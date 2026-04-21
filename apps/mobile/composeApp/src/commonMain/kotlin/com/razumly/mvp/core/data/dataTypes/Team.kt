@@ -17,13 +17,16 @@ import kotlinx.serialization.Serializable
 data class Team(
     val division: String,
     val name: String,
+    val kind: String? = null,
     val captainId: String,
     val managerId: String? = null,
     val headCoachId: String? = null,
     val coachIds: List<String> = emptyList(),
     val parentTeamId: String? = null,
     val playerIds: List<String> = emptyList(),
+    val playerRegistrationIds: List<String> = emptyList(),
     val pending: List<String> = emptyList(),
+    val staffAssignmentIds: List<String> = emptyList(),
     val teamSize: Int,
     val profileImageId: String? = null,
     val sport: String? = null,
@@ -34,9 +37,15 @@ data class Team(
     val ageDivisionTypeId: String? = null,
     val ageDivisionTypeName: String? = null,
     val divisionGender: String? = null,
+    val organizationId: String? = null,
+    val createdBy: String? = null,
+    val openRegistration: Boolean = false,
+    val registrationPriceCents: Int = 0,
+    val playerRegistrations: List<TeamPlayerRegistration> = emptyList(),
+    val staffAssignments: List<TeamStaffAssignment> = emptyList(),
     @PrimaryKey override val id: String
 ) : MVPDocument, DisplayableEntity {
-    override val displayName: String get() = name.ifBlank { "Team ${playerIds.size}" }
+    override val displayName: String get() = name.ifBlank { "Team ${activePlayerRegistrations().size}" }
     override val imageUrl: String? get() = profileImageId
     val assistantCoachIds: List<String> get() = coachIds
 
@@ -50,12 +59,14 @@ data class Team(
                 division = DEFAULT_DIVISION,
                 name = "",
                 playerIds = listOf(captainId),
+                playerRegistrationIds = emptyList(),
                 teamSize = 2,
                 id = newId(),
                 captainId = captainId,
                 managerId = captainId,
                 headCoachId = null,
                 coachIds = emptyList(),
+                staffAssignmentIds = emptyList(),
                 profileImageId = null,
                 sport = null,
                 divisionTypeId = buildCombinedDivisionTypeId(
@@ -71,33 +82,44 @@ data class Team(
                 ageDivisionTypeId = defaultAgeDivisionTypeId,
                 ageDivisionTypeName = defaultAgeDivisionTypeName,
                 divisionGender = "C",
-            )
+                organizationId = null,
+                createdBy = captainId,
+                openRegistration = false,
+                registrationPriceCents = 0,
+                playerRegistrations = emptyList(),
+                staffAssignments = emptyList(),
+            ).withSynchronizedMembership()
         }
     }
 
     fun toTeamDTO(): TeamDTO {
+        val synced = withSynchronizedMembership()
         return TeamDTO(
-            name = name,
-            division = division.normalizeDivisionLabel(),
-            playerIds = playerIds,
-            captainId = captainId,
-            managerId = managerId,
-            headCoachId = headCoachId,
-            assistantCoachIds = assistantCoachIds,
-            coachIds = coachIds,
-            parentTeamId = parentTeamId,
-            teamSize = teamSize,
-            id = id,
-            pending = pending,
-            profileImageId = profileImageId,
-            sport = sport,
-            divisionTypeId = divisionTypeId,
-            divisionTypeName = divisionTypeName,
-            skillDivisionTypeId = skillDivisionTypeId,
-            skillDivisionTypeName = skillDivisionTypeName,
-            ageDivisionTypeId = ageDivisionTypeId,
-            ageDivisionTypeName = ageDivisionTypeName,
-            divisionGender = divisionGender,
+            name = synced.name,
+            division = synced.division.normalizeDivisionLabel(),
+            playerIds = synced.playerIds,
+            captainId = synced.captainId,
+            managerId = synced.managerId,
+            headCoachId = synced.headCoachId,
+            assistantCoachIds = synced.assistantCoachIds,
+            coachIds = synced.coachIds,
+            parentTeamId = synced.parentTeamId,
+            teamSize = synced.teamSize,
+            id = synced.id,
+            pending = synced.pending,
+            profileImageId = synced.profileImageId,
+            sport = synced.sport,
+            divisionTypeId = synced.divisionTypeId,
+            divisionTypeName = synced.divisionTypeName,
+            skillDivisionTypeId = synced.skillDivisionTypeId,
+            skillDivisionTypeName = synced.skillDivisionTypeName,
+            ageDivisionTypeId = synced.ageDivisionTypeId,
+            ageDivisionTypeName = synced.ageDivisionTypeName,
+            divisionGender = synced.divisionGender,
+            organizationId = synced.organizationId,
+            createdBy = synced.createdBy,
+            openRegistration = synced.openRegistration,
+            registrationPriceCents = synced.registrationPriceCents,
         )
     }
 }

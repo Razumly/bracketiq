@@ -45,9 +45,12 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
+import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
 import com.razumly.mvp.core.data.dataTypes.assignedOfficialUserIds
 import com.razumly.mvp.core.data.dataTypes.officialAssignmentLabels
 import com.razumly.mvp.core.data.dataTypes.normalizedOfficialAssignments
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
@@ -258,6 +261,7 @@ fun MatchCard(
                             )
                             VerticalDivider(color = localColors.current.onPrimary)
                             TeamsSection(
+                                event = selectedEvent,
                                 team1 = teams[match.match.team1Id],
                                 team2 = teams[match.match.team2Id],
                                 match = match,
@@ -337,11 +341,10 @@ private fun resolveMatchTeam(
 }
 
 private fun Team.includesUser(userId: String): Boolean {
-    return captainId.trim() == userId ||
-        managerId?.trim() == userId ||
-        headCoachId?.trim() == userId ||
-        coachIds.any { coachId -> coachId.trim() == userId } ||
-        playerIds.any { playerId -> playerId.trim() == userId }
+    val syncedTeam = withSynchronizedMembership()
+    return syncedTeam.captainId.trim() == userId ||
+        syncedTeam.activeStaffAssignments().any { assignment -> assignment.userId == userId } ||
+        syncedTeam.activePlayerRegistrations().any { registration -> registration.userId == userId }
 }
 
 @Composable
@@ -436,6 +439,7 @@ private fun resolveFieldLabel(match: MatchWithRelations, fields: List<FieldWithM
 
 @Composable
 private fun TeamsSection(
+    event: Event,
     team1: TeamWithPlayers?,
     team2: TeamWithPlayers?,
     match: MatchWithRelations,
@@ -473,7 +477,13 @@ private fun TeamsSection(
         )
         TeamRow(
             team = team1,
-            points = match.match.team1Points.take(displaySetCount),
+            points = displayPointsForTeam(
+                event = event,
+                match = match.match,
+                teamId = match.match.team1Id,
+                legacyPoints = match.match.team1Points,
+                displaySetCount = displaySetCount,
+            ),
             previousMatch = leftMatch,
             isLosersBracket = match.match.losersBracket,
             playoffPlaceholder = playoffPlaceholders[BracketSlotKey(match.match.id, BracketTeamSlot.TEAM1)],
@@ -482,7 +492,13 @@ private fun TeamsSection(
         HorizontalDivider(thickness = 1.dp, color = localColors.current.onPrimary)
         TeamRow(
             team = team2,
-            points = match.match.team2Points.take(displaySetCount),
+            points = displayPointsForTeam(
+                event = event,
+                match = match.match,
+                teamId = match.match.team2Id,
+                legacyPoints = match.match.team2Points,
+                displaySetCount = displaySetCount,
+            ),
             previousMatch = rightMatch,
             isLosersBracket = match.match.losersBracket,
             playoffPlaceholder = playoffPlaceholders[BracketSlotKey(match.match.id, BracketTeamSlot.TEAM2)],
@@ -551,6 +567,33 @@ private fun TeamRow(
             )
         }
     }
+}
+
+internal fun displayPointsForTeam(
+    event: Event,
+    match: MatchMVP,
+    teamId: String?,
+    legacyPoints: List<Int>,
+    displaySetCount: Int,
+): List<Int> {
+    val normalizedTeamId = teamId?.trim()?.takeIf(String::isNotBlank)
+    val orderedSegments = match.segments.sortedBy { segment -> segment.sequence }
+    val sourcePoints = normalizedTeamId
+        ?.takeIf { candidateTeamId ->
+            orderedSegments.any { segment -> segment.scores.containsKey(candidateTeamId) }
+        }
+        ?.let { candidateTeamId ->
+            orderedSegments.map { segment -> segment.scores[candidateTeamId] ?: 0 }
+        }
+        ?: legacyPoints
+
+    if (sourcePoints.isEmpty()) {
+        return emptyList()
+    }
+    if (!event.usesSets) {
+        return listOf(sourcePoints.sum())
+    }
+    return sourcePoints.take(displaySetCount.coerceAtLeast(1))
 }
 
 private fun resolveDisplaySetCount(event: Event, match: MatchMVP): Int {

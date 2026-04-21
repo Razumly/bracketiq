@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -57,9 +58,10 @@ import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
-import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
+import com.razumly.mvp.core.presentation.composables.StandardTextField
+import com.razumly.mvp.core.presentation.composables.TermsConsentDialog
 import com.razumly.mvp.core.presentation.util.timeFormat
 import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.Month
@@ -72,11 +74,15 @@ import kotlin.time.Instant
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatGroupScreen(component: ChatGroupComponent) {
+    val verticalShift = 4.dp
     val input by component.messageInput.collectAsState()
     val chatGroupWithRelations by component.chatGroup.collectAsState()
+    val errorMessage by component.errorState.collectAsState()
     val friends by component.friends.collectAsState()
     val suggestedPlayers by component.suggestedPlayers.collectAsState()
     val isChatMuted by component.isChatMuted.collectAsState()
+    val chatTermsState by component.chatTermsState.collectAsState()
+    val showChatTermsPrompt by component.showChatTermsPrompt.collectAsState()
     val currentUserId = component.currentUser.id
     val chatGroup = chatGroupWithRelations?.chatGroup ?: ChatGroup.empty()
     val messages = chatGroupWithRelations?.messages ?: listOf()
@@ -109,6 +115,9 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
     var showDeleteChatDialog by remember { mutableStateOf(false) }
     var showLeaveChatDialog by remember { mutableStateOf(false) }
     var showManagePeopleDialog by remember { mutableStateOf(false) }
+    var showReportChatDialog by remember { mutableStateOf(false) }
+    var showReportLeaveDialog by remember { mutableStateOf(false) }
+    var reportNotes by remember { mutableStateOf("") }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -125,6 +134,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = Modifier.offset(y = -verticalShift),
                 title = { Text(chatTitle) },
                 navigationIcon = {
                     PlatformBackButton(
@@ -176,6 +186,13 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                                 showOptionsMenu = false
                             }
                         )
+                        DropdownMenuItem(
+                            text = { Text("Report Chat") },
+                            onClick = {
+                                showReportChatDialog = true
+                                showOptionsMenu = false
+                            }
+                        )
                     }
                 }
             )
@@ -185,9 +202,17 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(
-                    top = paddingValues.calculateTopPadding(),
+                    top = paddingValues.calculateTopPadding() - verticalShift,
                 )
         ) {
+            if (!errorMessage.isNullOrBlank()) {
+                Text(
+                    text = errorMessage.orEmpty(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -235,7 +260,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                             start = 16.dp,
                             top = 8.dp,
                             end = 16.dp,
-                            bottom = 24.dp,
+                            bottom = 20.dp,
                         ),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -286,7 +311,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
         AlertDialog(
             onDismissRequest = { showDeleteChatDialog = false },
             title = { Text("Delete Chat?") },
-            text = { Text("This deletes the chat for everyone and cannot be undone.") },
+            text = { Text("This removes the chat from normal chat lists. It is preserved for moderation review and can be permanently deleted later.") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -317,6 +342,79 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
             dismissButton = {
                 TextButton(onClick = { showLeaveChatDialog = false }) { Text("Cancel") }
             }
+        )
+    }
+
+    if (showReportChatDialog) {
+        AlertDialog(
+            onDismissRequest = { showReportChatDialog = false },
+            title = { Text("Report chat") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Report objectionable content or abusive behavior in this chat.")
+                    StandardTextField(
+                        value = reportNotes,
+                        onValueChange = { reportNotes = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = "Notes (optional)",
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showReportChatDialog = false
+                        showReportLeaveDialog = true
+                    }
+                ) {
+                    Text("Continue")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showReportChatDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
+    if (showReportLeaveDialog) {
+        AlertDialog(
+            onDismissRequest = { showReportLeaveDialog = false },
+            title = { Text("Leave this chat?") },
+            text = { Text("You can leave this chat after submitting the report, or stay and keep reviewing messages.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        component.reportChat(reportNotes, leaveChat = true)
+                        reportNotes = ""
+                        showReportLeaveDialog = false
+                    }
+                ) {
+                    Text("Report and leave")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        component.reportChat(reportNotes, leaveChat = false)
+                        reportNotes = ""
+                        showReportLeaveDialog = false
+                    }
+                ) {
+                    Text("Report only")
+                }
+            },
+        )
+    }
+
+    if (showChatTermsPrompt) {
+        TermsConsentDialog(
+            state = chatTermsState,
+            loading = false,
+            onAccept = component::acceptChatTermsPrompt,
+            onDismiss = component::dismissChatTermsPrompt,
+            intro = "Opening chats or creating events in Bracket IQ requires agreement to the Terms and EULA.",
         )
     }
 

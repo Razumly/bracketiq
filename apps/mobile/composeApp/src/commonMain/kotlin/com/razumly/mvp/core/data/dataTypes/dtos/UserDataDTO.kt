@@ -14,6 +14,8 @@ data class UserDataDTO(
     val friendRequestIds: List<String>,
     val friendRequestSentIds: List<String>,
     val followingIds: List<String>,
+    val blockedUserIds: List<String> = emptyList(),
+    val hiddenEventIds: List<String> = emptyList(),
     val userName: String,
     val hasStripeAccount: Boolean?,
     val uploadedImages: List<String>,
@@ -21,6 +23,8 @@ data class UserDataDTO(
     val displayName: String? = null,
     val isMinor: Boolean = false,
     val isIdentityHidden: Boolean = false,
+    val chatTermsAcceptedAt: String? = null,
+    val chatTermsVersion: String? = null,
     @Transient val id: String = "",
 ) {
     companion object {
@@ -35,6 +39,8 @@ data class UserDataDTO(
                 friendRequestIds = listOf(),
                 friendRequestSentIds = listOf(),
                 followingIds = listOf(),
+                blockedUserIds = listOf(),
+                hiddenEventIds = listOf(),
                 userName = userName,
                 hasStripeAccount = false,
                 uploadedImages = listOf(),
@@ -42,6 +48,8 @@ data class UserDataDTO(
                 displayName = null,
                 isMinor = false,
                 isIdentityHidden = false,
+                chatTermsAcceptedAt = null,
+                chatTermsVersion = null,
                 id = userId,
             )
         }
@@ -57,6 +65,8 @@ suspend fun UserDataDTO.toUserData(id: String): UserData {
         friendRequestIds = friendRequestIds,
         friendRequestSentIds = friendRequestSentIds,
         followingIds = followingIds,
+        blockedUserIds = blockedUserIds,
+        hiddenEventIds = hiddenEventIds,
         userName = userName,
         hasStripeAccount = hasStripeAccount,
         uploadedImages = uploadedImages,
@@ -64,6 +74,8 @@ suspend fun UserDataDTO.toUserData(id: String): UserData {
         privacyDisplayName = displayName,
         isMinor = isMinor,
         isIdentityHidden = isIdentityHidden,
+        chatTermsAcceptedAt = chatTermsAcceptedAt,
+        chatTermsVersion = chatTermsVersion,
         id = id
     )
 }

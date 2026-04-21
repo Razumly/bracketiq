@@ -160,7 +160,6 @@ actual class MapComponent(
             )
         )
         val reqBody = AutocompleteRequest(input = query, locationBias = bias)
-        Napier.d("Request: $reqBody")
 
         return try {
             val resp = httpClient.post("https://places.googleapis.com/v1/places:autocomplete") {
@@ -172,7 +171,6 @@ actual class MapComponent(
                 )
                 setBody(reqBody)
             }
-            Napier.d("Response: ${resp.bodyAsText()}")
             val body: AutoCompleteResponse = resp.body()
 
             body.suggestions.map { sug ->
@@ -218,8 +216,6 @@ actual class MapComponent(
             textQuery = query,
             locationBias = bias
         )
-        Napier.d("Request: $requestBody")
-
         return try {
             val resp = httpClient.post("https://places.googleapis.com/v1/places:searchText") {
                 header("Content-Type", "application/json")
@@ -227,7 +223,6 @@ actual class MapComponent(
                 header("X-Goog-FieldMask", "places.displayName,places.location,places.formattedAddress")
                 setBody(requestBody)
             }
-            Napier.d("Response: ${resp.bodyAsText()}")
             val body: SearchTextResponse = resp.body()
             body.places.map { place ->
                 val locationName = place.displayName.text

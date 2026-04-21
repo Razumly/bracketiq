@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.util.normalizeDivisionLabel
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -27,6 +28,10 @@ data class TeamDTO (
     val ageDivisionTypeId: String? = null,
     val ageDivisionTypeName: String? = null,
     val divisionGender: String? = null,
+    val organizationId: String? = null,
+    val createdBy: String? = null,
+    val openRegistration: Boolean = false,
+    val registrationPriceCents: Int = 0,
     @Transient
     val id: String = ""
 )
@@ -53,5 +58,9 @@ fun TeamDTO.toTeam(id: String): Team {
         ageDivisionTypeId = ageDivisionTypeId,
         ageDivisionTypeName = ageDivisionTypeName,
         divisionGender = divisionGender,
-    )
+        organizationId = organizationId,
+        createdBy = createdBy,
+        openRegistration = openRegistration,
+        registrationPriceCents = registrationPriceCents.coerceAtLeast(0),
+    ).withSynchronizedMembership()
 }

@@ -84,22 +84,32 @@ fun StandardTextField(
     val finalModifier = modifier
         .then(if (height != null) Modifier.height(height) else Modifier)
         .then(if (contentPadding != null) Modifier.padding(contentPadding) else Modifier)
+        .then(
+            if (externalFocusManager != null) {
+                Modifier.platformFocusable(externalFocusManager, enabled)
+            } else {
+                Modifier
+            }
+        )
 
-    val keyboardTypeValue = when (keyboardType) {
-        "email" -> KeyboardType.Email
-        "number", "numbers", "money" -> KeyboardType.Number
-        "password" -> KeyboardType.Password
+    val usesPasswordKeyboard = isPassword || keyboardType == "password"
+    val keyboardTypeValue = when {
+        usesPasswordKeyboard -> KeyboardType.Password
+        keyboardType == "email" -> KeyboardType.Email
+        keyboardType == "number" || keyboardType == "numbers" || keyboardType == "money" -> KeyboardType.Number
         else -> KeyboardType.Text
     }
 
     val visualTransformation = when {
-        isPassword || keyboardType == "password" -> PasswordVisualTransformation()
+        isPassword -> PasswordVisualTransformation()
         keyboardType == "money" -> CurrencyAmountInputVisualTransformation()
         else -> VisualTransformation.None
     }
-
-    // Keep compatibility with existing signature while migrating call sites.
-    @Suppress("UNUSED_VARIABLE") val ignoredFocusManager = externalFocusManager
+    val keyboardOptionsValue = KeyboardOptions(
+        keyboardType = keyboardTypeValue,
+        imeAction = imeAction,
+        autoCorrectEnabled = if (usesPasswordKeyboard) false else null,
+    )
 
     val defaultColors = OutlinedTextFieldDefaults.colors(
         focusedTextColor = MaterialTheme.colorScheme.onSurface,
@@ -191,7 +201,7 @@ fun StandardTextField(
                 supportingText = if (supportingText.isNotEmpty()) ({ Text(supportingText) }) else null,
                 trailingIcon = trailingIcon,
                 leadingIcon = leadingIcon,
-                keyboardOptions = KeyboardOptions(keyboardType = keyboardTypeValue, imeAction = imeAction),
+                keyboardOptions = keyboardOptionsValue,
                 keyboardActions = KeyboardActions(
                     onNext = { focusManager.moveFocus(FocusDirection.Down) },
                     onDone = { onImeAction?.invoke() ?: focusManager.clearFocus() },
@@ -219,10 +229,7 @@ fun StandardTextField(
         readOnly = readOnly,
         textStyle = finalTextStyle,
         visualTransformation = visualTransformation,
-        keyboardOptions = KeyboardOptions(
-            keyboardType = keyboardTypeValue,
-            imeAction = imeAction,
-        ),
+        keyboardOptions = keyboardOptionsValue,
         keyboardActions = KeyboardActions(
             onNext = { focusManager.moveFocus(FocusDirection.Down) },
             onDone = { onImeAction?.invoke() ?: focusManager.clearFocus() },

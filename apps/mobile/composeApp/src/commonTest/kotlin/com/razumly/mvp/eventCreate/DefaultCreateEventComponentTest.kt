@@ -23,6 +23,50 @@ import kotlin.test.assertTrue
 
 class DefaultCreateEventComponentTest : MainDispatcherTest() {
     @Test
+    fun create_screen_starts_in_terms_loading_state() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+
+        assertTrue(harness.component.termsConsentLoading.value)
+
+        advance()
+
+        assertFalse(harness.component.termsConsentLoading.value)
+    }
+
+    @Test
+    fun create_screen_loads_existing_terms_consent_state_on_init() = runTest(testDispatcher) {
+        val harness = CreateEventHarness().apply {
+            userRepository.chatTermsConsentState = userRepository.chatTermsConsentState.copy(
+                accepted = false,
+                acceptedAt = null,
+            )
+        }
+
+        advance()
+
+        assertEquals(1, harness.userRepository.getChatTermsConsentStateCalls)
+        assertFalse(harness.component.termsConsentState.value.accepted)
+    }
+
+    @Test
+    fun accepting_terms_updates_create_screen_consent_state() = runTest(testDispatcher) {
+        val harness = CreateEventHarness().apply {
+            userRepository.chatTermsConsentState = userRepository.chatTermsConsentState.copy(
+                accepted = false,
+                acceptedAt = null,
+            )
+        }
+        advance()
+
+        harness.component.acceptTermsConsent()
+        advance()
+
+        assertEquals(1, harness.userRepository.acceptChatTermsConsentCalls)
+        assertTrue(harness.component.termsConsentState.value.accepted)
+        assertTrue(harness.component.termsConsentState.value.acceptedAt != null)
+    }
+
+    @Test
     fun updating_host_and_assistant_hosts_normalizes_ids_and_prevents_host_duplication() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
@@ -420,10 +464,36 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.onTypeSelected(EventType.LEAGUE)
         advance()
         assertTrue(harness.component.newEventState.value.noFixedEndDateTime)
+        assertFalse(harness.component.useManualTimeSlots.value)
 
         harness.component.onTypeSelected(EventType.EVENT)
         advance()
         assertFalse(harness.component.newEventState.value.noFixedEndDateTime)
+
+        harness.component.onTypeSelected(EventType.WEEKLY_EVENT)
+        advance()
+        assertTrue(harness.component.useManualTimeSlots.value)
+
+        harness.component.onTypeSelected(EventType.EVENT)
+        advance()
+        assertFalse(harness.component.useManualTimeSlots.value)
+    }
+
+    @Test
+    fun selecting_weekly_event_keeps_existing_team_signup_choice() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+
+        harness.component.updateEventField { copy(teamSignup = false) }
+        advance()
+
+        harness.component.onTypeSelected(EventType.WEEKLY_EVENT)
+        advance()
+
+        assertEquals(EventType.WEEKLY_EVENT, harness.component.newEventState.value.eventType)
+        assertFalse(harness.component.newEventState.value.teamSignup)
+        assertTrue(harness.component.newEventState.value.noFixedEndDateTime)
+        assertTrue(harness.component.newEventState.value.singleDivision)
     }
 
     @Test
@@ -743,6 +813,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.selectFieldCount(2)
         advance()
         val localFieldIds = harness.component.localFields.value.map { it.id }
+        harness.component.setUseManualTimeSlots(true)
+        advance()
 
         harness.component.updateEventField {
             copy(
@@ -821,6 +893,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.selectFieldCount(1)
         advance()
         val localFieldId = harness.component.localFields.value.first().id
+        harness.component.setUseManualTimeSlots(true)
+        advance()
 
         harness.component.updateEventField {
             copy(
@@ -905,6 +979,132 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun given_fixed_end_league_with_manual_timeslots_disabled_when_submitted_then_single_event_range_slot_is_created() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        harness.component.setLoadingHandler(harness.loadingHandler)
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        advance()
+        harness.component.selectFieldCount(2)
+        advance()
+
+        val eventStart = instant(1_700_000_000_000)
+        val eventEnd = instant(1_700_003_600_000)
+        harness.component.updateEventField {
+            copy(
+                name = "League Auto Slot",
+                organizationId = "org-auto-slot",
+                divisions = listOf("Open"),
+                start = eventStart,
+                end = eventEnd,
+                noFixedEndDateTime = false,
+            )
+        }
+        advance()
+
+        harness.component.createEvent()
+        advance()
+
+        val createCall = harness.eventRepository.createEventCalls.single()
+        val createdFieldIds = createCall.fields.orEmpty().map { field -> field.id }
+        val createdSlots = createCall.timeSlots.orEmpty()
+
+        assertEquals(1, createdSlots.size)
+        assertFalse(createdSlots[0].repeating)
+        assertEquals(eventStart, createdSlots[0].startDate)
+        assertEquals(eventEnd, createdSlots[0].endDate)
+        assertEquals(createdFieldIds.first(), createdSlots[0].scheduledFieldId)
+        assertEquals(createdFieldIds, createdSlots[0].scheduledFieldIds)
+        assertEquals(listOf(createdSlots[0].id), createCall.event.timeSlotIds)
+    }
+
+    @Test
+    fun given_fixed_end_league_with_manual_timeslots_enabled_when_submitted_then_configured_slot_is_preserved() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        harness.component.setLoadingHandler(harness.loadingHandler)
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        advance()
+        harness.component.selectFieldCount(1)
+        advance()
+        val localFieldId = harness.component.localFields.value.first().id
+        harness.component.setUseManualTimeSlots(true)
+        advance()
+
+        harness.component.updateEventField {
+            copy(
+                name = "League Manual Slot",
+                organizationId = "org-manual-slot",
+                divisions = listOf("Open"),
+                start = instant(1_700_000_000_000),
+                end = instant(1_700_086_400_000),
+                noFixedEndDateTime = false,
+            )
+        }
+        harness.component.updateLeagueTimeSlot(0) {
+            copy(
+                repeating = true,
+                startDate = instant(1_700_000_000_000),
+                endDate = null,
+                dayOfWeek = 1,
+                daysOfWeek = listOf(1, 3),
+                startTimeMinutes = 600,
+                endTimeMinutes = 660,
+                scheduledFieldId = localFieldId,
+                scheduledFieldIds = listOf(localFieldId),
+            )
+        }
+        advance()
+
+        harness.component.createEvent()
+        advance()
+
+        val createdSlots = harness.eventRepository.createEventCalls.single().timeSlots.orEmpty()
+        val timezone = TimeZone.currentSystemDefault()
+        val expectedDateOnlyEnd = instant(1_700_086_400_000).toLocalDateTime(timezone).date.atStartOfDayIn(timezone)
+        assertEquals(1, createdSlots.size)
+        assertTrue(createdSlots[0].repeating)
+        assertEquals(listOf(1, 3), createdSlots[0].daysOfWeek)
+        assertEquals(600, createdSlots[0].startTimeMinutes)
+        assertEquals(660, createdSlots[0].endTimeMinutes)
+        assertEquals(expectedDateOnlyEnd, createdSlots[0].endDate)
+    }
+
+    @Test
+    fun switching_to_tournament_clears_repeating_slot_end_dates() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        advance()
+
+        val eventStart = instant(1_700_000_000_000)
+        val eventEnd = instant(1_700_086_400_000)
+        val timezone = TimeZone.currentSystemDefault()
+        val expectedDateOnlyEnd = eventEnd.toLocalDateTime(timezone).date.atStartOfDayIn(timezone)
+
+        harness.component.updateEventField {
+            copy(
+                start = eventStart,
+                end = eventEnd,
+                noFixedEndDateTime = false,
+            )
+        }
+        advance()
+
+        harness.component.addLeagueTimeSlot()
+        advance()
+        assertEquals(expectedDateOnlyEnd, harness.component.leagueSlots.value.last().endDate)
+
+        harness.component.onTypeSelected(EventType.TOURNAMENT)
+        advance()
+
+        assertTrue(harness.component.leagueSlots.value.all { slot -> slot.endDate == null })
+    }
+
+    @Test
     fun given_repeating_league_slot_with_custom_start_date_when_submitted_then_custom_start_date_is_preserved() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         harness.component.setLoadingHandler(harness.loadingHandler)
@@ -915,6 +1115,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.selectFieldCount(1)
         advance()
         val localFieldId = harness.component.localFields.value.first().id
+        harness.component.setUseManualTimeSlots(true)
+        advance()
         val eventStart = instant(1_700_000_000_000)
         val customSlotStart = instant(1_700_172_800_000)
 
@@ -960,6 +1162,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.selectFieldCount(1)
         advance()
         val localFieldId = harness.component.localFields.value.first().id
+        harness.component.setUseManualTimeSlots(true)
+        advance()
         val slotStart = instant(1_700_000_000_000)
         val slotEnd = instant(1_700_003_600_000)
         val timezone = TimeZone.currentSystemDefault()
@@ -1016,6 +1220,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         advance()
         harness.component.selectFieldCount(1)
         advance()
+        harness.component.setUseManualTimeSlots(true)
+        advance()
 
         harness.component.updateEventField {
             copy(
@@ -1057,6 +1263,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.selectFieldCount(2)
         advance()
         val localFieldIds = harness.component.localFields.value.map { it.id }
+        harness.component.setUseManualTimeSlots(true)
+        advance()
 
         harness.component.updateEventField {
             copy(
@@ -1109,6 +1317,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
                 organizationId = "org-456",
                 start = instant(1_700_000_000_000),
                 end = instant(1_700_086_400_000),
+                noFixedEndDateTime = false,
             )
         }
         harness.component.addLeagueTimeSlot()
@@ -1125,8 +1334,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
         val createCall = harness.eventRepository.createEventCalls.single()
         assertEquals(1, createCall.fields.orEmpty().size)
-        assertEquals(0, createCall.timeSlots.orEmpty().size)
-        assertEquals(emptyList(), createCall.event.timeSlotIds)
+        assertEquals(1, createCall.timeSlots.orEmpty().size)
+        assertEquals(createCall.timeSlots.orEmpty().map { slot -> slot.id }, createCall.event.timeSlotIds)
         assertNull(createCall.leagueScoringConfig)
     }
 }

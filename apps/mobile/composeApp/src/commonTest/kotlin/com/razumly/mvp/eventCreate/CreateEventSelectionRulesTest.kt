@@ -87,6 +87,28 @@ class CreateEventSelectionRulesTest {
     }
 
     @Test
+    fun weekly_selection_preserves_team_signup_choice() {
+        val start = Instant.fromEpochMilliseconds(13_000L)
+        val end = Instant.fromEpochMilliseconds(15_000L)
+        val draft = Event(
+            eventType = EventType.WEEKLY_EVENT,
+            teamSignup = false,
+            singleDivision = false,
+            noFixedEndDateTime = false,
+            start = start,
+            end = end,
+        )
+
+        val updated = draft.applyCreateSelectionRules(isRentalFlow = false)
+
+        assertEquals(EventType.WEEKLY_EVENT, updated.eventType)
+        assertFalse(updated.teamSignup)
+        assertTrue(updated.singleDivision)
+        assertFalse(updated.allowPaymentPlans == true)
+        assertEquals(end, updated.end)
+    }
+
+    @Test
     fun rental_flow_preserves_league_type_and_fixed_end_choice() {
         val draft = Event(
             eventType = EventType.LEAGUE,

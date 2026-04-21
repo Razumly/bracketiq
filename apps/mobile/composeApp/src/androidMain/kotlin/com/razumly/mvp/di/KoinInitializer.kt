@@ -8,6 +8,9 @@ actual class KoinInitializer(
     private val context: Context
 ) {
     actual fun init() {
+        if (GlobalContext.getOrNull() != null) {
+            return
+        }
         GlobalContext.startKoin {
             androidContext(context)
             modules(

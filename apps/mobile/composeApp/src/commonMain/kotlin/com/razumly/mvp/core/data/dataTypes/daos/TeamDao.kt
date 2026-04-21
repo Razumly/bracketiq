@@ -9,6 +9,7 @@ import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPendingPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import io.github.aakira.napier.Napier
@@ -103,23 +104,24 @@ interface TeamDao {
 
     @Transaction
     suspend fun upsertTeamWithRelations(team: Team) {
-        deleteTeamPlayerCrossRefsByTeamId(team.id)
-        deleteTeamPendingPlayerCrossRefsByTeamId(team.id)
-        upsertTeam(team)
+        val syncedTeam = team.withSynchronizedMembership()
+        deleteTeamPlayerCrossRefsByTeamId(syncedTeam.id)
+        deleteTeamPendingPlayerCrossRefsByTeamId(syncedTeam.id)
+        upsertTeam(syncedTeam)
         try {
-            upsertTeamPlayerCrossRefs(team.playerIds.map { playerId ->
-                TeamPlayerCrossRef(team.id, playerId)
+            upsertTeamPlayerCrossRefs(syncedTeam.playerIds.map { playerId: String ->
+                TeamPlayerCrossRef(syncedTeam.id, playerId)
             })
         } catch (e: Exception) {
-            Napier.d("Failed to add user team crossRef for team: ${team.id} players- ${team.playerIds}\n" +
+            Napier.d("Failed to add user team crossRef for team: ${syncedTeam.id} players- ${syncedTeam.playerIds}\n" +
                     "${e.message}")
         }
         try {
-            upsertTeamPendingPlayerCrossRefs(team.pending.map { playerId ->
-                TeamPendingPlayerCrossRef(team.id, playerId)
+            upsertTeamPendingPlayerCrossRefs(syncedTeam.pending.map { playerId: String ->
+                TeamPendingPlayerCrossRef(syncedTeam.id, playerId)
             })
         } catch (e: Exception) {
-            Napier.d("Failed to add pending user team crossRef for team: ${team.id}\n${e.message}")
+            Napier.d("Failed to add pending user team crossRef for team: ${syncedTeam.id}\n${e.message}")
         }
     }
 

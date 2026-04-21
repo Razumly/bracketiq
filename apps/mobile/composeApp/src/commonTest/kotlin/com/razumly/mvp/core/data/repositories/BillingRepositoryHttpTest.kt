@@ -4,9 +4,15 @@ import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.OrganizationVerificationReviewStatus
+import com.razumly.mvp.core.data.dataTypes.OrganizationVerificationStatus
+import com.razumly.mvp.core.data.dataTypes.RefundRequest
+import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
+import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
+import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
 import com.razumly.mvp.core.data.dataTypes.daos.MessageDao
@@ -48,20 +54,74 @@ private class BillingRepositoryHttp_InMemoryAuthTokenStore(
     override suspend fun clear() { token = "" }
 }
 
-private class BillingRepositoryHttp_FakeDatabaseService : DatabaseService {
+private class BillingRepositoryHttp_FakeRefundRequestDao : RefundRequestDao {
+    var storedRefunds: List<RefundRequest> = emptyList()
+
+    override suspend fun upsertRefundRequest(refundRequest: RefundRequest) {
+        storedRefunds = storedRefunds.filterNot { existing -> existing.id == refundRequest.id } + refundRequest
+    }
+
+    override suspend fun upsertRefundRequests(refundRequests: List<RefundRequest>) {
+        storedRefunds = refundRequests
+    }
+
+    override suspend fun getRefundRequest(refundId: String): RefundRequest? =
+        storedRefunds.firstOrNull { refund -> refund.id == refundId }
+
+    override suspend fun getRefundRequestsForHost(hostId: String): List<RefundRequest> =
+        storedRefunds.filter { refund -> refund.hostId == hostId }
+
+    override fun getRefundRequestsForHostFlow(hostId: String): Flow<List<RefundRequest>> =
+        flowOf(storedRefunds.filter { refund -> refund.hostId == hostId })
+
+    override suspend fun deleteRefundRequest(refundId: String) {
+        storedRefunds = storedRefunds.filterNot { refund -> refund.id == refundId }
+    }
+
+    override suspend fun deleteRefundRequests(refundIds: List<String>) {
+        storedRefunds = storedRefunds.filterNot { refund -> refund.id in refundIds }
+    }
+
+    override suspend fun deleteAllRefundRequests() {
+        storedRefunds = emptyList()
+    }
+
+    override suspend fun getRefundRequestsWithRelations(hostId: String): List<RefundRequestWithRelations> =
+        getRefundRequestsForHost(hostId).map { refund ->
+            RefundRequestWithRelations(refundRequest = refund, user = null, event = null)
+        }
+
+    override fun getRefundRequestsWithRelationsFlow(hostId: String): Flow<List<RefundRequestWithRelations>> =
+        flowOf(
+            storedRefunds
+                .filter { refund -> refund.hostId == hostId }
+                .map { refund -> RefundRequestWithRelations(refundRequest = refund, user = null, event = null) },
+        )
+
+    override suspend fun getRefundRequestWithRelations(refundId: String): RefundRequestWithRelations? =
+        getRefundRequest(refundId)?.let { refund ->
+            RefundRequestWithRelations(refundRequest = refund, user = null, event = null)
+        }
+}
+
+private class BillingRepositoryHttp_FakeDatabaseService(
+    private val refundRequestDao: RefundRequestDao = BillingRepositoryHttp_FakeRefundRequestDao(),
+) : DatabaseService {
     override val getMatchDao: MatchDao get() = error("unused")
     override val getTeamDao: TeamDao get() = error("unused")
     override val getFieldDao: FieldDao get() = error("unused")
     override val getUserDataDao: UserDataDao get() = error("unused")
     override val getEventDao: EventDao get() = error("unused")
+    override val getEventRegistrationDao: EventRegistrationDao get() = error("unused")
     override val getChatGroupDao: ChatGroupDao get() = error("unused")
     override val getMessageDao: MessageDao get() = error("unused")
-    override val getRefundRequestDao: RefundRequestDao get() = error("unused")
+    override val getRefundRequestDao: RefundRequestDao get() = refundRequestDao
 }
 
 private class BillingRepositoryHttp_FakeUserRepository(
     currentUser: UserData,
     currentAccount: AuthAccount,
+    private val getUsersHandler: ((List<String>) -> Result<List<UserData>>)? = null,
 ) : IUserRepository {
     override val currentUser: StateFlow<Result<UserData>> = MutableStateFlow(Result.success(currentUser))
     override val currentAccount: StateFlow<Result<AuthAccount>> = MutableStateFlow(Result.success(currentAccount))
@@ -69,7 +129,7 @@ private class BillingRepositoryHttp_FakeUserRepository(
     override suspend fun getUsers(
         userIds: List<String>,
         visibilityContext: UserVisibilityContext,
-    ): Result<List<UserData>> = error("unused")
+    ): Result<List<UserData>> = getUsersHandler?.invoke(userIds) ?: error("unused")
     override fun getUsersFlow(
         userIds: List<String>,
         visibilityContext: UserVisibilityContext,
@@ -163,11 +223,93 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
         fields: List<com.razumly.mvp.core.data.dataTypes.Field>?,
         timeSlots: List<com.razumly.mvp.core.data.dataTypes.TimeSlot>?,
     ): Result<Event> = error("unused")
-    override suspend fun createWeeklySession(
-        parentEventId: String,
-        sessionStart: kotlin.time.Instant,
-        sessionEnd: kotlin.time.Instant,
-        slotId: String?,
+    override suspend fun scheduleEvent(eventId: String, participantCount: Int?): Result<Event> = error("unused")
+    override suspend fun updateEvent(
+        newEvent: Event,
+        fields: List<com.razumly.mvp.core.data.dataTypes.Field>?,
+        timeSlots: List<com.razumly.mvp.core.data.dataTypes.TimeSlot>?,
+        leagueScoringConfig: com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO?,
+    ): Result<Event> = error("unused")
+    override suspend fun updateLocalEvent(newEvent: Event): Result<Event> = error("unused")
+    override fun getEventsInBoundsFlow(bounds: com.razumly.mvp.core.data.dataTypes.Bounds): Flow<Result<List<Event>>> = error("unused")
+    override suspend fun getEventsInBounds(bounds: com.razumly.mvp.core.data.dataTypes.Bounds): Result<Pair<List<Event>, Boolean>> = error("unused")
+    override suspend fun getEventsInBounds(
+        bounds: com.razumly.mvp.core.data.dataTypes.Bounds,
+        dateFrom: kotlin.time.Instant?,
+        dateTo: kotlin.time.Instant?,
+        limit: Int,
+        offset: Int,
+        includeDistanceFilter: Boolean,
+    ): Result<Pair<List<Event>, Boolean>> = error("unused")
+    override suspend fun searchEvents(
+        searchQuery: String,
+        userLocation: dev.icerock.moko.geo.LatLng,
+        limit: Int,
+        offset: Int,
+    ): Result<Pair<List<Event>, Boolean>> = error("unused")
+    override fun getEventsByHostFlow(hostId: String): Flow<Result<List<Event>>> = error("unused")
+    override suspend fun deleteEvent(eventId: String): Result<Unit> = error("unused")
+    override suspend fun addCurrentUserToEvent(
+        event: Event,
+        preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<SelfRegistrationResult> = error("unused")
+    override suspend fun registerChildForEvent(
+        eventId: String,
+        childUserId: String,
+        joinWaitlist: Boolean,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<ChildRegistrationResult> = error("unused")
+    override suspend fun addTeamToEvent(
+        event: Event,
+        team: com.razumly.mvp.core.data.dataTypes.Team,
+        preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<Unit> = error("unused")
+    override suspend fun syncEventParticipants(
+        event: Event,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<EventParticipantsSyncResult> = error("unused")
+    override suspend fun getLeagueDivisionStandings(
+        eventId: String,
+        divisionId: String,
+    ): Result<LeagueDivisionStandings> = error("unused")
+    override suspend fun confirmLeagueDivisionStandings(
+        eventId: String,
+        divisionId: String,
+        applyReassignment: Boolean,
+    ): Result<LeagueStandingsConfirmResult> = error("unused")
+    override suspend fun removeTeamFromEvent(
+        event: Event,
+        teamWithPlayers: com.razumly.mvp.core.data.dataTypes.TeamWithPlayers,
+        refundMode: EventParticipantRefundMode?,
+        refundReason: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<Unit> = error("unused")
+    override suspend fun removeCurrentUserFromEvent(
+        event: Event,
+        targetUserId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<Unit> = error("unused")
+}
+
+private class BillingRepositoryHttp_FakeEventRepository(
+    private val getEventsByIdsHandler: ((List<String>) -> Result<List<Event>>)? = null,
+) : IEventRepository {
+    override fun getCachedEventsFlow(): Flow<Result<List<Event>>> = error("unused")
+    override fun getEventWithRelationsFlow(eventId: String): Flow<Result<com.razumly.mvp.core.data.dataTypes.EventWithRelations>> = error("unused")
+    override fun resetCursor() {}
+    override suspend fun getEvent(eventId: String): Result<Event> = error("unused")
+    override suspend fun getEventStaffInvites(eventId: String): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")
+    override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> =
+        getEventsByIdsHandler?.invoke(eventIds) ?: error("unused")
+    override suspend fun getEventsByOrganization(organizationId: String, limit: Int): Result<List<Event>> = error("unused")
+    override suspend fun createEvent(
+        newEvent: Event,
+        requiredTemplateIds: List<String>,
+        leagueScoringConfig: com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO?,
+        fields: List<com.razumly.mvp.core.data.dataTypes.Field>?,
+        timeSlots: List<com.razumly.mvp.core.data.dataTypes.TimeSlot>?,
     ): Result<Event> = error("unused")
     override suspend fun scheduleEvent(eventId: String, participantCount: Int?): Result<Event> = error("unused")
     override suspend fun updateEvent(
@@ -198,17 +340,24 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
     override suspend fun addCurrentUserToEvent(
         event: Event,
         preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
     ): Result<SelfRegistrationResult> = error("unused")
     override suspend fun registerChildForEvent(
         eventId: String,
         childUserId: String,
         joinWaitlist: Boolean,
+        occurrence: EventOccurrenceSelection?,
     ): Result<ChildRegistrationResult> = error("unused")
     override suspend fun addTeamToEvent(
         event: Event,
         team: com.razumly.mvp.core.data.dataTypes.Team,
         preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
     ): Result<Unit> = error("unused")
+    override suspend fun syncEventParticipants(
+        event: Event,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<EventParticipantsSyncResult> = error("unused")
     override suspend fun getLeagueDivisionStandings(
         eventId: String,
         divisionId: String,
@@ -223,8 +372,13 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
         teamWithPlayers: com.razumly.mvp.core.data.dataTypes.TeamWithPlayers,
         refundMode: EventParticipantRefundMode?,
         refundReason: String?,
+        occurrence: EventOccurrenceSelection?,
     ): Result<Unit> = error("unused")
-    override suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String?): Result<Unit> = error("unused")
+    override suspend fun removeCurrentUserFromEvent(
+        event: Event,
+        targetUserId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<Unit> = error("unused")
 }
 
 @Suppress("SameParameterValue")
@@ -436,11 +590,16 @@ class BillingRepositoryHttpTest {
                       "organizations": [
                         {
                           "id": "org_1",
-                          "name": "Indoor Soccer Arena"
+                          "name": "Indoor Soccer Arena",
+                          "sports": ["Soccer", " Futsal "],
+                          "verificationStatus": "VERIFIED",
+                          "verifiedAt": "2026-04-13T20:30:00.000Z",
+                          "verificationReviewStatus": "RESOLVED"
                         },
                         {
                           "id": "org_2",
-                          "name": "Indoor Sports Complex"
+                          "name": "Indoor Sports Complex",
+                          "hasStripeAccount": true
                         }
                       ]
                     }
@@ -459,6 +618,66 @@ class BillingRepositoryHttpTest {
         assertEquals(2, organizations.size)
         assertEquals("org_1", organizations[0].id)
         assertEquals("Indoor Soccer Arena", organizations[0].name)
+        assertEquals(listOf("Soccer", "Futsal"), organizations[0].sports)
+        assertEquals(OrganizationVerificationStatus.VERIFIED, organizations[0].verificationStatus)
+        assertEquals("2026-04-13T20:30:00.000Z", organizations[0].verifiedAt)
+        assertEquals(OrganizationVerificationReviewStatus.RESOLVED, organizations[0].verificationReviewStatus)
+        assertEquals(OrganizationVerificationStatus.LEGACY_CONNECTED, organizations[1].verificationStatus)
+    }
+
+    @Test
+    fun getOrganizationsByIds_maps_verification_fallbacks() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/organizations", request.url.encodedPath)
+            assertEquals("ids=org_legacy,org_pending&limit=100", request.url.encodedQuery)
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            respond(
+                content = """
+                    {
+                      "organizations": [
+                        {
+                          "id": "org_legacy",
+                          "name": "Legacy Connected Org",
+                          "hasStripeAccount": true
+                        },
+                        {
+                          "id": "org_pending",
+                          "name": "Pending Org",
+                          "hasStripeAccount": false,
+                          "verificationStatus": "PENDING",
+                          "verificationReviewStatus": "OPEN",
+                          "verificationReviewNotes": "Waiting on payout details",
+                          "verificationReviewUpdatedAt": "2026-04-13T21:00:00.000Z"
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val organizations = repo.getOrganizationsByIds(listOf("org_legacy", "org_pending")).getOrThrow()
+
+        assertEquals(2, organizations.size)
+        assertEquals(OrganizationVerificationStatus.LEGACY_CONNECTED, organizations[0].verificationStatus)
+        assertEquals(OrganizationVerificationStatus.PENDING, organizations[1].verificationStatus)
+        assertEquals(OrganizationVerificationReviewStatus.OPEN, organizations[1].verificationReviewStatus)
+        assertEquals("Waiting on payout details", organizations[1].verificationReviewNotes)
+        assertEquals("2026-04-13T21:00:00.000Z", organizations[1].verificationReviewUpdatedAt)
     }
 
     @Test
@@ -736,6 +955,57 @@ class BillingRepositoryHttpTest {
         val event = Event(id = "e1", hostId = "h1", priceCents = 1000, eventType = EventType.EVENT)
         repo.createPurchaseIntent(event = event, teamId = "team_123").getOrThrow()
 
+        assertTrue(capturedBody.contains("\"team\""))
+        assertTrue(capturedBody.contains("\"id\":\"team_123\""))
+    }
+
+    @Test
+    fun createTeamRegistrationPurchaseIntent_posts_team_registration_payload() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/billing/purchase-intent", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "paymentIntent": "pi_team_registration",
+                      "publishableKey": "pk_test_123"
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val team = Team(captainId = "u1").copy(
+            id = "team_123",
+            name = "Open Team",
+            openRegistration = true,
+            registrationPriceCents = 2500,
+        )
+        val intent = repo.createTeamRegistrationPurchaseIntent(team).getOrThrow()
+
+        assertEquals("pi_team_registration", intent.paymentIntent)
+        assertTrue(capturedBody.contains("\"purchaseType\":\"team_registration\""))
+        assertTrue(capturedBody.contains("\"teamRegistration\""))
+        assertTrue(capturedBody.contains("\"teamId\":\"team_123\""))
         assertTrue(capturedBody.contains("\"team\""))
         assertTrue(capturedBody.contains("\"id\":\"team_123\""))
     }
@@ -1157,5 +1427,78 @@ class BillingRepositoryHttpTest {
         assertEquals("https://stripe.example/onboarding-link", onboardingUrl)
         assertTrue(capturedBody.contains("\"refreshUrl\":\"$stripeRedirectBaseUrl\""))
         assertTrue(capturedBody.contains("\"returnUrl\":\"$stripeRedirectBaseUrl\""))
+    }
+
+    @Test
+    fun getRefundsWithRelations_batches_related_user_and_event_hydration() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val requestedUserIds = mutableListOf<List<String>>()
+        val requestedEventIds = mutableListOf<List<String>>()
+        val refundDao = BillingRepositoryHttp_FakeRefundRequestDao()
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("host_1"),
+            currentAccount = AuthAccount(id = "host_1", email = "host_1@example.test", name = "Host User"),
+            getUsersHandler = { userIds ->
+                requestedUserIds += userIds
+                Result.success(emptyList())
+            },
+        )
+        val eventRepo = BillingRepositoryHttp_FakeEventRepository(
+            getEventsByIdsHandler = { eventIds ->
+                requestedEventIds += eventIds
+                Result.success(emptyList())
+            },
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService(refundDao)
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/refund-requests", request.url.encodedPath)
+            assertEquals("hostId=host_1&limit=200", request.url.encodedQuery)
+            respond(
+                content = """
+                    {
+                      "refunds": [
+                        {
+                          "id": "refund_1",
+                          "eventId": "event_1",
+                          "userId": "user_1",
+                          "hostId": "host_1",
+                          "reason": "weather",
+                          "status": "PENDING"
+                        },
+                        {
+                          "id": "refund_2",
+                          "eventId": "event_2",
+                          "userId": "user_2",
+                          "hostId": "host_1",
+                          "reason": "injury",
+                          "status": "PENDING"
+                        },
+                        {
+                          "id": "refund_3",
+                          "eventId": "event_2",
+                          "userId": "user_1",
+                          "hostId": "host_1",
+                          "reason": "duplicate",
+                          "status": "APPROVED"
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, eventRepo, db)
+
+        val refunds = repo.getRefundsWithRelations().getOrThrow()
+
+        assertEquals(3, refunds.size)
+        assertEquals(listOf(listOf("user_1", "user_2")), requestedUserIds)
+        assertEquals(listOf(listOf("event_1", "event_2")), requestedEventIds)
+        assertEquals(listOf("refund_1", "refund_2", "refund_3"), refundDao.storedRefunds.map { refund -> refund.id })
     }
 }

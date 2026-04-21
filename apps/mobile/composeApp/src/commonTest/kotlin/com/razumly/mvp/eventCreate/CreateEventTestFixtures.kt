@@ -35,6 +35,7 @@ import com.razumly.mvp.core.data.repositories.FamilyJoinRequest
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequestAction
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequestResolution
 import com.razumly.mvp.core.data.repositories.BoldSignOperationStatus
+import com.razumly.mvp.core.data.repositories.ChatTermsConsentState
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
@@ -51,7 +52,9 @@ import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.CreateBillRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
+import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.EventParticipantRefundMode
+import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
 import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.SignStep
@@ -59,6 +62,10 @@ import com.razumly.mvp.core.data.repositories.SignupProfileSelection
 import com.razumly.mvp.core.data.repositories.UserEmailMembershipMatch
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.network.dto.InviteCreateDto
+import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
+import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
+import com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto
+import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.core.network.MvpUploadFile
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.util.LoadingHandler
@@ -194,9 +201,19 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
         name = user.fullName,
     )
     val createInviteCalls = mutableListOf<List<InviteCreateDto>>()
+    val deleteInviteCalls = mutableListOf<String>()
     var createdInvitesResult: List<com.razumly.mvp.core.data.dataTypes.Invite> = emptyList()
     var emailMembershipMatches: List<UserEmailMembershipMatch> = emptyList()
     var searchResults: List<UserData> = emptyList()
+    var chatTermsConsentState = ChatTermsConsentState(
+        version = "2026-04-14",
+        url = "/terms",
+        summary = listOf("There is no tolerance for objectionable content or abusive users."),
+        accepted = true,
+        acceptedAt = "2026-04-14T12:00:00Z",
+    )
+    var getChatTermsConsentStateCalls = 0
+    var acceptChatTermsConsentCalls = 0
 
     override val currentUser: StateFlow<Result<UserData>> = MutableStateFlow(Result.success(user))
     override val currentAccount: StateFlow<Result<AuthAccount>> = MutableStateFlow(Result.success(account))
@@ -219,7 +236,9 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
         Result.success(createdInvitesResult).also {
             createInviteCalls += invites
         }
-    override suspend fun deleteInvite(inviteId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun deleteInvite(inviteId: String): Result<Unit> = Result.success(Unit).also {
+        deleteInviteCalls += inviteId
+    }
     override suspend fun findEmailMembership(
         emails: List<String>,
         userIds: List<String>,
@@ -290,6 +309,20 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
     override suspend fun followUser(userId: String): Result<Unit> = Result.success(Unit)
     override suspend fun unfollowUser(userId: String): Result<Unit> = Result.success(Unit)
     override suspend fun removeFriend(userId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun getChatTermsConsentState(): Result<ChatTermsConsentState> =
+        Result.success(chatTermsConsentState).also {
+            getChatTermsConsentStateCalls += 1
+        }
+    override suspend fun acceptChatTermsConsent(): Result<ChatTermsConsentState> =
+        Result.success(
+            chatTermsConsentState.copy(
+                accepted = true,
+                acceptedAt = chatTermsConsentState.acceptedAt ?: "2026-04-14T12:00:00Z",
+            )
+        ).also { result ->
+            acceptChatTermsConsentCalls += 1
+            chatTermsConsentState = result.getOrThrow()
+        }
 }
 
 internal data class CreateEventCall(
@@ -340,13 +373,6 @@ internal class CreateEvent_FakeEventRepository(
         newEvent
     }
 
-    override suspend fun createWeeklySession(
-        parentEventId: String,
-        sessionStart: Instant,
-        sessionEnd: Instant,
-        slotId: String?,
-    ): Result<Event> = Result.failure(IllegalStateException("unused"))
-
     override suspend fun scheduleEvent(eventId: String, participantCount: Int?): Result<Event> =
         Result.failure(IllegalStateException("unused"))
 
@@ -387,17 +413,26 @@ internal class CreateEvent_FakeEventRepository(
     override suspend fun addCurrentUserToEvent(
         event: Event,
         preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
     ): Result<SelfRegistrationResult> = Result.success(SelfRegistrationResult())
     override suspend fun registerChildForEvent(
         eventId: String,
         childUserId: String,
         joinWaitlist: Boolean,
+        occurrence: EventOccurrenceSelection?,
     ): Result<ChildRegistrationResult> = Result.failure(NotImplementedError("unused"))
     override suspend fun addTeamToEvent(
         event: Event,
         team: Team,
         preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
     ): Result<Unit> = Result.success(Unit)
+    override suspend fun syncEventParticipants(
+        event: Event,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<EventParticipantsSyncResult> = Result.success(
+        EventParticipantsSyncResult(event = event)
+    )
     override suspend fun getLeagueDivisionStandings(
         eventId: String,
         divisionId: String,
@@ -412,10 +447,14 @@ internal class CreateEvent_FakeEventRepository(
         teamWithPlayers: TeamWithPlayers,
         refundMode: EventParticipantRefundMode?,
         refundReason: String?,
+        occurrence: EventOccurrenceSelection?,
     ): Result<Unit> =
         Result.success(Unit)
-    override suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String?): Result<Unit> =
-        Result.success(Unit)
+    override suspend fun removeCurrentUserFromEvent(
+        event: Event,
+        targetUserId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<Unit> = Result.success(Unit)
 }
 
 internal class CreateEvent_FakeFieldRepository : IFieldRepository {
@@ -495,7 +534,30 @@ internal class CreateEvent_FakeMatchRepository : IMatchRepository {
     override suspend fun getMatch(matchId: String): Result<MatchMVP> = Result.failure(IllegalStateException("unused"))
     override fun getMatchFlow(matchId: String): Flow<Result<MatchWithRelations>> =
         flowOf(Result.failure(IllegalStateException("unused")))
+    override suspend fun saveMatchLocally(match: MatchMVP): Result<Unit> = Result.success(Unit)
     override suspend fun updateMatch(match: MatchMVP): Result<Unit> = Result.success(Unit)
+    override suspend fun updateMatchOperations(
+        match: MatchMVP,
+        lifecycle: MatchLifecycleOperationDto?,
+        segmentOperations: List<MatchSegmentOperationDto>?,
+        incidentOperations: List<MatchIncidentOperationDto>?,
+        officialCheckIn: MatchOfficialCheckInOperationDto?,
+        finalize: Boolean,
+        time: Instant?,
+    ): Result<MatchMVP> = Result.success(match)
+
+    override suspend fun setMatchScore(
+        match: MatchMVP,
+        segmentId: String?,
+        sequence: Int,
+        eventTeamId: String,
+        points: Int,
+    ): Result<MatchMVP> = Result.success(match)
+
+    override suspend fun addMatchIncident(
+        match: MatchMVP,
+        operation: MatchIncidentOperationDto,
+    ): Result<MatchMVP> = Result.success(match)
 
     override suspend fun updateMatchesBulk(
         matches: List<MatchMVP>,
@@ -551,6 +613,7 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
         teamId: String?,
         priceCents: Int?,
         timeSlotContext: PurchaseIntentTimeSlotContext?,
+        occurrence: EventOccurrenceSelection?,
     ): Result<PurchaseIntent> {
         purchaseIntentCalls += PurchaseIntentCall(
             event = event,
@@ -558,6 +621,9 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
         )
         return Result.success(PurchaseIntent(paymentIntent = "pi_test", publishableKey = "pk_test"))
     }
+
+    override suspend fun createTeamRegistrationPurchaseIntent(team: Team): Result<PurchaseIntent> =
+        Result.success(PurchaseIntent(paymentIntent = "pi_team_registration", publishableKey = "pk_test"))
 
     override suspend fun createBill(request: CreateBillRequest): Result<Bill> = Result.success(
         Bill(

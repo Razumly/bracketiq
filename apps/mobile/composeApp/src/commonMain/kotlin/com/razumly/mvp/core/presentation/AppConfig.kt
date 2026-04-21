@@ -24,6 +24,9 @@ sealed class AppConfig {
     data object Login : AppConfig()
 
     @Serializable
+    data object ProfileCompletion : AppConfig()
+
+    @Serializable
     data class EventDetail(
         val event: Event,
     ) : AppConfig()

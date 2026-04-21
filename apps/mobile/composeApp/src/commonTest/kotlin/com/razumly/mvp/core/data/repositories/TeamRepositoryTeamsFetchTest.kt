@@ -9,6 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
+import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
 import com.razumly.mvp.core.data.dataTypes.daos.MessageDao
@@ -24,15 +25,19 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -131,6 +136,7 @@ private class FakeDatabaseService(
     override val getUserDataDao: UserDataDao get() = error("unused")
     override val getFieldDao: FieldDao get() = error("unused")
     override val getEventDao: EventDao get() = error("unused")
+    override val getEventRegistrationDao: EventRegistrationDao get() = error("unused")
     override val getChatGroupDao: ChatGroupDao get() = error("unused")
     override val getMessageDao: MessageDao get() = error("unused")
     override val getRefundRequestDao: RefundRequestDao get() = error("unused")
@@ -328,7 +334,11 @@ class TeamRepositoryTeamsFetchTest {
                           "playerIds": ["u1"],
                           "captainId": "u1",
                           "pending": [],
-                          "teamSize": 2
+                          "teamSize": 2,
+                          "organizationId": "org_1",
+                          "createdBy": "owner_1",
+                          "openRegistration": true,
+                          "registrationPriceCents": 2500
                         }
                       ]
                     }
@@ -348,12 +358,113 @@ class TeamRepositoryTeamsFetchTest {
         val teams = repo.getTeams(listOf("t1", "t2")).getOrThrow()
         assertEquals(1, teams.size)
         assertEquals("t1", teams.first().id)
+        assertEquals("org_1", teams.first().organizationId)
+        assertEquals("owner_1", teams.first().createdBy)
+        assertTrue(teams.first().openRegistration)
+        assertEquals(2500, teams.first().registrationPriceCents)
 
         val cached = teamDao.getTeams(listOf("t1"))
         assertEquals(1, cached.size)
         assertEquals("t1", cached.first().id)
 
         assertEquals(listOf("u1"), userRepo.lastGetUsersInput)
+    }
+
+    @Test
+    fun registerForTeam_posts_self_registration_endpoint_and_caches_team() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/teams/team_1/registrations/self", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            respond(
+                content = """
+                    {
+                      "registrationId": "registration_1",
+                      "status": "ACTIVE",
+                      "team": {
+                        "id": "team_1",
+                        "name": "Open Team",
+                        "division": "Open",
+                        "playerIds": ["u1"],
+                        "captainId": "captain_1",
+                        "pending": [],
+                        "teamSize": 6,
+                        "openRegistration": true,
+                        "registrationPriceCents": 0
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        val team = repo.registerForTeam("team_1").getOrThrow()
+
+        assertEquals("team_1", team.id)
+        assertTrue(team.openRegistration)
+        assertEquals(listOf("u1", "captain_1"), team.playerIds)
+        assertEquals("team_1", teamDao.getTeam("team_1").id)
+    }
+
+    @Test
+    fun leaveTeam_deletes_self_registration_endpoint_and_caches_team() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/teams/team_1/registrations/self", request.url.encodedPath)
+            assertEquals(HttpMethod.Delete, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            respond(
+                content = """
+                    {
+                      "left": true,
+                      "team": {
+                        "id": "team_1",
+                        "name": "Open Team",
+                        "division": "Open",
+                        "playerIds": [],
+                        "captainId": "captain_1",
+                        "pending": [],
+                        "teamSize": 6,
+                        "openRegistration": true,
+                        "registrationPriceCents": 0
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        val team = repo.leaveTeam("team_1").getOrThrow()
+
+        assertEquals("team_1", team.id)
+        assertTrue(team.openRegistration)
+        assertEquals(listOf("captain_1"), team.playerIds)
+        assertEquals("team_1", teamDao.getTeam("team_1").id)
     }
 
     @Test
@@ -461,10 +572,13 @@ class TeamRepositoryTeamsFetchTest {
 
         repo.getTeamsWithPlayersFlow("u_manager").first()
 
-        var pollAttempts = 0
-        while (teamDao.getTeamsForUser("u_manager").isEmpty() && pollAttempts < 100) {
-            Thread.sleep(10)
-            pollAttempts += 1
+        for (attempt in 0 until 100) {
+            if (teamDao.getTeamsForUser("u_manager").isNotEmpty()) {
+                break
+            }
+            withContext(Dispatchers.Default) {
+                delay(10)
+            }
         }
 
         val cachedTeams = teamDao.getTeamsForUser("u_manager")

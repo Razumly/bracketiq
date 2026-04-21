@@ -212,7 +212,7 @@ class MatchCardOfficialSummaryTest {
 
         assertEquals(5, calculateManageOfficialLineCount(match, fiveSlots))
         assertEquals(6, calculateManageOfficialLineCount(match, sixSlots))
-        assertEquals(16, sixSlotHeight - fiveSlotHeight)
+        assertEquals(17, sixSlotHeight - fiveSlotHeight)
     }
 }
 

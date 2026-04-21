@@ -9,9 +9,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -55,9 +57,11 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.officialAssignmentLabels
+import com.razumly.mvp.core.presentation.composables.PlatformLoadingIndicator
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.timeFormat
 import com.razumly.mvp.eventDetail.composables.ScheduleItem
+import com.razumly.mvp.eventDetail.composables.ScheduleMatchGroupMode
 import com.razumly.mvp.eventDetail.composables.ScheduleView
 import kotlinx.coroutines.launch
 import kotlinx.datetime.DatePeriod
@@ -82,6 +86,12 @@ private enum class ScheduleMode {
     AGENDA,
 }
 
+private enum class ScheduleEntryFilter {
+    BOTH,
+    MATCHES,
+    EVENTS,
+}
+
 private data class ScheduleEntry(
     val id: String,
     val eventId: String,
@@ -95,6 +105,7 @@ private data class ScheduleEntry(
 @Composable
 fun ProfileMyScheduleScreen(component: ProfileComponent) {
     val state by component.myScheduleState.collectAsState()
+    var selectedFilter by rememberSaveable { mutableStateOf(ScheduleEntryFilter.BOTH) }
     val scheduleItems = remember(state.events, state.matches, state.teams, state.fields) {
         buildScheduleItems(
             events = state.events,
@@ -102,6 +113,9 @@ fun ProfileMyScheduleScreen(component: ProfileComponent) {
             teams = state.teams,
             fields = state.fields,
         )
+    }
+    val filteredScheduleItems = remember(scheduleItems, selectedFilter) {
+        scheduleItems.filter(selectedFilter::includes)
     }
     val scheduleFields = remember(state.fields, state.matches) {
         buildScheduleFields(
@@ -111,6 +125,9 @@ fun ProfileMyScheduleScreen(component: ProfileComponent) {
     }
     val eventsById = remember(state.events) {
         state.events.associateBy(Event::id)
+    }
+    val eventLabelsById = remember(state.events) {
+        state.events.associate { event -> event.id to event.name }
     }
 
     LaunchedEffect(component) {
@@ -125,30 +142,111 @@ fun ProfileMyScheduleScreen(component: ProfileComponent) {
         isRefreshing = state.isLoading,
         scrollContent = false,
     ) {
-        state.error?.let { error ->
-            Text(
-                text = error,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-
-        ScheduleView(
-            items = scheduleItems,
-            fields = scheduleFields,
-            showFab = {},
-            onMatchClick = { match -> component.openScheduleEvent(match.match.eventId) },
-            onEventClick = { event -> component.openScheduleEvent(event.id) },
-            matchCardContent = { match, onClick ->
-                ProfileScheduleMatchCard(
-                    match = match,
-                    event = eventsById[match.match.eventId],
-                    onClick = onClick,
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            state.error?.let { error ->
+                Text(
+                    text = error,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
                 )
-            },
-        )
+            }
+
+            if (!state.isLoading || scheduleItems.isNotEmpty()) {
+                ScheduleEntryFilterSelector(
+                    selected = selectedFilter,
+                    onSelected = { selectedFilter = it },
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+            ) {
+                if (state.isLoading && scheduleItems.isEmpty()) {
+                    MyScheduleLoadingState()
+                } else {
+                    ScheduleView(
+                        items = filteredScheduleItems,
+                        fields = scheduleFields,
+                        showFab = {},
+                        showGroupingToggle = false,
+                        matchGroupMode = ScheduleMatchGroupMode.EVENT,
+                        eventLabelsById = eventLabelsById,
+                        onMatchClick = { match -> component.openScheduleEvent(match.match.eventId) },
+                        onEventClick = { event -> component.openScheduleEvent(event.id) },
+                        matchCardContent = { match, onClick ->
+                            ProfileScheduleMatchCard(
+                                match = match,
+                                event = eventsById[match.match.eventId],
+                                onClick = onClick,
+                            )
+                        },
+                    )
+                }
+            }
+        }
     }
 }
+
+@Composable
+private fun ScheduleEntryFilterSelector(
+    selected: ScheduleEntryFilter,
+    onSelected: (ScheduleEntryFilter) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ScheduleEntryFilter.entries.forEach { filter ->
+            FilterChip(
+                selected = selected == filter,
+                onClick = { onSelected(filter) },
+                label = {
+                    Text(
+                        when (filter) {
+                            ScheduleEntryFilter.BOTH -> "Both"
+                            ScheduleEntryFilter.MATCHES -> "Matches"
+                            ScheduleEntryFilter.EVENTS -> "Events"
+                        },
+                    )
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun MyScheduleLoadingState() {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            PlatformLoadingIndicator(
+                modifier = Modifier.size(32.dp),
+            )
+            Text(
+                text = "Loading schedule...",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private fun ScheduleEntryFilter.includes(item: ScheduleItem): Boolean =
+    when (this) {
+        ScheduleEntryFilter.BOTH -> true
+        ScheduleEntryFilter.MATCHES -> item is ScheduleItem.MatchEntry
+        ScheduleEntryFilter.EVENTS -> item is ScheduleItem.EventEntry
+    }
 
 @Composable
 private fun ScheduleModeSelector(

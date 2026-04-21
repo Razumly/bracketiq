@@ -34,15 +34,6 @@ fun LeagueConfigurationFields(
     val currentSets = normalizeSetCount(leagueConfig.setsPerMatch)
 
     Text("League Configuration", style = MaterialTheme.typography.titleMedium)
-    Text(
-        text = if (leagueConfig.usesSets) {
-            "Set-based scoring is determined by the selected sport."
-        } else {
-            "Timed match scoring is determined by the selected sport."
-        },
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
 
     Row(
         modifier = Modifier.fillMaxWidth(),

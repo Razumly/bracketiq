@@ -1,27 +1,32 @@
 package com.razumly.mvp.teamManagement
 
-import com.razumly.mvp.core.network.userMessage
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonColors
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -36,8 +41,13 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
+import com.razumly.mvp.core.data.dataTypes.TeamStaffAssignment
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
+import com.razumly.mvp.core.data.dataTypes.normalizedRole
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.util.DEFAULT_AGE_DIVISION
 import com.razumly.mvp.core.data.util.DEFAULT_AGE_DIVISION_OPTIONS
 import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
@@ -52,12 +62,16 @@ import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.data.util.parseCombinedDivisionTypeId
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
+import com.razumly.mvp.core.network.userMessage
+import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
+import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
-import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
+import com.razumly.mvp.core.presentation.composables.StandardTextField
 import kotlinx.coroutines.launch
 
 private enum class TeamInviteTarget(val label: String, val inviteType: String?) {
@@ -73,8 +87,23 @@ private val TEAM_DIVISION_GENDER_OPTIONS = listOf(
     DropdownOption(value = "C", label = "Coed"),
 )
 
+private fun normalizeJerseyNumberInput(value: String?): String =
+    value.orEmpty().filter(Char::isDigit).take(3)
+
+private fun formatRegistrationCost(openRegistration: Boolean, registrationPriceCents: Int): String =
+    when {
+        !openRegistration -> "Not open"
+        registrationPriceCents <= 0 -> "Free"
+        else -> {
+            val dollars = registrationPriceCents / 100
+            val cents = registrationPriceCents % 100
+            "\$$dollars.${cents.toString().padStart(2, '0')}"
+        }
+    }
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CreateOrEditTeamDialog(
+fun CreateOrEditTeamScreen(
     team: TeamWithPlayers,
     sports: List<Sport>,
     friends: List<UserData>,
@@ -82,6 +111,7 @@ fun CreateOrEditTeamDialog(
     suggestions: List<UserData>,
     onSearch: (String) -> Unit,
     onFinish: (Team) -> Unit,
+    onLeaveTeam: (Team) -> Unit = {},
     onDelete: (TeamWithPlayers) -> Unit,
     onDismiss: () -> Unit,
     deleteEnabled: Boolean,
@@ -89,15 +119,36 @@ fun CreateOrEditTeamDialog(
     isCaptain: Boolean,
     currentUser: UserData,
     isNewTeam: Boolean,
+    isSaving: Boolean = false,
+    saveError: String? = null,
     staffUsersById: Map<String, UserData> = emptyMap(),
     onEnsureUserByEmail: (suspend (email: String) -> Result<UserData>)? = null,
     onInviteTeamRole: ((teamId: String, userId: String, inviteType: String) -> Unit)? = null,
 ) {
+    val navBottomPadding = LocalNavBarPadding.current.calculateBottomPadding()
+    val syncedTeam = remember(team.team) { team.team.withSynchronizedMembership() }
     var teamName by remember { mutableStateOf(team.team.name) }
     var teamSizeInput by remember { mutableStateOf(team.team.teamSize.toString()) }
+    var openRegistrationInput by remember(team.team.id) { mutableStateOf(team.team.openRegistration) }
+    var registrationCostInput by remember(team.team.id) {
+        mutableStateOf(
+            if (team.team.registrationPriceCents > 0) {
+                team.team.registrationPriceCents.toString()
+            } else {
+                ""
+            }
+        )
+    }
     var showSearchDialog by remember { mutableStateOf(false) }
     var invitedPlayers by remember { mutableStateOf(team.pendingPlayers) }
     var playersInTeam by remember { mutableStateOf(team.players) }
+    var jerseyNumbersByUserId by remember(team.team.id, syncedTeam.playerRegistrations) {
+        mutableStateOf(
+            syncedTeam.playerRegistrations.associate { registration ->
+                registration.userId to normalizeJerseyNumberInput(registration.jerseyNumber)
+            }
+        )
+    }
     var showLeaveTeamDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var inviteError by remember { mutableStateOf<String?>(null) }
@@ -105,9 +156,13 @@ fun CreateOrEditTeamDialog(
     var sportInput by remember(team.team.id) { mutableStateOf(team.team.sport?.trim().orEmpty()) }
     val scope = rememberCoroutineScope()
     val showEditDetails = isCaptain || isNewTeam
+    val canEditFields = showEditDetails && !isSaving
+    val canChargeRegistration = currentUser.hasStripeAccount == true || team.team.registrationPriceCents > 0
     val parsedTeamSize = teamSizeInput.toIntOrNull()
     val isTeamSizeValid = parsedTeamSize != null && parsedTeamSize > 0
     val resolvedTeamSize = parsedTeamSize ?: team.team.teamSize
+    val registrationPriceCentsInput = (registrationCostInput.toIntOrNull() ?: 0)
+        .coerceAtLeast(0)
     val normalizedEventDivisionDetails = remember(
         selectedEvent?.id,
         selectedEvent?.divisions,
@@ -322,30 +377,156 @@ fun CreateOrEditTeamDialog(
             ?.takeIf(String::isNotBlank)
             ?.let { knownUsersById[it]?.displayName ?: "Unknown user" }
     }
-    val managerLabel = resolveUserName(team.team.managerId ?: team.team.captainId) ?: "Unassigned"
-    val headCoachLabel = resolveUserName(team.team.headCoachId) ?: "Unassigned"
-    val assistantCoachLabel = if (team.team.coachIds.isNotEmpty()) {
-        team.team.coachIds.joinToString { coachId ->
+    val activeStaffAssignments = remember(syncedTeam) { syncedTeam.activeStaffAssignments() }
+    val managerLabel = activeStaffAssignments
+        .firstOrNull { assignment -> assignment.normalizedRole() == "MANAGER" }
+        ?.userId
+        ?.let(resolveUserName)
+        ?: resolveUserName(syncedTeam.managerId ?: syncedTeam.captainId)
+        ?: "Unassigned"
+    val headCoachLabel = activeStaffAssignments
+        .firstOrNull { assignment -> assignment.normalizedRole() == "HEAD_COACH" }
+        ?.userId
+        ?.let(resolveUserName)
+        ?: resolveUserName(syncedTeam.headCoachId)
+        ?: "Unassigned"
+    val assistantCoachIds = activeStaffAssignments
+        .filter { assignment -> assignment.normalizedRole() == "ASSISTANT_COACH" }
+        .map(TeamStaffAssignment::userId)
+        .ifEmpty { syncedTeam.coachIds }
+    val assistantCoachLabel = if (assistantCoachIds.isNotEmpty()) {
+        assistantCoachIds.joinToString { coachId ->
             resolveUserName(coachId) ?: "Unknown user"
         }
     } else {
         "Unassigned"
     }
+    val existingPlayerRegistrationsByUserId = remember(syncedTeam.playerRegistrations) {
+        syncedTeam.playerRegistrations.associateBy(TeamPlayerRegistration::userId)
+    }
+    fun jerseyNumberForUser(userId: String): String = jerseyNumbersByUserId[userId].orEmpty()
 
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
-        shape = RoundedCornerShape(12.dp),
-        elevation = CardDefaults.cardElevation(12.dp)
-    ) {
+    fun updateJerseyNumber(userId: String, jerseyNumber: String) {
+        jerseyNumbersByUserId = jerseyNumbersByUserId + (userId to normalizeJerseyNumberInput(jerseyNumber))
+    }
+
+    fun buildUpdatedTeam(
+        activePlayers: List<UserData>,
+        invitedPlayers: List<UserData>,
+        resolvedName: String,
+        resolvedSize: Int,
+    ): Team {
+        val activePlayerIds = activePlayers.map(UserData::id).distinct()
+        val invitedPlayerIds = invitedPlayers
+            .map(UserData::id)
+            .distinct()
+            .filterNot(activePlayerIds::contains)
+        val resolvedCaptainId = syncedTeam.captainId
+            .takeIf(activePlayerIds::contains)
+            ?: activePlayerIds.firstOrNull()
+            .orEmpty()
+        val updatedPlayerRegistrations = buildList {
+            activePlayerIds.forEach { userId ->
+                val existing = existingPlayerRegistrationsByUserId[userId]
+                val jerseyNumberInput = jerseyNumbersByUserId[userId]
+                val normalizedJerseyNumberInput = normalizeJerseyNumberInput(jerseyNumberInput)
+                add(
+                    TeamPlayerRegistration(
+                        id = existing?.id ?: "${syncedTeam.id}__player__active__${userId}",
+                        teamId = syncedTeam.id,
+                        userId = userId,
+                        status = "ACTIVE",
+                        jerseyNumber = if (jerseyNumberInput != null) {
+                            normalizedJerseyNumberInput.takeIf(String::isNotBlank)
+                        } else {
+                            normalizeJerseyNumberInput(existing?.jerseyNumber).takeIf(String::isNotBlank)
+                        },
+                        position = existing?.position,
+                        isCaptain = userId == resolvedCaptainId,
+                    )
+                )
+            }
+            invitedPlayerIds.forEach { userId ->
+                val existing = existingPlayerRegistrationsByUserId[userId]
+                val jerseyNumberInput = jerseyNumbersByUserId[userId]
+                val normalizedJerseyNumberInput = normalizeJerseyNumberInput(jerseyNumberInput)
+                add(
+                    TeamPlayerRegistration(
+                        id = existing?.id ?: "${syncedTeam.id}__player__invited__${userId}",
+                        teamId = syncedTeam.id,
+                        userId = userId,
+                        status = "INVITED",
+                        jerseyNumber = if (jerseyNumberInput != null) {
+                            normalizedJerseyNumberInput.takeIf(String::isNotBlank)
+                        } else {
+                            normalizeJerseyNumberInput(existing?.jerseyNumber).takeIf(String::isNotBlank)
+                        },
+                        position = existing?.position,
+                        isCaptain = false,
+                    )
+                )
+            }
+        }
+
+        return syncedTeam.copy(
+            name = resolvedName,
+            sport = normalizedSportName.ifBlank { null },
+            teamSize = resolvedSize,
+            division = resolvedDivisionToken,
+            divisionTypeId = resolvedDivisionTypeId,
+            divisionTypeName = resolvedDivisionTypeName,
+            skillDivisionTypeId = normalizedSkillDivisionTypeId,
+            skillDivisionTypeName = resolvedSkillDivisionTypeName,
+            ageDivisionTypeId = normalizedAgeDivisionTypeId,
+            ageDivisionTypeName = resolvedAgeDivisionTypeName,
+            divisionGender = normalizedDivisionGender,
+            captainId = resolvedCaptainId,
+            playerIds = activePlayerIds,
+            pending = invitedPlayerIds,
+            playerRegistrations = updatedPlayerRegistrations,
+            staffAssignments = syncedTeam.staffAssignments,
+            openRegistration = openRegistrationInput,
+            registrationPriceCents = if (openRegistrationInput && canChargeRegistration) {
+                registrationPriceCentsInput
+            } else {
+                0
+            },
+        ).withSynchronizedMembership()
+    }
+
+    Scaffold(
+        contentWindowInsets = NoScaffoldContentInsets,
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text(if (isNewTeam) "Create Team" else "Edit Team") },
+                navigationIcon = {
+                    PlatformBackButton(
+                        onBack = { if (!isSaving) onDismiss() },
+                        arrow = true,
+                    )
+                },
+            )
+        },
+    ) { paddingValues ->
         Column(
             modifier = Modifier
-                .padding(16.dp)
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp + navBottomPadding)
                 .verticalScroll(rememberScrollState())
         ) {
             Text("Team Setup", style = MaterialTheme.typography.titleLarge)
             Spacer(modifier = Modifier.height(8.dp))
 
             inviteError?.let {
+                Text(
+                    text = it,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+            }
+
+            saveError?.let {
                 Text(
                     text = it,
                     color = MaterialTheme.colorScheme.error,
@@ -366,7 +547,7 @@ fun CreateOrEditTeamDialog(
                 } else {
                     ""
                 },
-                readOnly = !showEditDetails
+                readOnly = !canEditFields
             )
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -377,7 +558,7 @@ fun CreateOrEditTeamDialog(
                 label = "Team Size",
                 keyboardType = "number",
                 inputFilter = { value -> value.filter(Char::isDigit) },
-                readOnly = !showEditDetails,
+                readOnly = !canEditFields,
                 isError = showEditDetails && !isTeamSizeValid,
                 supportingText = if (showEditDetails && !isTeamSizeValid) {
                     "Enter a team size greater than 0."
@@ -394,7 +575,7 @@ fun CreateOrEditTeamDialog(
                 modifier = Modifier.fillMaxWidth(),
                 label = "Sport",
                 placeholder = "Select sport",
-                enabled = showEditDetails,
+                enabled = canEditFields,
             )
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -414,7 +595,7 @@ fun CreateOrEditTeamDialog(
                     modifier = Modifier.weight(1f),
                     label = "Gender",
                     placeholder = "Select gender",
-                    enabled = showEditDetails,
+                    enabled = canEditFields,
                 )
                 PlatformDropdown(
                     selectedValue = skillDivisionTypeInput,
@@ -425,7 +606,7 @@ fun CreateOrEditTeamDialog(
                     modifier = Modifier.weight(1f),
                     label = "Skill Division",
                     placeholder = "Select skill",
-                    enabled = showEditDetails,
+                    enabled = canEditFields,
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -438,7 +619,7 @@ fun CreateOrEditTeamDialog(
                 modifier = Modifier.fillMaxWidth(),
                 label = "Age Division",
                 placeholder = "Select age",
-                enabled = showEditDetails,
+                enabled = canEditFields,
             )
             if (showEditDetails && !isTeamDivisionValid) {
                 Text(
@@ -450,41 +631,130 @@ fun CreateOrEditTeamDialog(
             }
 
             Spacer(modifier = Modifier.height(12.dp))
+            if (showEditDetails) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(
+                        checked = openRegistrationInput,
+                        onCheckedChange = { checked -> openRegistrationInput = checked },
+                        enabled = canEditFields,
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Open registration")
+                        Text(
+                            text = "Players can join this team without an invite.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                StandardTextField(
+                    value = registrationCostInput,
+                    onValueChange = { registrationCostInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "Registration cost",
+                    keyboardType = "money",
+                    inputFilter = { value -> value.filter(Char::isDigit).take(7) },
+                    readOnly = !canEditFields || !openRegistrationInput || !canChargeRegistration,
+                    supportingText = if (canChargeRegistration) {
+                        "Leave blank for free registration."
+                    } else {
+                        "Connect Stripe to charge for registration. Free registration is still available."
+                    },
+                )
+            } else {
+                ReadOnlyLabeledValue(
+                    label = "Open registration",
+                    value = if (openRegistrationInput) "Yes" else "No",
+                    supportingText = if (openRegistrationInput) {
+                        "Players can join this team without an invite."
+                    } else {
+                        "Players need an invite to join this team."
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                ReadOnlyLabeledValue(
+                    label = "Registration cost",
+                    value = formatRegistrationCost(
+                        openRegistration = openRegistrationInput,
+                        registrationPriceCents = team.team.registrationPriceCents,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
             Text("Players")
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 playersInTeam.forEach { player ->
+                    val jerseyNumber = jerseyNumberForUser(player.id)
                     Row(
                         Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        PlayerCard(player = player, modifier = Modifier.weight(1f))
+                        PlayerCard(
+                            player = player,
+                            modifier = Modifier.weight(1f),
+                            jerseyNumber = jerseyNumber,
+                            trailingContent = {
+                                JerseyNumberField(
+                                    value = jerseyNumber,
+                                    onValueChange = { updateJerseyNumber(player.id, it) },
+                                    canEdit = canEditFields,
+                                )
+                            },
+                        )
                         if (showEditDetails) {
-                            Button(onClick = {
-                                playersInTeam = playersInTeam - player
-                            }) {
+                            Button(
+                                onClick = {
+                                    playersInTeam = playersInTeam - player
+                                },
+                                enabled = canEditFields,
+                            ) {
                                 Text("Remove")
                             }
                         }
                     }
                 }
                 invitedPlayers.forEach { player ->
+                    val jerseyNumber = jerseyNumberForUser(player.id)
                     Row(
                         Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        PlayerCard(player = player, isPending = true, Modifier.weight(1f))
+                        PlayerCard(
+                            player = player,
+                            isPending = true,
+                            modifier = Modifier.weight(1f),
+                            jerseyNumber = jerseyNumber,
+                            trailingContent = {
+                                JerseyNumberField(
+                                    value = jerseyNumber,
+                                    onValueChange = { updateJerseyNumber(player.id, it) },
+                                    canEdit = canEditFields,
+                                )
+                            },
+                        )
                         if (showEditDetails) {
-                            Button(onClick = {
-                                invitedPlayers = invitedPlayers - player
-                            }) {
+                            Button(
+                                onClick = {
+                                    invitedPlayers = invitedPlayers - player
+                                },
+                                enabled = canEditFields,
+                            ) {
                                 Text("Remove")
                             }
                         }
                     }
                 }
-                if (playersInTeam.size + invitedPlayers.size < resolvedTeamSize || resolvedTeamSize == 7 && showEditDetails) {
+                if (canEditFields && (playersInTeam.size + invitedPlayers.size < resolvedTeamSize || resolvedTeamSize == 7)) {
                     InvitePlayerCard {
                         inviteTarget = TeamInviteTarget.PLAYER
                         showSearchDialog = true
@@ -517,6 +787,7 @@ fun CreateOrEditTeamDialog(
                             showSearchDialog = true
                         },
                         modifier = Modifier.weight(1f),
+                        enabled = canEditFields,
                     ) { Text("Invite Manager") }
                     OutlinedButton(
                         onClick = {
@@ -524,6 +795,7 @@ fun CreateOrEditTeamDialog(
                             showSearchDialog = true
                         },
                         modifier = Modifier.weight(1f),
+                        enabled = canEditFields,
                     ) { Text("Invite Head Coach") }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
@@ -533,6 +805,7 @@ fun CreateOrEditTeamDialog(
                         showSearchDialog = true
                     },
                     modifier = Modifier.fillMaxWidth(),
+                    enabled = canEditFields,
                 ) { Text("Invite Assistant Coach") }
             } else if (showEditDetails && isNewTeam) {
                 Text(
@@ -546,39 +819,40 @@ fun CreateOrEditTeamDialog(
             Row(
                 Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                OutlinedButton(onClick = onDismiss) {
+                OutlinedButton(onClick = onDismiss, enabled = !isSaving) {
                     Text("Cancel")
                 }
                 if (showEditDetails) {
                     Button(onClick = {
                         onFinish(
-                            team.team.copy(playerIds = playersInTeam.map { it.id },
-                                pending = invitedPlayers.map { it.id },
-                                name = normalizedTeamName,
-                                sport = normalizedSportName.ifBlank { null },
-                                teamSize = resolvedTeamSize,
-                                division = resolvedDivisionToken,
-                                divisionTypeId = resolvedDivisionTypeId,
-                                divisionTypeName = resolvedDivisionTypeName,
-                                skillDivisionTypeId = normalizedSkillDivisionTypeId,
-                                skillDivisionTypeName = resolvedSkillDivisionTypeName,
-                                ageDivisionTypeId = normalizedAgeDivisionTypeId,
-                                ageDivisionTypeName = resolvedAgeDivisionTypeName,
-                                divisionGender = normalizedDivisionGender,
+                            buildUpdatedTeam(
+                                activePlayers = playersInTeam,
+                                invitedPlayers = invitedPlayers,
+                                resolvedName = normalizedTeamName,
+                                resolvedSize = resolvedTeamSize,
                             )
                         )
-                    }, enabled = isTeamSizeValid && isTeamDivisionValid && isTeamNameValid) {
-                        Text("Finish")
+                    }, enabled = !isSaving && isTeamSizeValid && isTeamDivisionValid && isTeamNameValid) {
+                        if (isSaving) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(if (isNewTeam) "Creating..." else "Saving...")
+                        } else {
+                            Text(if (isNewTeam) "Create" else "Save")
+                        }
                     }
                 } else {
-                    Button(onClick = { showLeaveTeamDialog = true }) {
+                    Button(onClick = { showLeaveTeamDialog = true }, enabled = !isSaving) {
                         Text("Leave Team")
                     }
                 }
             }
 
             if (isCaptain) {
-                IconButton(onClick = { showDeleteDialog = true }, enabled = deleteEnabled,
+                IconButton(onClick = { showDeleteDialog = true }, enabled = deleteEnabled && !isSaving,
                     colors = IconButtonColors(
                         containerColor = MaterialTheme.colorScheme.error,
                         contentColor = MaterialTheme.colorScheme.onError,
@@ -621,13 +895,7 @@ fun CreateOrEditTeamDialog(
             text = { Text("Are you sure you want to leave this team?") },
             confirmButton = {
                 Button(onClick = {
-                    onFinish(
-                        team.team.copy(playerIds = (playersInTeam - currentUser).map { it.id },
-                            pending = invitedPlayers.map { it.id },
-                            name = normalizedTeamName,
-                            teamSize = resolvedTeamSize
-                        )
-                    )
+                    onLeaveTeam(team.team)
                     showLeaveTeamDialog = false
                 }) {
                     Text("Leave")
@@ -655,6 +923,9 @@ fun CreateOrEditTeamDialog(
                     } else {
                         invitedPlayers = invitedPlayers + it
                     }
+                    if (!jerseyNumbersByUserId.containsKey(it.id)) {
+                        updateJerseyNumber(it.id, "")
+                    }
                 } else {
                     val inviteType = inviteTarget.inviteType
                     if (inviteType != null) {
@@ -674,6 +945,9 @@ fun CreateOrEditTeamDialog(
                                         invitedPlayers.any { it.id == user.id }
                                     if (!alreadySelected) {
                                         invitedPlayers = invitedPlayers + user
+                                        if (!jerseyNumbersByUserId.containsKey(user.id)) {
+                                            updateJerseyNumber(user.id, "")
+                                        }
                                     }
                                 } else {
                                     val inviteType = inviteTarget.inviteType
@@ -690,5 +964,77 @@ fun CreateOrEditTeamDialog(
             eventName = selectedEvent?.name ?: "",
             entryLabel = inviteTarget.label,
         )
+    }
+}
+
+@Composable
+private fun JerseyNumberField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    canEdit: Boolean,
+) {
+    if (!canEdit) {
+        JerseyNumberReadOnlyView(value = value)
+        return
+    }
+
+    StandardTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier.width(96.dp),
+        label = "Jersey",
+        keyboardType = "number",
+        inputFilter = { input -> input.filter(Char::isDigit).take(3) },
+        readOnly = !canEdit,
+        height = 56.dp,
+        contentPadding = PaddingValues(0.dp),
+    )
+}
+
+@Composable
+private fun JerseyNumberReadOnlyView(value: String) {
+    Column(
+        modifier = Modifier.width(96.dp),
+        horizontalAlignment = Alignment.Start,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = "Jersey",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = normalizeJerseyNumberInput(value).ifBlank { " " },
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun ReadOnlyLabeledValue(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    supportingText: String? = null,
+) {
+    Column(modifier = modifier.padding(vertical = 4.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        supportingText?.let { text ->
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }

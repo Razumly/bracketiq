@@ -29,6 +29,8 @@ import com.razumly.mvp.profile.DefaultProfileComponent
 import com.razumly.mvp.profile.ProfileComponent
 import com.razumly.mvp.profile.profileDetails.DefaultProfileDetailsComponent
 import com.razumly.mvp.profile.profileDetails.ProfileDetailsComponent
+import com.razumly.mvp.profileCompletion.DefaultProfileCompletionComponent
+import com.razumly.mvp.profileCompletion.ProfileCompletionComponent
 import com.razumly.mvp.refundManager.DefaultRefundManagerComponent
 import com.razumly.mvp.refundManager.RefundManagerComponent
 import com.razumly.mvp.organizationDetail.DefaultOrganizationDetailComponent
@@ -154,6 +156,13 @@ val componentModule = module {
             teamRepository = get(),
             pushNotificationsRepository = get(),
             navigationHandler = navHandler,
+        )
+    }
+
+    factory<ProfileCompletionComponent> { (componentContext: ComponentContext) ->
+        DefaultProfileCompletionComponent(
+            componentContext = componentContext,
+            userRepository = get(),
         )
     }
 

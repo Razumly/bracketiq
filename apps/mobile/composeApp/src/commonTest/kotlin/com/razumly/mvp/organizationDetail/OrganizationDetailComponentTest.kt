@@ -187,6 +187,12 @@ private object NoopTeamRepository : ITeamRepository {
 
     override suspend fun updateTeam(newTeam: Team): Result<Team> = Result.success(newTeam)
 
+    override suspend fun registerForTeam(teamId: String): Result<Team> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun leaveTeam(teamId: String): Result<Team> =
+        Result.failure(IllegalStateException("unused"))
+
     override suspend fun deleteTeam(team: TeamWithPlayers): Result<Unit> = Result.success(Unit)
 
     override fun getTeamsWithPlayersFlow(id: String): Flow<Result<List<TeamWithPlayers>>> =
@@ -214,8 +220,34 @@ private object NoopMatchRepository : IMatchRepository {
     override fun getMatchFlow(matchId: String): Flow<Result<com.razumly.mvp.core.data.dataTypes.MatchWithRelations>> =
         flowOf(Result.failure(IllegalStateException("unused")))
 
+    override suspend fun saveMatchLocally(match: com.razumly.mvp.core.data.dataTypes.MatchMVP): Result<Unit> =
+        Result.success(Unit)
+
     override suspend fun updateMatch(match: com.razumly.mvp.core.data.dataTypes.MatchMVP): Result<Unit> =
         Result.success(Unit)
+
+    override suspend fun updateMatchOperations(
+        match: com.razumly.mvp.core.data.dataTypes.MatchMVP,
+        lifecycle: com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto?,
+        segmentOperations: List<com.razumly.mvp.core.network.dto.MatchSegmentOperationDto>?,
+        incidentOperations: List<com.razumly.mvp.core.network.dto.MatchIncidentOperationDto>?,
+        officialCheckIn: com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto?,
+        finalize: Boolean,
+        time: kotlin.time.Instant?,
+    ): Result<com.razumly.mvp.core.data.dataTypes.MatchMVP> = Result.success(match)
+
+    override suspend fun setMatchScore(
+        match: com.razumly.mvp.core.data.dataTypes.MatchMVP,
+        segmentId: String?,
+        sequence: Int,
+        eventTeamId: String,
+        points: Int,
+    ): Result<com.razumly.mvp.core.data.dataTypes.MatchMVP> = Result.success(match)
+
+    override suspend fun addMatchIncident(
+        match: com.razumly.mvp.core.data.dataTypes.MatchMVP,
+        operation: com.razumly.mvp.core.network.dto.MatchIncidentOperationDto,
+    ): Result<com.razumly.mvp.core.data.dataTypes.MatchMVP> = Result.success(match)
 
     override suspend fun updateMatchesBulk(
         matches: List<com.razumly.mvp.core.data.dataTypes.MatchMVP>,

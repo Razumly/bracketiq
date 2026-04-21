@@ -20,9 +20,14 @@ class IOSNativeViewFactory: NativeViewFactory {
         onEventSelected: @escaping (Event) -> Void,
         onPlaceSelected: @escaping (MVPPlace) -> Void,
         onPlaceSelectionPoint: @escaping (KotlinFloat, KotlinFloat) -> Void,
+        selectionRequiresConfirmation: Bool,
+        originalPlace: MVPPlace?,
+        selectedPlace: MVPPlace?,
+        onPlaceSelectionCleared: @escaping () -> Void,
         canClickPOI: Bool,
         focusedLocation: LatLng?,
         focusedEvent: (Event)?,
+        recenterRequestToken: Int32,
         locationButtonBottomPadding: Float
     ) -> UIViewController {
         let view = EventMap(
@@ -30,9 +35,14 @@ class IOSNativeViewFactory: NativeViewFactory {
             onEventSelected: onEventSelected,
             onPlaceSelected: onPlaceSelected,
             onPlaceSelectionPoint: onPlaceSelectionPoint,
+            selectionRequiresConfirmation: selectionRequiresConfirmation,
+            originalPlace: originalPlace,
+            selectedPlace: selectedPlace,
+            onPlaceSelectionCleared: onPlaceSelectionCleared,
             canClickPOI: canClickPOI,
             focusedLocation: focusedLocation,
             focusedEvent: focusedEvent,
+            recenterRequestToken: Int(recenterRequestToken),
             locationButtonBottomPadding: CGFloat(locationButtonBottomPadding)
         )
         
@@ -50,9 +60,14 @@ class IOSNativeViewFactory: NativeViewFactory {
             onEventSelected: @escaping (Event) -> Void,
             onPlaceSelected: @escaping (MVPPlace) -> Void,
             onPlaceSelectionPoint: @escaping (KotlinFloat, KotlinFloat) -> Void,
+            selectionRequiresConfirmation: Bool,
+            originalPlace: MVPPlace?,
+            selectedPlace: MVPPlace?,
+            onPlaceSelectionCleared: @escaping () -> Void,
             canClickPOI: Bool,
             focusedLocation: LatLng?,
             focusedEvent: (Event)?,
+            recenterRequestToken: Int32,
             locationButtonBottomPadding: Float
         ) {
             guard let hostingController = viewController as? UIHostingController<EventMap> else {
@@ -64,9 +79,14 @@ class IOSNativeViewFactory: NativeViewFactory {
                 onEventSelected: onEventSelected,
                 onPlaceSelected: onPlaceSelected,
                 onPlaceSelectionPoint: onPlaceSelectionPoint,
+                selectionRequiresConfirmation: selectionRequiresConfirmation,
+                originalPlace: originalPlace,
+                selectedPlace: selectedPlace,
+                onPlaceSelectionCleared: onPlaceSelectionCleared,
                 canClickPOI: canClickPOI,
                 focusedLocation: focusedLocation,
                 focusedEvent: focusedEvent,
+                recenterRequestToken: Int(recenterRequestToken),
                 locationButtonBottomPadding: CGFloat(locationButtonBottomPadding)
             )
 

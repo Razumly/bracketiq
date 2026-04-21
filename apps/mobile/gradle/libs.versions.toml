@@ -5,64 +5,67 @@ android-compileSdk = "36"
 android-minSdk = "26"
 android-targetSdk = "36"
 androidx-activityCompose = "1.13.0"
-androidx-lifecycle = "2.9.6"
+androidx-lifecycle = "2.10.0"
 assertk = "0.28.1"
 coil3 = "3.4.0"
-componentsResourcesVersion = "1.10.2"
-compose-multiplatform = "1.10.2"
-calendar = "2.10.0"
+componentsResourcesVersion = "1.10.3"
+compose-multiplatform = "1.10.3"
+calendar = "2.10.1"
 concurrentFuturesKtx = "1.3.0"
 core = "1.7.0"
 coroutines = "1.10.2"
 datastore = "1.2.1"
 decompose = "3.5.0"
 firebaseMessaging = "25.0.1"
-foundation = "1.10.2"
-foundationLayout = "1.10.5"
+foundation = "1.10.3"
+foundationLayout = "1.10.6"
 geo = "0.8.0"
 googleApiServicesOauth2 = "v2-rev20200213-2.0.0"
 googleAuthLibraryOauth2Http = "1.43.0"
 googleHttpClientGson = "2.1.0"
 hazeMaterials = "1.7.2"
-imagepickerkmp = "1.0.34"
+imagepickerkmp = "1.0.39"
 kmpalette = "3.1.0"
 kmpnotifier = "1.6.1"
-koin = "4.1.1"
+koin = "4.2.1"
 kotlin = "2.3.10"
 kotlinxDatetime = "0.7.1"
 kotlinx_datetime_ext = "1.4.0"
-kotlinxSerializationJson = "1.10.0"
+kotlinxSerializationJson = "1.11.0"
 ksp = "2.3.0"
-ktor = "3.4.1"
+ktor = "3.4.2"
 lifecycle = "2.5.0"
 lifecycleRuntimeComposeAndroid = "2.10.0"
-mapsCompose = "8.2.1"
-material = "1.10.5"
+mapsCompose = "8.3.0"
+material = "1.10.6"
 material3 = "1.9.0"
 materialIconsExtended = "1.7.3"
 materialKolor = "4.1.1"
 mockk = "1.14.9"
+multiplatformSettings = "1.3.0"
 napier = "2.7.1"
 navigationCommonKtx = "2.9.7"
 performanceAnnotation = "1.0.0-alpha01"
 permissions = "0.20.1"
-places = "5.1.1"
+places = "5.2.0"
 playServicesLocation = "21.3.0"
 playServicesMaps = "20.0.0"
 robolectric = "4.16.1"
 room = "2.8.4"
-runtimeSaveable = "1.10.2"
+runtimeSaveable = "1.10.3"
 secrets = "2.0.1"
 sqlite = "2.6.2"
-stripeAndroid = "23.0.2"
+stripeAndroid = "23.3.0"
 turbine = "1.2.1"
-uiVersion = "1.10.2"
+uiVersion = "1.10.3"
 vectorize = "1.2.0"
-animationAndroid = "1.10.5"
-browser = "1.9.0"
-credentials = "1.5.0"
+animationAndroid = "1.10.6"
+browser = "1.10.0"
+credentials = "1.6.0"
 googleId = "1.2.0"
 splashscreen = "1.2.0"
+androidxComposeUiTest = "1.10.6"
+androidxSecurityCrypto = "1.1.0-alpha06"
 
 [libraries]
 androidx-core = { module = "androidx.test:core", version.ref = "core" }
@@ -133,6 +136,7 @@ ktor-client-darwin = { group = "io.ktor", name = "ktor-client-darwin", version.r
 ktor-serialization-kotlinx-json = { group = "io.ktor", name = "ktor-serialization-kotlinx-json", version.ref = "ktor" }
 maps-compose = { module = "com.google.maps.android:maps-compose", version.ref = "mapsCompose" }
 mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
+multiplatform-settings = { module = "com.russhwolf:multiplatform-settings", version.ref = "multiplatformSettings" }
 napier = { module = "io.github.aakira:napier", version.ref = "napier" }
 permissions = { module = "dev.icerock.moko:permissions", version.ref = "permissions" }
 permissions-location = { module = "dev.icerock.moko:permissions-location", version.ref = "permissions" }
@@ -145,6 +149,8 @@ robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectr
 runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "runtimeSaveable" }
 runtime-saveable = { module = "org.jetbrains.compose.runtime:runtime-saveable", version.ref = "runtimeSaveable" }
 androidx-animation-android = { group = "androidx.compose.animation", name = "animation-android", version.ref = "animationAndroid" }
+androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4", version.ref = "androidxComposeUiTest" }
+androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest", version.ref = "androidxComposeUiTest" }
 stripe-android = { group = "com.stripe", name = "stripe-android", version.ref = "stripeAndroid" }
 financial-connections = { group = "com.stripe", name = "financial-connections", version.ref = "stripeAndroid" }
 turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }
@@ -153,6 +159,7 @@ androidx-credentials = { module = "androidx.credentials:credentials", version.re
 androidx-credentials-play-services-auth = { module = "androidx.credentials:credentials-play-services-auth", version.ref = "credentials" }
 googleid = { module = "com.google.android.libraries.identity.googleid:googleid", version.ref = "googleId" }
 androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "splashscreen" }
+androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "androidxSecurityCrypto" }
 
 
 [plugins]

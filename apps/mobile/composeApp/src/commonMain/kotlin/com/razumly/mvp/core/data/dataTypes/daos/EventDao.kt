@@ -72,8 +72,19 @@ interface EventDao {
 
     @Transaction
     suspend fun deleteEventWithCrossRefs(eventId: String) {
-        deleteEventById(eventId)
         deleteEventCrossRefs(eventId)
+        deleteEventById(eventId)
+    }
+
+    @Transaction
+    suspend fun deleteEventsWithCrossRefs(eventIds: List<String>) {
+        eventIds
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+            .forEach { eventId ->
+                deleteEventWithCrossRefs(eventId)
+            }
     }
 
     @Transaction

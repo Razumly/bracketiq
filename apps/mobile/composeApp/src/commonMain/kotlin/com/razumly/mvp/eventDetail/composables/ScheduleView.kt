@@ -89,6 +89,11 @@ private enum class ScheduleGroupingMode {
     FIELD,
 }
 
+enum class ScheduleMatchGroupMode {
+    FIELD,
+    EVENT,
+}
+
 sealed interface ScheduleItem {
     val key: String
     val eventId: String
@@ -114,7 +119,7 @@ sealed interface ScheduleItem {
     }
 }
 
-private data class FieldScheduleGroup(
+private data class MatchScheduleGroup(
     val key: String,
     val label: String,
     val matches: List<MatchWithRelations>,
@@ -122,7 +127,8 @@ private data class FieldScheduleGroup(
 
 private const val MOBILE_BREAKPOINT_DP = 600
 private const val UNASSIGNED_FIELD_KEY = "__unassigned_field__"
-private const val ALL_FIELDS_KEY = "__all_fields__"
+private const val UNASSIGNED_EVENT_KEY = "__unassigned_event__"
+private const val ALL_MATCH_GROUPS_KEY = "__all_match_groups__"
 private const val BRACKET_CARD_HEIGHT_DP = 90
 private const val BRACKET_CARD_VERTICAL_PADDING_DP = 20
 private const val BRACKET_CARD_VERTICAL_PADDING_WITH_OFFICIAL_DP = 28
@@ -137,6 +143,9 @@ fun ScheduleView(
     showEventOfficialNames: Boolean = true,
     limitOfficialsToCurrentUser: Boolean = false,
     canManageMatches: Boolean = false,
+    showGroupingToggle: Boolean = true,
+    matchGroupMode: ScheduleMatchGroupMode = ScheduleMatchGroupMode.FIELD,
+    eventLabelsById: Map<String, String> = emptyMap(),
     onToggleLockAllMatches: ((Boolean, List<String>) -> Unit)? = null,
     onMatchClick: (MatchWithRelations) -> Unit,
     onEventClick: (Event) -> Unit = {},
@@ -212,8 +221,16 @@ fun ScheduleView(
         sortedDates.firstOrNull { it >= today } ?: sortedDates.firstOrNull() ?: today
     }
     var selectedDate by remember(defaultDate) { mutableStateOf(defaultDate) }
-    var groupingMode by rememberSaveable { mutableStateOf(ScheduleGroupingMode.TIME) }
-    var selectedFieldKey by rememberSaveable { mutableStateOf(ALL_FIELDS_KEY) }
+    var groupingMode by rememberSaveable(showGroupingToggle) {
+        mutableStateOf(
+            if (showGroupingToggle) {
+                ScheduleGroupingMode.TIME
+            } else {
+                ScheduleGroupingMode.FIELD
+            }
+        )
+    }
+    var selectedMatchGroupKey by rememberSaveable { mutableStateOf(ALL_MATCH_GROUPS_KEY) }
     val isMobileLayout = getScreenWidth() < MOBILE_BREAKPOINT_DP
     val hasAnyMatches = remember(displayedItems) {
         displayedItems.any { item -> item is ScheduleItem.MatchEntry }
@@ -223,6 +240,11 @@ fun ScheduleView(
             groupingMode = ScheduleGroupingMode.TIME
         }
     }
+    LaunchedEffect(showGroupingToggle, hasAnyMatches) {
+        if (!showGroupingToggle && hasAnyMatches) {
+            groupingMode = ScheduleGroupingMode.FIELD
+        }
+    }
     LaunchedEffect(sortedDates) {
         if (selectedDate !in itemsByDate.keys) {
             selectedDate = sortedDates.firstOrNull() ?: today
@@ -230,7 +252,7 @@ fun ScheduleView(
     }
     LaunchedEffect(groupingMode) {
         if (groupingMode != ScheduleGroupingMode.FIELD) {
-            selectedFieldKey = ALL_FIELDS_KEY
+            selectedMatchGroupKey = ALL_MATCH_GROUPS_KEY
         }
     }
     val startMonth = remember(sortedDates, selectedDate) {
@@ -263,26 +285,30 @@ fun ScheduleView(
     val dayEvents = remember(dayItems) {
         dayItems.mapNotNull { item -> item as? ScheduleItem.EventEntry }
     }
-    val fieldGroups = remember(dayMatches, fieldsById) {
-        buildFieldScheduleGroups(dayMatches, fieldsById)
-    }
-    val selectableFieldKeys = remember(fieldGroups) {
-        fieldGroups.map(FieldScheduleGroup::key).toSet()
-    }
-    LaunchedEffect(selectableFieldKeys) {
-        if (selectedFieldKey != ALL_FIELDS_KEY && selectedFieldKey !in selectableFieldKeys) {
-            selectedFieldKey = ALL_FIELDS_KEY
+    val matchGroups = remember(dayMatches, fieldsById, matchGroupMode, eventLabelsById) {
+        when (matchGroupMode) {
+            ScheduleMatchGroupMode.FIELD -> buildFieldScheduleGroups(dayMatches, fieldsById)
+            ScheduleMatchGroupMode.EVENT -> buildEventScheduleGroups(dayMatches, eventLabelsById)
         }
     }
-    val visibleFieldGroups = remember(fieldGroups, selectedFieldKey) {
-        if (selectedFieldKey == ALL_FIELDS_KEY) {
-            fieldGroups
+    val selectableMatchGroupKeys = remember(matchGroups) {
+        matchGroups.map(MatchScheduleGroup::key).toSet()
+    }
+    LaunchedEffect(selectableMatchGroupKeys) {
+        if (selectedMatchGroupKey != ALL_MATCH_GROUPS_KEY && selectedMatchGroupKey !in selectableMatchGroupKeys) {
+            selectedMatchGroupKey = ALL_MATCH_GROUPS_KEY
+        }
+    }
+    val visibleMatchGroups = remember(matchGroups, selectedMatchGroupKey) {
+        if (selectedMatchGroupKey == ALL_MATCH_GROUPS_KEY) {
+            matchGroups
         } else {
-            fieldGroups.filter { it.key == selectedFieldKey }
+            matchGroups.filter { it.key == selectedMatchGroupKey }
         }
     }
     val canLockVisibleMatches =
         canManageMatches && onToggleLockAllMatches != null && visibleMatchIds.isNotEmpty()
+    val showScheduleControls = hasTrackedMatches || canLockVisibleMatches || showGroupingToggle
 
     Box(
         modifier = Modifier
@@ -340,34 +366,44 @@ fun ScheduleView(
             item(key = "schedule_day_summary") {
                 DaySummaryHeader(selectedDate, dayItems)
             }
-            item(key = "schedule_controls") {
-                Spacer(modifier = Modifier.height(8.dp))
-                if (hasTrackedMatches || canLockVisibleMatches) {
-                    ScheduleQuickActions(
-                        hasTrackedMatches = hasTrackedMatches,
-                        showOnlyMyMatches = showOnlyMyMatches,
-                        onToggleShowOnlyMyMatches = { showOnlyMyMatches = !showOnlyMyMatches },
-                        canLockVisibleMatches = canLockVisibleMatches,
-                        allVisibleLocked = allVisibleLocked,
-                        onToggleLockAllMatches = {
-                            onToggleLockAllMatches?.invoke(!allVisibleLocked, visibleMatchIds)
-                        }
-                    )
+            if (showScheduleControls) {
+                item(key = "schedule_controls") {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    if (hasTrackedMatches || canLockVisibleMatches) {
+                        ScheduleQuickActions(
+                            hasTrackedMatches = hasTrackedMatches,
+                            showOnlyMyMatches = showOnlyMyMatches,
+                            onToggleShowOnlyMyMatches = { showOnlyMyMatches = !showOnlyMyMatches },
+                            canLockVisibleMatches = canLockVisibleMatches,
+                            allVisibleLocked = allVisibleLocked,
+                            onToggleLockAllMatches = {
+                                onToggleLockAllMatches?.invoke(!allVisibleLocked, visibleMatchIds)
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    if (showGroupingToggle) {
+                        ScheduleGroupingToggle(
+                            selectedMode = groupingMode,
+                            onModeSelected = { groupingMode = it },
+                            canGroupByField = hasAnyMatches,
+                            groupMode = matchGroupMode,
+                            showFieldSelector = isMobileLayout &&
+                                hasAnyMatches &&
+                                groupingMode == ScheduleGroupingMode.FIELD &&
+                                matchGroupMode == ScheduleMatchGroupMode.FIELD &&
+                                matchGroups.isNotEmpty(),
+                            matchGroups = matchGroups,
+                            selectedMatchGroupKey = selectedMatchGroupKey,
+                            onMatchGroupSelected = { selectedMatchGroupKey = it },
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
+            } else {
+                item(key = "schedule_controls_spacer") {
                     Spacer(modifier = Modifier.height(8.dp))
                 }
-                ScheduleGroupingToggle(
-                    selectedMode = groupingMode,
-                    onModeSelected = { groupingMode = it },
-                    canGroupByField = hasAnyMatches,
-                    showFieldSelector = isMobileLayout &&
-                        hasAnyMatches &&
-                        groupingMode == ScheduleGroupingMode.FIELD &&
-                        fieldGroups.isNotEmpty(),
-                    fieldGroups = fieldGroups,
-                    selectedFieldKey = selectedFieldKey,
-                    onFieldSelected = { selectedFieldKey = it },
-                )
-                Spacer(modifier = Modifier.height(8.dp))
             }
 
             if (dayItems.isEmpty()) {
@@ -409,7 +445,7 @@ fun ScheduleView(
                                 }
                             }
                         } else {
-                            if (selectedFieldKey == ALL_FIELDS_KEY && dayEvents.isNotEmpty()) {
+                            if (selectedMatchGroupKey == ALL_MATCH_GROUPS_KEY && dayEvents.isNotEmpty()) {
                                 Text(
                                     text = "Events (${dayEvents.size})",
                                     modifier = Modifier.padding(horizontal = 16.dp),
@@ -422,7 +458,7 @@ fun ScheduleView(
                                     }
                                 }
                             }
-                            visibleFieldGroups.forEach { group ->
+                            visibleMatchGroups.forEach { group ->
                                 Text(
                                     text = "${group.label} (${group.matches.size})",
                                     modifier = Modifier.padding(horizontal = 16.dp),
@@ -554,12 +590,17 @@ private fun ScheduleGroupingToggle(
     selectedMode: ScheduleGroupingMode,
     onModeSelected: (ScheduleGroupingMode) -> Unit,
     canGroupByField: Boolean,
+    groupMode: ScheduleMatchGroupMode,
     showFieldSelector: Boolean,
-    fieldGroups: List<FieldScheduleGroup>,
-    selectedFieldKey: String,
-    onFieldSelected: (String) -> Unit,
+    matchGroups: List<MatchScheduleGroup>,
+    selectedMatchGroupKey: String,
+    onMatchGroupSelected: (String) -> Unit,
 ) {
     val scrollState = rememberScrollState()
+    val groupLabel = when (groupMode) {
+        ScheduleMatchGroupMode.FIELD -> "By Field"
+        ScheduleMatchGroupMode.EVENT -> "By Event"
+    }
     Box(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -578,13 +619,13 @@ private fun ScheduleGroupingToggle(
                 FilterChip(
                     selected = selectedMode == ScheduleGroupingMode.FIELD,
                     onClick = { onModeSelected(ScheduleGroupingMode.FIELD) },
-                    label = { Text("By Field") }
+                    label = { Text(groupLabel) }
                 )
                 if (showFieldSelector) {
                     FieldSelectorDropdownChip(
-                        fieldGroups = fieldGroups,
-                        selectedFieldKey = selectedFieldKey,
-                        onFieldSelected = onFieldSelected,
+                        matchGroups = matchGroups,
+                        selectedMatchGroupKey = selectedMatchGroupKey,
+                        onMatchGroupSelected = onMatchGroupSelected,
                     )
                 }
             }
@@ -594,18 +635,18 @@ private fun ScheduleGroupingToggle(
 
 @Composable
 private fun FieldSelectorDropdownChip(
-    fieldGroups: List<FieldScheduleGroup>,
-    selectedFieldKey: String,
-    onFieldSelected: (String) -> Unit,
+    matchGroups: List<MatchScheduleGroup>,
+    selectedMatchGroupKey: String,
+    onMatchGroupSelected: (String) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val selectedLabel = remember(fieldGroups, selectedFieldKey) {
-        fieldGroups.firstOrNull { it.key == selectedFieldKey }?.label ?: "All fields"
+    val selectedLabel = remember(matchGroups, selectedMatchGroupKey) {
+        matchGroups.firstOrNull { it.key == selectedMatchGroupKey }?.label ?: "All fields"
     }
 
     Box {
         FilterChip(
-            selected = selectedFieldKey != ALL_FIELDS_KEY,
+            selected = selectedMatchGroupKey != ALL_MATCH_GROUPS_KEY,
             onClick = { expanded = true },
             label = {
                 Text(
@@ -629,15 +670,15 @@ private fun FieldSelectorDropdownChip(
             DropdownMenuItem(
                 text = { Text("All fields") },
                 onClick = {
-                    onFieldSelected(ALL_FIELDS_KEY)
+                    onMatchGroupSelected(ALL_MATCH_GROUPS_KEY)
                     expanded = false
                 }
             )
-            fieldGroups.forEach { group ->
+            matchGroups.forEach { group ->
                 DropdownMenuItem(
                     text = { Text(group.label) },
                     onClick = {
-                        onFieldSelected(group.key)
+                        onMatchGroupSelected(group.key)
                         expanded = false
                     }
                 )
@@ -649,7 +690,7 @@ private fun FieldSelectorDropdownChip(
 private fun buildFieldScheduleGroups(
     dayMatches: List<MatchWithRelations>,
     fieldsById: Map<String, FieldWithMatches>,
-): List<FieldScheduleGroup> {
+): List<MatchScheduleGroup> {
     if (dayMatches.isEmpty()) return emptyList()
 
     val grouped = dayMatches.groupBy { match ->
@@ -657,13 +698,38 @@ private fun buildFieldScheduleGroups(
     }
 
     return grouped.map { (fieldKey, matchesForField) ->
-        FieldScheduleGroup(
+        MatchScheduleGroup(
             key = fieldKey,
             label = resolveFieldLabel(matchesForField.firstOrNull(), fieldsById),
             matches = matchesForField.sortedBy { it.match.start }
         )
     }.sortedBy { group ->
         if (group.key == UNASSIGNED_FIELD_KEY) {
+            "\uFFFF"
+        } else {
+            group.label.lowercase()
+        }
+    }
+}
+
+private fun buildEventScheduleGroups(
+    dayMatches: List<MatchWithRelations>,
+    eventLabelsById: Map<String, String>,
+): List<MatchScheduleGroup> {
+    if (dayMatches.isEmpty()) return emptyList()
+
+    val grouped = dayMatches.groupBy { match ->
+        match.match.eventId.trim().ifBlank { UNASSIGNED_EVENT_KEY }
+    }
+
+    return grouped.map { (eventKey, matchesForEvent) ->
+        MatchScheduleGroup(
+            key = eventKey,
+            label = resolveEventLabel(eventKey, eventLabelsById),
+            matches = matchesForEvent.sortedBy { it.match.start }
+        )
+    }.sortedBy { group ->
+        if (group.key == UNASSIGNED_EVENT_KEY) {
             "\uFFFF"
         } else {
             group.label.lowercase()
@@ -708,6 +774,18 @@ private fun resolveFieldLabel(
     }
 
     return "Field TBD"
+}
+
+private fun resolveEventLabel(
+    eventId: String,
+    eventLabelsById: Map<String, String>,
+): String {
+    if (eventId == UNASSIGNED_EVENT_KEY) return "Event TBD"
+
+    return eventLabelsById[eventId]
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: "Event"
 }
 
 private fun normalizeScheduleEnd(start: Instant, end: Instant?): Instant =

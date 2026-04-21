@@ -4,8 +4,13 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.toLocalDateTime
+import kotlin.test.assertEquals
 import kotlin.test.Test
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Instant
 
@@ -133,6 +138,18 @@ class EventDetailsScheduleLockingTest {
     }
 
     @Test
+    fun schedule_input_validation_is_skipped_when_slot_editor_is_hidden() {
+        val shouldValidate = requiresScheduleInputValidation(
+            eventType = EventType.LEAGUE,
+            isNewEvent = true,
+            scheduleTimeLocked = false,
+            slotEditorEnabled = false,
+        )
+
+        assertFalse(shouldValidate)
+    }
+
+    @Test
     fun field_count_validation_is_skipped_when_schedule_is_locked() {
         val shouldValidate = requiresFieldCountValidation(
             eventType = EventType.LEAGUE,
@@ -153,6 +170,89 @@ class EventDetailsScheduleLockingTest {
         )
 
         assertFalse(shouldValidate)
+    }
+
+    @Test
+    fun editable_repeating_slot_uses_event_start_and_open_end_when_no_fixed_scheduling_is_enabled() {
+        val eventStart = instant(1_700_000_000_000)
+        val eventEnd = instant(1_700_086_400_000)
+        val event = Event(
+            eventType = EventType.LEAGUE,
+            start = eventStart,
+            end = eventEnd,
+            noFixedEndDateTime = true,
+        )
+        val slot = buildSlot(
+            fieldId = "field-1",
+        ).copy(
+            repeating = true,
+            startDate = eventStart,
+            endDate = eventEnd,
+        )
+
+        val normalized = normalizeEditableLeagueTimeSlotForEvent(event, slot)
+
+        assertEquals(Instant.DISTANT_PAST, normalized.startDate)
+        assertNull(normalized.endDate)
+    }
+
+    @Test
+    fun recurring_slot_payload_uses_updated_event_start_and_boolean_for_open_ended_scheduling() {
+        val originalStart = instant(1_700_000_000_000)
+        val updatedStart = instant(1_701_209_600_000)
+        val displayedEnd = instant(1_701_296_000_000)
+        val event = Event(
+            eventType = EventType.LEAGUE,
+            start = updatedStart,
+            end = displayedEnd,
+            noFixedEndDateTime = true,
+        )
+        val slot = buildSlot(
+            fieldId = "field-1",
+        ).copy(
+            repeating = true,
+            startDate = originalStart,
+            endDate = displayedEnd,
+        )
+
+        val bounds = resolveRecurringSlotDateBoundsForEventDraft(
+            slot = slot,
+            event = event,
+            originalEventStart = originalStart,
+        )
+
+        assertEquals(updatedStart, bounds.startDate)
+        assertNull(bounds.endDate)
+    }
+
+    @Test
+    fun recurring_slot_payload_uses_event_end_date_when_fixed_end_scheduling_is_enabled() {
+        val eventStart = instant(1_700_000_000_000)
+        val eventEnd = instant(1_700_086_400_000)
+        val event = Event(
+            eventType = EventType.TOURNAMENT,
+            start = eventStart,
+            end = eventEnd,
+            noFixedEndDateTime = false,
+        )
+        val slot = buildSlot(
+            fieldId = "field-1",
+        ).copy(
+            repeating = true,
+            startDate = Instant.DISTANT_PAST,
+            endDate = null,
+        )
+        val timezone = TimeZone.currentSystemDefault()
+        val expectedEndDate = eventEnd.toLocalDateTime(timezone).date.atStartOfDayIn(timezone)
+
+        val bounds = resolveRecurringSlotDateBoundsForEventDraft(
+            slot = slot,
+            event = event,
+            originalEventStart = eventStart,
+        )
+
+        assertEquals(eventStart, bounds.startDate)
+        assertEquals(expectedEndDate, bounds.endDate)
     }
 
     private fun buildSlot(fieldId: String): TimeSlot {

@@ -21,6 +21,7 @@ import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
+import com.razumly.mvp.core.presentation.composables.OrganizationVerificationBadge
 import com.razumly.mvp.core.presentation.util.getImageUrl
 
 @Composable
@@ -60,12 +61,20 @@ internal fun DiscoverRentalCard(
                         size = 36.dp,
                         contentDescription = "Organization logo",
                     )
-                    Text(
-                        text = organization.name.ifBlank { "Organization" },
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            modifier = Modifier.weight(1f),
+                            text = organization.name.ifBlank { "Organization" },
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        OrganizationVerificationBadge(organization = organization)
+                    }
                 }
 
                 organization.location?.takeIf { it.isNotBlank() }?.let { location ->

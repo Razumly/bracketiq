@@ -26,6 +26,7 @@ data class BillingEventRefDto(
 data class BillingTeamRefDto(
     val id: String? = null,
     @SerialName("\$id") val legacyId: String? = null,
+    val teamId: String? = null,
     val name: String? = null,
 )
 
@@ -43,10 +44,14 @@ data class BillingTimeSlotRefDto(
 
 @Serializable
 data class PurchaseIntentRequestDto(
+    val purchaseType: String? = null,
     val user: BillingUserRefDto? = null,
     val event: BillingEventRefDto? = null,
     val team: BillingTeamRefDto? = null,
+    val teamRegistration: BillingTeamRefDto? = null,
     val timeSlot: BillingTimeSlotRefDto? = null,
+    val slotId: String? = null,
+    val occurrenceDate: String? = null,
     val productId: String? = null,
     val billingAddress: BillingAddressDto? = null,
 )

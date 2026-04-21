@@ -16,6 +16,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
+import com.razumly.mvp.core.presentation.composables.OrganizationVerificationBadge
 
 @Composable
 fun DiscoverRentalSuggestion(
@@ -39,12 +40,20 @@ fun DiscoverRentalSuggestion(
                     size = 32.dp,
                     contentDescription = "Organization logo",
                 )
-                Text(
-                    text = organization.name.ifBlank { "Organization" },
-                    style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        modifier = Modifier.weight(1f),
+                        text = organization.name.ifBlank { "Organization" },
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    OrganizationVerificationBadge(organization = organization)
+                }
             }
 
             val fieldCount = organization.fieldIds.size

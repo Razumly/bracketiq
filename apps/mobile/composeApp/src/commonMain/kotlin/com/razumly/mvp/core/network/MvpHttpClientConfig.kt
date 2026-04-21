@@ -1,5 +1,6 @@
 package com.razumly.mvp.core.network
 
+import com.razumly.mvp.core.util.Platform
 import com.razumly.mvp.core.util.jsonMVP
 import io.github.aakira.napier.Napier
 import io.ktor.client.HttpClientConfig
@@ -31,14 +32,16 @@ internal fun HttpClientConfig<*>.configureMvpHttpClient() {
         json(jsonMVP)
     }
 
-    install(Logging) {
-        level = LogLevel.ALL
-        logger = object : Logger {
-            override fun log(message: String) {
-                Napier.d("HTTP: $message")
+    if (Platform.isDebugBuild) {
+        install(Logging) {
+            level = LogLevel.INFO
+            logger = object : Logger {
+                override fun log(message: String) {
+                    Napier.d("HTTP: $message")
+                }
             }
+            sanitizeHeader { header -> header == HttpHeaders.Authorization }
         }
-        sanitizeHeader { header -> header == HttpHeaders.Authorization }
     }
 
     defaultRequest {

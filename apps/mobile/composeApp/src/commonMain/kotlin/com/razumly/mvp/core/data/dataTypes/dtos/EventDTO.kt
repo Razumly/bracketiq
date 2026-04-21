@@ -6,7 +6,9 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
@@ -74,6 +76,9 @@ data class EventDTO(
     val setsPerMatch: Int? = null,
     val doTeamsOfficiate: Boolean? = null,
     val teamOfficialsMaySwap: Boolean? = null,
+    val matchRulesOverride: MatchRulesConfigMVP? = null,
+    val autoCreatePointMatchIncidents: Boolean = false,
+    val resolvedMatchRules: ResolvedMatchRulesMVP? = null,
     val restTimeMinutes: Int? = null,
     val state: String = "UNPUBLISHED",
     val pointsToVictory: List<Int> = emptyList(),
@@ -149,6 +154,9 @@ data class EventDTO(
             setsPerMatch = setsPerMatch,
             doTeamsOfficiate = doTeamsOfficiate,
             teamOfficialsMaySwap = if (doTeamsOfficiate == true) teamOfficialsMaySwap else false,
+            matchRulesOverride = matchRulesOverride,
+            autoCreatePointMatchIncidents = autoCreatePointMatchIncidents,
+            resolvedMatchRules = resolvedMatchRules,
             restTimeMinutes = restTimeMinutes,
             state = state,
             pointsToVictory = pointsToVictory,

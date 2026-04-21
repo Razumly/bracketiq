@@ -63,10 +63,16 @@ actual fun EventMap(
     onEventSelected: (event: Event) -> Unit,
     onPlaceSelected: (place: MVPPlace) -> Unit,
     onPlaceSelectionPoint: (x: Float, y: Float) -> Unit,
+    selectionRequiresConfirmation: Boolean,
+    originalPlace: MVPPlace?,
+    selectedPlace: MVPPlace?,
+    onPlaceSelectionCleared: () -> Unit,
     canClickPOI: Boolean,
     modifier: Modifier,
     focusedLocation: dev.icerock.moko.geo.LatLng,
     focusedEvent: Event?,
+    mapActionLabel: String,
+    usePrimaryActionButton: Boolean,
     onBackPressed: (() -> Unit)?
 ) {
     val context = LocalContext.current
@@ -90,6 +96,10 @@ actual fun EventMap(
     }
     val cameraPositionState = rememberCameraPositionState()
     val eventMarkerStates = remember { mutableMapOf<String, MarkerState>() }
+    val placeMarkerStates = remember { mutableMapOf<String, MarkerState>() }
+    val searchedPlaceMarkerStates = remember { mutableMapOf<String, MarkerState>() }
+    val originalPlaceMarkerState = remember { MarkerState() }
+    val selectedPlaceMarkerState = remember { MarkerState() }
     var selectedPOI by remember { mutableStateOf<PointOfInterest?>(null) }
     var isAnimating by remember { mutableStateOf(false) }
     val poiMarkerState = remember { MarkerState() }
@@ -101,19 +111,116 @@ actual fun EventMap(
     val placeSelectionHint = "Click to select"
     val userLocationMatchThresholdMeters = 10f
     val userRecenterThresholdMeters = 1000f
+
+    fun coordinatesMatch(
+        firstLatitude: Double,
+        firstLongitude: Double,
+        secondLatitude: Double,
+        secondLongitude: Double,
+        tolerance: Double = 0.000001,
+    ): Boolean =
+        kotlin.math.abs(firstLatitude - secondLatitude) < tolerance &&
+            kotlin.math.abs(firstLongitude - secondLongitude) < tolerance
+
+    fun sameLocation(first: MVPPlace?, second: MVPPlace?): Boolean {
+        if (first == null || second == null) return false
+        val firstId = first.id.trim()
+        val secondId = second.id.trim()
+        if (
+            firstId.isNotBlank() &&
+            secondId.isNotBlank() &&
+            !firstId.startsWith("__") &&
+            !secondId.startsWith("__") &&
+            firstId == secondId
+        ) {
+            return true
+        }
+        return coordinatesMatch(
+            firstLatitude = first.latitude,
+            firstLongitude = first.longitude,
+            secondLatitude = second.latitude,
+            secondLongitude = second.longitude,
+        )
+    }
+
+    fun matchesSearchPlace(place: Place, selection: MVPPlace?): Boolean {
+        if (selection == null) return false
+        val selectionId = selection.id.trim()
+        val placeId = place.id?.trim().orEmpty()
+        if (
+            placeId.isNotBlank() &&
+            selectionId.isNotBlank() &&
+            !selectionId.startsWith("__") &&
+            selectionId == placeId
+        ) {
+            return true
+        }
+        val location = place.location ?: return false
+        return coordinatesMatch(
+            firstLatitude = selection.latitude,
+            firstLongitude = selection.longitude,
+            secondLatitude = location.latitude,
+            secondLongitude = location.longitude,
+        )
+    }
+
+    fun matchesPoi(poi: PointOfInterest?, selection: MVPPlace?): Boolean {
+        if (poi == null || selection == null) return false
+        val selectionId = selection.id.trim()
+        if (
+            poi.placeId.isNotBlank() &&
+            selectionId.isNotBlank() &&
+            !selectionId.startsWith("__") &&
+            poi.placeId == selectionId
+        ) {
+            return true
+        }
+        return coordinatesMatch(
+            firstLatitude = selection.latitude,
+            firstLongitude = selection.longitude,
+            secondLatitude = poi.latLng.latitude,
+            secondLongitude = poi.latLng.longitude,
+        )
+    }
+
+    fun overlapsExistingPlace(searchPlace: Place): Boolean =
+        places.any { matchesSearchPlace(searchPlace, it) }
+
+    val distinctSelectedPlace = selectedPlace?.takeIf { !sameLocation(it, originalPlace) }
     val focusedIsCurrentUserLocation = trackedLatLng?.let { tracked ->
         distanceBetweenMeters(tracked, initCameraState) <= userLocationMatchThresholdMeters
     } == true && focusedEvent == null
 
-    fun updateRevealCenterFor(latLng: LatLng) {
+    val clearPendingSelection: () -> Unit = {
+        selectedPOI = null
+        searchedPlaces = emptyList()
+        armedPlaceId = null
+        armedSearchedPlaceId = null
+        armedPoiPlaceId = null
+        onPlaceSelectionCleared()
+    }
+
+    fun localMapPointFor(latLng: LatLng): Offset? =
         cameraPositionState.projection
             ?.toScreenLocation(latLng)
-            ?.let { point ->
-                onPlaceSelectionPoint(
-                    point.x.toFloat() + mapTopLeftInWindow.x,
-                    point.y.toFloat() + mapTopLeftInWindow.y,
-                )
-            }
+            ?.let { point -> Offset(point.x.toFloat(), point.y.toFloat()) }
+
+    fun updateRevealCenterFor(latLng: LatLng) {
+        localMapPointFor(latLng)?.let { point ->
+            onPlaceSelectionPoint(
+                point.x + mapTopLeftInWindow.x,
+                point.y + mapTopLeftInWindow.y,
+            )
+        }
+    }
+
+    suspend fun animateToSelectedLocation(latLng: LatLng) {
+        val update = if (cameraPositionState.position.zoom > 0f) {
+            CameraUpdateFactory.newLatLng(latLng)
+        } else {
+            CameraUpdateFactory.newLatLngZoom(latLng, defaultZoom)
+        }
+        cameraPositionState.animate(update, 500)
     }
 
     suspend fun selectSearchedPlace(searchResult: Place) {
@@ -137,7 +244,10 @@ actual fun EventMap(
             )
         }
 
-        markerLatLng?.let(::updateRevealCenterFor)
+        markerLatLng?.let { latLng ->
+            animateToSelectedLocation(latLng)
+            updateRevealCenterFor(latLng)
+        }
         onPlaceSelected(selectedPlace)
     }
 
@@ -201,6 +311,62 @@ actual fun EventMap(
         }
     }
 
+    LaunchedEffect(places) {
+        val currentPlaceIds = places.map { place -> place.id }.toSet()
+        placeMarkerStates.keys.removeAll { placeId -> placeId !in currentPlaceIds }
+    }
+
+    LaunchedEffect(searchedPlaces) {
+        val currentSearchResultIds = searchedPlaces.mapNotNull { place -> place.id }.toSet()
+        searchedPlaceMarkerStates.keys.removeAll { placeId -> placeId !in currentSearchResultIds }
+    }
+
+    LaunchedEffect(
+        selectedPlace?.id,
+        originalPlace?.id,
+        selectedPOI?.placeId,
+        selectionRequiresConfirmation,
+    ) {
+        if (!selectionRequiresConfirmation || selectedPlace == null) {
+            placeMarkerStates.values.forEach(MarkerState::hideInfoWindow)
+            searchedPlaceMarkerStates.values.forEach(MarkerState::hideInfoWindow)
+            poiMarkerState.hideInfoWindow()
+            originalPlaceMarkerState.hideInfoWindow()
+            selectedPlaceMarkerState.hideInfoWindow()
+            return@LaunchedEffect
+        }
+
+        placeMarkerStates.values.forEach(MarkerState::hideInfoWindow)
+        searchedPlaceMarkerStates.values.forEach(MarkerState::hideInfoWindow)
+        poiMarkerState.hideInfoWindow()
+        originalPlaceMarkerState.hideInfoWindow()
+        selectedPlaceMarkerState.hideInfoWindow()
+
+        delay(100)
+        when {
+            places.firstOrNull { sameLocation(it, selectedPlace) } != null -> {
+                val matchingPlace = places.first { sameLocation(it, selectedPlace) }
+                placeMarkerStates[matchingPlace.id]?.showInfoWindow()
+            }
+            searchedPlaces.firstOrNull { matchesSearchPlace(it, selectedPlace) } != null -> {
+                val matchingSearchPlace = searchedPlaces.first { matchesSearchPlace(it, selectedPlace) }
+                searchedPlaceMarkerStates[matchingSearchPlace.id.orEmpty()]?.showInfoWindow()
+            }
+            matchesPoi(selectedPOI, selectedPlace) -> {
+                poiMarkerState.position = LatLng(selectedPlace.latitude, selectedPlace.longitude)
+                poiMarkerState.showInfoWindow()
+            }
+            sameLocation(selectedPlace, originalPlace) && originalPlace != null -> {
+                originalPlaceMarkerState.position = LatLng(originalPlace.latitude, originalPlace.longitude)
+                originalPlaceMarkerState.showInfoWindow()
+            }
+            else -> {
+                selectedPlaceMarkerState.position = LatLng(selectedPlace.latitude, selectedPlace.longitude)
+                selectedPlaceMarkerState.showInfoWindow()
+            }
+        }
+    }
+
     LaunchedEffect(initCameraState, focusedIsCurrentUserLocation) {
         if (focusedIsCurrentUserLocation) {
             val shouldRecenterOnUser = lastUserCameraLocation?.let { lastLocation ->
@@ -253,13 +419,22 @@ actual fun EventMap(
                     armedSearchedPlaceId = null
                     armedPoiPlaceId = null
                     isAnimating = true
-                    scope.launch {
-                        cameraPositionState.animate(
-                            CameraUpdateFactory.newLatLng(poi.latLng),
-                            durationMs = 500,
-                        )
-                        delay(300)
-                        isAnimating = false
+                    if (selectionRequiresConfirmation) {
+                        scope.launch {
+                            animateToSelectedLocation(poi.latLng)
+                            selectPoiPlace(poi)
+                            delay(300)
+                            isAnimating = false
+                        }
+                    } else {
+                        scope.launch {
+                            cameraPositionState.animate(
+                                CameraUpdateFactory.newLatLng(poi.latLng),
+                                durationMs = 500,
+                            )
+                            delay(300)
+                            isAnimating = false
+                        }
                     }
                 }
             },
@@ -284,7 +459,7 @@ actual fun EventMap(
             }
 
             places.forEach { place ->
-                val markerState = remember(place.id) {
+                val markerState = placeMarkerStates.getOrPut(place.id) {
                     MarkerState(position = LatLng(place.latitude, place.longitude))
                 }
                 val newPosition = LatLng(place.latitude, place.longitude)
@@ -294,10 +469,27 @@ actual fun EventMap(
 
                 MarkerInfoWindow(
                     state = markerState,
-                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE),
+                    icon = BitmapDescriptorFactory.defaultMarker(
+                        when {
+                            sameLocation(place, distinctSelectedPlace) -> BitmapDescriptorFactory.HUE_AZURE
+                            sameLocation(place, originalPlace) -> BitmapDescriptorFactory.HUE_RED
+                            else -> BitmapDescriptorFactory.HUE_ORANGE
+                        },
+                    ),
                     onClick = {
                         if (!canClickPOI) {
                             false
+                        } else if (selectionRequiresConfirmation) {
+                            selectedPOI = null
+                            armedPlaceId = null
+                            armedSearchedPlaceId = null
+                            armedPoiPlaceId = null
+                            scope.launch {
+                                animateToSelectedLocation(newPosition)
+                                updateRevealCenterFor(newPosition)
+                                onPlaceSelected(place)
+                            }
+                            true
                         } else {
                             val isSecondTap = armedPlaceId == place.id
                             armedPlaceId = if (isSecondTap) null else place.id
@@ -313,6 +505,7 @@ actual fun EventMap(
                         }
                     },
                     onInfoWindowClick = {
+                        selectedPOI = null
                         armedPlaceId = null
                         armedSearchedPlaceId = null
                         armedPoiPlaceId = null
@@ -322,23 +515,43 @@ actual fun EventMap(
                 ) {
                     MapPOICard(
                         name = place.name,
-                        callToAction = if (canClickPOI) placeSelectionHint else null,
+                        callToAction = if (canClickPOI && !selectionRequiresConfirmation) {
+                            placeSelectionHint
+                        } else {
+                            null
+                        },
                         modifier = Modifier.wrapContentSize(),
                     )
                 }
             }
 
             searchedPlaces.forEach { place ->
-                val markerState = remember(place.id) {
+                if (overlapsExistingPlace(place)) return@forEach
+                val markerState = searchedPlaceMarkerStates.getOrPut(place.id.orEmpty()) {
                     MarkerState(position = place.location!!)
                 }
 
                 MarkerInfoWindow(
                     state = markerState,
-                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
+                    icon = BitmapDescriptorFactory.defaultMarker(
+                        when {
+                            matchesSearchPlace(place, distinctSelectedPlace) -> BitmapDescriptorFactory.HUE_AZURE
+                            matchesSearchPlace(place, originalPlace) -> BitmapDescriptorFactory.HUE_RED
+                            else -> BitmapDescriptorFactory.HUE_AZURE
+                        },
+                    ),
                     onClick = {
                         if (!canClickPOI) {
                             false
+                        } else if (selectionRequiresConfirmation) {
+                            selectedPOI = null
+                            armedPlaceId = null
+                            armedPoiPlaceId = null
+                            armedSearchedPlaceId = null
+                            scope.launch {
+                                selectSearchedPlace(place)
+                            }
+                            true
                         } else {
                             val isSecondTap = armedSearchedPlaceId == place.id
                             armedPlaceId = null
@@ -355,6 +568,7 @@ actual fun EventMap(
                         }
                     },
                     onInfoWindowClick = {
+                        selectedPOI = null
                         armedPlaceId = null
                         armedSearchedPlaceId = null
                         armedPoiPlaceId = null
@@ -365,7 +579,7 @@ actual fun EventMap(
                 ) {
                     MapPOICard(
                         name = place.displayName ?: "Unknown Place",
-                        callToAction = placeSelectionHint,
+                        callToAction = if (selectionRequiresConfirmation) null else placeSelectionHint,
                         modifier = Modifier.wrapContentSize(),
                     )
                 }
@@ -374,9 +588,23 @@ actual fun EventMap(
             selectedPOI?.let { poi ->
                 MarkerInfoWindow(
                     state = poiMarkerState,
-                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
+                    icon = BitmapDescriptorFactory.defaultMarker(
+                        when {
+                            matchesPoi(poi, distinctSelectedPlace) -> BitmapDescriptorFactory.HUE_AZURE
+                            matchesPoi(poi, originalPlace) -> BitmapDescriptorFactory.HUE_RED
+                            else -> BitmapDescriptorFactory.HUE_AZURE
+                        },
+                    ),
                     onClick = {
                         if (!canClickPOI) {
+                            false
+                        } else if (selectionRequiresConfirmation) {
+                            armedPlaceId = null
+                            armedSearchedPlaceId = null
+                            armedPoiPlaceId = null
+                            scope.launch {
+                                selectPoiPlace(poi)
+                            }
                             false
                         } else {
                             val isSecondTap = armedPoiPlaceId == poi.placeId
@@ -404,9 +632,78 @@ actual fun EventMap(
                 ) {
                     MapPOICard(
                         name = poi.name,
-                        callToAction = placeSelectionHint,
+                        callToAction = if (selectionRequiresConfirmation) null else placeSelectionHint,
                         modifier = Modifier.wrapContentSize(),
                     )
+                }
+            }
+
+            originalPlace?.takeIf { selectionRequiresConfirmation }?.let { place ->
+                val shouldRenderOriginalPlaceMarker =
+                    place.latitude != 0.0 || place.longitude != 0.0
+                val hasExistingOriginalMarker =
+                    places.any { sameLocation(it, place) } ||
+                        searchedPlaces.any { matchesSearchPlace(it, place) } ||
+                        matchesPoi(selectedPOI, place)
+
+                if (shouldRenderOriginalPlaceMarker && !hasExistingOriginalMarker) {
+                    originalPlaceMarkerState.position = LatLng(place.latitude, place.longitude)
+                    MarkerInfoWindow(
+                        state = originalPlaceMarkerState,
+                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED),
+                        onClick = {
+                            if (!canClickPOI) {
+                                false
+                            } else if (selectionRequiresConfirmation) {
+                                scope.launch {
+                                    animateToSelectedLocation(originalPlaceMarkerState.position)
+                                    updateRevealCenterFor(originalPlaceMarkerState.position)
+                                    onPlaceSelected(place)
+                                }
+                                true
+                            } else {
+                                false
+                            }
+                        },
+                        onInfoWindowClick = {
+                            if (canClickPOI && selectionRequiresConfirmation) {
+                                scope.launch {
+                                    animateToSelectedLocation(originalPlaceMarkerState.position)
+                                    updateRevealCenterFor(originalPlaceMarkerState.position)
+                                    onPlaceSelected(place)
+                                }
+                            }
+                        },
+                    ) {
+                        MapPOICard(
+                            name = place.name,
+                            modifier = Modifier.wrapContentSize(),
+                        )
+                    }
+                }
+            }
+
+            distinctSelectedPlace?.takeIf { selectionRequiresConfirmation }?.let { place ->
+                val shouldRenderSelectedPlaceMarker =
+                    place.latitude != 0.0 || place.longitude != 0.0
+                val hasExistingSelectedMarker =
+                    places.any { sameLocation(it, place) } ||
+                        searchedPlaces.any { matchesSearchPlace(it, place) } ||
+                        matchesPoi(selectedPOI, place)
+
+                if (shouldRenderSelectedPlaceMarker && !hasExistingSelectedMarker) {
+                    selectedPlaceMarkerState.position = LatLng(place.latitude, place.longitude)
+                    MarkerInfoWindow(
+                        state = selectedPlaceMarkerState,
+                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
+                        onClick = { true },
+                        onInfoWindowClick = {},
+                    ) {
+                        MapPOICard(
+                            name = place.name,
+                            modifier = Modifier.wrapContentSize(),
+                        )
+                    }
                 }
             }
 
@@ -458,7 +755,7 @@ actual fun EventMap(
             }
         }
 
-        trackedLatLng?.let { userLocation ->
+        trackedLatLng?.takeIf { onBackPressed == null }?.let { userLocation ->
             MapCurrentLocationButton(
                 onClick = {
                     scope.launch {
@@ -472,9 +769,9 @@ actual fun EventMap(
                     }
                 },
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
+                    .align(Alignment.BottomStart)
                     .padding(
-                        end = MAP_ACTION_BUTTON_SCAFFOLD_BOTTOM_SPACING,
+                        start = MAP_ACTION_BUTTON_SCAFFOLD_BOTTOM_SPACING,
                         bottom = closeButtonBottomPadding,
                     ),
             )
@@ -483,6 +780,26 @@ actual fun EventMap(
         if (onBackPressed != null) {
             MapFloatingActionButton(
                 onCloseMap = onBackPressed,
+                label = mapActionLabel,
+                usePrimaryActionButton = usePrimaryActionButton,
+                onLeadingAction = trackedLatLng?.let { userLocation ->
+                    {
+                        scope.launch {
+                            val update = if (cameraPositionState.position.zoom > 0f) {
+                                CameraUpdateFactory.newLatLng(userLocation)
+                            } else {
+                                CameraUpdateFactory.newLatLngZoom(userLocation, defaultZoom)
+                            }
+                            cameraPositionState.animate(update, defaultDurationMs)
+                            lastUserCameraLocation = userLocation
+                        }
+                    }
+                },
+                onClearSelection = if (selectionRequiresConfirmation && selectedPlace != null) {
+                    clearPendingSelection
+                } else {
+                    null
+                },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = closeButtonBottomPadding),

@@ -32,10 +32,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
+import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
+import com.razumly.mvp.core.data.dataTypes.isCaptainOrManager
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamBillingUserOption
+import com.razumly.mvp.core.data.repositories.EventParticipantManagementEntry
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
@@ -86,6 +91,39 @@ private data class ParticipantRemoveTarget(
     val userId: String? = null,
 )
 
+private fun EventParticipantManagementEntry.requiresDocumentAttention(): Boolean {
+    val normalizedConsentStatus = consentStatus?.trim()?.lowercase()
+    return status.equals("STARTED", ignoreCase = true) ||
+        normalizedConsentStatus == "guardian_approval_required" ||
+        normalizedConsentStatus == "child_email_required" ||
+        normalizedConsentStatus == "send_failed" ||
+        normalizedConsentStatus == "sent"
+}
+
+private fun EventParticipantManagementEntry.hostStatusText(): String {
+    val normalizedConsentStatus = consentStatus?.trim()?.lowercase()
+    return when {
+        normalizedConsentStatus == "child_email_required" -> "Missing child email for required documents"
+        normalizedConsentStatus == "guardian_approval_required" -> "Parent approval required"
+        normalizedConsentStatus == "send_failed" -> "Required documents failed to send"
+        normalizedConsentStatus == "sent" || status.equals("STARTED", ignoreCase = true) ->
+            "Required documents pending"
+        normalizedConsentStatus == "completed" || status.equals("ACTIVE", ignoreCase = true) ->
+            "Registered"
+        status.equals("BLOCKED", ignoreCase = true) -> "Registration blocked"
+        status.equals("CANCELLED", ignoreCase = true) -> "Registration cancelled"
+        status.equals("CONSENTFAILED", ignoreCase = true) -> "Required documents failed"
+        else -> "Registration status unavailable"
+    }
+}
+
+private fun preferredRegistrationEntry(
+    entries: List<EventParticipantManagementEntry>,
+): EventParticipantManagementEntry? {
+    return entries.firstOrNull(EventParticipantManagementEntry::requiresDocumentAttention)
+        ?: entries.firstOrNull()
+}
+
 @Composable
 fun ParticipantsView(
     showFab: (Boolean) -> Unit,
@@ -98,6 +136,8 @@ fun ParticipantsView(
     val divisionTeams by component.divisionTeams.collectAsState()
     val selectedEvent by component.eventWithRelations.collectAsState()
     val currentUser by component.currentUser.collectAsState()
+    val participantManagementSnapshot by component.participantManagementSnapshot.collectAsState()
+    val participantManagementLoading by component.participantManagementLoading.collectAsState()
     val participants = selectedEvent.players
     val teamSignup = selectedEvent.event.teamSignup
     val participantIds = remember(selectedEvent.event.playerIds) {
@@ -127,13 +167,11 @@ fun ParticipantsView(
     val participantsTeamsByUserId = remember(selectedEvent.teams) {
         mutableMapOf<String, TeamWithPlayers>().apply {
             selectedEvent.teams.forEach { teamWithPlayers: TeamWithPlayers ->
-                val team = teamWithPlayers.team
+                val team = teamWithPlayers.team.withSynchronizedMembership()
                 val memberIds = buildSet {
-                    addAll(team.playerIds)
-                    add(team.captainId)
-                    team.managerId?.let { add(it) }
-                    team.headCoachId?.let { add(it) }
-                    addAll(team.coachIds)
+                    addAll(team.activePlayerRegistrations().map { it.userId })
+                    team.captainId.takeIf(String::isNotBlank)?.let(::add)
+                    addAll(team.activeStaffAssignments().map { it.userId })
                 }.map(String::trim).filter(String::isNotBlank)
 
                 memberIds.forEach { memberId ->
@@ -146,8 +184,7 @@ fun ParticipantsView(
     }
     val canInviteToTeam = remember(selectedEvent.teams, currentUser.id) {
         selectedEvent.teams.any { teamWithPlayers ->
-            teamWithPlayers.team.captainId == currentUser.id ||
-                teamWithPlayers.team.managerId == currentUser.id
+            teamWithPlayers.team.isCaptainOrManager(currentUser.id)
         }
     }
     val navPadding = LocalNavBarPadding.current
@@ -213,12 +250,11 @@ fun ParticipantsView(
             .distinctBy(UserData::id)
             .associateBy(UserData::id)
         teamDialogKnownUsers = baseKnownUsers
+        val syncedTeam = team.team.withSynchronizedMembership()
 
         val roleIds = buildSet {
-            add(team.team.captainId)
-            team.team.managerId?.let(::add)
-            team.team.headCoachId?.let(::add)
-            addAll(team.team.assistantCoachIds)
+            syncedTeam.captainId.takeIf(String::isNotBlank)?.let(::add)
+            addAll(syncedTeam.activeStaffAssignments().map { it.userId })
         }
             .map(String::trim)
             .filter(String::isNotBlank)
@@ -251,12 +287,11 @@ fun ParticipantsView(
 
     fun resolveTeamUsers(team: TeamWithPlayers): List<EventTeamBillingUserOption> {
         val usersById = selectedEvent.players.associateBy(UserData::id)
+        val syncedTeam = team.team.withSynchronizedMembership()
         val uniqueIds = buildSet {
-            addAll(team.team.playerIds)
-            add(team.team.captainId)
-            team.team.managerId?.let { add(it) }
-            team.team.headCoachId?.let { add(it) }
-            addAll(team.team.coachIds)
+            addAll(syncedTeam.activePlayerRegistrations().map { it.userId })
+            syncedTeam.captainId.takeIf(String::isNotBlank)?.let(::add)
+            addAll(syncedTeam.activeStaffAssignments().map { it.userId })
         }.map(String::trim).filter(String::isNotBlank)
 
         return uniqueIds.map { userId ->
@@ -309,6 +344,12 @@ fun ParticipantsView(
             defaultOwnerType = "USER",
             defaultOwnerId = user.id,
         )
+    }
+
+    val participantRegistrationByUserId = remember(participantManagementSnapshot) {
+        (participantManagementSnapshot.userRegistrations + participantManagementSnapshot.childRegistrations)
+            .groupBy(EventParticipantManagementEntry::registrantId)
+            .mapValues { (_, entries) -> preferredRegistrationEntry(entries) }
     }
 
     fun closeRefundModal() {
@@ -468,6 +509,12 @@ fun ParticipantsView(
                             onUnfollow = { user ->
                                 playerInteractionComponent.unfollowUser(user)
                             },
+                            onBlock = { user, leaveSharedChats ->
+                                playerInteractionComponent.blockUser(user, leaveSharedChats)
+                            },
+                            onUnblock = { user ->
+                                playerInteractionComponent.unblockUser(user)
+                            },
                             onInviteToTeam = if (canInviteToTeam) {
                                 { user -> component.inviteFreeAgentToTeam(user.id) }
                             } else {
@@ -484,6 +531,15 @@ fun ParticipantsView(
                 } else {
                     participantUsersFromEvent.ifEmpty { participants }
                 }
+                if (manageMode && canManageParticipants && participantManagementLoading) {
+                    item(key = "participants-manage-loading") {
+                        Text(
+                            "Loading registration status...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 if (visibleParticipants.isEmpty()) {
                     item(key = "participants-empty") {
                         Text(
@@ -495,6 +551,7 @@ fun ParticipantsView(
                 } else {
                     items(visibleParticipants, key = { it.id }) { participant ->
                         val billingContext = buildUserBillingContext(participant)
+                        val registrationEntry = participantRegistrationByUserId[participant.id]
                         Column(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -513,8 +570,25 @@ fun ParticipantsView(
                                 },
                                 onUnfollow = { user ->
                                     playerInteractionComponent.unfollowUser(user)
-                                }
+                                },
+                                onBlock = { user, leaveSharedChats ->
+                                    playerInteractionComponent.blockUser(user, leaveSharedChats)
+                                },
+                                onUnblock = { user ->
+                                    playerInteractionComponent.unblockUser(user)
+                                },
                             )
+                            if (manageMode && canManageParticipants && registrationEntry != null) {
+                                Text(
+                                    text = registrationEntry.hostStatusText(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (registrationEntry.requiresDocumentAttention()) {
+                                        MaterialTheme.colorScheme.error
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                            }
                             if (manageMode && canManageParticipants) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -577,7 +651,13 @@ fun ParticipantsView(
                     PlayerAction.FOLLOW -> playerInteractionComponent.followUser(user)
                     PlayerAction.UNFOLLOW -> playerInteractionComponent.unfollowUser(user)
                 }
-            }
+            },
+            onBlockPlayer = { user, leaveSharedChats ->
+                playerInteractionComponent.blockUser(user, leaveSharedChats)
+            },
+            onUnblockPlayer = { user ->
+                playerInteractionComponent.unblockUser(user)
+            },
         )
     }
 

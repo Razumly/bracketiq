@@ -33,6 +33,7 @@ import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.addOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
@@ -45,6 +46,7 @@ import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
+import com.razumly.mvp.core.presentation.composables.TermsConsentDialog
 import com.razumly.mvp.core.presentation.util.backAnimation
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.util.LocalLoadingHandler
@@ -71,9 +73,20 @@ fun CreateEventScreen(
     var canProceed by remember { mutableStateOf(false) }
     var validationErrors by remember { mutableStateOf<List<String>>(emptyList()) }
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
-    var previousMapSelection by remember { mutableStateOf<LatLng?>(null) }
+    var pendingMapPlace by remember { mutableStateOf<MVPPlace?>(null) }
     val defaultEvent by component.defaultEvent.collectAsState()
     val newEventState by component.newEventState.collectAsState()
+    fun originalLocationPlace(): MVPPlace? {
+        val lat = newEventState.lat
+        val long = newEventState.long
+        if (newEventState.location.isBlank() || (lat == 0.0 && long == 0.0)) return null
+        return MVPPlace(
+            name = newEventState.location,
+            id = "__selected_event_location__",
+            coordinates = listOf(long, lat),
+            address = newEventState.address,
+        )
+    }
     val childStack by component.childStack.subscribeAsState()
     val eventImageUrls by component.eventImageUrls.collectAsState()
     val isRentalFlow by component.isRentalFlow.collectAsState()
@@ -83,12 +96,15 @@ fun CreateEventScreen(
     val organizationTemplatesError by component.organizationTemplatesError.collectAsState()
     val localFields by component.localFields.collectAsState()
     val leagueSlots by component.leagueSlots.collectAsState()
+    val useManualTimeSlots by component.useManualTimeSlots.collectAsState()
     val leagueScoringConfig by component.leagueScoringConfig.collectAsState()
     val suggestedUsers by component.suggestedUsers.collectAsState()
     val pendingStaffInvites by component.pendingStaffInvites.collectAsState()
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
     val webSignaturePrompt by component.webSignaturePrompt.collectAsState()
     val billingAddressPrompt by component.billingAddressPrompt.collectAsState()
+    val termsConsentState by component.termsConsentState.collectAsState()
+    val termsConsentLoading by component.termsConsentLoading.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
     val isEditing = true
     val currentUser by component.currentUser.collectAsState()
@@ -97,6 +113,16 @@ fun CreateEventScreen(
     val errorHandler = LocalPopupHandler.current
 
     PreparePaymentProcessor(component)
+
+    if (!termsConsentLoading && !termsConsentState.accepted) {
+        TermsConsentDialog(
+            state = termsConsentState,
+            loading = termsConsentLoading,
+            onAccept = component::acceptTermsConsent,
+            onDismiss = null,
+            intro = "Creating an event in Bracket IQ requires agreement to the Terms and EULA.",
+        )
+    }
 
     LaunchedEffect(Unit) {
         component.setLoadingHandler(loadingHandler)
@@ -125,6 +151,12 @@ fun CreateEventScreen(
             specVersion = ColorSpec.SpecVersion.SPEC_2025,
             style = PaletteStyle.Neutral,
         )
+    }
+
+    LaunchedEffect(showMap) {
+        if (!showMap) {
+            pendingMapPlace = null
+        }
     }
 
     val eventWithRelations = remember(defaultEvent, newEventState) {
@@ -269,26 +301,48 @@ fun CreateEventScreen(
             EventMap(
                 component = mapComponent,
                 onEventSelected = { _ ->
+                    pendingMapPlace = null
                     mapComponent.toggleMap()
                 },
                 onPlaceSelected = { place ->
-                    component.selectPlace(place)
-                    previousMapSelection = LatLng(place.latitude, place.longitude)
-                    mapComponent.toggleMap()
+                    pendingMapPlace = place
                 },
                 onPlaceSelectionPoint = { x, y ->
                     mapRevealCenter = Offset(x, y)
                 },
+                selectionRequiresConfirmation = true,
+                originalPlace = originalLocationPlace(),
+                selectedPlace = pendingMapPlace,
+                onPlaceSelectionCleared = {
+                    pendingMapPlace = null
+                },
                 canClickPOI = true,
-                focusedLocation = if (newEventState.location.isNotBlank()) {
-                    LatLng(newEventState.lat, newEventState.long)
-                } else if (previousMapSelection != null) {
-                    previousMapSelection!!
-                } else {
-                    mapComponent.currentLocation.value ?: LatLng(0.0, 0.0)
+                focusedLocation = when {
+                    pendingMapPlace != null -> {
+                        LatLng(pendingMapPlace!!.latitude, pendingMapPlace!!.longitude)
+                    }
+                    originalLocationPlace() != null -> {
+                        LatLng(originalLocationPlace()!!.latitude, originalLocationPlace()!!.longitude)
+                    }
+                    newEventState.location.isNotBlank() -> {
+                        LatLng(newEventState.lat, newEventState.long)
+                    }
+                    else -> {
+                        mapComponent.currentLocation.value ?: LatLng(0.0, 0.0)
+                    }
                 },
                 focusedEvent = null,
-                onBackPressed = mapComponent::toggleMap,
+                mapActionLabel = if (pendingMapPlace != null) {
+                    "Select Location"
+                } else {
+                    "Close Map"
+                },
+                usePrimaryActionButton = pendingMapPlace != null,
+                onBackPressed = {
+                    pendingMapPlace?.let(component::selectPlace)
+                    pendingMapPlace = null
+                    mapComponent.toggleMap()
+                },
             )
         },
     ) {
@@ -371,16 +425,28 @@ fun CreateEventScreen(
                             leagueTimeSlots = leagueSlots,
                             leagueScoringConfig = leagueScoringConfig,
                             onHostCreateAccount = component::createAccount,
+                            onOpenLocationMap = {
+                                pendingMapPlace = null
+                                mapComponent.toggleMap()
+                            },
                             onPlaceSelected = component::selectPlace,
                             onEditEvent = onEditEvent,
                             onEditTournament = onEditTournament,
                             onEventTypeSelected = onEventTypeSelected,
                             onSportSelected = { sportId ->
-                                onEditEvent { copy(sportId = sportId.takeIf(String::isNotBlank)) }
+                                onEditEvent {
+                                    copy(
+                                        sportId = sportId.takeIf(String::isNotBlank),
+                                        matchRulesOverride = null,
+                                        resolvedMatchRules = null,
+                                    )
+                                }
                             },
                             onSelectFieldCount = component::selectFieldCount,
                             onUpdateLocalFieldName = component::updateLocalFieldName,
                             onUpdateLocalFieldDivisions = component::updateLocalFieldDivisions,
+                            useManualTimeSlots = useManualTimeSlots,
+                            onUseManualTimeSlotsChange = component::setUseManualTimeSlots,
                             onAddLeagueTimeSlot = component::addLeagueTimeSlot,
                             onUpdateLeagueTimeSlot = { index, updated ->
                                 component.updateLeagueTimeSlot(index) { updated }

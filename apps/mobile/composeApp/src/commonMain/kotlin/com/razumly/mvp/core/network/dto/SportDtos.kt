@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.Sport
+import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.SportOfficialPositionTemplate
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -15,6 +16,7 @@ data class SportApiDto(
     val id: String? = null,
     @SerialName("\$id") val legacyId: String? = null,
     val name: String? = null,
+    val matchRulesTemplate: MatchRulesConfigMVP? = null,
     val usePointsForWin: Boolean? = null,
     val usePointsForDraw: Boolean? = null,
     val usePointsForLoss: Boolean? = null,
@@ -81,6 +83,7 @@ data class SportApiDto(
         return Sport(
             id = resolvedId,
             name = resolvedName,
+            matchRulesTemplate = matchRulesTemplate,
             usePointsForWin = resolvedUsePointsForWin,
             usePointsForDraw = resolvedUsePointsForDraw,
             usePointsForLoss = resolvedUsePointsForLoss,

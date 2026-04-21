@@ -18,9 +18,14 @@ interface NativeViewFactory {
         onEventSelected: (event: Event) -> Unit,
         onPlaceSelected: (place: MVPPlace) -> Unit,
         onPlaceSelectionPoint: (x: Float, y: Float) -> Unit,
+        selectionRequiresConfirmation: Boolean,
+        originalPlace: MVPPlace?,
+        selectedPlace: MVPPlace?,
+        onPlaceSelectionCleared: () -> Unit,
         canClickPOI: Boolean,
         focusedLocation: LatLng?,
         focusedEvent: Event?,
+        recenterRequestToken: Int,
         locationButtonBottomPadding: Float,
     ): UIViewController
 
@@ -30,9 +35,14 @@ interface NativeViewFactory {
         onEventSelected: (event: Event) -> Unit,
         onPlaceSelected: (place: MVPPlace) -> Unit,
         onPlaceSelectionPoint: (x: Float, y: Float) -> Unit,
+        selectionRequiresConfirmation: Boolean,
+        originalPlace: MVPPlace?,
+        selectedPlace: MVPPlace?,
+        onPlaceSelectionCleared: () -> Unit,
         canClickPOI: Boolean,
         focusedLocation: LatLng?,
         focusedEvent: Event?,
+        recenterRequestToken: Int,
         locationButtonBottomPadding: Float,
     )
 

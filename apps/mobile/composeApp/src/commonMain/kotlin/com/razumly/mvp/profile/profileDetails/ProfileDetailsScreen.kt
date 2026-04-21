@@ -47,6 +47,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.util.LocalLoadingHandler
@@ -131,6 +132,12 @@ fun ProfileDetailsScreen(
         derivedStateOf {
             deleteAccountConfirmationText.trim().equals(DELETE_ACCOUNT_CONFIRMATION_TEXT, ignoreCase = true)
         }
+    }
+    val passwordKeyboardOptions = remember {
+        KeyboardOptions(
+            keyboardType = KeyboardType.Password,
+            autoCorrectEnabled = false,
+        )
     }
 
     // Initialize form with current data
@@ -293,6 +300,8 @@ fun ProfileDetailsScreen(
         )
     }
 
+    val navPadding = LocalNavBarPadding.current
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(title = { Text("Profile Details") }, navigationIcon = {
@@ -302,7 +311,10 @@ fun ProfileDetailsScreen(
             })
         }) { innerPadding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(innerPadding).padding(horizontal = 16.dp)
+            modifier = Modifier.fillMaxSize()
+                .padding(innerPadding)
+                .padding(navPadding)
+                .padding(horizontal = 16.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -398,7 +410,7 @@ fun ProfileDetailsScreen(
                 label = { Text("Current Password") },
                 modifier = Modifier.fillMaxWidth(),
                 visualTransformation = if (currentPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                keyboardOptions = passwordKeyboardOptions,
                 trailingIcon = {
                     IconButton(onClick = { currentPasswordVisible = !currentPasswordVisible }) {
                         Icon(
@@ -421,7 +433,7 @@ fun ProfileDetailsScreen(
                 label = { Text("New Password") },
                 modifier = Modifier.fillMaxWidth(),
                 visualTransformation = if (newPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                keyboardOptions = passwordKeyboardOptions,
                 trailingIcon = {
                     IconButton(onClick = { newPasswordVisible = !newPasswordVisible }) {
                         Icon(
@@ -448,7 +460,7 @@ fun ProfileDetailsScreen(
                     label = { Text("Confirm New Password") },
                     modifier = Modifier.fillMaxWidth(),
                     visualTransformation = if (confirmNewPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    keyboardOptions = passwordKeyboardOptions,
                     trailingIcon = {
                         IconButton(onClick = { confirmNewPasswordVisible = !confirmNewPasswordVisible }) {
                             Icon(

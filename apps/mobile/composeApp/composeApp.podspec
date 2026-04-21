@@ -1,6 +1,6 @@
 Pod::Spec.new do |spec|
     spec.name                     = 'composeApp'
-    spec.version                  = '1.2.2'
+    spec.version                  = '1.3.5'
     spec.homepage                 = 'https://example.com'
     spec.source                   = { :http=> ''}
     spec.authors                  = ''
@@ -47,5 +47,5 @@ Pod::Spec.new do |spec|
             SCRIPT
         }
     ]
-    spec.resources = ['build\compose\cocoapods\compose-resources']
+    spec.resources = ['build/compose/cocoapods/compose-resources']
 end

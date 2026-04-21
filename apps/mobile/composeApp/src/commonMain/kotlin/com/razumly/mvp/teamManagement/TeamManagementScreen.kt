@@ -36,8 +36,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
+import com.razumly.mvp.core.data.dataTypes.isCaptainOrManager
+import com.razumly.mvp.core.network.userMessage
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.TeamCard
@@ -46,6 +48,7 @@ import com.razumly.mvp.core.util.LocalLoadingHandler
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TeamManagementScreen(component: TeamManagementComponent) {
+    val navBottomPadding = LocalNavBarPadding.current.calculateBottomPadding()
     val loadingHandler = LocalLoadingHandler.current
     val currentTeams by component.currentTeams.collectAsState()
     val isCurrentTeamsLoading by component.isCurrentTeamsLoading.collectAsState()
@@ -59,8 +62,10 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val selectedTeam by component.selectedTeam.collectAsState()
     val staffUsersById by component.staffUsersById.collectAsState()
     val currentUser = component.currentUser
-    val isCaptain = selectedTeam?.team?.captainId == currentUser.id || selectedTeam?.team?.managerId == currentUser.id
+    val isCaptain = selectedTeam?.team?.isCaptainOrManager(currentUser.id) == true
     var createTeam by remember { mutableStateOf(false) }
+    var isSavingTeam by remember(selectedTeam?.team?.id, createTeam) { mutableStateOf(false) }
+    var saveError by remember(selectedTeam?.team?.id, createTeam) { mutableStateOf<String?>(null) }
     val deleteEnabled by component.enableDeleteTeam.collectAsState()
 
     LaunchedEffect(component, loadingHandler) {
@@ -70,9 +75,63 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
         createTeam = true
         component.selectTeam(null)
     }
+    val onCloseTeamEditor = {
+        createTeam = false
+        component.deselectTeam()
+    }
+
+    selectedTeam?.let { team ->
+        CreateOrEditTeamScreen(
+            team = team,
+            sports = sports,
+            friends = friends,
+            freeAgents = freeAgents,
+            onSearch = { query -> component.searchPlayers(query) },
+            suggestions = suggestions,
+            onFinish = { newTeam ->
+                if (!isSavingTeam) {
+                    isSavingTeam = true
+                    saveError = null
+                    val onResult: (Result<Unit>) -> Unit = { result ->
+                        isSavingTeam = false
+                        result
+                            .onSuccess { onCloseTeamEditor() }
+                            .onFailure { saveError = it.userMessage("Save failed") }
+                    }
+                    if (createTeam) {
+                        component.createTeam(newTeam, onResult)
+                    } else {
+                        component.updateTeam(newTeam, onResult)
+                    }
+                }
+            },
+            onLeaveTeam = { teamToLeave ->
+                component.leaveTeam(teamToLeave)
+                createTeam = false
+            },
+            onDismiss = onCloseTeamEditor,
+            onDelete = { teamToDelete ->
+                component.deleteTeam(teamToDelete)
+                onCloseTeamEditor()
+            },
+            deleteEnabled = deleteEnabled,
+            selectedEvent = selectedEvent,
+            isCaptain = isCaptain,
+            currentUser = currentUser,
+            isNewTeam = createTeam,
+            isSaving = isSavingTeam,
+            saveError = saveError,
+            staffUsersById = staffUsersById,
+            onEnsureUserByEmail = { email -> component.ensureUserByEmail(email) },
+            onInviteTeamRole = { teamId, userId, inviteType ->
+                component.inviteUserToRole(teamId, userId, inviteType)
+            },
+        )
+        return
+    }
 
     Scaffold(
-        modifier = Modifier.padding(LocalNavBarPadding.current),
+        contentWindowInsets = NoScaffoldContentInsets,
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Team Management") },
@@ -84,7 +143,10 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
         },
         floatingActionButton = {
             if (currentTeams.isNotEmpty()) {
-                FloatingActionButton(onClick = onCreateTeamClick) {
+                FloatingActionButton(
+                    onClick = onCreateTeamClick,
+                    modifier = Modifier.padding(bottom = navBottomPadding),
+                ) {
                     Icon(Icons.Default.Add, contentDescription = "Create New Team")
                 }
             }
@@ -96,7 +158,8 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(paddingValues),
+                        .padding(paddingValues)
+                        .padding(bottom = navBottomPadding),
                     contentAlignment = Alignment.Center,
                 ) {
                     CircularProgressIndicator()
@@ -105,7 +168,8 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(paddingValues),
+                        .padding(paddingValues)
+                        .padding(bottom = navBottomPadding),
                     contentAlignment = Alignment.Center,
                 ) {
                     EmptyTeamCallToAction(
@@ -120,6 +184,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(paddingValues),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = navBottomPadding + 16.dp),
                 state = lazyListState,
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -152,46 +217,12 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                 items(currentTeams) { team ->
                     TeamCard(
                         modifier = Modifier.clickable(onClick = {
+                            createTeam = false
                             component.selectTeam(team)
                         }), team = team
                     )
                 }
             }
-        }
-    }
-
-    if (selectedTeam != null) {
-        Dialog(onDismissRequest = { component.deselectTeam() }) {
-            CreateOrEditTeamDialog(
-                team = selectedTeam!!,
-                sports = sports,
-                friends = friends,
-                freeAgents = freeAgents,
-                onSearch = { query -> component.searchPlayers(query) },
-                suggestions = suggestions,
-                onFinish = { newTeam ->
-                    if (createTeam) {
-                        component.createTeam(newTeam)
-                    } else {
-                        component.updateTeam(newTeam)
-                    }
-                    createTeam = false
-                },
-                onDismiss = { component.deselectTeam() },
-                onDelete = { team ->
-                    component.deleteTeam(team)
-                },
-                deleteEnabled = deleteEnabled,
-                selectedEvent = selectedEvent,
-                isCaptain = isCaptain,
-                currentUser = currentUser,
-                isNewTeam = createTeam,
-                staffUsersById = staffUsersById,
-                onEnsureUserByEmail = { email -> component.ensureUserByEmail(email) },
-                onInviteTeamRole = { teamId, userId, inviteType ->
-                    component.inviteUserToRole(teamId, userId, inviteType)
-                },
-            )
         }
     }
 }

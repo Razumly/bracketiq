@@ -10,7 +10,9 @@ import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
@@ -94,6 +96,9 @@ data class EventApiDto(
     val setsPerMatch: Int? = null,
     val doTeamsOfficiate: Boolean? = null,
     val teamOfficialsMaySwap: Boolean? = null,
+    val matchRulesOverride: MatchRulesConfigMVP? = null,
+    val autoCreatePointMatchIncidents: Boolean? = null,
+    val resolvedMatchRules: ResolvedMatchRulesMVP? = null,
     val restTimeMinutes: Int? = null,
 
     val state: String? = null,
@@ -127,14 +132,7 @@ data class EventApiDto(
         val normalizedEventType = eventType?.trim()?.uppercase()
         val resolvedEventType = runCatching { EventType.valueOf(normalizedEventType ?: EventType.EVENT.name) }
             .getOrDefault(EventType.EVENT)
-        val resolvedNoFixedEndDateTime = when {
-            noFixedEndDateTime != null -> noFixedEndDateTime
-            resolvedEventType == EventType.LEAGUE || resolvedEventType == EventType.TOURNAMENT ->
-                resolvedEnd.isNullOrBlank() || resolvedStart == resolvedEnd
-            resolvedEventType == EventType.WEEKLY_EVENT ->
-                resolvedEnd.isNullOrBlank()
-            else -> false
-        }
+        val resolvedNoFixedEndDateTime = noFixedEndDateTime ?: false
         val parsedEnd = when {
             !resolvedEnd.isNullOrBlank() -> runCatching { Instant.parse(resolvedEnd) }.getOrNull()
             resolvedNoFixedEndDateTime -> parsedStart
@@ -157,7 +155,7 @@ data class EventApiDto(
         val resolvedFieldCount = resolvedFieldIds.size.takeIf { count -> count > 0 }
         val resolvedPriceCents = (price ?: 0).coerceAtLeast(0)
         val resolvedMaxParticipants = (maxParticipants ?: 0).coerceAtLeast(0)
-        val resolvedEventPlayoffTeamCount = playoffTeamCount?.coerceAtLeast(2)
+        val resolvedEventPlayoffTeamCount = playoffTeamCount
         val resolvedEventInstallmentAmounts = (installmentAmounts ?: emptyList())
             .map { amount -> amount.coerceAtLeast(0) }
         val resolvedEventInstallmentDueDates = (installmentDueDates ?: emptyList())
@@ -187,7 +185,7 @@ data class EventApiDto(
                 playoffTeamCount = when {
                     includePlayoffs != true -> null
                     singleDivision != false -> resolvedEventPlayoffTeamCount
-                    else -> (detail.playoffTeamCount ?: resolvedEventPlayoffTeamCount)?.coerceAtLeast(2)
+                    else -> detail.playoffTeamCount
                 },
                 allowPaymentPlans = if (singleDivision != false) {
                     resolvedEventAllowPaymentPlans
@@ -262,11 +260,7 @@ data class EventApiDto(
             fieldCount = resolvedFieldCount,
             gamesPerOpponent = gamesPerOpponent,
             includePlayoffs = includePlayoffs ?: false,
-            playoffTeamCount = if (singleDivision == false) {
-                null
-            } else {
-                resolvedEventPlayoffTeamCount
-            },
+            playoffTeamCount = resolvedEventPlayoffTeamCount,
             doubleElimination = doubleElimination ?: false,
             winnerSetCount = winnerSetCount ?: 1,
             loserSetCount = loserSetCount ?: 0,
@@ -279,6 +273,9 @@ data class EventApiDto(
             setsPerMatch = setsPerMatch,
             doTeamsOfficiate = doTeamsOfficiate,
             teamOfficialsMaySwap = if (doTeamsOfficiate == true) teamOfficialsMaySwap else false,
+            matchRulesOverride = matchRulesOverride,
+            autoCreatePointMatchIncidents = autoCreatePointMatchIncidents ?: false,
+            resolvedMatchRules = resolvedMatchRules,
             restTimeMinutes = restTimeMinutes,
             state = state ?: "UNPUBLISHED",
             pointsToVictory = pointsToVictory ?: emptyList(),
@@ -309,16 +306,6 @@ data class EventsResponseDto(
 @Serializable
 data class EventResponseDto(
     val event: EventApiDto? = null,
-)
-
-@Serializable
-data class WeeklySessionCreateRequestDto(
-    val sessionStart: String,
-    val sessionEnd: String,
-    val slotId: String? = null,
-    val divisionId: String? = null,
-    val divisionTypeId: String? = null,
-    val divisionTypeKey: String? = null,
 )
 
 @Serializable
@@ -367,9 +354,8 @@ data class EventParticipantsRequestDto(
     val divisionId: String? = null,
     val divisionTypeId: String? = null,
     val divisionTypeKey: String? = null,
-    val sessionStart: String? = null,
-    val sessionEnd: String? = null,
     val slotId: String? = null,
+    val occurrenceDate: String? = null,
     val refundMode: String? = null,
     val refundReason: String? = null,
 )
@@ -384,6 +370,8 @@ data class EventParticipantsResponseDto(
 @Serializable
 data class EventChildRegistrationRequestDto(
     val childId: String,
+    val slotId: String? = null,
+    val occurrenceDate: String? = null,
 )
 
 @Serializable
@@ -407,6 +395,102 @@ data class EventChildRegistrationResponseDto(
     val requiresParentApproval: Boolean? = null,
     val warnings: List<String> = emptyList(),
     val error: String? = null,
+)
+
+@Serializable
+data class EventParticipantEntryDto(
+    val registrationId: String? = null,
+    val registrantId: String? = null,
+    val registrantType: String? = null,
+    val rosterRole: String? = null,
+    val status: String? = null,
+    val parentId: String? = null,
+    val divisionId: String? = null,
+    val divisionTypeId: String? = null,
+    val divisionTypeKey: String? = null,
+    val consentDocumentId: String? = null,
+    val consentStatus: String? = null,
+    val slotId: String? = null,
+    val occurrenceDate: String? = null,
+    val createdAt: String? = null,
+    val updatedAt: String? = null,
+)
+
+@Serializable
+data class EventParticipantDivisionIdsDto(
+    val divisionId: String? = null,
+    val divisionTypeId: String? = null,
+    val divisionTypeKey: String? = null,
+    val teamIds: List<String> = emptyList(),
+    val userIds: List<String> = emptyList(),
+    val waitListIds: List<String> = emptyList(),
+    val freeAgentIds: List<String> = emptyList(),
+)
+
+@Serializable
+data class EventParticipantIdsSnapshotDto(
+    val teamIds: List<String> = emptyList(),
+    val userIds: List<String> = emptyList(),
+    val waitListIds: List<String> = emptyList(),
+    val freeAgentIds: List<String> = emptyList(),
+    val divisions: List<EventParticipantDivisionIdsDto> = emptyList(),
+)
+
+@Serializable
+data class EventParticipantRegistrationSectionsDto(
+    val teams: List<EventParticipantEntryDto> = emptyList(),
+    val users: List<EventParticipantEntryDto> = emptyList(),
+    val children: List<EventParticipantEntryDto> = emptyList(),
+    val waitlist: List<EventParticipantEntryDto> = emptyList(),
+    val freeAgents: List<EventParticipantEntryDto> = emptyList(),
+)
+
+@Serializable
+data class EventOccurrenceDto(
+    val slotId: String? = null,
+    val occurrenceDate: String? = null,
+)
+
+@Serializable
+data class EventParticipantsSnapshotResponseDto(
+    val event: EventApiDto? = null,
+    val participants: EventParticipantIdsSnapshotDto = EventParticipantIdsSnapshotDto(),
+    val registrations: EventParticipantRegistrationSectionsDto? = null,
+    val teams: List<TeamApiDto> = emptyList(),
+    val users: List<UserProfileDto> = emptyList(),
+    val participantCount: Int? = null,
+    val participantCapacity: Int? = null,
+    val occurrence: EventOccurrenceDto? = null,
+    val weeklySelectionRequired: Boolean? = null,
+    val error: String? = null,
+)
+
+@Serializable
+data class CurrentUserEventRegistrationDto(
+    val id: String? = null,
+    val eventId: String? = null,
+    val registrantId: String? = null,
+    val parentId: String? = null,
+    val registrantType: String? = null,
+    val rosterRole: String? = null,
+    val status: String? = null,
+    val eventTeamId: String? = null,
+    val sourceTeamRegistrationId: String? = null,
+    val divisionId: String? = null,
+    val divisionTypeId: String? = null,
+    val divisionTypeKey: String? = null,
+    val jerseyNumber: String? = null,
+    val position: String? = null,
+    val isCaptain: Boolean? = null,
+    val slotId: String? = null,
+    val occurrenceDate: String? = null,
+    val createdAt: String? = null,
+    val updatedAt: String? = null,
+)
+
+@Serializable
+data class CurrentUserEventRegistrationsResponseDto(
+    val registrations: List<CurrentUserEventRegistrationDto> = emptyList(),
 )
 
 @Serializable
@@ -442,8 +526,6 @@ data class EventUpdateDto(
     val price: Int? = null,
     val singleDivision: Boolean? = null,
     val registrationByDivisionType: Boolean? = null,
-    val waitListIds: List<String>? = null,
-    val freeAgentIds: List<String>? = null,
     val cancellationRefundHours: Int? = null,
     val teamSignup: Boolean? = null,
     val prize: String? = null,
@@ -472,8 +554,6 @@ data class EventUpdateDto(
     val fieldIds: List<String>? = null,
     val fields: List<Field>? = null,
     val timeSlots: List<TimeSlot>? = null,
-    val teamIds: List<String>? = null,
-    val userIds: List<String>? = null,
     val leagueScoringConfigId: String? = null,
     val leagueScoringConfig: LeagueScoringConfigDTO? = null,
     val organizationId: String? = null,
@@ -481,6 +561,8 @@ data class EventUpdateDto(
     val eventType: String? = null,
     val doTeamsOfficiate: Boolean? = null,
     val teamOfficialsMaySwap: Boolean? = null,
+    val matchRulesOverride: MatchRulesConfigMVP? = null,
+    val autoCreatePointMatchIncidents: Boolean? = null,
     val officialIds: List<String>? = null,
     val allowPaymentPlans: Boolean? = null,
     val installmentCount: Int? = null,
@@ -564,8 +646,8 @@ fun Event.toUpdateDto(
             },
             playoffTeamCount = when {
                 !includePlayoffs -> null
-                singleDivision -> playoffTeamCount?.coerceAtLeast(2)
-                else -> (detail.playoffTeamCount ?: playoffTeamCount)?.coerceAtLeast(2)
+                singleDivision -> playoffTeamCount
+                else -> detail.playoffTeamCount
             },
             allowPaymentPlans = if (singleDivision) {
                 defaultAllowPaymentPlans
@@ -599,7 +681,7 @@ fun Event.toUpdateDto(
     return EventUpdateDto(
         name = name,
         start = start.toString(),
-        end = if (noFixedEndDateTime) null else end.toString(),
+        end = end.toString(),
         description = description,
         divisions = normalizedDivisions,
         divisionDetails = normalizedDivisionDetailsForPayload,
@@ -619,8 +701,6 @@ fun Event.toUpdateDto(
         price = priceCents,
         singleDivision = singleDivision,
         registrationByDivisionType = registrationByDivisionType,
-        waitListIds = waitListIds,
-        freeAgentIds = freeAgentIds,
         cancellationRefundHours = cancellationRefundHours,
         teamSignup = teamSignup,
         prize = prize,
@@ -633,8 +713,8 @@ fun Event.toUpdateDto(
         coordinates = coordinates,
         gamesPerOpponent = gamesPerOpponent,
         includePlayoffs = includePlayoffs,
-        playoffTeamCount = if (includePlayoffs && singleDivision) {
-            playoffTeamCount?.coerceAtLeast(2)
+        playoffTeamCount = if (includePlayoffs) {
+            playoffTeamCount
         } else {
             null
         },
@@ -653,8 +733,6 @@ fun Event.toUpdateDto(
         fieldIds = fieldIds,
         fields = if (includeFieldObjects) fieldsOverride else null,
         timeSlots = if (includeTimeSlotObjects) timeSlotsOverride else null,
-        teamIds = teamIds,
-        userIds = userIds,
         leagueScoringConfigId = leagueScoringConfigId,
         leagueScoringConfig = leagueScoringConfigOverride,
         organizationId = if (includeOrganizationId) organizationId else null,
@@ -662,6 +740,8 @@ fun Event.toUpdateDto(
         eventType = eventType.name,
         doTeamsOfficiate = doTeamsOfficiate,
         teamOfficialsMaySwap = if (doTeamsOfficiate == true) teamOfficialsMaySwap else false,
+        matchRulesOverride = matchRulesOverride,
+        autoCreatePointMatchIncidents = autoCreatePointMatchIncidents,
         officialIds = officialIds,
         allowPaymentPlans = allowPaymentPlans,
         installmentCount = installmentCount,

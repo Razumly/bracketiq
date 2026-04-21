@@ -32,8 +32,8 @@ compose.resources {
     generateResClass = always
 }
 
-val mvpVersion = "1.2.2"
-val mvpVersionCode = 25
+val mvpVersion = "1.3.5"
+val mvpVersionCode = 31
 kotlin {
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
@@ -200,11 +200,13 @@ kotlin {
                 implementation(libs.stripe.android)
                 implementation(libs.financial.connections)
                 implementation(libs.androidx.browser)
+                implementation(libs.androidx.security.crypto)
                 implementation(libs.ktor.client.okhttp)
             }
         }
         iosMain {
             dependencies {
+                implementation(libs.multiplatform.settings)
                 implementation(libs.ktor.client.darwin)
             }
         }
@@ -225,6 +227,7 @@ kotlin {
                 implementation(libs.mockk)
                 implementation(libs.robolectric)
                 implementation(libs.androidx.core)
+                implementation(libs.androidx.compose.ui.test.junit4)
             }
         }
 
@@ -309,6 +312,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose.android)
     implementation(libs.androidx.animation.android)
     debugImplementation("org.jetbrains.compose.ui:ui-tooling:${libs.versions.uiVersion.get()}")
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
     add("kspAndroid", libs.androidx.room.compiler)
     add("kspIosX64", libs.androidx.room.compiler)
     add("kspIosArm64", libs.androidx.room.compiler)
@@ -451,13 +455,18 @@ fun resolveBackendDir(project: Project): File? {
     val fromEnv = System.getenv("MVP_SITE_DIR")?.takeIf { it.isNotBlank() }?.let { File(it) }
 
     val userHome = System.getProperty("user.home") ?: ""
+    val windowsUserProfile = System.getenv("USERPROFILE")?.takeIf { it.isNotBlank() }
 
     val candidates = listOfNotNull(
         fromGradleProp,
         fromEnv,
         // Prefer sibling checkout for a mono-workspace style setup.
         project.rootProject.file("../mvp-site"),
-        // Common personal setups (including macOS-style path segments, but under user.home).
+        // Current Windows workspace location and its WSL mount path.
+        File(userHome, "Documents/Code/mvp-site"),
+        windowsUserProfile?.let { File(it, "Documents/Code/mvp-site") },
+        File("/mnt/c/Users/samue/Documents/Code/mvp-site"),
+        // Common legacy personal setups (including macOS-style path segments, but under user.home).
         File(userHome, "Projects/MVP/mvp-site"),
         File(userHome, "StudioProjects/mvp-site"),
     )
@@ -470,7 +479,7 @@ fun resolveBackendDir(project: Project): File? {
 fun resolveWslBackendDir(project: Project): String {
     val fromGradleProp = project.findProperty("mvp.site.wsl.dir")?.toString()?.takeIf { it.isNotBlank() }
     val fromEnv = System.getenv("MVP_SITE_WSL_DIR")?.takeIf { it.isNotBlank() }
-    return fromGradleProp ?: fromEnv ?: "~/Projects/MVP/mvp-site"
+    return fromGradleProp ?: fromEnv ?: "/mnt/c/Users/samue/Documents/Code/mvp-site"
 }
 
 fun resolveWslDistro(project: Project): String? {
@@ -684,7 +693,7 @@ val startLocalBackend = tasks.register("startLocalBackend") {
         var startedBackendProcess: Process? = null
 
         if (backendDir == null) {
-            // Many dev setups keep mvp-site under WSL (~//Projects/MVP/mvp-site). If so, start it there.
+            // If Windows path resolution misses the backend, try the configured WSL-visible path.
             if (!isWindows) {
                 logger.lifecycle(
                     "startLocalBackend: mvp-site not found; skipping. " +

@@ -41,11 +41,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -71,19 +73,19 @@ fun SearchBox(
     onFocusChange: (Boolean) -> Unit,
     onPositionChange: (Offset, IntSize) -> Unit,
     onToggleFilter: (Boolean) -> Unit,
+    trailingAction: (@Composable (() -> Unit))? = null,
     rowAction: (@Composable RowScope.() -> Unit)? = null,
 ) {
     var searchInput by remember { mutableStateOf("") }
-    val focusManager = rememberPlatformFocusManager()
+    var isSearchFieldFocused by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
     var showFilterDropdown by remember { mutableStateOf(false) }
 
     LaunchedEffect(showFilterDropdown) {
         onToggleFilter(showFilterDropdown)
     }
-    LaunchedEffect(Unit) {
-        focusManager.setFocusChangeListener { isFocused ->
-            onFocusChange(isFocused || searchInput.isNotEmpty())
-        }
+    LaunchedEffect(isSearchFieldFocused, searchInput) {
+        onFocusChange(isSearchFieldFocused || searchInput.isNotEmpty())
     }
 
     Column(modifier = modifier.fillMaxWidth().onGloballyPositioned { coordinates ->
@@ -108,7 +110,7 @@ fun SearchBox(
                         contentDescription = "Search"
                     )
                 },
-                trailingIcon = {
+                trailingIcon = trailingAction ?: {
                     if (searchInput.isNotEmpty()) {
                         IconButton(onClick = {
                             searchInput = ""
@@ -122,8 +124,11 @@ fun SearchBox(
                         }
                     }
                 },
-                modifier = Modifier.weight(1f),
-                externalFocusManager = focusManager
+                modifier = Modifier
+                    .weight(1f)
+                    .onFocusChanged { focusState ->
+                        isSearchFieldFocused = focusState.isFocused
+                    },
             )
 
             if (filter && currentFilter != null) {

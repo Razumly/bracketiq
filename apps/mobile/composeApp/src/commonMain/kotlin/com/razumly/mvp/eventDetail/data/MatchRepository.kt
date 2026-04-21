@@ -1,6 +1,7 @@
 package com.razumly.mvp.eventDetail.data
 
 import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
@@ -12,7 +13,12 @@ import com.razumly.mvp.core.network.dto.BulkMatchCreateEntryDto
 import com.razumly.mvp.core.network.dto.BulkMatchUpdateEntryDto
 import com.razumly.mvp.core.network.dto.BulkMatchUpdateRequestDto
 import com.razumly.mvp.core.network.dto.BulkMatchesResponseDto
+import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
+import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
+import com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto
 import com.razumly.mvp.core.network.dto.MatchResponseDto
+import com.razumly.mvp.core.network.dto.MatchScoreSetDto
+import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.core.network.dto.MatchUpdateDto
 import com.razumly.mvp.core.network.dto.MatchesResponseDto
 import com.razumly.mvp.core.network.dto.toBulkMatchCreateEntryDto
@@ -42,7 +48,28 @@ data class StagedMatchCreate(
 interface IMatchRepository : IMVPRepository {
     suspend fun getMatch(matchId: String): Result<MatchMVP>
     fun getMatchFlow(matchId: String): Flow<Result<MatchWithRelations>>
+    suspend fun saveMatchLocally(match: MatchMVP): Result<Unit>
     suspend fun updateMatch(match: MatchMVP): Result<Unit>
+    suspend fun updateMatchOperations(
+        match: MatchMVP,
+        lifecycle: MatchLifecycleOperationDto? = null,
+        segmentOperations: List<MatchSegmentOperationDto>? = null,
+        incidentOperations: List<MatchIncidentOperationDto>? = null,
+        officialCheckIn: MatchOfficialCheckInOperationDto? = null,
+        finalize: Boolean = false,
+        time: Instant? = null,
+    ): Result<MatchMVP>
+    suspend fun setMatchScore(
+        match: MatchMVP,
+        segmentId: String?,
+        sequence: Int,
+        eventTeamId: String,
+        points: Int,
+    ): Result<MatchMVP>
+    suspend fun addMatchIncident(
+        match: MatchMVP,
+        operation: MatchIncidentOperationDto,
+    ): Result<MatchMVP>
     suspend fun updateMatchesBulk(
         matches: List<MatchMVP>,
         creates: List<StagedMatchCreate> = emptyList(),
@@ -92,6 +119,67 @@ class MatchRepository(
     private fun MatchMVP.normalizedOfficialAssignmentsForSync() =
         officialIds.normalizedMatchOfficialAssignments()
 
+    private fun MatchIncidentMVP.isPendingLocalCreate(): Boolean =
+        uploadStatus == "PENDING" || uploadStatus == "FAILED"
+
+    private fun MatchIncidentMVP.isPendingLocalDelete(): Boolean =
+        uploadStatus == "DELETE_PENDING" || uploadStatus == "DELETE_FAILED"
+
+    private fun MatchIncidentMVP.matchesIncident(other: MatchIncidentMVP): Boolean {
+        if (id.isNotBlank() && id == other.id) return true
+        if (!legacyId.isNullOrBlank() && legacyId == other.legacyId) return true
+        return segmentId == other.segmentId &&
+            eventTeamId == other.eventTeamId &&
+            eventRegistrationId == other.eventRegistrationId &&
+            participantUserId == other.participantUserId &&
+            incidentType == other.incidentType &&
+            linkedPointDelta == other.linkedPointDelta &&
+            minute == other.minute &&
+            note == other.note
+    }
+
+    private fun mergePendingLocalIncidents(remoteMatch: MatchMVP, localMatch: MatchMVP?): MatchMVP {
+        val pendingLocalCreates = localMatch?.incidents
+            .orEmpty()
+            .filter { incident -> incident.isPendingLocalCreate() }
+            .filterNot { pending ->
+                remoteMatch.incidents.any { remote -> remote.matchesIncident(pending) }
+            }
+        val pendingLocalDeletes = localMatch?.incidents
+            .orEmpty()
+            .filter { incident -> incident.isPendingLocalDelete() }
+        if (pendingLocalCreates.isEmpty() && pendingLocalDeletes.isEmpty()) {
+            return remoteMatch
+        }
+        val pendingDeleteIds = pendingLocalDeletes.map { incident -> incident.id }.toSet()
+        val remoteIncidents = remoteMatch.incidents.filterNot { remote ->
+            remote.id in pendingDeleteIds || pendingLocalDeletes.any { pending -> remote.matchesIncident(pending) }
+        }
+        return remoteMatch.copy(
+            incidents = (remoteIncidents + pendingLocalCreates + pendingLocalDeletes)
+                .sortedWith(compareBy<MatchIncidentMVP> { it.sequence }.thenBy { it.id }),
+        )
+    }
+
+    private suspend fun mergePendingLocalIncidents(remoteMatches: List<MatchMVP>): List<MatchMVP> {
+        if (remoteMatches.isEmpty()) return remoteMatches
+        val localMatchesById = remoteMatches
+            .mapNotNull { remote -> databaseService.getMatchDao.getMatchById(remote.id)?.match }
+            .associateBy { local -> local.id }
+        return remoteMatches.map { remote ->
+            mergePendingLocalIncidents(remote, localMatchesById[remote.id])
+        }
+    }
+
+    private suspend fun upsertRemoteMatchPreservingPendingIncidents(remoteMatch: MatchMVP) {
+        val localMatch = databaseService.getMatchDao.getMatchById(remoteMatch.id)?.match
+        databaseService.getMatchDao.upsertMatch(mergePendingLocalIncidents(remoteMatch, localMatch))
+    }
+
+    private suspend fun upsertRemoteMatchesPreservingPendingIncidents(remoteMatches: List<MatchMVP>) {
+        databaseService.getMatchDao.upsertMatches(mergePendingLocalIncidents(remoteMatches))
+    }
+
     private fun MatchMVP.toSanitizedForBulk(): MatchMVP {
         val normalizedAssignments = normalizedOfficialAssignmentsForSync()
         val primaryOfficial = normalizedAssignments
@@ -120,15 +208,51 @@ class MatchRepository(
         )
     }
 
+    private fun MatchMVP.toSegmentOperations(): List<MatchSegmentOperationDto>? =
+        segments
+            .takeIf { it.isNotEmpty() }
+            ?.map { segment ->
+                MatchSegmentOperationDto(
+                    id = segment.id,
+                    sequence = segment.sequence,
+                    status = segment.status,
+                    scores = segment.scores,
+                    winnerEventTeamId = segment.winnerEventTeamId,
+                    startedAt = segment.startedAt,
+                    endedAt = segment.endedAt,
+                    resultType = segment.resultType,
+                    statusReason = segment.statusReason,
+                )
+            }
+
     private suspend fun fetchRemoteMatches(tournamentId: String): List<MatchMVP> {
         return api.get<MatchesResponseDto>("api/events/$tournamentId/matches")
             .matches
             .mapNotNull { it.toMatchOrNull() }
     }
 
+    private suspend fun fetchRemoteMatch(eventId: String, matchId: String): MatchMVP {
+        val detailMatch = runCatching {
+            api.get<MatchResponseDto>("api/events/$eventId/matches/$matchId")
+                .match
+                ?.toMatchOrNull()
+        }.onFailure { error ->
+            Napier.w(
+                "Failed to refresh match $matchId from detail endpoint; falling back to event matches: ${error.message}"
+            )
+        }.getOrNull()
+        if (detailMatch != null) {
+            return detailMatch
+        }
+
+        val res = api.get<MatchesResponseDto>("api/events/$eventId/matches")
+        return res.matches.firstOrNull { (it.id ?: it.legacyId) == matchId }?.toMatchOrNull()
+            ?: error("Match $matchId not found")
+    }
+
     private suspend fun refreshMatchesFromRemote(tournamentId: String): List<MatchMVP> {
         val localMatches = databaseService.getMatchDao.getMatchesOfTournament(tournamentId)
-        val remoteMatches = fetchRemoteMatches(tournamentId)
+        val remoteMatches = mergePendingLocalIncidents(fetchRemoteMatches(tournamentId))
         val staleIds = localMatches.map { it.id }.toSet() - remoteMatches.map { it.id }.toSet()
         if (staleIds.isNotEmpty()) {
             databaseService.getMatchDao.deleteMatchesById(staleIds.toList())
@@ -146,13 +270,16 @@ class MatchRepository(
                 val local = databaseService.getMatchDao.getMatchById(matchId)?.match
                     ?: error("Match $matchId not cached; fetch matches for the event first")
 
-                val res = api.get<MatchesResponseDto>("api/events/${local.eventId}/matches")
-                res.matches.firstOrNull { (it.id ?: it.legacyId) == matchId }?.toMatchOrNull()
-                    ?: error("Match $matchId not found")
+                val remoteMatch = fetchRemoteMatch(local.eventId, matchId)
+                mergePendingLocalIncidents(remoteMatch, local)
             },
             saveCall = { match -> databaseService.getMatchDao.upsertMatch(match) },
             onReturn = { it },
         )
+
+    override suspend fun saveMatchLocally(match: MatchMVP): Result<Unit> = runCatching {
+        databaseService.getMatchDao.upsertMatch(match)
+    }
 
     override fun getMatchFlow(matchId: String): Flow<Result<MatchWithRelations>> {
         val localFlow =
@@ -177,6 +304,7 @@ class MatchRepository(
                     team1Points = sanitizedMatch.team1Points,
                     team2Points = sanitizedMatch.team2Points,
                     setResults = sanitizedMatch.setResults,
+                    segmentOperations = sanitizedMatch.toSegmentOperations(),
                     team1Id = sanitizedMatch.team1Id,
                     team2Id = sanitizedMatch.team2Id,
                     team1Seed = sanitizedMatch.team1Seed,
@@ -200,8 +328,70 @@ class MatchRepository(
                 ),
             ).match?.toMatchOrNull() ?: error("Update match response missing match")
         },
-        saveCall = { updatedMatch -> databaseService.getMatchDao.upsertMatch(updatedMatch) },
+        saveCall = { updatedMatch -> upsertRemoteMatchPreservingPendingIncidents(updatedMatch) },
         onReturn = {},
+    )
+
+    override suspend fun updateMatchOperations(
+        match: MatchMVP,
+        lifecycle: MatchLifecycleOperationDto?,
+        segmentOperations: List<MatchSegmentOperationDto>?,
+        incidentOperations: List<MatchIncidentOperationDto>?,
+        officialCheckIn: MatchOfficialCheckInOperationDto?,
+        finalize: Boolean,
+        time: Instant?,
+    ): Result<MatchMVP> = singleResponse(
+        networkCall = {
+            api.patch<MatchUpdateDto, MatchResponseDto>(
+                path = "api/events/${match.eventId}/matches/${match.id}",
+                body = MatchUpdateDto(
+                    lifecycle = lifecycle,
+                    segmentOperations = segmentOperations,
+                    incidentOperations = incidentOperations,
+                    officialCheckIn = officialCheckIn,
+                    finalize = finalize,
+                    time = time?.toString(),
+                ),
+            ).match?.toMatchOrNull() ?: error("Match operations response missing match")
+        },
+        saveCall = { updatedMatch -> upsertRemoteMatchPreservingPendingIncidents(updatedMatch) },
+        onReturn = { it },
+    )
+
+    override suspend fun setMatchScore(
+        match: MatchMVP,
+        segmentId: String?,
+        sequence: Int,
+        eventTeamId: String,
+        points: Int,
+    ): Result<MatchMVP> = singleResponse(
+        networkCall = {
+            api.post<MatchScoreSetDto, MatchResponseDto>(
+                path = "api/events/${match.eventId}/matches/${match.id}/score",
+                body = MatchScoreSetDto(
+                    segmentId = segmentId,
+                    sequence = sequence,
+                    eventTeamId = eventTeamId,
+                    points = points,
+                ),
+            ).match?.toMatchOrNull() ?: error("Score set response missing match")
+        },
+        saveCall = { updatedMatch -> upsertRemoteMatchPreservingPendingIncidents(updatedMatch) },
+        onReturn = { it },
+    )
+
+    override suspend fun addMatchIncident(
+        match: MatchMVP,
+        operation: MatchIncidentOperationDto,
+    ): Result<MatchMVP> = singleResponse(
+        networkCall = {
+            api.post<MatchIncidentOperationDto, MatchResponseDto>(
+                path = "api/events/${match.eventId}/matches/${match.id}/incidents",
+                body = operation.copy(action = "CREATE"),
+            ).match?.toMatchOrNull() ?: error("Add incident response missing match")
+        },
+        saveCall = { updatedMatch -> upsertRemoteMatchPreservingPendingIncidents(updatedMatch) },
+        onReturn = { it },
     )
 
     override suspend fun updateMatchesBulk(
@@ -262,7 +452,7 @@ class MatchRepository(
 
             val updatedMatches = response.matches.mapNotNull { it.toMatchOrNull() }
             if (updatedMatches.isNotEmpty()) {
-                databaseService.getMatchDao.upsertMatches(updatedMatches)
+                upsertRemoteMatchesPreservingPendingIncidents(updatedMatches)
             }
             val deletedIds = response.deleted
                 .mapNotNull { deletedId -> normalizeOptionalToken(deletedId) }
@@ -319,6 +509,7 @@ class MatchRepository(
                         team1Points = sanitizedMatch.team1Points,
                         team2Points = sanitizedMatch.team2Points,
                         setResults = sanitizedMatch.setResults,
+                        segmentOperations = sanitizedMatch.toSegmentOperations(),
                         team1Id = sanitizedMatch.team1Id,
                         team2Id = sanitizedMatch.team2Id,
                         team1Seed = sanitizedMatch.team1Seed,
@@ -344,7 +535,7 @@ class MatchRepository(
                     ),
                 ).match?.toMatchOrNull() ?: error("Finalize match response missing match")
             },
-            saveCall = { updated -> databaseService.getMatchDao.upsertMatch(updated) },
+            saveCall = { updated -> upsertRemoteMatchPreservingPendingIncidents(updated) },
             onReturn = {},
         )
 
@@ -402,7 +593,7 @@ class MatchRepository(
 
         val dedupedMatches = aggregatedMatches.distinctBy { match -> match.id }
         if (dedupedMatches.isNotEmpty()) {
-            databaseService.getMatchDao.upsertMatches(dedupedMatches)
+            upsertRemoteMatchesPreservingPendingIncidents(dedupedMatches)
         }
         dedupedMatches
     }

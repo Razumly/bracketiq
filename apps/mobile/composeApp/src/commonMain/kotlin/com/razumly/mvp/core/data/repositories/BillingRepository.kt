@@ -8,11 +8,14 @@ import com.razumly.mvp.core.data.dataTypes.BillingAddressProfile
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.resolveOrganizationVerificationReviewStatus
+import com.razumly.mvp.core.data.dataTypes.resolveOrganizationVerificationStatus
 import com.razumly.mvp.core.data.dataTypes.Product
 import com.razumly.mvp.core.data.dataTypes.ProductTaxCategory
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
 import com.razumly.mvp.core.data.dataTypes.Subscription
+import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.stripeRedirectBaseUrl
@@ -231,7 +234,9 @@ interface IBillingRepository : IMVPRepository {
         teamId: String? = null,
         priceCents: Int? = null,
         timeSlotContext: PurchaseIntentTimeSlotContext? = null,
+        occurrence: EventOccurrenceSelection? = null,
     ): Result<PurchaseIntent>
+    suspend fun createTeamRegistrationPurchaseIntent(team: Team): Result<PurchaseIntent>
     suspend fun getRequiredSignLinks(eventId: String): Result<List<SignStep>>
     suspend fun getRequiredSignLinks(
         eventId: String,
@@ -317,6 +322,7 @@ class BillingRepository(
         teamId: String?,
         priceCents: Int?,
         timeSlotContext: PurchaseIntentTimeSlotContext?,
+        occurrence: EventOccurrenceSelection?,
     ): Result<PurchaseIntent> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
         val email = userRepository.currentAccount.value.getOrNull()?.email
@@ -361,6 +367,33 @@ class BillingRepository(
                             .distinct(),
                     )
                 },
+                slotId = occurrence?.slotId?.trim()?.takeIf(String::isNotBlank),
+                occurrenceDate = occurrence?.occurrenceDate?.trim()?.takeIf(String::isNotBlank),
+            ),
+        )
+
+        if (!response.error.isNullOrBlank()) {
+            throw Exception(response.error)
+        }
+        response
+    }
+
+    override suspend fun createTeamRegistrationPurchaseIntent(team: Team): Result<PurchaseIntent> = runCatching {
+        val user = userRepository.currentUser.value.getOrThrow()
+        val email = userRepository.currentAccount.value.getOrNull()?.email
+        val normalizedTeamId = team.id.trim().takeIf(String::isNotBlank)
+            ?: error("Team id is required for registration checkout.")
+
+        val response = api.post<PurchaseIntentRequestDto, PurchaseIntent>(
+            path = "api/billing/purchase-intent",
+            body = PurchaseIntentRequestDto(
+                purchaseType = "team_registration",
+                user = BillingUserRefDto(id = user.id, email = email),
+                team = BillingTeamRefDto(
+                    id = normalizedTeamId,
+                    name = team.name,
+                ),
+                teamRegistration = BillingTeamRefDto(teamId = normalizedTeamId),
             ),
         )
 
@@ -1007,12 +1040,17 @@ class BillingRepository(
             val serverRefunds = api.get<RefundRequestsResponseDto>("api/refund-requests?hostId=$encoded&limit=200").refunds
             databaseService.getRefundRequestDao.upsertRefundRequests(serverRefunds)
 
-            serverRefunds.forEach { refund ->
-                userRepository.getUsers(listOf(refund.userId)).onFailure { e ->
-                    Napier.e("Failed to cache user for refund ${refund.id}", e)
+            val refundUserIds = serverRefunds.map { refund -> refund.userId }.distinct()
+            if (refundUserIds.isNotEmpty()) {
+                userRepository.getUsers(refundUserIds).onFailure { e ->
+                    Napier.e("Failed to cache users for refund hydration", e)
                 }
-                eventRepository.getEvent(refund.eventId).onFailure { e ->
-                    Napier.e("Failed to cache event for refund ${refund.id}", e)
+            }
+
+            val refundEventIds = serverRefunds.map { refund -> refund.eventId }.distinct()
+            if (refundEventIds.isNotEmpty()) {
+                eventRepository.getEventsByIds(refundEventIds).onFailure { e ->
+                    Napier.e("Failed to cache events for refund hydration", e)
                 }
             }
 
@@ -1703,8 +1741,14 @@ private data class OrganizationApiDto(
     val ownerId: String? = null,
     val hostIds: List<String>? = null,
     val website: String? = null,
+    val sports: List<String>? = null,
     val officialIds: List<String>? = null,
     val hasStripeAccount: Boolean? = null,
+    val verificationStatus: String? = null,
+    val verifiedAt: String? = null,
+    val verificationReviewStatus: String? = null,
+    val verificationReviewNotes: String? = null,
+    val verificationReviewUpdatedAt: String? = null,
     val coordinates: List<Double>? = null,
     val fieldIds: List<String>? = null,
     val productIds: List<String>? = null,
@@ -1728,8 +1772,22 @@ private data class OrganizationApiDto(
             ownerId = resolvedOwnerId,
             hostIds = hostIds ?: emptyList(),
             website = website,
+            sports = sports
+                ?.map(String::trim)
+                ?.filter(String::isNotBlank)
+                ?: emptyList(),
             officialIds = officialIds ?: emptyList(),
             hasStripeAccount = hasStripeAccount ?: false,
+            verificationStatus = resolveOrganizationVerificationStatus(
+                verificationStatus = verificationStatus,
+                hasStripeAccount = hasStripeAccount,
+            ),
+            verifiedAt = verifiedAt?.trim()?.takeIf(String::isNotBlank),
+            verificationReviewStatus = resolveOrganizationVerificationReviewStatus(
+                reviewStatus = verificationReviewStatus,
+            ),
+            verificationReviewNotes = verificationReviewNotes?.trim()?.takeIf(String::isNotBlank),
+            verificationReviewUpdatedAt = verificationReviewUpdatedAt?.trim()?.takeIf(String::isNotBlank),
             coordinates = coordinates,
             fieldIds = fieldIds ?: emptyList(),
             productIds = productIds ?: emptyList(),

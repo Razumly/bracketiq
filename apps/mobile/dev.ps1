@@ -8,7 +8,8 @@ param(
     # Optional: override backend repo directory. Otherwise tries:
     # 1) $env:MVP_SITE_DIR
     # 2) ../mvp-site (sibling to this repo)
-    # 3) ~/Projects/MVP/mvp-site
+    # 3) ~/Documents/Code/mvp-site
+    # 4) legacy personal workspace locations
     [string]$BackendDir = $env:MVP_SITE_DIR,
 
     # Optional: override the port used by the backend. Defaults to MVP_API_BASE_URL port (if present),
@@ -54,6 +55,7 @@ function Resolve-BackendDir([string]$Provided) {
     if ($env:MVP_SITE_DIR) { $candidates.Add($env:MVP_SITE_DIR) }
 
     $candidates.Add((Join-Path $RepoRoot "..\\mvp-site"))
+    $candidates.Add((Join-Path $HOME "Documents\\Code\\mvp-site"))
     $candidates.Add((Join-Path $HOME "Projects\\MVP\\mvp-site"))
     $candidates.Add((Join-Path $HOME "StudioProjects\\mvp-site"))
 
@@ -71,7 +73,7 @@ function Resolve-BackendDir([string]$Provided) {
     }
 
     throw ("Could not find the backend repo (mvp-site). " +
-        "Set `$env:MVP_SITE_DIR to the mvp-site path, or place it at ../mvp-site relative to this repo.")
+        "Set `$env:MVP_SITE_DIR to the mvp-site path, clone it to ~/Documents/Code/mvp-site, or place it at ../mvp-site relative to this repo.")
 }
 
 function Detect-PackageManager([string]$Dir) {
@@ -206,4 +208,3 @@ Write-Host ""
 Write-Host "Local dev backend should be available at:" -ForegroundColor Green
 Write-Host "  Emulator: http://10.0.2.2:$port" -ForegroundColor Green
 Write-Host "  Host:     http://localhost:$port" -ForegroundColor Green
-

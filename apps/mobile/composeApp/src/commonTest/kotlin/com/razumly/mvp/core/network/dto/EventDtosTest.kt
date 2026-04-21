@@ -11,6 +11,7 @@ import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Instant
@@ -35,7 +36,7 @@ class EventDtosTest {
 
         assertEquals(listOf("template-a", "template-b"), dto.requiredTemplateIds)
         assertEquals(true, dto.noFixedEndDateTime)
-        assertNull(dto.end)
+        assertEquals("2023-11-14T23:13:20Z", dto.end)
         assertEquals(true, dto.teamOfficialsMaySwap)
     }
 
@@ -306,7 +307,7 @@ class EventDtosTest {
         val dto = event.toUpdateDto()
         val detail = dto.divisionDetails.first()
 
-        assertNull(dto.playoffTeamCount)
+        assertEquals(12, dto.playoffTeamCount)
         assertEquals(6, detail.playoffTeamCount)
     }
 
@@ -553,7 +554,7 @@ class EventDtosTest {
     }
 
     @Test
-    fun event_api_dto_applies_event_playoff_count_to_multi_division_details_when_missing() {
+    fun event_api_dto_preserves_missing_multi_division_playoff_count_until_explicitly_set() {
         val dto = EventApiDto(
             id = "event-16",
             name = "API League",
@@ -583,7 +584,23 @@ class EventDtosTest {
 
         val event = dto.toEventOrNull()
 
-        assertEquals(null, event?.playoffTeamCount)
-        assertEquals(10, event?.divisionDetails?.firstOrNull()?.playoffTeamCount)
+        assertEquals(10, event?.playoffTeamCount)
+        assertEquals(null, event?.divisionDetails?.firstOrNull()?.playoffTeamCount)
+    }
+
+    @Test
+    fun event_api_dto_does_not_infer_no_fixed_end_datetime_from_matching_start_and_end() {
+        val dto = EventApiDto(
+            id = "event-24",
+            name = "Legacy-looking League",
+            hostId = "host-24",
+            eventType = EventType.LEAGUE.name,
+            start = "2026-02-10T00:00:00Z",
+            end = "2026-02-10T00:00:00Z",
+        )
+
+        val event = dto.toEventOrNull()
+
+        assertFalse(event?.noFixedEndDateTime ?: true)
     }
 }

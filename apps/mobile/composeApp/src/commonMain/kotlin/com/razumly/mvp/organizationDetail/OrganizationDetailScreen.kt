@@ -47,6 +47,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Product
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.canUsePaidBilling
 import com.razumly.mvp.core.presentation.LockedRentalSelection
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
@@ -54,6 +55,7 @@ import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
 import com.razumly.mvp.core.presentation.composables.EventCard
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
+import com.razumly.mvp.core.presentation.composables.TeamDetailsDialog
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.util.moneyFormat
 import com.razumly.mvp.core.util.LocalLoadingHandler
@@ -99,8 +101,11 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val isLoadingProducts by component.isLoadingProducts.collectAsState()
     val isLoadingRentals by component.isLoadingRentals.collectAsState()
     val billingAddressPrompt by component.billingAddressPrompt.collectAsState()
+    val currentUser by component.currentUser.collectAsState()
+    val startingTeamRegistrationId by component.startingTeamRegistrationId.collectAsState()
 
     var selectedTab by remember(component) { mutableStateOf(component.initialTab) }
+    var selectedTeam by remember { mutableStateOf<TeamWithPlayers?>(null) }
 
     val timeZone = remember { TimeZone.currentSystemDefault() }
     val today = remember(timeZone) { Clock.System.now().toLocalDateTime(timeZone).date }
@@ -321,6 +326,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                         teams = teams,
                         isLoading = isLoadingTeams,
                         bottomPadding = bottomPadding,
+                        onTeamClick = { team -> selectedTeam = team },
                     )
                 }
 
@@ -495,6 +501,19 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                     )
                 }
             }
+        }
+
+        selectedTeam?.let { team ->
+            TeamDetailsDialog(
+                team = team,
+                currentUser = currentUser,
+                knownUsers = team.players + team.pendingPlayers + listOfNotNull(team.captain),
+                onDismiss = { selectedTeam = null },
+                onPlayerMessage = {},
+                isRegistering = startingTeamRegistrationId == team.team.id,
+                onRegisterForTeam = { component.startTeamRegistration(team) },
+                onLeaveTeam = { component.leaveTeam(team) },
+            )
         }
     }
 
@@ -697,6 +716,7 @@ private fun TeamsTabContent(
     teams: List<TeamWithPlayers>,
     isLoading: Boolean,
     bottomPadding: androidx.compose.ui.unit.Dp,
+    onTeamClick: (TeamWithPlayers) -> Unit,
 ) {
     if (isLoading) {
         EmptyState(message = "Loading teams...")
@@ -714,7 +734,10 @@ private fun TeamsTabContent(
             }
         } else {
             items(teams, key = { team -> team.team.id }) { team ->
-                TeamCard(team = team)
+                TeamCard(
+                    team = team,
+                    modifier = Modifier.clickable { onTeamClick(team) },
+                )
             }
         }
     }
@@ -729,7 +752,7 @@ private fun StoreTabContent(
     bottomPadding: androidx.compose.ui.unit.Dp,
     onPurchase: (Product) -> Unit,
 ) {
-    val hasStripeAccount = organization?.hasStripeAccount == true
+    val paymentsEnabled = organization?.canUsePaidBilling() == true
     val isCheckoutStarting = !startingProductCheckoutId.isNullOrBlank()
 
     if (isLoading) {
@@ -742,7 +765,7 @@ private fun StoreTabContent(
         contentPadding = listTabPadding(bottomPadding),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        if (!hasStripeAccount) {
+        if (!paymentsEnabled) {
             item {
                 Text(
                     text = "Payments are not available for this organization yet.",
@@ -761,7 +784,7 @@ private fun StoreTabContent(
             items(products, key = { product -> product.id }) { product ->
                 ProductCard(
                     product = product,
-                    hasStripeAccount = hasStripeAccount,
+                    paymentsEnabled = paymentsEnabled,
                     isStartingCheckout = startingProductCheckoutId == product.id,
                     isCheckoutLocked = isCheckoutStarting,
                     onPurchase = onPurchase,
@@ -793,7 +816,7 @@ private fun SectionCard(
 @Composable
 private fun ProductCard(
     product: Product,
-    hasStripeAccount: Boolean,
+    paymentsEnabled: Boolean,
     isStartingCheckout: Boolean,
     isCheckoutLocked: Boolean,
     onPurchase: (Product) -> Unit,
@@ -845,7 +868,7 @@ private fun ProductCard(
 
             Button(
                 onClick = { onPurchase(product) },
-                enabled = hasStripeAccount && isActive && !isCheckoutLocked,
+                enabled = paymentsEnabled && isActive && !isCheckoutLocked,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 if (isStartingCheckout) {
@@ -858,7 +881,7 @@ private fun ProductCard(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(text = "Preparing checkout...")
                 } else {
-                    Text(text = if (hasStripeAccount) product.purchaseButtonLabel() else "Payments unavailable")
+                    Text(text = if (paymentsEnabled) product.purchaseButtonLabel() else "Payments unavailable")
                 }
             }
         }

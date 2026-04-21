@@ -140,6 +140,12 @@ private fun MatchEditDialogContent(
     var showLoserNextDropdown by remember { mutableStateOf(false) }
     var startTime by remember(match.match.start) { mutableStateOf(match.match.start) }
     var endTime by remember(match.match.end) { mutableStateOf(match.match.end) }
+    var actualStartTime by remember(match.match.actualStart) {
+        mutableStateOf(parseInstantToken(match.match.actualStart))
+    }
+    var actualEndTime by remember(match.match.actualEnd) {
+        mutableStateOf(parseInstantToken(match.match.actualEnd))
+    }
     var winnerNextMatchId by remember(match.match.winnerNextMatchId) {
         mutableStateOf(normalizeToken(match.match.winnerNextMatchId))
     }
@@ -283,6 +289,8 @@ private fun MatchEditDialogContent(
         editedMatch.match.fieldId,
         startTime,
         endTime,
+        actualStartTime,
+        actualEndTime,
         winnerNextMatchId,
         loserNextMatchId,
         losersBracket,
@@ -485,6 +493,42 @@ private fun MatchEditDialogContent(
             }
 
             item {
+                Text(
+                    text = "Actual Times",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            item {
+                TimePickerField(
+                    label = "Actual Start Time",
+                    selectedTime = actualStartTime,
+                    onTimeSelected = { newActualStartTime ->
+                        actualStartTime = newActualStartTime
+                    },
+                    canSelectPast = true,
+                    onTimeCleared = {
+                        actualStartTime = null
+                    },
+                )
+            }
+
+            item {
+                TimePickerField(
+                    label = "Actual End Time",
+                    selectedTime = actualEndTime,
+                    onTimeSelected = { newActualEndTime ->
+                        actualEndTime = newActualEndTime
+                    },
+                    canSelectPast = true,
+                    onTimeCleared = {
+                        actualEndTime = null
+                    },
+                )
+            }
+
+            item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -642,6 +686,10 @@ private fun MatchEditDialogContent(
                         validationError = "End time must be after start time."
                         return@Button
                     }
+                    if (actualStartTime != null && actualEndTime != null && actualEndTime!! <= actualStartTime!!) {
+                        validationError = "Actual end time must be after actual start time."
+                        return@Button
+                    }
 
                     val resolvedWinnerNext = selectedWinnerNext
                     val resolvedLoserNext = selectedLoserNext?.takeIf { candidate ->
@@ -680,6 +728,8 @@ private fun MatchEditDialogContent(
                     val nextMatch = editedMatch.match.copy(
                         start = startTime,
                         end = endTime,
+                        actualStart = actualStartTime?.toString(),
+                        actualEnd = actualEndTime?.toString(),
                         losersBracket = losersBracket,
                         winnerNextMatchId = resolvedWinnerNext,
                         loserNextMatchId = resolvedLoserNext,
@@ -947,6 +997,9 @@ private fun EventOfficialSelectionField(
 
 private fun normalizeToken(value: String?): String? = value?.trim()?.takeIf(String::isNotBlank)
 
+private fun parseInstantToken(value: String?): Instant? =
+    normalizeToken(value)?.let { token -> runCatching { Instant.parse(token) }.getOrNull() }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TeamSelectionField(
@@ -1040,7 +1093,11 @@ private fun MatchLinkSelectionField(
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalTime::class)
 @Composable
 fun TimePickerField(
-    label: String, selectedTime: Instant?, onTimeSelected: (Instant) -> Unit
+    label: String,
+    selectedTime: Instant?,
+    onTimeSelected: (Instant) -> Unit,
+    canSelectPast: Boolean = false,
+    onTimeCleared: (() -> Unit)? = null,
 ) {
     var showTimePicker by remember { mutableStateOf(false) }
 
@@ -1052,8 +1109,15 @@ fun TimePickerField(
         label = label,
         readOnly = true,
         trailingIcon = {
-            IconButton(onClick = { showTimePicker = true }) {
-                Icon(Icons.Default.AccessTime, contentDescription = "Select time")
+            Row {
+                if (selectedTime != null && onTimeCleared != null) {
+                    IconButton(onClick = onTimeCleared) {
+                        Icon(Icons.Default.Remove, contentDescription = "Clear time")
+                    }
+                }
+                IconButton(onClick = { showTimePicker = true }) {
+                    Icon(Icons.Default.AccessTime, contentDescription = "Select time")
+                }
             }
         },
         onTap = { showTimePicker = true }
@@ -1068,7 +1132,8 @@ fun TimePickerField(
             onDismissRequest = { showTimePicker = false },
             showPicker = showTimePicker,
             getTime = true,
-            canSelectPast = false
+            canSelectPast = canSelectPast,
+            initialDate = selectedTime,
         )
     }
 }

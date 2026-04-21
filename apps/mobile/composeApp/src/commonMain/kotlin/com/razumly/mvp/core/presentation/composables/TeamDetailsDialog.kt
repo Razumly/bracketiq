@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -20,8 +21,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.razumly.mvp.core.data.dataTypes.TeamStaffAssignment
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
+import com.razumly.mvp.core.data.dataTypes.isActive
+import com.razumly.mvp.core.data.dataTypes.isStarted
+import com.razumly.mvp.core.data.dataTypes.normalizedRole
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 
 @Composable
 fun TeamDetailsDialog(
@@ -30,7 +38,13 @@ fun TeamDetailsDialog(
     knownUsers: List<UserData> = emptyList(),
     onDismiss: () -> Unit,
     onPlayerMessage: (UserData) -> Unit,
-    onPlayerAction: (UserData, PlayerAction) -> Unit = { _, _ -> }
+    onPlayerAction: (UserData, PlayerAction) -> Unit = { _, _ -> },
+    onBlockPlayer: (UserData, Boolean) -> Unit = { _, _ -> },
+    onUnblockPlayer: (UserData) -> Unit = {},
+    isRegistering: Boolean = false,
+    isLeaving: Boolean = false,
+    onRegisterForTeam: (() -> Unit)? = null,
+    onLeaveTeam: (() -> Unit)? = null,
 ) {
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -43,36 +57,45 @@ fun TeamDetailsDialog(
             Column(
                 modifier = Modifier.padding(24.dp)
             ) {
+                val syncedTeam = team.team.withSynchronizedMembership()
                 val knownUsersById = (knownUsers + team.players + team.pendingPlayers + listOfNotNull(team.captain, currentUser))
                     .associateBy { it.id }
-                val managerId = (team.team.managerId ?: team.team.captainId)
-                    .trim()
-                    .takeIf(String::isNotBlank)
-                val managerLabel = managerId?.let { id ->
-                    knownUsersById[id]?.displayName ?: id
-                } ?: "Unassigned"
-                val headCoachLabel = team.team.headCoachId
-                    ?.trim()
-                    ?.takeIf(String::isNotBlank)
-                    ?.let { headCoachId ->
-                    knownUsersById[headCoachId]?.displayName ?: headCoachId
-                } ?: "Unassigned"
-                val assistantCoachIds = team.team.assistantCoachIds
-                    .map(String::trim)
-                    .filter(String::isNotBlank)
-                val assistantCoachLabel = if (assistantCoachIds.isNotEmpty()) {
-                    assistantCoachIds.joinToString { assistantCoachId ->
-                        knownUsersById[assistantCoachId]?.displayName ?: assistantCoachId
-                    }
-                } else {
-                    "Unassigned"
-                }
+                val activePlayerRegistrationsByUserId = syncedTeam
+                    .activePlayerRegistrations()
+                    .associateBy(TeamPlayerRegistration::userId)
+                val currentUserRegistration = syncedTeam.playerRegistrations
+                    .firstOrNull { registration -> registration.userId == currentUser.id }
+                val isCurrentUserActive = currentUserRegistration?.isActive() == true ||
+                    syncedTeam.playerIds.contains(currentUser.id)
+                val isCurrentUserPending = currentUserRegistration?.isStarted() == true
+                val reservedOrActiveCount = syncedTeam.playerRegistrations.count { registration ->
+                    registration.isActive() || registration.isStarted()
+                }.coerceAtLeast(syncedTeam.playerIds.size)
+                val teamHasCapacity = syncedTeam.teamSize <= 0 || reservedOrActiveCount < syncedTeam.teamSize
+                val canRegister = syncedTeam.openRegistration &&
+                    !isCurrentUserActive &&
+                    !isCurrentUserPending &&
+                    teamHasCapacity &&
+                    onRegisterForTeam != null
+                val activeStaffAssignments = syncedTeam.staffAssignments
+                    .filter(TeamStaffAssignment::isActive)
+                    .sortedWith(
+                        compareBy<TeamStaffAssignment> { assignment ->
+                            when (assignment.normalizedRole()) {
+                                "MANAGER" -> 0
+                                "HEAD_COACH" -> 1
+                                else -> 2
+                            }
+                        }.thenBy(TeamStaffAssignment::userId),
+                    )
 
                 // Team Header
                 Text(
                     text = team.team.name.ifBlank { "Team ${
                         team.players.joinToString(" & ") {
-                            "${it.firstName} ${it.lastName.first()}."
+                            val firstName = it.firstName.trim().ifBlank { "Player" }
+                            val lastInitial = it.lastName.trim().firstOrNull()?.let { initial -> "$initial." }.orEmpty()
+                            "$firstName $lastInitial".trim()
                         }
                     }" },
                     style = MaterialTheme.typography.headlineSmall,
@@ -85,25 +108,40 @@ fun TeamDetailsDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "Manager: $managerLabel",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "Head Coach: $headCoachLabel",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "Assistant Coaches: $assistantCoachLabel",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
                 Spacer(modifier = Modifier.height(16.dp))
+
+                if (activeStaffAssignments.isNotEmpty()) {
+                    Text(
+                        text = "Team Staff",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    activeStaffAssignments.forEach { assignment ->
+                        val staffUser = knownUsersById[assignment.userId]
+                        val roleLabel = when (assignment.normalizedRole()) {
+                            "MANAGER" -> "Manager"
+                            "HEAD_COACH" -> "Head Coach"
+                            else -> "Assistant Coach"
+                        }
+                        if (staffUser != null) {
+                            UnifiedCard(
+                                entity = staffUser,
+                                subtitle = roleLabel,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else {
+                            Text(
+                                text = "$roleLabel: ${assignment.userId}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
 
                 // Players List
                 Text(
@@ -118,6 +156,7 @@ fun TeamDetailsDialog(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(team.players) { player ->
+                        val playerRegistration = activePlayerRegistrationsByUserId[player.id]
                         PlayerCardWithActions(
                             player = player,
                             currentUser = currentUser,
@@ -130,6 +169,9 @@ fun TeamDetailsDialog(
                             },
                             onFollow = { user -> onPlayerAction(user, PlayerAction.FOLLOW) },
                             onUnfollow = { user -> onPlayerAction(user, PlayerAction.UNFOLLOW) },
+                            onBlock = onBlockPlayer,
+                            onUnblock = onUnblockPlayer,
+                            jerseyNumber = playerRegistration?.jerseyNumber,
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
@@ -158,6 +200,34 @@ fun TeamDetailsDialog(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Actions
+                if (onRegisterForTeam != null || onLeaveTeam != null) {
+                    if (isCurrentUserActive && onLeaveTeam != null) {
+                        Button(
+                            onClick = onLeaveTeam,
+                            enabled = !isLeaving,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(if (isLeaving) "Leaving..." else "Leave Team")
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    } else if (syncedTeam.openRegistration || isCurrentUserPending) {
+                        Button(
+                            onClick = { onRegisterForTeam?.invoke() },
+                            enabled = canRegister && !isRegistering,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                when {
+                                    isRegistering -> "Registering..."
+                                    isCurrentUserPending -> "Registration Pending"
+                                    !teamHasCapacity -> "Team Full"
+                                    else -> "Register for Team"
+                                }
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
@@ -176,5 +246,5 @@ fun TeamDetailsDialog(
 enum class PlayerAction {
     FRIEND_REQUEST,
     FOLLOW,
-    UNFOLLOW
+    UNFOLLOW,
 }
