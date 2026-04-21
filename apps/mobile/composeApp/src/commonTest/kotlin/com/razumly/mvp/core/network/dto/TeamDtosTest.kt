@@ -94,4 +94,52 @@ class TeamDtosTest {
         assertFalse(serialized.contains("ageDivisionTypeName"))
         assertFalse(serialized.contains("divisionGender"))
     }
+
+    @Test
+    fun update_team_request_serialization_omits_requested_fields() {
+        val team = Team(
+            division = "OPEN",
+            name = "Aces",
+            captainId = "user-1",
+            managerId = "user-1",
+            playerIds = listOf("user-1"),
+            pending = listOf("user-2"),
+            teamSize = 6,
+            openRegistration = true,
+            registrationPriceCents = 2500,
+            playerRegistrations = listOf(
+                TeamPlayerRegistration(
+                    id = "registration-1",
+                    teamId = "team-1",
+                    userId = "user-1",
+                    status = "ACTIVE",
+                    isCaptain = true,
+                ),
+            ),
+            parentTeamId = "parent-1",
+            id = "team-1",
+        )
+
+        val serialized = jsonMVP.encodeToString(
+            UpdateTeamRequestDto(
+                team = team.toUpdateDto(
+                    omitFields = setOf(
+                        "assistantCoachIds",
+                        "parentTeamId",
+                        "playerRegistrations",
+                        "openRegistration",
+                        "registrationPriceCents",
+                    ),
+                ),
+            ),
+        )
+
+        assertFalse(serialized.contains("assistantCoachIds"))
+        assertFalse(serialized.contains("parentTeamId"))
+        assertFalse(serialized.contains("playerRegistrations"))
+        assertFalse(serialized.contains("openRegistration"))
+        assertFalse(serialized.contains("registrationPriceCents"))
+        assertTrue(serialized.contains("\"coachIds\":[]"))
+        assertTrue(serialized.contains("\"captainId\":\"user-1\""))
+    }
 }

@@ -265,20 +265,8 @@ class DefaultOrganizationDetailComponent(
             if (_isLoadingTeams.value) return@launch
             if (teamsLoaded && !force) return@launch
 
-            val teamIds = _organization.value?.teamIds.orEmpty()
-                .map { id -> id.trim() }
-                .filter(String::isNotBlank)
-                .distinct()
-
             _isLoadingTeams.value = true
-            if (teamIds.isEmpty()) {
-                _teams.value = emptyList()
-                _isLoadingTeams.value = false
-                teamsLoaded = true
-                return@launch
-            }
-
-            teamRepository.getTeamsWithPlayers(teamIds)
+            teamRepository.getTeamsByOrganization(organizationId)
                 .onSuccess { teamsWithPlayers ->
                     _teams.value = teamsWithPlayers
                 }

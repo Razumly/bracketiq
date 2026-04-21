@@ -83,10 +83,56 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
 
             assertNull(harness.component.startingProductCheckoutId.value)
         }
+
+    @Test
+    fun refreshTeams_loads_organization_teams_by_organization_id() = runTest(testDispatcher) {
+        val expectedTeam = Team(
+            division = "Open",
+            name = "Org Team",
+            captainId = "captain-1",
+            playerIds = listOf("captain-1"),
+            pending = emptyList(),
+            teamSize = 6,
+            organizationId = "org-1",
+            id = "team-1",
+        )
+        val capturedOrganizationIds = mutableListOf<String>()
+        val teamRepository = object : ITeamRepository by NoopTeamRepository {
+            override suspend fun getTeamsByOrganization(
+                organizationId: String,
+                limit: Int,
+            ): Result<List<TeamWithPlayers>> {
+                capturedOrganizationIds += organizationId
+                return Result.success(
+                    listOf(
+                        TeamWithPlayers(
+                            team = expectedTeam,
+                            captain = null,
+                            players = emptyList(),
+                            pendingPlayers = emptyList(),
+                        ),
+                    ),
+                )
+            }
+        }
+        val harness = OrganizationDetailHarness(
+            product = createProduct(period = "SINGLE"),
+            teamRepository = teamRepository,
+        )
+        advance()
+
+        harness.component.refreshTeams(force = true)
+        advance()
+
+        assertEquals(2, capturedOrganizationIds.size)
+        assertEquals(listOf("org-1", "org-1"), capturedOrganizationIds)
+        assertEquals(listOf("team-1"), harness.component.teams.value.map { team -> team.team.id })
+    }
 }
 
 private class OrganizationDetailHarness(
     val product: Product,
+    private val teamRepository: ITeamRepository = NoopTeamRepository,
 ) {
     private val organization = Organization(
         id = "org-1",
@@ -115,7 +161,7 @@ private class OrganizationDetailHarness(
         initialTab = OrganizationDetailTab.STORE,
         billingRepository = billingRepository,
         eventRepository = CreateEvent_FakeEventRepository(),
-        teamRepository = NoopTeamRepository,
+        teamRepository = teamRepository,
         fieldRepository = CreateEvent_FakeFieldRepository(),
         matchRepository = NoopMatchRepository,
         userRepository = CreateEvent_FakeUserRepository(),

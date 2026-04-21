@@ -184,36 +184,41 @@ private fun normalizeJerseyNumber(value: String?): String? =
         .take(3)
         .takeIf(String::isNotBlank)
 
-fun Team.toUpdateDto(): TeamUpdateDto {
+fun Team.toUpdateDto(
+    omitFields: Set<String> = emptySet(),
+): TeamUpdateDto {
     val synced = withSynchronizedMembership()
     return TeamUpdateDto(
-        name = synced.name,
-        division = synced.division,
-        playerIds = synced.playerIds,
-        captainId = synced.captainId,
-        managerId = synced.managerId,
-        headCoachId = synced.headCoachId,
-        assistantCoachIds = synced.assistantCoachIds,
-        coachIds = synced.coachIds,
-        parentTeamId = synced.parentTeamId,
-        pending = synced.pending,
-        teamSize = synced.teamSize,
-        profileImageId = synced.profileImageId,
-        sport = synced.sport,
-        divisionTypeId = synced.divisionTypeId,
-        divisionTypeName = synced.divisionTypeName,
-        openRegistration = synced.openRegistration,
-        registrationPriceCents = synced.registrationPriceCents.coerceAtLeast(0),
-        playerRegistrations = synced.playerRegistrations.map { registration ->
-            TeamPlayerRegistrationApiDto(
-                id = registration.id,
-                teamId = registration.teamId,
-                userId = registration.userId,
-                status = registration.status,
-                jerseyNumber = normalizeJerseyNumber(registration.jerseyNumber),
-                position = registration.position,
-                isCaptain = registration.isCaptain,
-            )
-        },
+        name = synced.name.takeUnless { "name" in omitFields },
+        division = synced.division.takeUnless { "division" in omitFields },
+        playerIds = synced.playerIds.takeUnless { "playerIds" in omitFields },
+        captainId = synced.captainId.takeUnless { "captainId" in omitFields },
+        managerId = synced.managerId.takeUnless { "managerId" in omitFields },
+        headCoachId = synced.headCoachId.takeUnless { "headCoachId" in omitFields },
+        assistantCoachIds = synced.assistantCoachIds.takeUnless { "assistantCoachIds" in omitFields },
+        coachIds = synced.coachIds.takeUnless { "coachIds" in omitFields },
+        parentTeamId = synced.parentTeamId.takeUnless { "parentTeamId" in omitFields },
+        pending = synced.pending.takeUnless { "pending" in omitFields },
+        teamSize = synced.teamSize.takeUnless { "teamSize" in omitFields },
+        profileImageId = synced.profileImageId.takeUnless { "profileImageId" in omitFields },
+        sport = synced.sport.takeUnless { "sport" in omitFields },
+        divisionTypeId = synced.divisionTypeId.takeUnless { "divisionTypeId" in omitFields },
+        divisionTypeName = synced.divisionTypeName.takeUnless { "divisionTypeName" in omitFields },
+        openRegistration = synced.openRegistration.takeUnless { "openRegistration" in omitFields },
+        registrationPriceCents = synced.registrationPriceCents.coerceAtLeast(0)
+            .takeUnless { "registrationPriceCents" in omitFields },
+        playerRegistrations = synced.playerRegistrations
+            .takeUnless { "playerRegistrations" in omitFields }
+            ?.map { registration ->
+                TeamPlayerRegistrationApiDto(
+                    id = registration.id,
+                    teamId = registration.teamId,
+                    userId = registration.userId,
+                    status = registration.status,
+                    jerseyNumber = normalizeJerseyNumber(registration.jerseyNumber),
+                    position = registration.position,
+                    isCaptain = registration.isCaptain,
+                )
+            },
     )
 }

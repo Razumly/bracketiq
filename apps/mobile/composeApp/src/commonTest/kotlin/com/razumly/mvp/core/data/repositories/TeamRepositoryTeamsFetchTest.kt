@@ -18,6 +18,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.network.AuthTokenStore
 import com.razumly.mvp.core.network.MvpApiClient
+import com.razumly.mvp.core.network.configureMvpHttpClient
 import com.razumly.mvp.core.util.jsonMVP
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -118,7 +119,16 @@ private class FakeTeamDao : TeamDao {
         error("unused")
 
     override fun getTeamsWithPlayersFlowByIds(ids: List<String>): Flow<List<com.razumly.mvp.core.data.dataTypes.TeamWithPlayers>> =
-        error("unused")
+        teams.map { cached ->
+            ids.mapNotNull(cached::get).map { team ->
+                com.razumly.mvp.core.data.dataTypes.TeamWithPlayers(
+                    team = team,
+                    captain = null,
+                    players = emptyList(),
+                    pendingPlayers = emptyList(),
+                )
+            }
+        }
 
     override suspend fun upsertTeamWithRelations(team: Team) {
         upsertTeam(team)
@@ -586,5 +596,134 @@ class TeamRepositoryTeamsFetchTest {
         assertEquals("u_manager", capturedPlayerId)
         assertEquals("u_manager", capturedManagerId)
         assertTrue(cachedTeams.any { it.id == "t_manager_only" })
+    }
+
+    @Test
+    fun getTeamsByOrganization_uses_organization_query_param_and_returns_cached_relations() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/teams", request.url.encodedPath)
+            assertEquals("org_1", request.url.parameters["organizationId"])
+            assertEquals("200", request.url.parameters["limit"])
+
+            respond(
+                content = """
+                    {
+                      "teams": [
+                        {
+                          "id": "org_team_1",
+                          "name": "Org Team",
+                          "division": "Open",
+                          "playerIds": ["u1"],
+                          "captainId": "u1",
+                          "pending": [],
+                          "teamSize": 6,
+                          "organizationId": "org_1"
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        val teams = repo.getTeamsByOrganization("org_1").getOrThrow()
+
+        assertEquals(1, teams.size)
+        assertEquals("org_team_1", teams.first().team.id)
+        assertEquals("org_1", teams.first().team.organizationId)
+    }
+
+    @Test
+    fun updateTeam_retries_without_unknown_fields_when_backend_rejects_strict_patch() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+        var requestCount = 0
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/teams/team_1", request.url.encodedPath)
+            assertEquals(HttpMethod.Patch, request.method)
+            requestCount += 1
+
+            if (requestCount == 1) {
+                respond(
+                    content = """
+                        {
+                          "error": "Invalid input",
+                          "details": {
+                            "formErrors": [
+                              "Unrecognized key(s) in object: 'assistantCoachIds', 'playerRegistrations', 'openRegistration', 'registrationPriceCents'"
+                            ],
+                            "fieldErrors": {}
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.BadRequest,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            } else {
+                respond(
+                    content = """
+                        {
+                          "id": "team_1",
+                          "name": "Compatibility Team",
+                          "division": "Open",
+                          "playerIds": ["u1"],
+                          "captainId": "u1",
+                          "pending": [],
+                          "teamSize": 6,
+                          "organizationId": "org_1"
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+        }
+
+        val http = HttpClient(engine) {
+            configureMvpHttpClient()
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+        val team = Team(
+            division = "Open",
+            name = "Compatibility Team",
+            captainId = "u1",
+            managerId = "u1",
+            playerIds = listOf("u1"),
+            pending = emptyList(),
+            teamSize = 6,
+            openRegistration = true,
+            registrationPriceCents = 2500,
+            playerRegistrations = listOf(
+                com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration(
+                    id = "registration_1",
+                    teamId = "team_1",
+                    userId = "u1",
+                    status = "ACTIVE",
+                    isCaptain = true,
+                ),
+            ),
+            id = "team_1",
+        )
+
+        val updated = repo.updateTeam(team).getOrThrow()
+
+        assertEquals("team_1", updated.id)
+        assertEquals(2, requestCount)
     }
 }

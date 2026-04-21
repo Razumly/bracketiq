@@ -11,6 +11,7 @@ import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.network.MvpApiClient
+import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.dto.CreateInvitesRequestDto
 import com.razumly.mvp.core.network.dto.DeleteInvitesRequestDto
 import com.razumly.mvp.core.network.dto.InviteCreateDto
@@ -22,6 +23,7 @@ import com.razumly.mvp.core.network.dto.TeamsResponseDto
 import com.razumly.mvp.core.network.dto.UpdateTeamRequestDto
 import com.razumly.mvp.core.network.dto.toUpdateDto
 import com.razumly.mvp.core.network.dto.toUserDataOrNull
+import com.razumly.mvp.core.util.jsonMVP
 import com.razumly.mvp.core.util.newId
 import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.CoroutineScope
@@ -35,12 +37,21 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 interface ITeamRepository : IMVPRepository {
     fun getTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>>
     suspend fun getTeamWithPlayers(teamId: String): Result<TeamWithPlayers>
     suspend fun getTeams(ids: List<String>): Result<List<Team>>
     suspend fun getTeamsWithPlayers(ids: List<String>): Result<List<TeamWithPlayers>>
+    suspend fun getTeamsByOrganization(
+        organizationId: String,
+        limit: Int = 200,
+    ): Result<List<TeamWithPlayers>> = Result.failure(NotImplementedError("Organization team lookup is not implemented."))
     suspend fun addPlayerToTeam(team: Team, player: UserData): Result<Unit>
     suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit>
     suspend fun createTeam(newTeam: Team): Result<Team>
@@ -77,6 +88,21 @@ class TeamRepository(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val userTeamsLoadingState = MutableStateFlow<Map<String, Boolean>>(emptyMap())
 
+    private companion object {
+        val RETRYABLE_TEAM_UPDATE_FIELDS = setOf(
+            "assistantCoachIds",
+            "parentTeamId",
+            "playerRegistrations",
+            "openRegistration",
+            "registrationPriceCents",
+        )
+        val UNRECOGNIZED_KEYS_REGEX = Regex(
+            pattern = "Unrecognized key\\(s\\) in object:\\s*(.+)",
+            option = RegexOption.IGNORE_CASE,
+        )
+        val QUOTED_FIELD_REGEX = Regex("'([^']+)'|`([^`]+)`|\"([^\"]+)\"")
+    }
+
     override fun getTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> {
         val teamIds = ids.distinct().filter(String::isNotBlank)
         if (teamIds.isEmpty()) {
@@ -111,6 +137,20 @@ class TeamRepository(
             getTeams(ids).getOrThrow()
             databaseService.getTeamDao.getTeamsWithPlayersFlowByIds(ids).first()
         }
+
+    override suspend fun getTeamsByOrganization(
+        organizationId: String,
+        limit: Int,
+    ): Result<List<TeamWithPlayers>> = runCatching {
+        val normalizedOrganizationId = organizationId.trim()
+        if (normalizedOrganizationId.isBlank()) return@runCatching emptyList()
+        val teams = fetchRemoteTeamsByOrganization(normalizedOrganizationId, limit)
+        if (teams.isEmpty()) {
+            return@runCatching emptyList()
+        }
+        databaseService.getTeamDao.upsertTeamsWithRelations(teams)
+        databaseService.getTeamDao.getTeamsWithPlayersFlowByIds(teams.map(Team::id)).first()
+    }
 
     override suspend fun addPlayerToTeam(team: Team, player: UserData): Result<Unit> {
         val syncedTeam = team.withSynchronizedMembership()
@@ -211,10 +251,22 @@ class TeamRepository(
     override suspend fun updateTeam(newTeam: Team): Result<Team> = singleResponse(
         networkCall = {
             val syncedTeam = newTeam.withSynchronizedMembership()
-            val updated = api.patch<UpdateTeamRequestDto, TeamApiDto>(
-                path = "api/teams/${syncedTeam.id}",
-                body = UpdateTeamRequestDto(team = syncedTeam.toUpdateDto()),
-            ).toTeamOrNull() ?: error("Update team response missing team")
+            val fullRequest = UpdateTeamRequestDto(team = syncedTeam.toUpdateDto())
+            val updated = try {
+                patchTeamUpdate(teamId = syncedTeam.id, request = fullRequest)
+            } catch (error: ApiException) {
+                if (error.statusCode != 400) {
+                    throw error
+                }
+                val retryFields = extractRetryableUnknownTeamUpdateFields(error.responseBody)
+                if (retryFields.isEmpty()) {
+                    throw error
+                }
+                patchTeamUpdate(
+                    teamId = syncedTeam.id,
+                    request = UpdateTeamRequestDto(team = syncedTeam.toUpdateDto(omitFields = retryFields)),
+                )
+            }
 
             ensureUsersCachedForTeam(updated)
             updated
@@ -427,6 +479,18 @@ class TeamRepository(
         return teams
     }
 
+    private suspend fun fetchRemoteTeamsByOrganization(
+        organizationId: String,
+        limit: Int,
+    ): List<Team> {
+        val encodedOrganizationId = organizationId.encodeURLQueryComponent()
+        val safeLimit = limit.coerceAtLeast(1)
+        val res = api.get<TeamsResponseDto>("api/teams?organizationId=$encodedOrganizationId&limit=$safeLimit")
+        val teams = res.teams.mapNotNull { it.toTeamOrNull() }
+        ensureUsersCachedForTeams(teams)
+        return teams
+    }
+
     private suspend fun fetchRemoteTeam(teamId: String): Team {
         val dto = api.get<TeamApiDto>("api/teams/$teamId")
         val team = dto.toTeamOrNull() ?: error("Team response missing team")
@@ -457,6 +521,72 @@ class TeamRepository(
                 visibilityContext = UserVisibilityContext(teamId = syncedTeam.id),
             ).getOrThrow()
         }
+    }
+
+    private suspend fun patchTeamUpdate(
+        teamId: String,
+        request: UpdateTeamRequestDto,
+    ): Team {
+        return api.patch<UpdateTeamRequestDto, TeamApiDto>(
+            path = "api/teams/$teamId",
+            body = request,
+        ).toTeamOrNull() ?: error("Update team response missing team")
+    }
+
+    private fun extractRetryableUnknownTeamUpdateFields(responseBody: String?): Set<String> {
+        val normalizedBody = responseBody?.trim()?.takeIf(String::isNotBlank) ?: return emptySet()
+        val fields = mutableSetOf<String>()
+        val json = runCatching { jsonMVP.parseToJsonElement(normalizedBody) }.getOrNull()
+        if (json != null) {
+            collectUnknownKeysFromJson(json, fields)
+            collectStringLeaves(json).forEach { message ->
+                fields += extractUnknownKeysFromMessage(message)
+            }
+        } else {
+            fields += extractUnknownKeysFromMessage(normalizedBody)
+        }
+        return fields.intersect(RETRYABLE_TEAM_UPDATE_FIELDS)
+    }
+
+    private fun collectUnknownKeysFromJson(
+        element: JsonElement,
+        fields: MutableSet<String>,
+    ) {
+        when (element) {
+            is JsonObject -> {
+                (element["unknownKeys"] as? JsonArray)
+                    ?.mapNotNull { entry -> (entry as? JsonPrimitive)?.contentOrNull?.trim() }
+                    ?.filter(String::isNotBlank)
+                    ?.forEach(fields::add)
+                element.values.forEach { value -> collectUnknownKeysFromJson(value, fields) }
+            }
+
+            is JsonArray -> element.forEach { value -> collectUnknownKeysFromJson(value, fields) }
+            is JsonPrimitive -> Unit
+        }
+    }
+
+    private fun collectStringLeaves(element: JsonElement): Sequence<String> = sequence {
+        when (element) {
+            is JsonObject -> element.values.forEach { value -> yieldAll(collectStringLeaves(value)) }
+            is JsonArray -> element.forEach { value -> yieldAll(collectStringLeaves(value)) }
+            is JsonPrimitive -> {
+                element.contentOrNull?.takeIf(String::isNotBlank)?.let { value -> yield(value) }
+            }
+        }
+    }
+
+    private fun extractUnknownKeysFromMessage(message: String): Set<String> {
+        val normalizedMessage = message.trim()
+        val unknownKeysMessage = UNRECOGNIZED_KEYS_REGEX.find(normalizedMessage)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?: return emptySet()
+        return QUOTED_FIELD_REGEX.findAll(unknownKeysMessage)
+            .mapNotNull { match ->
+                match.groupValues.drop(1).firstOrNull(String::isNotBlank)
+            }
+            .toSet()
     }
 
     private suspend fun syncInvitesForPendingDiff(
