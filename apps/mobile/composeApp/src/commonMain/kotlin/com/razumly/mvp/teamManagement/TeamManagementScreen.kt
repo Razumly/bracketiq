@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.sp
 import com.razumly.mvp.core.data.dataTypes.isCaptainOrManager
 import com.razumly.mvp.core.network.userMessage
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.TeamCard
@@ -47,6 +48,7 @@ import com.razumly.mvp.core.util.LocalLoadingHandler
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TeamManagementScreen(component: TeamManagementComponent) {
+    val navBottomPadding = LocalNavBarPadding.current.calculateBottomPadding()
     val loadingHandler = LocalLoadingHandler.current
     val currentTeams by component.currentTeams.collectAsState()
     val isCurrentTeamsLoading by component.isCurrentTeamsLoading.collectAsState()
@@ -129,7 +131,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     }
 
     Scaffold(
-        modifier = Modifier.padding(LocalNavBarPadding.current),
+        contentWindowInsets = NoScaffoldContentInsets,
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Team Management") },
@@ -141,7 +143,10 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
         },
         floatingActionButton = {
             if (currentTeams.isNotEmpty()) {
-                FloatingActionButton(onClick = onCreateTeamClick) {
+                FloatingActionButton(
+                    onClick = onCreateTeamClick,
+                    modifier = Modifier.padding(bottom = navBottomPadding),
+                ) {
                     Icon(Icons.Default.Add, contentDescription = "Create New Team")
                 }
             }
@@ -153,7 +158,8 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(paddingValues),
+                        .padding(paddingValues)
+                        .padding(bottom = navBottomPadding),
                     contentAlignment = Alignment.Center,
                 ) {
                     CircularProgressIndicator()
@@ -162,7 +168,8 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(paddingValues),
+                        .padding(paddingValues)
+                        .padding(bottom = navBottomPadding),
                     contentAlignment = Alignment.Center,
                 ) {
                     EmptyTeamCallToAction(
@@ -177,6 +184,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(paddingValues),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = navBottomPadding + 16.dp),
                 state = lazyListState,
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp)

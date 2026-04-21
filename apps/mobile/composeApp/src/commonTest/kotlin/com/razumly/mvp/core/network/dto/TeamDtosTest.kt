@@ -2,8 +2,12 @@ package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
+import com.razumly.mvp.core.util.jsonMVP
+import kotlinx.serialization.encodeToString
 import kotlin.test.Test
+import kotlin.test.assertFalse
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import kotlin.test.assertNull
 
 class TeamDtosTest {
@@ -57,5 +61,37 @@ class TeamDtosTest {
         assertNull(registrations.first { it.userId == "user-2" }.jerseyNumber)
         assertEquals("12", registrations.first { it.userId == "user-3" }.jerseyNumber)
         assertNull(registrations.first { it.userId == "user-4" }.jerseyNumber)
+    }
+
+    @Test
+    fun update_team_request_serialization_omits_derived_division_fields() {
+        val team = Team(
+            division = "c_skill_open_age_u18",
+            name = "Aces",
+            captainId = "user-1",
+            playerIds = listOf("user-1"),
+            pending = emptyList(),
+            teamSize = 6,
+            divisionTypeId = "skill_open_age_u18",
+            divisionTypeName = "Open • U18",
+            skillDivisionTypeId = "skill_open",
+            skillDivisionTypeName = "Open",
+            ageDivisionTypeId = "age_u18",
+            ageDivisionTypeName = "U18",
+            divisionGender = "C",
+            id = "team-1",
+        )
+
+        val serialized = jsonMVP.encodeToString(
+            UpdateTeamRequestDto(team = team.toUpdateDto())
+        )
+
+        assertTrue(serialized.contains("\"divisionTypeId\":\"skill_open_age_u18\""))
+        assertTrue(serialized.contains("\"divisionTypeName\":\"Open • U18\""))
+        assertFalse(serialized.contains("skillDivisionTypeId"))
+        assertFalse(serialized.contains("skillDivisionTypeName"))
+        assertFalse(serialized.contains("ageDivisionTypeId"))
+        assertFalse(serialized.contains("ageDivisionTypeName"))
+        assertFalse(serialized.contains("divisionGender"))
     }
 }

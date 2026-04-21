@@ -64,6 +64,7 @@ import com.razumly.mvp.core.data.util.parseCombinedDivisionTypeId
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.network.userMessage
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
@@ -124,6 +125,7 @@ fun CreateOrEditTeamScreen(
     onEnsureUserByEmail: (suspend (email: String) -> Result<UserData>)? = null,
     onInviteTeamRole: ((teamId: String, userId: String, inviteType: String) -> Unit)? = null,
 ) {
+    val navBottomPadding = LocalNavBarPadding.current.calculateBottomPadding()
     val syncedTeam = remember(team.team) { team.team.withSynchronizedMembership() }
     var teamName by remember { mutableStateOf(team.team.name) }
     var teamSizeInput by remember { mutableStateOf(team.team.teamSize.toString()) }
@@ -493,7 +495,7 @@ fun CreateOrEditTeamScreen(
     }
 
     Scaffold(
-        modifier = Modifier.padding(LocalNavBarPadding.current),
+        contentWindowInsets = NoScaffoldContentInsets,
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text(if (isNewTeam) "Create Team" else "Edit Team") },
@@ -510,7 +512,7 @@ fun CreateOrEditTeamScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(16.dp)
+                .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp + navBottomPadding)
                 .verticalScroll(rememberScrollState())
         ) {
             Text("Team Setup", style = MaterialTheme.typography.titleLarge)
