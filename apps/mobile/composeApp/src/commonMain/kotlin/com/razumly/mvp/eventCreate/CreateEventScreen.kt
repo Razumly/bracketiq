@@ -114,7 +114,7 @@ fun CreateEventScreen(
 
     PreparePaymentProcessor(component)
 
-    if (!termsConsentLoading && !termsConsentState.accepted) {
+    if (!termsConsentState.accepted) {
         TermsConsentDialog(
             state = termsConsentState,
             loading = termsConsentLoading,

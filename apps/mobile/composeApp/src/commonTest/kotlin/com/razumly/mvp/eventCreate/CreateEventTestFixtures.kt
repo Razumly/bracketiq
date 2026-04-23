@@ -205,13 +205,27 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
     var createdInvitesResult: List<com.razumly.mvp.core.data.dataTypes.Invite> = emptyList()
     var emailMembershipMatches: List<UserEmailMembershipMatch> = emptyList()
     var searchResults: List<UserData> = emptyList()
-    var chatTermsConsentState = ChatTermsConsentState(
+    private val initialChatTermsConsent = ChatTermsConsentState(
         version = "2026-04-14",
         url = "/terms",
         summary = listOf("There is no tolerance for objectionable content or abusive users."),
         accepted = true,
         acceptedAt = "2026-04-14T12:00:00Z",
     )
+    private val _chatTermsConsentState = MutableStateFlow(initialChatTermsConsent)
+    override val chatTermsConsentState: StateFlow<ChatTermsConsentState> = _chatTermsConsentState
+    var chatTermsConsent = initialChatTermsConsent
+        set(value) {
+            field = value
+            _chatTermsConsentState.value = value
+        }
+    private val _chatTermsConsentLoading = MutableStateFlow(false)
+    override val chatTermsConsentLoading: StateFlow<Boolean> = _chatTermsConsentLoading
+    var isChatTermsConsentLoading = false
+        set(value) {
+            field = value
+            _chatTermsConsentLoading.value = value
+        }
     var getChatTermsConsentStateCalls = 0
     var acceptChatTermsConsentCalls = 0
 
@@ -310,18 +324,18 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
     override suspend fun unfollowUser(userId: String): Result<Unit> = Result.success(Unit)
     override suspend fun removeFriend(userId: String): Result<Unit> = Result.success(Unit)
     override suspend fun getChatTermsConsentState(): Result<ChatTermsConsentState> =
-        Result.success(chatTermsConsentState).also {
+        Result.success(chatTermsConsent).also {
             getChatTermsConsentStateCalls += 1
         }
     override suspend fun acceptChatTermsConsent(): Result<ChatTermsConsentState> =
         Result.success(
-            chatTermsConsentState.copy(
+            chatTermsConsent.copy(
                 accepted = true,
-                acceptedAt = chatTermsConsentState.acceptedAt ?: "2026-04-14T12:00:00Z",
+                acceptedAt = chatTermsConsent.acceptedAt ?: "2026-04-14T12:00:00Z",
             )
         ).also { result ->
             acceptChatTermsConsentCalls += 1
-            chatTermsConsentState = result.getOrThrow()
+            chatTermsConsent = result.getOrThrow()
         }
 }
 
@@ -604,6 +618,7 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
     )
 
     val purchaseIntentCalls = mutableListOf<PurchaseIntentCall>()
+    val teamRegistrationPurchaseIntentCalls = mutableListOf<String>()
     val rentalSignLinksCalls = mutableListOf<RentalSignLinksCall>()
     val recordSignatureCalls = mutableListOf<RecordSignatureCall>()
     var rentalSignLinksResult: List<SignStep> = emptyList()
@@ -622,8 +637,10 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
         return Result.success(PurchaseIntent(paymentIntent = "pi_test", publishableKey = "pk_test"))
     }
 
-    override suspend fun createTeamRegistrationPurchaseIntent(team: Team): Result<PurchaseIntent> =
-        Result.success(PurchaseIntent(paymentIntent = "pi_team_registration", publishableKey = "pk_test"))
+    override suspend fun createTeamRegistrationPurchaseIntent(team: Team): Result<PurchaseIntent> {
+        teamRegistrationPurchaseIntentCalls += team.id
+        return Result.success(PurchaseIntent(paymentIntent = "pi_team_registration", publishableKey = "pk_test"))
+    }
 
     override suspend fun createBill(request: CreateBillRequest): Result<Bill> = Result.success(
         Bill(

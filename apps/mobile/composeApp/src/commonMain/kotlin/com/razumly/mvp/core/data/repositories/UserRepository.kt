@@ -41,6 +41,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
@@ -77,6 +78,10 @@ private val defaultStartupAuthStateFlow =
     MutableStateFlow<StartupAuthState>(StartupAuthState.Unauthenticated)
 private val defaultRequiredProfileCompletionStateFlow =
     MutableStateFlow(RequiredProfileCompletionState())
+private val defaultChatTermsConsentStateFlow =
+    MutableStateFlow(ChatTermsConsentState())
+private val defaultChatTermsConsentLoadingFlow =
+    MutableStateFlow(false)
 
 data class FamilyChild(
     val userId: String,
@@ -206,6 +211,10 @@ interface IUserRepository : IMVPRepository {
         get() = defaultStartupAuthStateFlow
     val requiredProfileCompletionState: StateFlow<RequiredProfileCompletionState>
         get() = defaultRequiredProfileCompletionStateFlow
+    val chatTermsConsentState: StateFlow<ChatTermsConsentState>
+        get() = defaultChatTermsConsentStateFlow
+    val chatTermsConsentLoading: StateFlow<Boolean>
+        get() = defaultChatTermsConsentLoadingFlow
 
     suspend fun login(email: String, password: String): Result<UserData>
     suspend fun logout(): Result<Unit>
@@ -341,6 +350,12 @@ class UserRepository(
     private val _requiredProfileCompletionState = MutableStateFlow(RequiredProfileCompletionState())
     override val requiredProfileCompletionState: StateFlow<RequiredProfileCompletionState> =
         _requiredProfileCompletionState.asStateFlow()
+    private val _chatTermsConsentState = MutableStateFlow(ChatTermsConsentState())
+    override val chatTermsConsentState: StateFlow<ChatTermsConsentState> = _chatTermsConsentState.asStateFlow()
+    private val _chatTermsConsentLoading = MutableStateFlow(false)
+    override val chatTermsConsentLoading: StateFlow<Boolean> = _chatTermsConsentLoading.asStateFlow()
+    private var hasLoadedChatTermsConsent = false
+    private var chatTermsPrefetchJob: Job? = null
     private val startupLoadJob = scope.launch {
         runCatching { loadCurrentUser() }.onFailure { throwable ->
             if (throwable !is CancellationException) {
@@ -586,7 +601,10 @@ class UserRepository(
                         "Failed reading local cached user for id=$savedId"
                     }
                 }.getOrNull()
-                if (local != null) _currentUser.value = Result.success(local)
+                if (local != null) {
+                    _currentUser.value = Result.success(local)
+                    syncChatTermsConsentFromProfile(local)
+                }
             }
 
             val me = api.get<AuthResponseDto>("api/auth/me")
@@ -654,6 +672,8 @@ class UserRepository(
             }
         }
         _currentUser.value = Result.success(profile)
+        syncChatTermsConsentFromProfile(profile)
+        scheduleChatTermsConsentPrefetch()
         _startupAuthState.value = StartupAuthState.Authenticated
     }
 
@@ -663,6 +683,11 @@ class UserRepository(
     }
 
     private suspend fun clearLoginState() {
+        chatTermsPrefetchJob?.cancelAndJoin()
+        chatTermsPrefetchJob = null
+        hasLoadedChatTermsConsent = false
+        _chatTermsConsentState.value = ChatTermsConsentState()
+        _chatTermsConsentLoading.value = false
         runCatching { tokenStore.clear() }
         runCatching { currentUserDataSource.saveUserId("") }
         _currentUser.value = Result.failure(Exception("No User"))
@@ -1389,15 +1414,42 @@ class UserRepository(
     }
 
     override suspend fun getChatTermsConsentState(): Result<ChatTermsConsentState> = runCatching {
-        api.get<ChatTermsConsentResponseDto>("api/chat/terms-consent").toState()
+        _chatTermsConsentLoading.value = true
+        val state = api.get<ChatTermsConsentResponseDto>("api/chat/terms-consent").toState()
+        hasLoadedChatTermsConsent = true
+        _chatTermsConsentState.value = state
+
+        val currentProfile = currentUser.value.getOrNull()
+        if (currentProfile != null) {
+            cacheCurrentUserProfile(
+                currentProfile.copy(
+                    chatTermsAcceptedAt = state.acceptedAt,
+                    chatTermsVersion = state.version.takeIf(String::isNotBlank),
+                )
+            )
+        }
+
+        state
+    }.onFailure { throwable ->
+        if (throwable is CancellationException) {
+            throw throwable
+        }
+    }.also {
+        chatTermsPrefetchJob = null
+        _chatTermsConsentLoading.value = false
     }
 
     override suspend fun acceptChatTermsConsent(): Result<ChatTermsConsentState> = runCatching {
+        chatTermsPrefetchJob?.cancelAndJoin()
+        chatTermsPrefetchJob = null
+        _chatTermsConsentLoading.value = true
         val response = api.post<ChatTermsConsentRequestDto, ChatTermsConsentResponseDto>(
             path = "api/chat/terms-consent",
             body = ChatTermsConsentRequestDto(accepted = true),
         )
         val state = response.toState()
+        hasLoadedChatTermsConsent = true
+        _chatTermsConsentState.value = state
         val currentProfile = currentUser.value.getOrNull()
         if (currentProfile != null) {
             cacheCurrentUserProfile(
@@ -1408,6 +1460,12 @@ class UserRepository(
             )
         }
         state
+    }.onFailure { throwable ->
+        if (throwable is CancellationException) {
+            throw throwable
+        }
+    }.also {
+        _chatTermsConsentLoading.value = false
     }
 
     private suspend fun refreshCurrentUserFromSocialResponse(responseUser: UserProfileDto?) {
@@ -1415,6 +1473,37 @@ class UserRepository(
             ?: currentUser.value.getOrNull()?.id?.let { fetchUserProfile(it) }
             ?: error("Failed to refresh current user after social update.")
         cacheCurrentUserProfile(updated)
+    }
+
+    private fun syncChatTermsConsentFromProfile(profile: UserData?) {
+        if (profile == null) {
+            if (!hasLoadedChatTermsConsent) {
+                _chatTermsConsentState.value = ChatTermsConsentState()
+            }
+            return
+        }
+
+        val acceptedAt = profile.chatTermsAcceptedAt?.trim()?.takeIf(String::isNotBlank)
+        val version = profile.chatTermsVersion?.trim()?.takeIf(String::isNotBlank)
+        if (acceptedAt == null && version == null && hasLoadedChatTermsConsent) {
+            return
+        }
+
+        val currentState = _chatTermsConsentState.value
+        _chatTermsConsentState.value = currentState.copy(
+            version = version ?: currentState.version,
+            accepted = acceptedAt != null,
+            acceptedAt = acceptedAt,
+        )
+    }
+
+    private fun scheduleChatTermsConsentPrefetch() {
+        if (hasLoadedChatTermsConsent || chatTermsPrefetchJob?.isActive == true) {
+            return
+        }
+        chatTermsPrefetchJob = scope.launch {
+            getChatTermsConsentState()
+        }
     }
 }
 

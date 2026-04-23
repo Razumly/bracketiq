@@ -81,11 +81,9 @@ class DefaultChatGroupComponent(
     override val friends = _friends.asStateFlow()
     private val _isChatMuted = MutableStateFlow(false)
     override val isChatMuted: StateFlow<Boolean> = _isChatMuted.asStateFlow()
-    private val _chatTermsState = MutableStateFlow(ChatTermsConsentState())
-    override val chatTermsState = _chatTermsState.asStateFlow()
-    private val _isCheckingChatTerms = MutableStateFlow(true)
-    override val isCheckingChatTerms = _isCheckingChatTerms.asStateFlow()
-    private val _showChatTermsPrompt = MutableStateFlow(false)
+    override val chatTermsState = userRepository.chatTermsConsentState
+    override val isCheckingChatTerms = userRepository.chatTermsConsentLoading
+    private val _showChatTermsPrompt = MutableStateFlow(!chatTermsState.value.accepted)
     override val showChatTermsPrompt = _showChatTermsPrompt.asStateFlow()
 
     override val chatGroup = chatTermsState
@@ -115,7 +113,21 @@ class DefaultChatGroupComponent(
     override val currentUser: UserData
         get() = currentUserState.value
     init {
-        refreshChatTermsState(showPromptWhenRequired = true)
+        scope.launch {
+            chatTermsState
+                .map { state -> state.accepted }
+                .distinctUntilChanged()
+                .collect { accepted ->
+                    if (accepted) {
+                        _showChatTermsPrompt.value = false
+                        chatGroupRepository.refreshChatGroupsAndMessages().onFailure {
+                            _errorState.value = it.userMessage("Failed to load chat.")
+                        }
+                    } else {
+                        _showChatTermsPrompt.value = true
+                    }
+                }
+        }
         scope.launch {
             currentUserState
                 .map { user -> user.friendIds }
@@ -350,21 +362,11 @@ class DefaultChatGroupComponent(
 
     override fun acceptChatTermsPrompt() {
         scope.launch {
-            _isCheckingChatTerms.value = true
             userRepository.acceptChatTermsConsent()
-                .onSuccess { state ->
-                    _chatTermsState.value = state
-                    _showChatTermsPrompt.value = !state.accepted
-                    if (state.accepted) {
-                        chatGroupRepository.refreshChatGroupsAndMessages().onFailure {
-                            _errorState.value = it.userMessage("Failed to load chat.")
-                        }
-                    }
-                }
+                .onSuccess { }
                 .onFailure {
                     _errorState.value = it.userMessage("Failed to record chat terms consent.")
                 }
-            _isCheckingChatTerms.value = false
         }
     }
 
@@ -383,23 +385,4 @@ class DefaultChatGroupComponent(
         val unreadSignature: String,
     )
 
-    private fun refreshChatTermsState(showPromptWhenRequired: Boolean) {
-        scope.launch {
-            _isCheckingChatTerms.value = true
-            userRepository.getChatTermsConsentState()
-                .onSuccess { state ->
-                    _chatTermsState.value = state
-                    _showChatTermsPrompt.value = showPromptWhenRequired && !state.accepted
-                    if (state.accepted) {
-                        chatGroupRepository.refreshChatGroupsAndMessages().onFailure {
-                            _errorState.value = it.userMessage("Failed to load chat.")
-                        }
-                    }
-                }
-                .onFailure {
-                    _errorState.value = it.userMessage("Failed to check chat access.")
-                }
-            _isCheckingChatTerms.value = false
-        }
-    }
 }

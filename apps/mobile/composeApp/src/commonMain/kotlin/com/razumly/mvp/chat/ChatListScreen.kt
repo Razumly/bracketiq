@@ -91,7 +91,16 @@ fun ChatListScreen(component: ChatListComponent) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            if (isCheckingChatTerms) {
+            if (chatTermsState.accepted) {
+                items(chatList) {
+                    ChatListItem(
+                        modifier = Modifier.clickable { component.onChatSelected(it) },
+                        chatGroup = it,
+                        currentUserId = component.currentUser.id,
+                        summary = chatSummaries[it.chatGroup.id],
+                    )
+                }
+            } else if (isCheckingChatTerms) {
                 item {
                     Text(
                         text = "Checking chat access...",
@@ -107,15 +116,6 @@ fun ChatListScreen(component: ChatListComponent) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-            } else {
-                items(chatList) {
-                    ChatListItem(
-                        modifier = Modifier.clickable { component.onChatSelected(it) },
-                        chatGroup = it,
-                        currentUserId = component.currentUser.id,
-                        summary = chatSummaries[it.chatGroup.id],
-                    )
-                }
             }
         }
         AnimatedVisibility(showNewChatDialog) {
@@ -125,7 +125,7 @@ fun ChatListScreen(component: ChatListComponent) {
         if (showChatTermsPrompt) {
             TermsConsentDialog(
                 state = chatTermsState,
-                loading = false,
+                loading = isCheckingChatTerms,
                 onAccept = component::acceptChatTermsPrompt,
                 onDismiss = component::dismissChatTermsPrompt,
                 intro = "Opening chats or creating events in Bracket IQ requires agreement to the Terms and EULA.",

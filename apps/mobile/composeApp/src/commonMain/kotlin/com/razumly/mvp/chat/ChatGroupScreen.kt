@@ -82,6 +82,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
     val suggestedPlayers by component.suggestedPlayers.collectAsState()
     val isChatMuted by component.isChatMuted.collectAsState()
     val chatTermsState by component.chatTermsState.collectAsState()
+    val isCheckingChatTerms by component.isCheckingChatTerms.collectAsState()
     val showChatTermsPrompt by component.showChatTermsPrompt.collectAsState()
     val currentUserId = component.currentUser.id
     val chatGroup = chatGroupWithRelations?.chatGroup ?: ChatGroup.empty()
@@ -411,7 +412,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
     if (showChatTermsPrompt) {
         TermsConsentDialog(
             state = chatTermsState,
-            loading = false,
+            loading = isCheckingChatTerms,
             onAccept = component::acceptChatTermsPrompt,
             onDismiss = component::dismissChatTermsPrompt,
             intro = "Opening chats or creating events in Bracket IQ requires agreement to the Terms and EULA.",

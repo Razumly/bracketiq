@@ -48,6 +48,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -119,6 +120,8 @@ private class UserRepositoryHttp_UnusedEventDao : EventDao {
     override suspend fun deleteEvent(game: Event) {}
     override suspend fun deleteEventsById(ids: List<String>) {}
     override suspend fun deleteAllEvents() {}
+    override suspend fun deleteAllEventUserCrossRefs() {}
+    override suspend fun deleteAllEventTeamCrossRefs() {}
     override fun getAllCachedEvents(): Flow<List<Event>> = flowOf(emptyList())
     override suspend fun getEventTeamCrossRefsByEventId(eventId: String): List<EventTeamCrossRef> = emptyList()
     override suspend fun upsertEventTeamCrossRefs(crossRefs: List<EventTeamCrossRef>) {}
@@ -135,6 +138,7 @@ private class UserRepositoryHttp_UnusedEventDao : EventDao {
     override suspend fun deleteEventCrossRefs(eventId: String) {}
     override suspend fun deleteEventUserCrossRefsByEventId(eventId: String) {}
     override suspend fun deleteEventTeamCrossRefsByEventId(eventId: String) {}
+    override suspend fun clearAllEventsWithCrossRefs() {}
 }
 
 private class UserRepositoryHttp_UnusedTeamDao : TeamDao {
@@ -184,6 +188,91 @@ private fun outgoingBodyText(content: OutgoingContent): String = when (content) 
 }
 
 class UserRepositoryHttpTest {
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun login_prefetches_chat_terms_consent_state() = runTest {
+        val requestedPaths = mutableListOf<String>()
+        val tokenStore = UserRepositoryHttp_InMemoryAuthTokenStore()
+        val engine = MockEngine { request ->
+            requestedPaths += "${request.method.value} ${request.url.encodedPath}"
+            when (request.url.encodedPath) {
+                "/api/auth/login" -> respond(
+                    content = """
+                        {
+                          "token": "token-123",
+                          "user": {
+                            "id": "user_1",
+                            "email": "user@example.test",
+                            "name": "Sam Player"
+                          },
+                          "profile": {
+                            "id": "user_1",
+                            "firstName": "Sam",
+                            "lastName": "Player",
+                            "teamIds": [],
+                            "friendIds": [],
+                            "friendRequestIds": [],
+                            "friendRequestSentIds": [],
+                            "followingIds": [],
+                            "blockedUserIds": [],
+                            "hiddenEventIds": [],
+                            "userName": "sam_player",
+                            "chatTermsAcceptedAt": null,
+                            "chatTermsVersion": null
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/chat/terms-consent" -> {
+                    assertEquals("Bearer token-123", request.headers[HttpHeaders.Authorization])
+                    respond(
+                        content = """
+                            {
+                              "accepted": false,
+                              "acceptedAt": null,
+                              "version": "2026-04-14",
+                              "url": "/terms",
+                              "summary": ["No tolerance for objectionable content."]
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected request ${request.method.value} ${request.url}")
+            }
+        }
+        val client = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val prefsStore = UserRepositoryHttp_InMemoryPreferencesDataStore()
+        val repository = UserRepository(
+            databaseService = UserRepositoryHttp_FakeDatabaseService(),
+            api = MvpApiClient(client, "http://localhost", tokenStore),
+            tokenStore = tokenStore,
+            currentUserDataSource = CurrentUserDataSource(prefsStore),
+            startupDispatcher = StandardTestDispatcher(testScheduler),
+        )
+
+        val profile = repository.login("user@example.test", "password").getOrThrow()
+        advanceUntilIdle()
+
+        assertEquals("user_1", profile.id)
+        assertEquals(false, repository.chatTermsConsentState.value.accepted)
+        assertEquals("2026-04-14", repository.chatTermsConsentState.value.version)
+        assertEquals(
+            listOf(
+                "POST /api/auth/login",
+                "GET /api/chat/terms-consent",
+            ),
+            requestedPaths,
+        )
+    }
+
     @Test
     fun getChatTermsConsentState_reads_server_payload() = runTest {
         val engine = MockEngine { request ->

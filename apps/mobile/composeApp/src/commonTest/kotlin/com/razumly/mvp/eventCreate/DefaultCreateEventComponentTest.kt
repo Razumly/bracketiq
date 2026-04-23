@@ -23,20 +23,20 @@ import kotlin.test.assertTrue
 
 class DefaultCreateEventComponentTest : MainDispatcherTest() {
     @Test
-    fun create_screen_starts_in_terms_loading_state() = runTest(testDispatcher) {
+    fun create_screen_terms_loading_mirrors_repository_state() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
 
-        assertTrue(harness.component.termsConsentLoading.value)
-
-        advance()
-
         assertFalse(harness.component.termsConsentLoading.value)
+
+        harness.userRepository.isChatTermsConsentLoading = true
+
+        assertTrue(harness.component.termsConsentLoading.value)
     }
 
     @Test
-    fun create_screen_loads_existing_terms_consent_state_on_init() = runTest(testDispatcher) {
+    fun create_screen_uses_shared_terms_consent_state_without_refetching() = runTest(testDispatcher) {
         val harness = CreateEventHarness().apply {
-            userRepository.chatTermsConsentState = userRepository.chatTermsConsentState.copy(
+            userRepository.chatTermsConsent = userRepository.chatTermsConsent.copy(
                 accepted = false,
                 acceptedAt = null,
             )
@@ -44,19 +44,18 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
         advance()
 
-        assertEquals(1, harness.userRepository.getChatTermsConsentStateCalls)
+        assertEquals(0, harness.userRepository.getChatTermsConsentStateCalls)
         assertFalse(harness.component.termsConsentState.value.accepted)
     }
 
     @Test
     fun accepting_terms_updates_create_screen_consent_state() = runTest(testDispatcher) {
         val harness = CreateEventHarness().apply {
-            userRepository.chatTermsConsentState = userRepository.chatTermsConsentState.copy(
+            userRepository.chatTermsConsent = userRepository.chatTermsConsent.copy(
                 accepted = false,
                 acceptedAt = null,
             )
         }
-        advance()
 
         harness.component.acceptTermsConsent()
         advance()

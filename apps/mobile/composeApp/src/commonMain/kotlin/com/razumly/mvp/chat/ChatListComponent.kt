@@ -92,13 +92,12 @@ class DefaultChatListComponent(
 
     private val _friends = MutableStateFlow<List<UserData>>(listOf())
     override val friends = _friends.asStateFlow()
-    private val _chatTermsState = MutableStateFlow(ChatTermsConsentState())
-    override val chatTermsState = _chatTermsState.asStateFlow()
-    private val _isCheckingChatTerms = MutableStateFlow(true)
-    override val isCheckingChatTerms = _isCheckingChatTerms.asStateFlow()
-    private val _showChatTermsPrompt = MutableStateFlow(false)
+    override val chatTermsState = userRepository.chatTermsConsentState
+    override val isCheckingChatTerms = userRepository.chatTermsConsentLoading
+    private val _showChatTermsPrompt = MutableStateFlow(!chatTermsState.value.accepted)
     override val showChatTermsPrompt = _showChatTermsPrompt.asStateFlow()
     private var pendingChatAction: (() -> Unit)? = null
+    private var hasDismissedAutoChatTermsPrompt = false
 
     override val chatGroups = chatGroupRepository.chatGroupsFlow.map { result ->
         result.getOrElse {
@@ -121,7 +120,22 @@ class DefaultChatListComponent(
         .stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
     init {
-        refreshChatTermsState(showPromptWhenRequired = true)
+        scope.launch {
+            chatTermsState
+                .map { state -> state.accepted }
+                .distinctUntilChanged()
+                .collect { accepted ->
+                    if (accepted) {
+                        hasDismissedAutoChatTermsPrompt = false
+                        _showChatTermsPrompt.value = false
+                        chatGroupRepository.refreshChatGroupsAndMessages().onFailure {
+                            _errorState.value = it.userMessage("Failed to load chats.")
+                        }
+                    } else if (!hasDismissedAutoChatTermsPrompt) {
+                        _showChatTermsPrompt.value = true
+                    }
+                }
+        }
         scope.launch {
             currentUserState
                 .map { user -> user.friendIds }
@@ -249,20 +263,15 @@ class DefaultChatListComponent(
 
     override fun dismissChatTermsPrompt() {
         pendingChatAction = null
+        hasDismissedAutoChatTermsPrompt = true
         _showChatTermsPrompt.value = false
     }
 
     override fun acceptChatTermsPrompt() {
         scope.launch {
-            _isCheckingChatTerms.value = true
             userRepository.acceptChatTermsConsent()
                 .onSuccess { state ->
-                    _chatTermsState.value = state
-                    _showChatTermsPrompt.value = !state.accepted
                     if (state.accepted) {
-                        chatGroupRepository.refreshChatGroupsAndMessages().onFailure {
-                            _errorState.value = it.userMessage("Failed to load chats.")
-                        }
                         pendingChatAction?.invoke()
                         pendingChatAction = null
                     }
@@ -270,7 +279,6 @@ class DefaultChatListComponent(
                 .onFailure { throwable ->
                     _errorState.value = throwable.userMessage("Failed to record chat terms consent.")
                 }
-            _isCheckingChatTerms.value = false
         }
     }
 
@@ -281,25 +289,5 @@ class DefaultChatListComponent(
         }
         pendingChatAction = onAccepted
         _showChatTermsPrompt.value = true
-    }
-
-    private fun refreshChatTermsState(showPromptWhenRequired: Boolean) {
-        scope.launch {
-            _isCheckingChatTerms.value = true
-            userRepository.getChatTermsConsentState()
-                .onSuccess { state ->
-                    _chatTermsState.value = state
-                    _showChatTermsPrompt.value = showPromptWhenRequired && !state.accepted
-                    if (state.accepted) {
-                        chatGroupRepository.refreshChatGroupsAndMessages().onFailure {
-                            _errorState.value = it.userMessage("Failed to load chats.")
-                        }
-                    }
-                }
-                .onFailure { throwable ->
-                    _errorState.value = throwable.userMessage("Failed to check chat access.")
-                }
-            _isCheckingChatTerms.value = false
-        }
     }
 }
