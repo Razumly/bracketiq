@@ -1,5 +1,6 @@
 package com.razumly.mvp.core.network.dto
 
+import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
 import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
@@ -54,5 +55,47 @@ class MatchDtosTest {
 
         assertEquals(listOf("player-1"), dto.officialIds?.map(MatchOfficialAssignment::userId))
         assertEquals(OfficialAssignmentHolderType.PLAYER, dto.officialIds?.single()?.holderType)
+    }
+
+    @Test
+    fun match_api_dto_uses_embedded_field_id_when_scalar_field_id_is_missing() {
+        val dto = MatchApiDto(
+            id = "match-3",
+            matchId = 3,
+            eventId = "event-3",
+            field = MatchEmbeddedFieldDto(
+                id = "field-7",
+                name = "Field 7",
+            ),
+        )
+
+        val match = dto.toMatchOrNull()
+
+        assertNotNull(match)
+        assertEquals("field-7", match.fieldId)
+    }
+
+    @Test
+    fun embedded_field_dto_only_maps_to_field_when_required_field_data_exists() {
+        val partialField = MatchEmbeddedFieldDto(
+            id = "field-7",
+            name = "Field 7",
+        )
+        val completeField = MatchEmbeddedFieldDto(
+            id = "field-8",
+            fieldNumber = 8,
+            name = "Field 8",
+        )
+
+        assertEquals(null, partialField.toFieldOrNull())
+        assertEquals(
+            Field(
+                id = "field-8",
+                fieldNumber = 8,
+                inUse = null,
+                name = "Field 8",
+            ),
+            completeField.toFieldOrNull(),
+        )
     }
 }

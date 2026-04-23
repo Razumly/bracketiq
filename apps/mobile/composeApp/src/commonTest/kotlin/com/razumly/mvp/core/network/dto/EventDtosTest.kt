@@ -9,14 +9,53 @@ import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.util.jsonMVP
+import kotlinx.serialization.decodeFromString
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 class EventDtosTest {
+    @Test
+    fun schedule_event_response_decodes_matches_with_partial_embedded_fields() {
+        val response = jsonMVP.decodeFromString<ScheduleEventResponseDto>(
+            """
+                {
+                  "preview": false,
+                  "event": {
+                    "id": "event_1",
+                    "name": "Scheduled Event",
+                    "hostId": "host_1",
+                    "eventType": "LEAGUE",
+                    "start": "2026-06-01T08:00:00Z",
+                    "end": "2026-06-01T09:00:00Z",
+                    "maxParticipants": 8
+                  },
+                  "matches": [
+                    {
+                      "id": "match_1",
+                      "matchId": 1,
+                      "eventId": "event_1",
+                      "field": {
+                        "id": "field_1",
+                        "name": "Court 1"
+                      }
+                    }
+                  ]
+                }
+            """.trimIndent(),
+        )
+
+        val match = response.matches.single().toMatchOrNull()
+
+        assertNotNull(match)
+        assertEquals("field_1", match.fieldId)
+    }
+
     @Test
     fun to_update_dto_trims_and_deduplicates_required_template_ids() {
         val event = Event(

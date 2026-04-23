@@ -1,5 +1,6 @@
 package com.razumly.mvp.core.network.dto
 
+import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
@@ -10,6 +11,42 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
+
+@Serializable
+data class MatchEmbeddedFieldDto(
+    val id: String? = null,
+    @SerialName("\$id") val legacyId: String? = null,
+    val fieldNumber: Int? = null,
+    val divisions: List<String>? = null,
+    val lat: Double? = null,
+    val long: Double? = null,
+    val heading: Double? = null,
+    val inUse: Boolean? = null,
+    val name: String? = null,
+    val rentalSlotIds: List<String>? = null,
+    val location: String? = null,
+    val organizationId: String? = null,
+) {
+    fun resolvedId(): String? = id ?: legacyId
+
+    fun toFieldOrNull(): Field? {
+        val resolvedId = resolvedId()?.trim()?.takeIf(String::isNotBlank) ?: return null
+        val resolvedFieldNumber = fieldNumber?.takeIf { it > 0 } ?: return null
+        return Field(
+            id = resolvedId,
+            fieldNumber = resolvedFieldNumber,
+            divisions = divisions ?: emptyList(),
+            lat = lat,
+            long = long,
+            heading = heading,
+            inUse = inUse,
+            name = name,
+            rentalSlotIds = rentalSlotIds ?: emptyList(),
+            location = location,
+            organizationId = organizationId,
+        )
+    }
+}
 
 @Serializable
 data class MatchApiDto(
@@ -24,6 +61,7 @@ data class MatchApiDto(
     val eventId: String? = null,
     val officialId: String? = null,
     val fieldId: String? = null,
+    val field: MatchEmbeddedFieldDto? = null,
     val status: String? = null,
     val resultStatus: String? = null,
     val resultType: String? = null,
@@ -57,6 +95,8 @@ data class MatchApiDto(
         val resolvedId = id ?: legacyId
         val resolvedMatchId = matchId
         val resolvedEventId = eventId
+        val resolvedFieldId = fieldId?.trim()?.takeIf(String::isNotBlank)
+            ?: field?.resolvedId()?.trim()?.takeIf(String::isNotBlank)
         if (resolvedId.isNullOrBlank() || resolvedMatchId == null) return null
         if (resolvedEventId.isNullOrBlank()) return null
 
@@ -69,7 +109,7 @@ data class MatchApiDto(
             team2Seed = team2Seed,
             eventId = resolvedEventId,
             officialId = officialId,
-            fieldId = fieldId,
+            fieldId = resolvedFieldId,
             status = status,
             resultStatus = resultStatus,
             resultType = resultType,

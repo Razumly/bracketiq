@@ -8,7 +8,7 @@ import kotlinx.serialization.Serializable
 @Entity
 @Serializable
 data class Field(
-    val fieldNumber: Int,
+    val fieldNumber: Int = 0,
     val divisions: List<String> = emptyList(),
     val lat: Double? = null,
     val long: Double? = null,
