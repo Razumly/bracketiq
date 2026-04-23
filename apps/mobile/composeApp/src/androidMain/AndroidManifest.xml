@@ -15,6 +15,10 @@
         android:roundIcon="@mipmap/ic_launcher_biq_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.MvpApp.Starting">
+        <!-- Required when Play services falls back to the legacy Maps renderer on API 28+. -->
+        <uses-library
+            android:name="org.apache.http.legacy"
+            android:required="false" />
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="DEFAULT_NOTIFICATION_CHANNEL_ID" />
