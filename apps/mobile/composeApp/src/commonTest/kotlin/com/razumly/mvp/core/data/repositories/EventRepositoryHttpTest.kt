@@ -2060,6 +2060,9 @@ class EventRepositoryHttpTest {
         assertEquals("host_1", result.standingsConfirmedBy)
         assertEquals(1, result.rows.size)
         assertEquals("team_1", result.rows.first().teamId)
+        assertEquals(3, result.rows.first().wins)
+        assertEquals(0, result.rows.first().losses)
+        assertEquals(0, result.rows.first().draws)
         assertEquals(10.0, result.rows.first().finalPoints)
         assertEquals(1.0, result.rows.first().pointsDelta)
     }

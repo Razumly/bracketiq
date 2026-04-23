@@ -89,6 +89,26 @@ class TeamRepository(
     private val userTeamsLoadingState = MutableStateFlow<Map<String, Boolean>>(emptyMap())
 
     private companion object {
+        val TEAM_UPDATE_FIELDS = setOf(
+            "name",
+            "division",
+            "playerIds",
+            "captainId",
+            "managerId",
+            "headCoachId",
+            "assistantCoachIds",
+            "coachIds",
+            "parentTeamId",
+            "pending",
+            "teamSize",
+            "profileImageId",
+            "sport",
+            "divisionTypeId",
+            "divisionTypeName",
+            "openRegistration",
+            "registrationPriceCents",
+            "playerRegistrations",
+        )
         val RETRYABLE_TEAM_UPDATE_FIELDS = setOf(
             "assistantCoachIds",
             "parentTeamId",
@@ -242,20 +262,37 @@ class TeamRepository(
     override suspend fun updateTeam(newTeam: Team): Result<Team> = singleResponse(
         networkCall = {
             val syncedTeam = newTeam.withSynchronizedMembership()
-            val fullRequest = UpdateTeamRequestDto(team = syncedTeam.toUpdateDto())
+            val cachedTeam = runCatching { databaseService.getTeamDao.getTeam(syncedTeam.id) }.getOrNull()
+            val preparedUpdate = prepareTeamUpdate(
+                newTeam = syncedTeam,
+                cachedTeam = cachedTeam,
+            )
+            if (preparedUpdate == null) {
+                return@singleResponse syncedTeam
+            }
+
             val updated = try {
-                patchTeamUpdate(teamId = syncedTeam.id, request = fullRequest)
+                patchTeamUpdate(teamId = syncedTeam.id, request = preparedUpdate.request)
             } catch (error: ApiException) {
                 if (error.statusCode != 400) {
                     throw error
                 }
                 val retryFields = extractRetryableUnknownTeamUpdateFields(error.responseBody)
+                    .intersect(preparedUpdate.includedFields)
                 if (retryFields.isEmpty()) {
+                    throw error
+                }
+                val retryPreparedUpdate = prepareTeamUpdate(
+                    newTeam = syncedTeam,
+                    cachedTeam = cachedTeam,
+                    omitFields = retryFields,
+                )
+                if (retryPreparedUpdate == null || retryPreparedUpdate.includedFields.isEmpty()) {
                     throw error
                 }
                 patchTeamUpdate(
                     teamId = syncedTeam.id,
-                    request = UpdateTeamRequestDto(team = syncedTeam.toUpdateDto(omitFields = retryFields)),
+                    request = retryPreparedUpdate.request,
                 )
             }
 
@@ -544,6 +581,66 @@ class TeamRepository(
         ).toTeamOrNull() ?: error("Update team response missing team")
     }
 
+    private fun prepareTeamUpdate(
+        newTeam: Team,
+        cachedTeam: Team?,
+        omitFields: Set<String> = emptySet(),
+    ): PreparedTeamUpdate? {
+        val syncedNewTeam = newTeam.withSynchronizedMembership()
+        val syncedCachedTeam = cachedTeam?.withSynchronizedMembership()
+        val changedFields = syncedCachedTeam
+            ?.let { existingTeam -> diffTeamUpdateFields(existingTeam = existingTeam, updatedTeam = syncedNewTeam) }
+            ?: TEAM_UPDATE_FIELDS
+        if (changedFields.isEmpty()) {
+            return null
+        }
+
+        val includedFields = changedFields - omitFields
+        return PreparedTeamUpdate(
+            request = UpdateTeamRequestDto(
+                team = syncedNewTeam.toUpdateDto(
+                    omitFields = omitFields,
+                    includeFields = syncedCachedTeam?.let { includedFields },
+                ),
+            ),
+            includedFields = includedFields,
+        )
+    }
+
+    private fun diffTeamUpdateFields(
+        existingTeam: Team,
+        updatedTeam: Team,
+    ): Set<String> = buildSet {
+        if (existingTeam.name != updatedTeam.name) add("name")
+        if (existingTeam.division != updatedTeam.division) add("division")
+        if (existingTeam.playerIds != updatedTeam.playerIds) add("playerIds")
+        if (existingTeam.captainId != updatedTeam.captainId) add("captainId")
+        if (existingTeam.managerId != updatedTeam.managerId) add("managerId")
+        if (existingTeam.headCoachId != updatedTeam.headCoachId) add("headCoachId")
+        if (existingTeam.assistantCoachIds != updatedTeam.assistantCoachIds) {
+            add("assistantCoachIds")
+            add("coachIds")
+        }
+        if (existingTeam.parentTeamId != updatedTeam.parentTeamId) add("parentTeamId")
+        if (existingTeam.pending != updatedTeam.pending) add("pending")
+        if (existingTeam.teamSize != updatedTeam.teamSize) add("teamSize")
+        if (existingTeam.profileImageId != updatedTeam.profileImageId) add("profileImageId")
+        if (existingTeam.sport != updatedTeam.sport) add("sport")
+        if (existingTeam.divisionTypeId != updatedTeam.divisionTypeId) add("divisionTypeId")
+        if (existingTeam.divisionTypeName != updatedTeam.divisionTypeName) add("divisionTypeName")
+        if (existingTeam.openRegistration != updatedTeam.openRegistration) add("openRegistration")
+        if (existingTeam.registrationPriceCents != updatedTeam.registrationPriceCents) add("registrationPriceCents")
+        if (!playerRegistrationsEquivalent(existingTeam, updatedTeam)) add("playerRegistrations")
+    }
+
+    private fun playerRegistrationsEquivalent(
+        existingTeam: Team,
+        updatedTeam: Team,
+    ): Boolean {
+        return existingTeam.toUpdateDto(includeFields = setOf("playerRegistrations")).playerRegistrations ==
+            updatedTeam.toUpdateDto(includeFields = setOf("playerRegistrations")).playerRegistrations
+    }
+
     private fun extractRetryableUnknownTeamUpdateFields(responseBody: String?): Set<String> {
         val normalizedBody = responseBody?.trim()?.takeIf(String::isNotBlank) ?: return emptySet()
         val fields = mutableSetOf<String>()
@@ -599,6 +696,11 @@ class TeamRepository(
             }
             .toSet()
     }
+
+    private data class PreparedTeamUpdate(
+        val request: UpdateTeamRequestDto,
+        val includedFields: Set<String>,
+    )
 
     private suspend fun syncInvitesForPendingDiff(
         teamId: String,

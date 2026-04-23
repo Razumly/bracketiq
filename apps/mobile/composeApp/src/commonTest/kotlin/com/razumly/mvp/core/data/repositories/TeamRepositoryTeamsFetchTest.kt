@@ -30,6 +30,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.OutgoingContent
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +43,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -52,6 +55,11 @@ private class InMemoryAuthTokenStore(
     override suspend fun get(): String = token
     override suspend fun set(token: String) { this.token = token }
     override suspend fun clear() { token = "" }
+}
+
+private fun outgoingBodyText(content: OutgoingContent): String = when (content) {
+    is OutgoingContent.ByteArrayContent -> content.bytes().decodeToString()
+    else -> error("Unsupported outgoing content ${content::class.simpleName}")
 }
 
 private class FakeTeamDao : TeamDao {
@@ -869,6 +877,118 @@ class TeamRepositoryTeamsFetchTest {
 
         assertEquals("team_1", updated.id)
         assertEquals(2, requestCount)
+    }
+
+    @Test
+    fun updateTeam_sends_only_changed_fields_in_patch_payload() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+        var capturedRequestBody = ""
+
+        val existingTeam = Team(
+            division = "Open",
+            name = "Existing Team",
+            captainId = "u1",
+            managerId = "u1",
+            playerIds = listOf("u1", "u2"),
+            pending = emptyList(),
+            teamSize = 6,
+            openRegistration = false,
+            registrationPriceCents = 0,
+            playerRegistrations = listOf(
+                com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration(
+                    id = "registration_1",
+                    teamId = "team_1",
+                    userId = "u1",
+                    status = "ACTIVE",
+                    jerseyNumber = "7",
+                    isCaptain = true,
+                ),
+                com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration(
+                    id = "registration_2",
+                    teamId = "team_1",
+                    userId = "u2",
+                    status = "ACTIVE",
+                    jerseyNumber = "12",
+                    isCaptain = false,
+                ),
+            ),
+            id = "team_1",
+        ).withSynchronizedMembership()
+        teamDao.upsertTeamWithRelations(existingTeam)
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/teams/team_1", request.url.encodedPath)
+            assertEquals(HttpMethod.Patch, request.method)
+            capturedRequestBody = outgoingBodyText(request.body)
+            respond(
+                content = """
+                    {
+                      "id": "team_1",
+                      "name": "Renamed Team",
+                      "division": "Open",
+                      "playerIds": ["u1", "u2"],
+                      "captainId": "u1",
+                      "pending": [],
+                      "teamSize": 8,
+                      "playerRegistrations": [
+                        {
+                          "id": "registration_1",
+                          "teamId": "team_1",
+                          "userId": "u1",
+                          "status": "ACTIVE",
+                          "jerseyNumber": "7",
+                          "isCaptain": true
+                        },
+                        {
+                          "id": "registration_2",
+                          "teamId": "team_1",
+                          "userId": "u2",
+                          "status": "ACTIVE",
+                          "jerseyNumber": "21",
+                          "isCaptain": false
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+        val updatedTeam = existingTeam.copy(
+            name = "Renamed Team",
+            teamSize = 8,
+            playerRegistrations = existingTeam.playerRegistrations.map { registration ->
+                if (registration.userId == "u2") {
+                    registration.copy(jerseyNumber = "21")
+                } else {
+                    registration
+                }
+            },
+        ).withSynchronizedMembership()
+
+        repo.updateTeam(updatedTeam).getOrThrow()
+
+        val teamPayload = jsonMVP.parseToJsonElement(capturedRequestBody)
+            .jsonObject
+            .getValue("team")
+            .jsonObject
+        assertEquals("Renamed Team", teamPayload["name"]?.jsonPrimitive?.content)
+        assertEquals(8, teamPayload["teamSize"]?.jsonPrimitive?.content?.toInt())
+        assertTrue("playerRegistrations" in teamPayload)
+        assertTrue("division" !in teamPayload)
+        assertTrue("playerIds" !in teamPayload)
+        assertTrue("openRegistration" !in teamPayload)
+        assertTrue("registrationPriceCents" !in teamPayload)
+        assertTrue("assistantCoachIds" !in teamPayload)
     }
 }
 

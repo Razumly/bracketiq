@@ -20,6 +20,17 @@ import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CancellationException
 
+private fun summarizeResponseBody(body: String?): String? {
+    val normalized = body
+        ?.lineSequence()
+        ?.map(String::trim)
+        ?.filter(String::isNotEmpty)
+        ?.joinToString(" ")
+        ?.takeIf(String::isNotBlank)
+        ?: return null
+    return normalized.take(1000)
+}
+
 internal fun HttpClientConfig<*>.configureMvpHttpClient() {
     install(HttpTimeout) {
         // Next.js dev server can take noticeable time to compile routes on first hit.
@@ -62,7 +73,14 @@ internal fun HttpClientConfig<*>.configureMvpHttpClient() {
         handleResponseExceptionWithRequest { cause, request ->
             when (cause) {
                 is ApiException -> {
-                    val message = "HTTP request failed: ${request.method.value} ${request.url} -> HTTP ${cause.statusCode}"
+                    val responseSummary = summarizeResponseBody(cause.responseBody)
+                    val message = buildString {
+                        append("HTTP request failed: ${request.method.value} ${request.url} -> HTTP ${cause.statusCode}")
+                        if (!responseSummary.isNullOrBlank()) {
+                            append(" | body=")
+                            append(responseSummary)
+                        }
+                    }
                     if (cause.statusCode == HttpStatusCode.NotFound.value) {
                         Napier.i(message)
                     } else {

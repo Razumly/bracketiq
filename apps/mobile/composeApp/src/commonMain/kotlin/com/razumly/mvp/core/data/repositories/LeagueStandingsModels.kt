@@ -6,6 +6,8 @@ data class LeagueStandingsRow(
     val position: Int,
     val teamId: String,
     val teamName: String,
+    val wins: Int,
+    val losses: Int,
     val draws: Int,
     val goalsFor: Int,
     val goalsAgainst: Int,

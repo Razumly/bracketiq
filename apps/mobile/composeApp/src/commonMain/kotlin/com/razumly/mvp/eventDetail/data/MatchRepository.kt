@@ -1,6 +1,7 @@
 package com.razumly.mvp.eventDetail.data
 
 import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
@@ -13,6 +14,7 @@ import com.razumly.mvp.core.network.dto.BulkMatchCreateEntryDto
 import com.razumly.mvp.core.network.dto.BulkMatchUpdateEntryDto
 import com.razumly.mvp.core.network.dto.BulkMatchUpdateRequestDto
 import com.razumly.mvp.core.network.dto.BulkMatchesResponseDto
+import com.razumly.mvp.core.network.dto.MatchApiDto
 import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
 import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
 import com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto
@@ -138,6 +140,25 @@ class MatchRepository(
             note == other.note
     }
 
+    private fun preserveIgnoredMatchScoreFields(remoteMatch: MatchMVP, localMatch: MatchMVP?): MatchMVP {
+        val ignoredMatchId = normalizeOptionalToken(_ignoreMatch.value?.id)
+        if (localMatch == null || ignoredMatchId == null || ignoredMatchId != remoteMatch.id) {
+            return remoteMatch
+        }
+        return remoteMatch.copy(
+            segments = localMatch.segments,
+            team1Points = localMatch.team1Points,
+            team2Points = localMatch.team2Points,
+            setResults = localMatch.setResults,
+        )
+    }
+
+    private fun mergeLocalMatchState(remoteMatch: MatchMVP, localMatch: MatchMVP?): MatchMVP =
+        preserveIgnoredMatchScoreFields(
+            remoteMatch = mergePendingLocalIncidents(remoteMatch, localMatch),
+            localMatch = localMatch,
+        )
+
     private fun mergePendingLocalIncidents(remoteMatch: MatchMVP, localMatch: MatchMVP?): MatchMVP {
         val pendingLocalCreates = localMatch?.incidents
             .orEmpty()
@@ -167,17 +188,34 @@ class MatchRepository(
             .mapNotNull { remote -> databaseService.getMatchDao.getMatchById(remote.id)?.match }
             .associateBy { local -> local.id }
         return remoteMatches.map { remote ->
-            mergePendingLocalIncidents(remote, localMatchesById[remote.id])
+            mergeLocalMatchState(remote, localMatchesById[remote.id])
         }
     }
 
     private suspend fun upsertRemoteMatchPreservingPendingIncidents(remoteMatch: MatchMVP) {
         val localMatch = databaseService.getMatchDao.getMatchById(remoteMatch.id)?.match
-        databaseService.getMatchDao.upsertMatch(mergePendingLocalIncidents(remoteMatch, localMatch))
+        databaseService.getMatchDao.upsertMatch(mergeLocalMatchState(remoteMatch, localMatch))
     }
 
     private suspend fun upsertRemoteMatchesPreservingPendingIncidents(remoteMatches: List<MatchMVP>) {
         databaseService.getMatchDao.upsertMatches(mergePendingLocalIncidents(remoteMatches))
+    }
+
+    private suspend fun persistEmbeddedField(matchDto: MatchApiDto) {
+        matchDto.field
+            ?.toFieldOrNull()
+            ?.let { field -> databaseService.getFieldDao.upsertField(field) }
+    }
+
+    private suspend fun persistEmbeddedFields(matchDtos: List<MatchApiDto>) {
+        val embeddedFields = matchDtos
+            .mapNotNull { matchDto ->
+                matchDto.field?.toFieldOrNull()
+            }
+            .distinctBy(Field::id)
+        if (embeddedFields.isNotEmpty()) {
+            databaseService.getFieldDao.upsertFields(embeddedFields)
+        }
     }
 
     private fun MatchMVP.toSanitizedForBulk(): MatchMVP {
@@ -226,16 +264,18 @@ class MatchRepository(
             }
 
     private suspend fun fetchRemoteMatches(tournamentId: String): List<MatchMVP> {
-        return api.get<MatchesResponseDto>("api/events/$tournamentId/matches")
-            .matches
-            .mapNotNull { it.toMatchOrNull() }
+        val responseMatches = api.get<MatchesResponseDto>("api/events/$tournamentId/matches").matches
+        persistEmbeddedFields(responseMatches)
+        return responseMatches.mapNotNull { it.toMatchOrNull() }
     }
 
     private suspend fun fetchRemoteMatch(eventId: String, matchId: String): MatchMVP {
         val detailMatch = runCatching {
-            api.get<MatchResponseDto>("api/events/$eventId/matches/$matchId")
-                .match
-                ?.toMatchOrNull()
+            val responseMatch = api.get<MatchResponseDto>("api/events/$eventId/matches/$matchId").match
+            if (responseMatch != null) {
+                persistEmbeddedField(responseMatch)
+            }
+            responseMatch?.toMatchOrNull()
         }.onFailure { error ->
             Napier.w(
                 "Failed to refresh match $matchId from detail endpoint; falling back to event matches: ${error.message}"
@@ -246,6 +286,7 @@ class MatchRepository(
         }
 
         val res = api.get<MatchesResponseDto>("api/events/$eventId/matches")
+        persistEmbeddedFields(res.matches)
         return res.matches.firstOrNull { (it.id ?: it.legacyId) == matchId }?.toMatchOrNull()
             ?: error("Match $matchId not found")
     }
@@ -271,9 +312,9 @@ class MatchRepository(
                     ?: error("Match $matchId not cached; fetch matches for the event first")
 
                 val remoteMatch = fetchRemoteMatch(local.eventId, matchId)
-                mergePendingLocalIncidents(remoteMatch, local)
+                mergeLocalMatchState(remoteMatch, local)
             },
-            saveCall = { match -> databaseService.getMatchDao.upsertMatch(match) },
+            saveCall = { match -> upsertRemoteMatchPreservingPendingIncidents(match) },
             onReturn = { it },
         )
 
@@ -298,7 +339,7 @@ class MatchRepository(
     override suspend fun updateMatch(match: MatchMVP): Result<Unit> = singleResponse(
         networkCall = {
             val sanitizedMatch = match.toSanitizedForBulk()
-            api.patch<MatchUpdateDto, MatchResponseDto>(
+            val responseMatch = api.patch<MatchUpdateDto, MatchResponseDto>(
                 path = "api/events/${match.eventId}/matches/${match.id}",
                 body = MatchUpdateDto(
                     team1Points = sanitizedMatch.team1Points,
@@ -326,7 +367,9 @@ class MatchRepository(
                     losersBracket = sanitizedMatch.losersBracket,
                     locked = sanitizedMatch.locked,
                 ),
-            ).match?.toMatchOrNull() ?: error("Update match response missing match")
+            ).match ?: error("Update match response missing match")
+            persistEmbeddedField(responseMatch)
+            responseMatch.toMatchOrNull() ?: error("Update match response missing match")
         },
         saveCall = { updatedMatch -> upsertRemoteMatchPreservingPendingIncidents(updatedMatch) },
         onReturn = {},
@@ -342,7 +385,7 @@ class MatchRepository(
         time: Instant?,
     ): Result<MatchMVP> = singleResponse(
         networkCall = {
-            api.patch<MatchUpdateDto, MatchResponseDto>(
+            val responseMatch = api.patch<MatchUpdateDto, MatchResponseDto>(
                 path = "api/events/${match.eventId}/matches/${match.id}",
                 body = MatchUpdateDto(
                     lifecycle = lifecycle,
@@ -352,7 +395,9 @@ class MatchRepository(
                     finalize = finalize,
                     time = time?.toString(),
                 ),
-            ).match?.toMatchOrNull() ?: error("Match operations response missing match")
+            ).match ?: error("Match operations response missing match")
+            persistEmbeddedField(responseMatch)
+            responseMatch.toMatchOrNull() ?: error("Match operations response missing match")
         },
         saveCall = { updatedMatch -> upsertRemoteMatchPreservingPendingIncidents(updatedMatch) },
         onReturn = { it },
@@ -366,7 +411,7 @@ class MatchRepository(
         points: Int,
     ): Result<MatchMVP> = singleResponse(
         networkCall = {
-            api.post<MatchScoreSetDto, MatchResponseDto>(
+            val responseMatch = api.post<MatchScoreSetDto, MatchResponseDto>(
                 path = "api/events/${match.eventId}/matches/${match.id}/score",
                 body = MatchScoreSetDto(
                     segmentId = segmentId,
@@ -374,7 +419,9 @@ class MatchRepository(
                     eventTeamId = eventTeamId,
                     points = points,
                 ),
-            ).match?.toMatchOrNull() ?: error("Score set response missing match")
+            ).match ?: error("Score set response missing match")
+            persistEmbeddedField(responseMatch)
+            responseMatch.toMatchOrNull() ?: error("Score set response missing match")
         },
         saveCall = { updatedMatch -> upsertRemoteMatchPreservingPendingIncidents(updatedMatch) },
         onReturn = { it },
@@ -385,10 +432,12 @@ class MatchRepository(
         operation: MatchIncidentOperationDto,
     ): Result<MatchMVP> = singleResponse(
         networkCall = {
-            api.post<MatchIncidentOperationDto, MatchResponseDto>(
+            val responseMatch = api.post<MatchIncidentOperationDto, MatchResponseDto>(
                 path = "api/events/${match.eventId}/matches/${match.id}/incidents",
                 body = operation.copy(action = "CREATE"),
-            ).match?.toMatchOrNull() ?: error("Add incident response missing match")
+            ).match ?: error("Add incident response missing match")
+            persistEmbeddedField(responseMatch)
+            responseMatch.toMatchOrNull() ?: error("Add incident response missing match")
         },
         saveCall = { updatedMatch -> upsertRemoteMatchPreservingPendingIncidents(updatedMatch) },
         onReturn = { it },
@@ -450,6 +499,7 @@ class MatchRepository(
                 ),
             )
 
+            persistEmbeddedFields(response.matches)
             val updatedMatches = response.matches.mapNotNull { it.toMatchOrNull() }
             if (updatedMatches.isNotEmpty()) {
                 upsertRemoteMatchesPreservingPendingIncidents(updatedMatches)
@@ -503,7 +553,7 @@ class MatchRepository(
         singleResponse(
             networkCall = {
                 val sanitizedMatch = match.toSanitizedForBulk()
-                api.patch<MatchUpdateDto, MatchResponseDto>(
+                val responseMatch = api.patch<MatchUpdateDto, MatchResponseDto>(
                     path = "api/events/${match.eventId}/matches/${match.id}",
                     body = MatchUpdateDto(
                         team1Points = sanitizedMatch.team1Points,
@@ -533,7 +583,9 @@ class MatchRepository(
                         losersBracket = sanitizedMatch.losersBracket,
                         locked = sanitizedMatch.locked,
                     ),
-                ).match?.toMatchOrNull() ?: error("Finalize match response missing match")
+                ).match ?: error("Finalize match response missing match")
+                persistEmbeddedField(responseMatch)
+                responseMatch.toMatchOrNull() ?: error("Finalize match response missing match")
             },
             saveCall = { updated -> upsertRemoteMatchPreservingPendingIncidents(updated) },
             onReturn = {},
@@ -585,9 +637,9 @@ class MatchRepository(
                 rangeStart?.let { start -> add("start=${start.toString().encodeURLQueryComponent()}") }
                 rangeEnd?.let { end -> add("end=${end.toString().encodeURLQueryComponent()}") }
             }.joinToString("&")
-            val fetchedMatches = api.get<MatchesResponseDto>("api/matches?$query")
-                .matches
-                .mapNotNull { match -> match.toMatchOrNull() }
+            val responseMatches = api.get<MatchesResponseDto>("api/matches?$query").matches
+            persistEmbeddedFields(responseMatches)
+            val fetchedMatches = responseMatches.mapNotNull { match -> match.toMatchOrNull() }
             aggregatedMatches.addAll(fetchedMatches)
         }
 

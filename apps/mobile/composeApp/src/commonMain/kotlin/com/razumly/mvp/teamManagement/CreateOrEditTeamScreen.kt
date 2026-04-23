@@ -49,12 +49,14 @@ import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
 import com.razumly.mvp.core.data.dataTypes.normalizedRole
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.util.DEFAULT_AGE_DIVISION
-import com.razumly.mvp.core.data.util.DEFAULT_AGE_DIVISION_OPTIONS
 import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
-import com.razumly.mvp.core.data.util.DEFAULT_DIVISION_OPTIONS
+import com.razumly.mvp.core.data.util.DivisionRatingType
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeName
 import com.razumly.mvp.core.data.util.buildGenderSkillAgeDivisionToken
+import com.razumly.mvp.core.data.util.getDefaultDivisionTypeSelectionsForSport
+import com.razumly.mvp.core.data.util.getDivisionTypeById
+import com.razumly.mvp.core.data.util.getDivisionTypeOptionsForSport
 import com.razumly.mvp.core.data.util.inferDivisionDetail
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionDetail
@@ -89,6 +91,34 @@ private val TEAM_DIVISION_GENDER_OPTIONS = listOf(
 
 private fun normalizeJerseyNumberInput(value: String?): String =
     value.orEmpty().filter(Char::isDigit).take(3)
+
+internal fun formatRegistrationCostInput(registrationPriceCents: Int): String =
+    registrationPriceCents
+        .takeIf { it > 0 }
+        ?.toString()
+        .orEmpty()
+
+internal fun syncedRegistrationInputs(
+    registrationSettingsEdited: Boolean,
+    openRegistrationInput: Boolean,
+    registrationCostInput: String,
+    sourceOpenRegistration: Boolean,
+    sourceRegistrationPriceCents: Int,
+): Pair<Boolean, String> = if (registrationSettingsEdited) {
+    openRegistrationInput to registrationCostInput
+} else {
+    sourceOpenRegistration to formatRegistrationCostInput(sourceRegistrationPriceCents)
+}
+
+internal fun resolvedRegistrationPriceCents(
+    openRegistration: Boolean,
+    canChargeRegistration: Boolean,
+    registrationPriceCentsInput: Int,
+): Int = if (openRegistration && canChargeRegistration) {
+    registrationPriceCentsInput
+} else {
+    0
+}
 
 private fun formatRegistrationCost(openRegistration: Boolean, registrationPriceCents: Int): String =
     when {
@@ -131,14 +161,9 @@ fun CreateOrEditTeamScreen(
     var teamSizeInput by remember { mutableStateOf(team.team.teamSize.toString()) }
     var openRegistrationInput by remember(team.team.id) { mutableStateOf(team.team.openRegistration) }
     var registrationCostInput by remember(team.team.id) {
-        mutableStateOf(
-            if (team.team.registrationPriceCents > 0) {
-                team.team.registrationPriceCents.toString()
-            } else {
-                ""
-            }
-        )
+        mutableStateOf(formatRegistrationCostInput(team.team.registrationPriceCents))
     }
+    var registrationSettingsEdited by remember(team.team.id) { mutableStateOf(false) }
     var showSearchDialog by remember { mutableStateOf(false) }
     var invitedPlayers by remember { mutableStateOf(team.pendingPlayers) }
     var playersInTeam by remember { mutableStateOf(team.players) }
@@ -163,6 +188,15 @@ fun CreateOrEditTeamScreen(
     val resolvedTeamSize = parsedTeamSize ?: team.team.teamSize
     val registrationPriceCentsInput = (registrationCostInput.toIntOrNull() ?: 0)
         .coerceAtLeast(0)
+    val resolvedEventSportName = remember(selectedEvent?.sportId, sports) {
+        val normalizedEventSportId = selectedEvent?.sportId?.trim().orEmpty()
+        if (normalizedEventSportId.isBlank()) {
+            ""
+        } else {
+            sports.firstOrNull { sport -> sport.id == normalizedEventSportId }?.name
+                ?: normalizedEventSportId
+        }
+    }
     val normalizedEventDivisionDetails = remember(
         selectedEvent?.id,
         selectedEvent?.divisions,
@@ -184,58 +218,6 @@ fun CreateOrEditTeamScreen(
                 detail.normalizeDivisionDetail(selectedEvent.id)
             }
         }
-    }
-    val skillDivisionOptions = remember(normalizedEventDivisionDetails) {
-        val options = linkedMapOf<String, String>()
-        fun addOption(id: String, label: String? = null) {
-            val normalizedId = id.normalizeDivisionIdentifier()
-            if (normalizedId.isBlank()) return
-            options[normalizedId] = label?.trim()?.takeIf(String::isNotBlank)
-                ?: normalizedId.toDivisionDisplayLabel()
-        }
-
-        DEFAULT_DIVISION_OPTIONS.forEach { divisionTypeId ->
-            addOption(divisionTypeId)
-        }
-        normalizedEventDivisionDetails.forEach { detail ->
-            addOption(
-                id = detail.skillDivisionTypeId,
-                label = detail.skillDivisionTypeName,
-            )
-        }
-        options.map { (value, label) -> DropdownOption(value = value, label = label) }
-    }
-    val ageDivisionOptions = remember(normalizedEventDivisionDetails) {
-        val options = linkedMapOf<String, String>()
-        fun addOption(id: String, label: String? = null) {
-            val normalizedId = id.normalizeDivisionIdentifier()
-            if (normalizedId.isBlank()) return
-            options[normalizedId] = label?.trim()?.takeIf(String::isNotBlank)
-                ?: normalizedId.toDivisionDisplayLabel()
-        }
-
-        DEFAULT_AGE_DIVISION_OPTIONS.forEach { divisionTypeId ->
-            addOption(divisionTypeId)
-        }
-        normalizedEventDivisionDetails.forEach { detail ->
-            addOption(
-                id = detail.ageDivisionTypeId,
-                label = detail.ageDivisionTypeName,
-            )
-        }
-        options.map { (value, label) -> DropdownOption(value = value, label = label) }
-    }
-    val skillDivisionOptionById = remember(skillDivisionOptions) {
-        skillDivisionOptions.associateBy(
-            keySelector = { option -> option.value.normalizeDivisionIdentifier() },
-            valueTransform = { option -> option.label },
-        )
-    }
-    val ageDivisionOptionById = remember(ageDivisionOptions) {
-        ageDivisionOptions.associateBy(
-            keySelector = { option -> option.value.normalizeDivisionIdentifier() },
-            valueTransform = { option -> option.label },
-        )
     }
     val inferredTeamDivisionDetail = remember(
         team.team.division,
@@ -278,6 +260,113 @@ fun CreateOrEditTeamScreen(
             gender = resolvedGender,
         )
     }
+    val divisionSportInput = remember(sportInput, resolvedEventSportName) {
+        sportInput.trim().ifBlank { resolvedEventSportName.trim() }
+    }
+    val sportDivisionTypeOptions = remember(divisionSportInput) {
+        getDivisionTypeOptionsForSport(divisionSportInput)
+    }
+    val selectedSportMatchesEventSport = remember(
+        divisionSportInput,
+        resolvedEventSportName,
+        selectedEvent?.sportId,
+        sports,
+    ) {
+        val normalizedDivisionSport = divisionSportInput.trim()
+        if (selectedEvent == null || normalizedDivisionSport.isBlank()) {
+            true
+        } else {
+            val matchingSportId = sports.firstOrNull { sport ->
+                sport.name.trim().equals(normalizedDivisionSport, ignoreCase = true) ||
+                    sport.id.trim().equals(normalizedDivisionSport, ignoreCase = true)
+            }?.id?.trim().orEmpty()
+            normalizedDivisionSport.equals(resolvedEventSportName.trim(), ignoreCase = true) ||
+                normalizedDivisionSport.equals(selectedEvent.sportId?.trim().orEmpty(), ignoreCase = true) ||
+                (matchingSportId.isNotBlank() &&
+                    matchingSportId.equals(selectedEvent.sportId?.trim().orEmpty(), ignoreCase = true))
+        }
+    }
+    val eventDivisionOptions = remember(normalizedEventDivisionDetails, selectedSportMatchesEventSport) {
+        if (selectedSportMatchesEventSport) {
+            normalizedEventDivisionDetails
+        } else {
+            emptyList()
+        }
+    }
+    val skillDivisionOptions = remember(
+        sportDivisionTypeOptions,
+        eventDivisionOptions,
+        inferredTeamDivisionDetail.skillDivisionTypeId,
+        inferredTeamDivisionDetail.skillDivisionTypeName,
+    ) {
+        val options = linkedMapOf<String, String>()
+        fun addOption(id: String, label: String? = null) {
+            val normalizedId = id.normalizeDivisionIdentifier()
+            if (normalizedId.isBlank()) return
+            options[normalizedId] = label?.trim()?.takeIf(String::isNotBlank)
+                ?: normalizedId.toDivisionDisplayLabel()
+        }
+
+        sportDivisionTypeOptions
+            .filter { option -> option.ratingType == DivisionRatingType.SKILL }
+            .forEach { option ->
+                addOption(option.id, option.name)
+            }
+        eventDivisionOptions.forEach { detail ->
+            addOption(
+                id = detail.skillDivisionTypeId,
+                label = detail.skillDivisionTypeName,
+            )
+        }
+        addOption(
+            id = inferredTeamDivisionDetail.skillDivisionTypeId,
+            label = inferredTeamDivisionDetail.skillDivisionTypeName,
+        )
+        options.map { (value, label) -> DropdownOption(value = value, label = label) }
+    }
+    val ageDivisionOptions = remember(
+        sportDivisionTypeOptions,
+        eventDivisionOptions,
+        inferredTeamDivisionDetail.ageDivisionTypeId,
+        inferredTeamDivisionDetail.ageDivisionTypeName,
+    ) {
+        val options = linkedMapOf<String, String>()
+        fun addOption(id: String, label: String? = null) {
+            val normalizedId = id.normalizeDivisionIdentifier()
+            if (normalizedId.isBlank()) return
+            options[normalizedId] = label?.trim()?.takeIf(String::isNotBlank)
+                ?: normalizedId.toDivisionDisplayLabel()
+        }
+
+        sportDivisionTypeOptions
+            .filter { option -> option.ratingType == DivisionRatingType.AGE }
+            .forEach { option ->
+                addOption(option.id, option.name)
+            }
+        eventDivisionOptions.forEach { detail ->
+            addOption(
+                id = detail.ageDivisionTypeId,
+                label = detail.ageDivisionTypeName,
+            )
+        }
+        addOption(
+            id = inferredTeamDivisionDetail.ageDivisionTypeId,
+            label = inferredTeamDivisionDetail.ageDivisionTypeName,
+        )
+        options.map { (value, label) -> DropdownOption(value = value, label = label) }
+    }
+    val skillDivisionOptionById = remember(skillDivisionOptions) {
+        skillDivisionOptions.associateBy(
+            keySelector = { option -> option.value.normalizeDivisionIdentifier() },
+            valueTransform = { option -> option.label },
+        )
+    }
+    val ageDivisionOptionById = remember(ageDivisionOptions) {
+        ageDivisionOptions.associateBy(
+            keySelector = { option -> option.value.normalizeDivisionIdentifier() },
+            valueTransform = { option -> option.label },
+        )
+    }
     var divisionGenderInput by remember(team.team.id) {
         mutableStateOf(inferredTeamDivisionDetail.gender.ifBlank { "C" })
     }
@@ -298,13 +387,26 @@ fun CreateOrEditTeamScreen(
     val normalizedSportName = sportInput.trim()
     val normalizedSkillDivisionTypeId = skillDivisionTypeInput.normalizeDivisionIdentifier()
     val normalizedAgeDivisionTypeId = ageDivisionTypeInput.normalizeDivisionIdentifier()
+    val defaultDivisionTypeSelections = remember(divisionSportInput) {
+        getDefaultDivisionTypeSelectionsForSport(divisionSportInput)
+    }
     val isTeamDivisionValid = normalizedDivisionGender in setOf("M", "F", "C") &&
         normalizedSkillDivisionTypeId.isNotBlank() &&
         normalizedAgeDivisionTypeId.isNotBlank()
     val resolvedSkillDivisionTypeName = skillDivisionOptionById[normalizedSkillDivisionTypeId]
+        ?: getDivisionTypeById(
+            sportInput = divisionSportInput,
+            divisionTypeId = normalizedSkillDivisionTypeId,
+            ratingType = DivisionRatingType.SKILL,
+        )?.name
         ?: inferredTeamDivisionDetail.skillDivisionTypeName.takeIf(String::isNotBlank)
         ?: normalizedSkillDivisionTypeId.toDivisionDisplayLabel()
     val resolvedAgeDivisionTypeName = ageDivisionOptionById[normalizedAgeDivisionTypeId]
+        ?: getDivisionTypeById(
+            sportInput = divisionSportInput,
+            divisionTypeId = normalizedAgeDivisionTypeId,
+            ratingType = DivisionRatingType.AGE,
+        )?.name
         ?: inferredTeamDivisionDetail.ageDivisionTypeName.takeIf(String::isNotBlank)
         ?: normalizedAgeDivisionTypeId.toDivisionDisplayLabel()
     val resolvedDivisionTypeId = buildCombinedDivisionTypeId(
@@ -320,15 +422,6 @@ fun CreateOrEditTeamScreen(
         skillDivisionTypeId = normalizedSkillDivisionTypeId,
         ageDivisionTypeId = normalizedAgeDivisionTypeId,
     )
-    val resolvedEventSportName = remember(selectedEvent?.sportId, sports) {
-        val normalizedEventSportId = selectedEvent?.sportId?.trim().orEmpty()
-        if (normalizedEventSportId.isBlank()) {
-            ""
-        } else {
-            sports.firstOrNull { sport -> sport.id == normalizedEventSportId }?.name
-                ?: normalizedEventSportId
-        }
-    }
     val sportOptions = remember(sports, team.team.sport, resolvedEventSportName) {
         val optionLabels = linkedSetOf<String>()
         team.team.sport
@@ -352,6 +445,36 @@ fun CreateOrEditTeamScreen(
         if (sportInput.isBlank() && resolvedEventSportName.isNotBlank()) {
             sportInput = resolvedEventSportName
         }
+    }
+    LaunchedEffect(
+        divisionSportInput,
+        skillDivisionOptions,
+        ageDivisionOptions,
+        defaultDivisionTypeSelections,
+    ) {
+        val hasSelectedSkillOption = skillDivisionOptions.any { option ->
+            option.value.normalizeDivisionIdentifier() == skillDivisionTypeInput.normalizeDivisionIdentifier()
+        }
+        val hasSelectedAgeOption = ageDivisionOptions.any { option ->
+            option.value.normalizeDivisionIdentifier() == ageDivisionTypeInput.normalizeDivisionIdentifier()
+        }
+        if (!hasSelectedSkillOption) {
+            skillDivisionTypeInput = defaultDivisionTypeSelections.skillDivisionTypeId
+        }
+        if (!hasSelectedAgeOption) {
+            ageDivisionTypeInput = defaultDivisionTypeSelections.ageDivisionTypeId
+        }
+    }
+    LaunchedEffect(team.team.openRegistration, team.team.registrationPriceCents, registrationSettingsEdited) {
+        val (syncedOpenRegistration, syncedRegistrationCostInput) = syncedRegistrationInputs(
+            registrationSettingsEdited = registrationSettingsEdited,
+            openRegistrationInput = openRegistrationInput,
+            registrationCostInput = registrationCostInput,
+            sourceOpenRegistration = team.team.openRegistration,
+            sourceRegistrationPriceCents = team.team.registrationPriceCents,
+        )
+        openRegistrationInput = syncedOpenRegistration
+        registrationCostInput = syncedRegistrationCostInput
     }
     val knownUsersById = remember(
         staffUsersById,
@@ -486,11 +609,11 @@ fun CreateOrEditTeamScreen(
             playerRegistrations = updatedPlayerRegistrations,
             staffAssignments = syncedTeam.staffAssignments,
             openRegistration = openRegistrationInput,
-            registrationPriceCents = if (openRegistrationInput && canChargeRegistration) {
-                registrationPriceCentsInput
-            } else {
-                0
-            },
+            registrationPriceCents = resolvedRegistrationPriceCents(
+                openRegistration = openRegistrationInput,
+                canChargeRegistration = canChargeRegistration,
+                registrationPriceCentsInput = registrationPriceCentsInput,
+            ),
         ).withSynchronizedMembership()
     }
 
@@ -639,7 +762,10 @@ fun CreateOrEditTeamScreen(
                 ) {
                     Checkbox(
                         checked = openRegistrationInput,
-                        onCheckedChange = { checked -> openRegistrationInput = checked },
+                        onCheckedChange = { checked ->
+                            registrationSettingsEdited = true
+                            openRegistrationInput = checked
+                        },
                         enabled = canEditFields,
                     )
                     Column(modifier = Modifier.weight(1f)) {
@@ -654,7 +780,10 @@ fun CreateOrEditTeamScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 StandardTextField(
                     value = registrationCostInput,
-                    onValueChange = { registrationCostInput = it },
+                    onValueChange = {
+                        registrationSettingsEdited = true
+                        registrationCostInput = it
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     label = "Registration cost",
                     keyboardType = "money",

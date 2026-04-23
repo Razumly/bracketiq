@@ -184,32 +184,45 @@ private fun normalizeJerseyNumber(value: String?): String? =
         .take(3)
         .takeIf(String::isNotBlank)
 
+private fun shouldIncludeTeamUpdateField(
+    field: String,
+    omitFields: Set<String>,
+    includeFields: Set<String>?,
+): Boolean = field !in omitFields && (includeFields == null || field in includeFields)
+
 fun Team.toUpdateDto(
     omitFields: Set<String> = emptySet(),
+    includeFields: Set<String>? = null,
 ): TeamUpdateDto {
     val synced = withSynchronizedMembership()
     return TeamUpdateDto(
-        name = synced.name.takeUnless { "name" in omitFields },
-        division = synced.division.takeUnless { "division" in omitFields },
-        playerIds = synced.playerIds.takeUnless { "playerIds" in omitFields },
-        captainId = synced.captainId.takeUnless { "captainId" in omitFields },
-        managerId = synced.managerId.takeUnless { "managerId" in omitFields },
-        headCoachId = synced.headCoachId.takeUnless { "headCoachId" in omitFields },
-        assistantCoachIds = synced.assistantCoachIds.takeUnless { "assistantCoachIds" in omitFields },
-        coachIds = synced.coachIds.takeUnless { "coachIds" in omitFields },
-        parentTeamId = synced.parentTeamId.takeUnless { "parentTeamId" in omitFields },
-        pending = synced.pending.takeUnless { "pending" in omitFields },
-        teamSize = synced.teamSize.takeUnless { "teamSize" in omitFields },
-        profileImageId = synced.profileImageId.takeUnless { "profileImageId" in omitFields },
-        sport = synced.sport.takeUnless { "sport" in omitFields },
-        divisionTypeId = synced.divisionTypeId.takeUnless { "divisionTypeId" in omitFields },
-        divisionTypeName = synced.divisionTypeName.takeUnless { "divisionTypeName" in omitFields },
-        openRegistration = synced.openRegistration.takeUnless { "openRegistration" in omitFields },
-        registrationPriceCents = synced.registrationPriceCents.coerceAtLeast(0)
-            .takeUnless { "registrationPriceCents" in omitFields },
-        playerRegistrations = synced.playerRegistrations
-            .takeUnless { "playerRegistrations" in omitFields }
-            ?.map { registration ->
+        name = synced.name.takeIf { shouldIncludeTeamUpdateField("name", omitFields, includeFields) },
+        division = synced.division.takeIf { shouldIncludeTeamUpdateField("division", omitFields, includeFields) },
+        playerIds = synced.playerIds.takeIf { shouldIncludeTeamUpdateField("playerIds", omitFields, includeFields) },
+        captainId = synced.captainId.takeIf { shouldIncludeTeamUpdateField("captainId", omitFields, includeFields) },
+        managerId = if (shouldIncludeTeamUpdateField("managerId", omitFields, includeFields)) synced.managerId else null,
+        headCoachId = if (shouldIncludeTeamUpdateField("headCoachId", omitFields, includeFields)) synced.headCoachId else null,
+        assistantCoachIds = synced.assistantCoachIds.takeIf {
+            shouldIncludeTeamUpdateField("assistantCoachIds", omitFields, includeFields)
+        },
+        coachIds = synced.coachIds.takeIf { shouldIncludeTeamUpdateField("coachIds", omitFields, includeFields) },
+        parentTeamId = if (shouldIncludeTeamUpdateField("parentTeamId", omitFields, includeFields)) synced.parentTeamId else null,
+        pending = synced.pending.takeIf { shouldIncludeTeamUpdateField("pending", omitFields, includeFields) },
+        teamSize = synced.teamSize.takeIf { shouldIncludeTeamUpdateField("teamSize", omitFields, includeFields) },
+        profileImageId = if (shouldIncludeTeamUpdateField("profileImageId", omitFields, includeFields)) synced.profileImageId else null,
+        sport = if (shouldIncludeTeamUpdateField("sport", omitFields, includeFields)) synced.sport else null,
+        divisionTypeId = if (shouldIncludeTeamUpdateField("divisionTypeId", omitFields, includeFields)) synced.divisionTypeId else null,
+        divisionTypeName = if (shouldIncludeTeamUpdateField("divisionTypeName", omitFields, includeFields)) synced.divisionTypeName else null,
+        openRegistration = synced.openRegistration.takeIf {
+            shouldIncludeTeamUpdateField("openRegistration", omitFields, includeFields)
+        },
+        registrationPriceCents = if (shouldIncludeTeamUpdateField("registrationPriceCents", omitFields, includeFields)) {
+            synced.registrationPriceCents.coerceAtLeast(0)
+        } else {
+            null
+        },
+        playerRegistrations = if (shouldIncludeTeamUpdateField("playerRegistrations", omitFields, includeFields)) {
+            synced.playerRegistrations.map { registration ->
                 TeamPlayerRegistrationApiDto(
                     id = registration.id,
                     teamId = registration.teamId,
@@ -219,6 +232,9 @@ fun Team.toUpdateDto(
                     position = registration.position,
                     isCaptain = registration.isCaptain,
                 )
-            },
+            }
+        } else {
+            null
+        },
     )
 }

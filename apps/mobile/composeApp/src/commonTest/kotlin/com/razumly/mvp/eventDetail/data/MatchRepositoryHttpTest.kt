@@ -1,7 +1,10 @@
 package com.razumly.mvp.eventDetail.data
 
 import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
@@ -107,15 +110,39 @@ private class MatchRepositoryHttp_FakeMatchDao(
 
 private class MatchRepositoryHttp_FakeDatabaseService(
     override val getMatchDao: MatchDao,
+    override val getFieldDao: FieldDao = MatchRepositoryHttp_FakeFieldDao(),
 ) : DatabaseService {
     override val getTeamDao: TeamDao get() = error("unused")
-    override val getFieldDao: FieldDao get() = error("unused")
     override val getUserDataDao: UserDataDao get() = error("unused")
     override val getEventDao: EventDao get() = error("unused")
     override val getEventRegistrationDao: EventRegistrationDao get() = error("unused")
     override val getChatGroupDao: ChatGroupDao get() = error("unused")
     override val getMessageDao: MessageDao get() = error("unused")
     override val getRefundRequestDao: RefundRequestDao get() = error("unused")
+}
+
+private class MatchRepositoryHttp_FakeFieldDao : FieldDao {
+    val upsertedFields = mutableListOf<Field>()
+
+    override suspend fun upsertField(field: Field) {
+        upsertedFields += field
+    }
+
+    override suspend fun upsertFields(fields: List<Field>) {
+        upsertedFields += fields
+    }
+
+    override suspend fun getFieldsByIds(ids: List<String>): List<Field> = emptyList()
+
+    override suspend fun getAllFields(): List<Field> = emptyList()
+
+    override suspend fun deleteFieldsById(ids: List<String>) = Unit
+
+    override suspend fun deleteField(field: Field) = Unit
+
+    override fun getFieldById(id: String): Flow<FieldWithMatches?> = error("unused")
+
+    override fun getFieldsWithMatches(ids: List<String>): Flow<List<FieldWithMatches>> = error("unused")
 }
 
 class MatchRepositoryHttpTest {
@@ -314,5 +341,262 @@ class MatchRepositoryHttpTest {
         assertEquals(listOf("/api/events/event_1/matches/match_1/incidents"), requestedPaths)
         assertEquals("incident_1", result.getOrThrow().incidents.single().id)
         assertEquals("incident_1", matchDao.upsertedMatches.single().incidents.single().id)
+    }
+
+    @Test
+    fun getMatchPreservesIgnoredLocalScoreFieldsWhileApplyingRemoteNonScoreFields() = runTest {
+        val requestedPaths = mutableListOf<String>()
+        val engine = MockEngine { request ->
+            requestedPaths += request.url.encodedPath
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("/api/events/event_1/matches/match_1", request.url.encodedPath)
+            respond(
+                content = """
+                    {
+                      "match": {
+                        "id": "match_1",
+                        "matchId": 1,
+                        "eventId": "event_1",
+                        "team1Id": "team_1",
+                        "team2Id": "team_2",
+                        "team1Points": [0],
+                        "team2Points": [0],
+                        "setResults": [0],
+                        "officialCheckedIn": true,
+                        "fieldId": "field_remote"
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) {
+                json(jsonMVP)
+            }
+        }
+        val localMatch = MatchMVP(
+            id = "match_1",
+            matchId = 1,
+            eventId = "event_1",
+            team1Id = "team_1",
+            team2Id = "team_2",
+            team1Points = listOf(2),
+            team2Points = listOf(1),
+            setResults = listOf(1),
+            segments = listOf(
+                MatchSegmentMVP(
+                    id = "match_1_segment_1",
+                    eventId = "event_1",
+                    matchId = "match_1",
+                    sequence = 1,
+                    status = "COMPLETE",
+                    scores = mapOf("team_1" to 2, "team_2" to 1),
+                    winnerEventTeamId = "team_1",
+                )
+            ),
+        )
+        val matchDao = MatchRepositoryHttp_FakeMatchDao(listOf(localMatch))
+        val repository = MatchRepository(
+            api = MvpApiClient(http, "http://example.test", MatchRepositoryHttp_InMemoryAuthTokenStore()),
+            databaseService = MatchRepositoryHttp_FakeDatabaseService(matchDao),
+        )
+        repository.setIgnoreMatch(localMatch)
+
+        val result = repository.getMatch("match_1")
+
+        assertTrue(result.isSuccess)
+        assertEquals(listOf("/api/events/event_1/matches/match_1"), requestedPaths)
+        val refreshedMatch = result.getOrThrow()
+        assertEquals(listOf(2), refreshedMatch.team1Points)
+        assertEquals(listOf(1), refreshedMatch.team2Points)
+        assertEquals(listOf(1), refreshedMatch.setResults)
+        assertEquals(2, refreshedMatch.segments.single().scores["team_1"])
+        assertEquals(true, refreshedMatch.officialCheckedIn)
+        assertEquals("field_remote", refreshedMatch.fieldId)
+        val savedMatch = matchDao.upsertedMatches.single()
+        assertEquals(listOf(2), savedMatch.team1Points)
+        assertEquals(listOf(1), savedMatch.team2Points)
+        assertEquals("field_remote", savedMatch.fieldId)
+    }
+
+    @Test
+    fun getMatchesOfTournamentPreservesIgnoredLocalScoreFieldsWhileApplyingRemoteNonScoreFields() = runTest {
+        val requestedPaths = mutableListOf<String>()
+        val engine = MockEngine { request ->
+            requestedPaths += request.url.encodedPath
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("/api/events/event_1/matches", request.url.encodedPath)
+            respond(
+                content = """
+                    {
+                      "matches": [
+                        {
+                          "id": "match_1",
+                          "matchId": 1,
+                          "eventId": "event_1",
+                          "team1Id": "team_1",
+                          "team2Id": "team_2",
+                          "team1Points": [0],
+                          "team2Points": [0],
+                          "setResults": [0],
+                          "officialCheckedIn": true,
+                          "fieldId": "field_remote"
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) {
+                json(jsonMVP)
+            }
+        }
+        val localMatch = MatchMVP(
+            id = "match_1",
+            matchId = 1,
+            eventId = "event_1",
+            team1Id = "team_1",
+            team2Id = "team_2",
+            team1Points = listOf(3),
+            team2Points = listOf(2),
+            setResults = listOf(0),
+            segments = listOf(
+                MatchSegmentMVP(
+                    id = "match_1_segment_1",
+                    eventId = "event_1",
+                    matchId = "match_1",
+                    sequence = 1,
+                    status = "IN_PROGRESS",
+                    scores = mapOf("team_1" to 3, "team_2" to 2),
+                )
+            ),
+        )
+        val matchDao = MatchRepositoryHttp_FakeMatchDao(listOf(localMatch))
+        val repository = MatchRepository(
+            api = MvpApiClient(http, "http://example.test", MatchRepositoryHttp_InMemoryAuthTokenStore()),
+            databaseService = MatchRepositoryHttp_FakeDatabaseService(matchDao),
+        )
+        repository.setIgnoreMatch(localMatch)
+
+        val result = repository.getMatchesOfTournament("event_1")
+
+        assertTrue(result.isSuccess)
+        assertEquals(listOf("/api/events/event_1/matches"), requestedPaths)
+        val refreshedMatch = result.getOrThrow().single()
+        assertEquals(listOf(3), refreshedMatch.team1Points)
+        assertEquals(listOf(2), refreshedMatch.team2Points)
+        assertEquals(3, refreshedMatch.segments.single().scores["team_1"])
+        assertEquals(true, refreshedMatch.officialCheckedIn)
+        assertEquals("field_remote", refreshedMatch.fieldId)
+        val savedMatch = matchDao.upsertedMatches.single()
+        assertEquals(listOf(3), savedMatch.team1Points)
+        assertEquals(listOf(2), savedMatch.team2Points)
+        assertEquals("field_remote", savedMatch.fieldId)
+    }
+
+    @Test
+    fun getMatchesOfTournamentPersistsEmbeddedFieldsFromMatchResponses() = runTest {
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("/api/events/event_1/matches", request.url.encodedPath)
+            respond(
+                content = """
+                    {
+                      "matches": [
+                        {
+                          "id": "match_1",
+                          "matchId": 1,
+                          "eventId": "event_1",
+                          "team1Id": "team_1",
+                          "team2Id": "team_2",
+                          "field": {
+                            "id": "field_1",
+                            "fieldNumber": 1,
+                            "name": "Field 1"
+                          }
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) {
+                json(jsonMVP)
+            }
+        }
+        val matchDao = MatchRepositoryHttp_FakeMatchDao(emptyList())
+        val fieldDao = MatchRepositoryHttp_FakeFieldDao()
+        val repository = MatchRepository(
+            api = MvpApiClient(http, "http://example.test", MatchRepositoryHttp_InMemoryAuthTokenStore()),
+            databaseService = MatchRepositoryHttp_FakeDatabaseService(
+                getMatchDao = matchDao,
+                getFieldDao = fieldDao,
+            ),
+        )
+
+        val result = repository.getMatchesOfTournament("event_1")
+
+        assertTrue(result.isSuccess)
+        assertEquals("field_1", result.getOrThrow().single().fieldId)
+        assertEquals(listOf("field_1"), fieldDao.upsertedFields.map(Field::id))
+        assertEquals("field_1", matchDao.upsertedMatches.single().fieldId)
+    }
+
+    @Test
+    fun getMatchesOfTournamentAcceptsPartialEmbeddedFieldsWithoutPersistingIncompleteFieldRows() = runTest {
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("/api/events/event_1/matches", request.url.encodedPath)
+            respond(
+                content = """
+                    {
+                      "matches": [
+                        {
+                          "id": "match_1",
+                          "matchId": 1,
+                          "eventId": "event_1",
+                          "team1Id": "team_1",
+                          "team2Id": "team_2",
+                          "field": {
+                            "id": "field_1",
+                            "name": "Field 1"
+                          }
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) {
+                json(jsonMVP)
+            }
+        }
+        val matchDao = MatchRepositoryHttp_FakeMatchDao(emptyList())
+        val fieldDao = MatchRepositoryHttp_FakeFieldDao()
+        val repository = MatchRepository(
+            api = MvpApiClient(http, "http://example.test", MatchRepositoryHttp_InMemoryAuthTokenStore()),
+            databaseService = MatchRepositoryHttp_FakeDatabaseService(
+                getMatchDao = matchDao,
+                getFieldDao = fieldDao,
+            ),
+        )
+
+        val result = repository.getMatchesOfTournament("event_1")
+
+        assertTrue(result.isSuccess)
+        assertEquals("field_1", result.getOrThrow().single().fieldId)
+        assertTrue(fieldDao.upsertedFields.isEmpty())
+        assertEquals("field_1", matchDao.upsertedMatches.single().fieldId)
     }
 }
