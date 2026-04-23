@@ -2,6 +2,8 @@ package com.razumly.mvp.eventDetail
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -247,7 +249,7 @@ private fun eventDetailTabVisuals(selected: Boolean): EventDetailTabVisuals {
 @Composable
 private fun eventDetailTabIconStyle(tab: DetailTab): EventDetailTabIconStyle =
     when (tab) {
-        DetailTab.BRACKET -> EventDetailTabIconStyle(size = 18.dp, xOffset = (-1).dp)
+        DetailTab.BRACKET -> EventDetailTabIconStyle(size = 20.dp)
         DetailTab.PARTICIPANTS -> EventDetailTabIconStyle(size = 20.dp)
         DetailTab.SCHEDULE -> EventDetailTabIconStyle(size = 20.dp)
         DetailTab.LEAGUES -> EventDetailTabIconStyle(size = 20.dp)
@@ -655,6 +657,27 @@ internal fun shouldRenderJoinOptionsActions(
 internal fun shouldShowScheduleMatchManagement(eventType: EventType): Boolean =
     eventType == EventType.LEAGUE || eventType == EventType.TOURNAMENT
 
+private fun overviewLoadingMessage(
+    event: Event,
+    teamsAndParticipantsLoading: Boolean,
+    matchesLoading: Boolean,
+): String? = when {
+    teamsAndParticipantsLoading && matchesLoading -> if (event.teamSignup) {
+        "Loading schedule, teams, and participants..."
+    } else {
+        "Loading schedule and participants..."
+    }
+
+    teamsAndParticipantsLoading -> if (!event.teamSignup) {
+        "Loading participants..."
+    } else {
+        null
+    }
+
+    matchesLoading -> "Loading schedule..."
+    else -> null
+}
+
 private fun WeeklyOccurrenceSummary.isFull(): Boolean =
     participantCapacity?.let { capacity -> capacity > 0 && participantCount >= capacity } == true
 
@@ -747,7 +770,18 @@ private fun EventOverviewSections(
         freeAgentIds.mapNotNull(playersById::get)
     }
     val unresolvedFreeAgentCount = (freeAgentIds.size - freeAgentUsers.size).coerceAtLeast(0)
-    val openDetailsLoading = teamsAndParticipantsLoading || matchesLoading
+    val openDetailsLoadingMessage = remember(
+        event.id,
+        event.teamSignup,
+        teamsAndParticipantsLoading,
+        matchesLoading,
+    ) {
+        overviewLoadingMessage(
+            event = event,
+            teamsAndParticipantsLoading = teamsAndParticipantsLoading,
+            matchesLoading = matchesLoading,
+        )
+    }
     val teamsNeedingPlayers = remember(visibleTeams, event.teamSizeLimit) {
         visibleTeams
             .mapNotNull { team ->
@@ -760,6 +794,27 @@ private fun EventOverviewSections(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        openDetailsLoadingMessage?.let { loadingMessage ->
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Text(
+                        text = loadingMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
         if (showFullnessSummary) {
         HorizontalDivider()
         Surface(
@@ -971,16 +1026,9 @@ private fun EventOverviewSections(
         if (showOpenDetailsAction) {
             TextButton(
                 onClick = onOpenDetails,
-                enabled = !openDetailsLoading,
                 modifier = Modifier.align(Alignment.End),
             ) {
-                Text(
-                    if (openDetailsLoading) {
-                        "Loading schedule and participants..."
-                    } else {
-                        "View Schedule and Participants"
-                    }
-                )
+                Text("View Schedule and Participants")
             }
         }
     }
@@ -2687,7 +2735,9 @@ fun EventDetailScreen(
                 ) {
                     Column(Modifier.fillMaxSize()) {
                 AnimatedVisibility(
-                    !showDetails, enter = expandVertically(), exit = shrinkVertically()
+                    !showDetails,
+                    enter = EnterTransition.None,
+                    exit = ExitTransition.None,
                 ) {
                     Box {
                         EventDetails(
@@ -3175,8 +3225,8 @@ fun EventDetailScreen(
                 }
                 AnimatedVisibility(
                     showDetails,
-                    enter = expandVertically(expandFrom = Alignment.Top),
-                    exit = shrinkVertically(shrinkTowards = Alignment.Top)
+                    enter = EnterTransition.None,
+                    exit = ExitTransition.None,
                 ) {
                     Column(Modifier.padding(innerPadding).padding(top = 4.dp)) {
                         val availableTabs = remember(hasBracketView, hasScheduleView, hasStandingsView) {

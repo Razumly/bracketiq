@@ -16,43 +16,43 @@ val MVPIcons.TournamentBracket: ImageVector
             name = "TournamentBracket",
             defaultWidth = 24.dp,
             defaultHeight = 24.dp,
-            viewportWidth = 65f,
-            viewportHeight = 55f
+            viewportWidth = 24f,
+            viewportHeight = 24f
         ).apply {
             path(
                 fill = SolidColor(Color(0xFF000000)),
                 strokeLineWidth = 0.2f,
                 strokeLineJoin = StrokeJoin.Round
             ) {
-                moveTo(15.833f, 53.833f)
-                lineTo(22.167f, 53.833f)
-                lineTo(22.167f, 45.917f)
-                lineTo(28.5f, 45.917f)
-                lineTo(28.5f, 53.833f)
-                lineTo(34.833f, 53.833f)
-                lineTo(34.833f, 39.583f)
-                lineTo(28.5f, 39.583f)
-                lineTo(28.5f, 33.25f)
-                lineTo(47.5f, 33.25f)
-                lineTo(47.5f, 39.583f)
-                lineTo(41.167f, 39.583f)
-                lineTo(41.167f, 53.833f)
-                lineTo(47.5f, 53.833f)
-                lineTo(47.5f, 45.917f)
-                lineTo(53.833f, 45.917f)
-                lineTo(53.833f, 53.833f)
-                lineTo(60.167f, 53.833f)
-                lineTo(60.167f, 39.583f)
-                lineTo(53.833f, 39.583f)
-                lineTo(53.833f, 26.917f)
-                lineTo(41.167f, 26.917f)
-                lineTo(41.167f, 19f)
-                lineTo(34.833f, 19f)
-                lineTo(34.833f, 26.917f)
-                lineTo(22.167f, 26.917f)
-                lineTo(22.167f, 39.583f)
-                lineTo(15.833f, 39.583f)
-                lineTo(15.833f, 53.833f)
+                moveTo(0f, 21.428f)
+                lineTo(3.429f, 21.428f)
+                lineTo(3.429f, 17.143f)
+                lineTo(6.857f, 17.143f)
+                lineTo(6.857f, 21.428f)
+                lineTo(10.286f, 21.428f)
+                lineTo(10.286f, 13.714f)
+                lineTo(6.857f, 13.714f)
+                lineTo(6.857f, 10.286f)
+                lineTo(17.143f, 10.286f)
+                lineTo(17.143f, 13.714f)
+                lineTo(13.714f, 13.714f)
+                lineTo(13.714f, 21.428f)
+                lineTo(17.143f, 21.428f)
+                lineTo(17.143f, 17.143f)
+                lineTo(20.571f, 17.143f)
+                lineTo(20.571f, 21.428f)
+                lineTo(24f, 21.428f)
+                lineTo(24f, 13.714f)
+                lineTo(20.571f, 13.714f)
+                lineTo(20.571f, 6.857f)
+                lineTo(13.714f, 6.857f)
+                lineTo(13.714f, 2.572f)
+                lineTo(10.286f, 2.572f)
+                lineTo(10.286f, 6.857f)
+                lineTo(3.429f, 6.857f)
+                lineTo(3.429f, 13.714f)
+                lineTo(0f, 13.714f)
+                lineTo(0f, 21.428f)
                 close()
             }
         }.build()

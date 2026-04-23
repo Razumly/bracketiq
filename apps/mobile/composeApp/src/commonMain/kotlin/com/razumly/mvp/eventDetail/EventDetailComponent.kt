@@ -388,6 +388,17 @@ data class WithdrawTargetOption(
     val isSelf: Boolean,
 )
 
+private data class WithdrawTargetsRefreshKey(
+    val eventId: String,
+    val occurrenceKey: String?,
+    val teamSignup: Boolean,
+    val eventType: EventType,
+    val playerIds: List<String>,
+    val waitListIds: List<String>,
+    val freeAgentIds: List<String>,
+    val teamIds: List<String>,
+)
+
 private fun FamilyChild.toJoinChildOption(): JoinChildOption {
     val normalizedFirstName = firstName.trim()
     val normalizedLastName = lastName.trim()
@@ -1178,6 +1189,23 @@ class DefaultEventDetailComponent(
                 }
         }
         scope.launch {
+            selectedEvent
+                .map { selected -> selected.id.trim() to isWeeklyParentEvent(selected) }
+                .distinctUntilChanged()
+                .collectLatest { (eventId, weeklyParent) ->
+                    if (eventId.isEmpty() || weeklyParent) {
+                        _eventTeamsAndParticipantsLoading.value = false
+                        return@collectLatest
+                    }
+                    _eventTeamsAndParticipantsLoading.value = true
+                    try {
+                        prefetchNonWeeklyParticipants(selectedEvent.value)
+                    } finally {
+                        _eventTeamsAndParticipantsLoading.value = false
+                    }
+                }
+        }
+        scope.launch {
             _selectedWeeklyOccurrence
                 .collectLatest {
                     val targetEvent = selectedEvent.value
@@ -1248,13 +1276,13 @@ class DefaultEventDetailComponent(
             }
         }
         scope.launch {
-            selectedEvent.collect { selected ->
-                if (selected.id.isBlank()) {
+            selectedEventId.collect { eventId ->
+                if (eventId.isBlank()) {
                     _eventStaffInvites.value = emptyList()
                 } else {
-                    _eventStaffInvites.value = eventRepository.getEventStaffInvites(selected.id)
+                    _eventStaffInvites.value = eventRepository.getEventStaffInvites(eventId)
                         .getOrElse { error ->
-                            Napier.w("Failed to refresh staff invites for event ${selected.id}: ${error.message}")
+                            Napier.w("Failed to refresh staff invites for event $eventId: ${error.message}")
                             emptyList()
                         }
                 }
@@ -1274,16 +1302,63 @@ class DefaultEventDetailComponent(
                         timeSlots = relations.timeSlots,
                     )
                 }
+                val activeDivision = _selectedDivision.value ?: relations.event.resolveDefaultSelectedDivisionId()
+                if (!activeDivision.isNullOrBlank()) {
+                    selectDivision(activeDivision)
+                } else {
+                    refreshSelectedDivisionContent()
+                }
             }
         }
         scope.launch {
             selectedEvent.collect { selected ->
                 refreshCurrentUserMembershipState(selected)
-                refreshWithdrawTargets(selected)
-                selected.resolveDefaultSelectedDivisionId()?.let { divisionId ->
-                    selectDivision(divisionId)
-                }
             }
+        }
+        scope.launch {
+            selectedEvent
+                .map { selected -> selected.resolveDefaultSelectedDivisionId() }
+                .distinctUntilChanged()
+                .collect { divisionId ->
+                    divisionId?.let { resolvedDivisionId ->
+                        if (!divisionsEquivalent(_selectedDivision.value, resolvedDivisionId)) {
+                            selectDivision(resolvedDivisionId)
+                        }
+                    }
+                }
+        }
+        scope.launch {
+            combine(selectedEvent, selectedWeeklyOccurrence) { selected, occurrence ->
+                WithdrawTargetsRefreshKey(
+                    eventId = selected.id.trim(),
+                    occurrenceKey = weeklyOccurrenceSummaryKey(
+                        slotId = occurrence?.slotId,
+                        occurrenceDate = occurrence?.occurrenceDate,
+                    ),
+                    teamSignup = selected.teamSignup,
+                    eventType = selected.eventType,
+                    playerIds = selected.playerIds
+                        .map(String::trim)
+                        .filter(String::isNotBlank)
+                        .distinct(),
+                    waitListIds = selected.waitList
+                        .map(String::trim)
+                        .filter(String::isNotBlank)
+                        .distinct(),
+                    freeAgentIds = selected.freeAgents
+                        .map(String::trim)
+                        .filter(String::isNotBlank)
+                        .distinct(),
+                    teamIds = selected.teamIds
+                        .map(String::trim)
+                        .filter(String::isNotBlank)
+                        .distinct(),
+                ) to selected
+            }
+                .distinctUntilChanged { old, new -> old.first == new.first }
+                .collect { (_, selected) ->
+                    refreshWithdrawTargets(selected)
+                }
         }
         scope.launch {
             combine(eventWithRelations, eventFields, _isEditing) { relations, fieldsWithMatches, editing ->
@@ -1341,6 +1416,23 @@ class DefaultEventDetailComponent(
         }
     }
 
+    private suspend fun prefetchNonWeeklyParticipants(
+        event: Event = selectedEvent.value,
+    ) {
+        if (isWeeklyParentEvent(event)) {
+            return
+        }
+        eventRepository.syncEventParticipants(event = event)
+            .onSuccess { result ->
+                refreshParticipantManagementSnapshotIfNeeded(result.event)
+            }
+            .onFailure { throwable ->
+                _errorState.value = ErrorMessage(
+                    throwable.userMessage("Failed to load teams and participants."),
+                )
+            }
+    }
+
     private fun loadSports() {
         scope.launch {
             sportsRepository.getSports()
@@ -1396,6 +1488,10 @@ class DefaultEventDetailComponent(
     override fun selectDivision(division: String) {
         val normalizedDivision = division.normalizeDivisionIdentifier()
         _selectedDivision.value = normalizedDivision.ifEmpty { null }
+        refreshSelectedDivisionContent()
+    }
+
+    private fun refreshSelectedDivisionContent() {
         _divisionTeams.value = eventWithRelations.value.teams.associateBy { it.team.id }
         val divisionFilter = _selectedDivision.value
         _divisionMatches.value = if (!selectedEvent.value.singleDivision && !divisionFilter.isNullOrEmpty()) {
@@ -3039,7 +3135,7 @@ class DefaultEventDetailComponent(
     }
 
     override fun viewEvent() {
-        hydrateEventDetailForMobile(showDetailsOnSuccess = true)
+        _showDetails.value = true
     }
 
     override fun toggleDetails() {

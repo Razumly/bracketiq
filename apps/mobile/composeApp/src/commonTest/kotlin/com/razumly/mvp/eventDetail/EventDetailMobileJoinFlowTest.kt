@@ -209,7 +209,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             assertTrue(fieldRepository.requestedFieldIds.any { it == listOf(field.id) })
             assertTrue(fieldRepository.requestedTimeSlotIds.any { it == listOf(slot.id) })
             assertTrue(matchRepository.requestedTournamentIds.contains(initialEvent.id))
-            assertTrue(eventRepository.staffInviteRequests.contains(initialEvent.id))
+            assertEquals(listOf(initialEvent.id), eventRepository.staffInviteRequests)
 
             component.joinEvent()
             advance()
@@ -222,6 +222,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             assertEquals(listOf(slot.id), component.eventWithRelations.value.timeSlots.map(TimeSlot::id))
             assertEquals(listOf(field.id), component.eventFields.value.map { it.field.id })
             assertEquals(staffInvites.map(Invite::id), component.eventWithRelations.value.staffInvites.map(Invite::id))
+            assertEquals(listOf(initialEvent.id), eventRepository.staffInviteRequests)
         }
 
     @Test
@@ -927,21 +928,21 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
     }
 
     @Test
-    fun weekly_view_event_syncs_participants_without_selected_occurrence() = runTest(testDispatcher) {
-        val host = mobileUser(id = "weekly_host_sync", firstName = "Weekly", lastName = "Host")
-        val currentUser = mobileUser(id = "weekly_joiner_sync", firstName = "Weekly", lastName = "Joiner")
+    fun non_weekly_view_event_opens_details_without_triggering_an_extra_participant_sync() = runTest(testDispatcher) {
+        val host = mobileUser(id = "league_host_sync", firstName = "League", lastName = "Host")
+        val currentUser = mobileUser(id = "league_joiner_sync", firstName = "League", lastName = "Joiner")
 
         val field = Field(
-            id = "weekly_field_sync",
+            id = "league_field_sync",
             fieldNumber = 1,
-            name = "Weekly Court",
+            name = "League Court",
             divisions = listOf("open"),
-            rentalSlotIds = listOf("weekly_slot_sync"),
-            location = "Practice Complex",
-            organizationId = "org_weekly_sync",
+            rentalSlotIds = listOf("league_slot_sync"),
+            location = "League Complex",
+            organizationId = "org_league_sync",
         )
         val slot = TimeSlot(
-            id = "weekly_slot_sync",
+            id = "league_slot_sync",
             dayOfWeek = 2,
             daysOfWeek = listOf(2),
             divisions = listOf("open"),
@@ -955,16 +956,16 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             price = 0,
         )
         val initialEvent = Event(
-            id = "weekly_event_sync",
-            name = "Weekly Clinic Sync",
-            description = "Opening weekly detail should sync parent participants for the current context.",
+            id = "league_event_sync",
+            name = "League Detail Sync",
+            description = "Opening detail should not trigger an extra roster refresh.",
             hostId = host.id,
             coordinates = listOf(-80.1918, 25.7617),
-            location = "Practice Complex",
+            location = "League Complex",
             start = Instant.parse("2030-04-16T16:00:00Z"),
             end = Instant.parse("2030-05-28T17:00:00Z"),
             state = "PUBLISHED",
-            eventType = EventType.WEEKLY_EVENT,
+            eventType = EventType.LEAGUE,
             teamSignup = false,
             singleDivision = true,
             divisions = listOf("open"),
@@ -1009,12 +1010,130 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
         component.setLoadingHandler(EventDetailTestLoadingHandler())
 
         advance()
+
+        assertEquals(1, eventRepository.syncCallCount)
+        assertEquals(null, eventRepository.lastSyncedOccurrence)
+        assertFalse(component.showDetails.value)
+
         val initialSyncCount = eventRepository.syncCallCount
         component.viewEvent()
         advance()
 
-        assertEquals(initialSyncCount + 1, eventRepository.syncCallCount)
+        assertTrue(component.showDetails.value)
+        assertEquals(initialSyncCount, eventRepository.syncCallCount)
         assertEquals(null, eventRepository.lastSyncedOccurrence)
+    }
+
+    @Test
+    fun non_weekly_team_prefetch_populates_division_teams_without_manual_reload() = runTest(testDispatcher) {
+        val host = mobileUser(id = "league_host_team_sync", firstName = "League", lastName = "Host")
+        val currentUser = mobileUser(id = "league_joiner_team_sync", firstName = "League", lastName = "Joiner")
+        val team = Team(
+            id = "league_team_sync",
+            name = "Sync Squad",
+            captainId = host.id,
+            division = "open",
+            playerIds = listOf(currentUser.id),
+            teamSize = 6,
+        )
+
+        val field = Field(
+            id = "league_field_team_sync",
+            fieldNumber = 2,
+            name = "League Arena",
+            divisions = listOf("open"),
+            rentalSlotIds = listOf("league_slot_team_sync"),
+            location = "League Arena",
+            organizationId = "org_league_team_sync",
+        )
+        val slot = TimeSlot(
+            id = "league_slot_team_sync",
+            dayOfWeek = 4,
+            daysOfWeek = listOf(4),
+            divisions = listOf("open"),
+            startTimeMinutes = 600,
+            endTimeMinutes = 660,
+            startDate = Instant.parse("2030-04-18T00:00:00Z"),
+            repeating = true,
+            endDate = Instant.parse("2030-05-30T00:00:00Z"),
+            scheduledFieldId = field.id,
+            scheduledFieldIds = listOf(field.id),
+            price = 0,
+        )
+        val initialEvent = Event(
+            id = "league_team_event_sync",
+            name = "League Team Sync",
+            description = "Eager roster sync should populate teams before opening detail.",
+            hostId = host.id,
+            coordinates = listOf(-80.1918, 25.7617),
+            location = "League Arena",
+            start = Instant.parse("2030-04-18T17:00:00Z"),
+            end = Instant.parse("2030-05-30T18:00:00Z"),
+            state = "PUBLISHED",
+            eventType = EventType.LEAGUE,
+            teamSignup = true,
+            singleDivision = true,
+            divisions = listOf("open"),
+            fieldIds = listOf(field.id),
+            timeSlotIds = listOf(slot.id),
+            maxParticipants = 8,
+        )
+        val syncedEvent = initialEvent.copy(teamIds = listOf(team.id))
+
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = initialEvent,
+            host = host,
+            currentUser = currentUser,
+            players = emptyList(),
+            teams = emptyList(),
+            staffInvites = emptyList(),
+            defaultSyncSnapshot = FakeParticipantSyncSnapshot(
+                event = syncedEvent,
+                players = listOf(host, currentUser),
+                teams = listOf(team),
+                participantCount = 1,
+                participantCapacity = initialEvent.maxParticipants,
+            ),
+        )
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = EventDetailFakeUserRepository(currentUser),
+            fieldRepository = EventDetailFakeFieldRepository(
+                fields = listOf(field),
+                timeSlots = listOf(slot),
+                fieldMatches = listOf(FieldWithMatches(field = field, matches = emptyList())),
+            ),
+            event = initialEvent,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(
+                matches = emptyList(),
+                fieldsById = mapOf(field.id to field),
+                teamsById = mapOf(team.id to team),
+            ),
+            teamRepository = EventDetailFakeTeamRepository(
+                teams = listOf(team),
+                users = listOf(host, currentUser),
+            ),
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+        advance()
+
+        assertEquals(1, eventRepository.syncCallCount)
+        assertEquals(listOf(team.id), component.eventWithRelations.value.teams.map { it.team.id })
+        assertEquals(setOf(team.id), component.divisionTeams.value.keys)
+
+        component.viewEvent()
+        advance()
+
+        assertTrue(component.showDetails.value)
+        assertEquals(1, eventRepository.syncCallCount)
+        assertEquals(setOf(team.id), component.divisionTeams.value.keys)
     }
 }
 
@@ -1037,6 +1156,7 @@ private class EventDetailFakeEventRepository(
     private val staffInvites: List<Invite>,
     private val syncSnapshotsByOccurrence: Map<String, FakeParticipantSyncSnapshot> = emptyMap(),
     initialCachedRegistrations: List<EventRegistrationCacheEntry> = emptyList(),
+    private val defaultSyncSnapshot: FakeParticipantSyncSnapshot? = null,
 ) : IEventRepository by com.razumly.mvp.eventCreate.CreateEvent_FakeEventRepository() {
     private val eventFlow = MutableStateFlow(Result.success(initialEvent.toRelations(host, players, teams)))
     private val cachedRegistrationsFlow = MutableStateFlow(initialCachedRegistrations)
@@ -1086,7 +1206,7 @@ private class EventDetailFakeEventRepository(
         syncCallCount += 1
         lastSyncedOccurrence = occurrence
         val snapshotKey = occurrence?.let { selection -> "${selection.slotId}|${selection.occurrenceDate}" }
-        val snapshot = snapshotKey?.let(syncSnapshotsByOccurrence::get)
+        val snapshot = snapshotKey?.let(syncSnapshotsByOccurrence::get) ?: defaultSyncSnapshot.takeIf { snapshotKey == null }
         if (snapshot != null) {
             eventFlow.value = Result.success(
                 snapshot.event.toRelations(
@@ -1116,12 +1236,12 @@ private class EventDetailFakeEventRepository(
         occurrence: EventOccurrenceSelection?,
     ): Result<EventParticipantsSummary> {
         val snapshotKey = occurrence?.let { selection -> "${selection.slotId}|${selection.occurrenceDate}" }
-        val snapshot = snapshotKey?.let(syncSnapshotsByOccurrence::get)
+        val snapshot = snapshotKey?.let(syncSnapshotsByOccurrence::get) ?: defaultSyncSnapshot.takeIf { snapshotKey == null }
         return Result.success(
             EventParticipantsSummary(
                 participantCount = snapshot?.participantCount ?: 0,
                 participantCapacity = snapshot?.participantCapacity,
-                weeklySelectionRequired = occurrence == null,
+                weeklySelectionRequired = occurrence == null && snapshot == null,
             )
         )
     }
