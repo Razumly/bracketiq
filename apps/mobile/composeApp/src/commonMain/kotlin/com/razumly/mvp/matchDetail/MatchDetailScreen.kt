@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -297,6 +298,46 @@ internal fun activeMatchSegmentLabel(
     null
 }
 
+internal data class MatchSegmentTrackerEntry(
+    val label: String,
+    val team1Score: Int,
+    val team2Score: Int,
+    val isActive: Boolean,
+    val isComplete: Boolean,
+)
+
+internal fun buildMatchSegmentTrackerEntries(
+    rules: ResolvedMatchRulesMVP,
+    segmentBaseLabel: String,
+    segments: List<MatchSegmentMVP>,
+    team1Id: String?,
+    team2Id: String?,
+    team1Scores: List<Int>,
+    team2Scores: List<Int>,
+    currentSegmentIndex: Int,
+): List<MatchSegmentTrackerEntry> {
+    if (rules.scoringModel != "SETS") {
+        return emptyList()
+    }
+    val orderedSegments = segments.sortedBy { segment -> segment.sequence }
+    val segmentCount = matchDetailSegmentCount(
+        rules = rules,
+        segments = orderedSegments,
+        team1Scores = team1Scores,
+        team2Scores = team2Scores,
+    )
+    return List(segmentCount) { index ->
+        val segment = orderedSegments.getOrNull(index)
+        MatchSegmentTrackerEntry(
+            label = "$segmentBaseLabel ${index + 1}",
+            team1Score = segmentScore(segment, team1Id, team1Scores, index),
+            team2Score = segmentScore(segment, team2Id, team2Scores, index),
+            isActive = index == currentSegmentIndex,
+            isComplete = segment?.status.equals("COMPLETE", ignoreCase = true),
+        )
+    }
+}
+
 internal fun incidentDialogTypes(
     rules: ResolvedMatchRulesMVP,
     teamScoped: Boolean,
@@ -358,7 +399,6 @@ fun MatchDetailScreen(
     val matchTimeSaving by component.matchTimeSaving.collectAsState()
     val segmentConfirmSaving by component.segmentConfirmSaving.collectAsState()
     val showOfficialCheckInDialog by component.showOfficialCheckInDialog.collectAsState()
-    val showSetConfirmDialog by component.showSetConfirmDialog.collectAsState()
     val currentSet by component.currentSet.collectAsState()
     val matchFinished by component.matchFinished.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
@@ -453,10 +493,12 @@ fun MatchDetailScreen(
         )
     }
     val activeSegment = orderedSegments.getOrNull(currentSet)
-    val canIncrement = showOfficialScoreControls &&
+    val canAdjustScore = showOfficialScoreControls &&
         !matchFinished &&
         officialCheckedIn &&
         activeSegment?.status != "COMPLETE"
+    val canIncrementScore = canAdjustScore &&
+        canIncrementCurrentSegment(match.match, rules, event, currentSet)
     val isTimedMatch = rules.scoringModel == "POINTS_ONLY"
     val team1Score = matchDisplayScore(
         scoringModel = rules.scoringModel,
@@ -486,15 +528,34 @@ fun MatchDetailScreen(
         currentSegmentIndex = currentSet,
         showSegmentBreakdown = showSegmentBreakdown,
     )
+    val segmentTrackerEntries = remember(
+        rules,
+        segmentBaseLabel,
+        orderedSegments,
+        match.match.team1Id,
+        match.match.team2Id,
+        match.match.team1Points,
+        match.match.team2Points,
+        currentSet,
+    ) {
+        buildMatchSegmentTrackerEntries(
+            rules = rules,
+            segmentBaseLabel = segmentBaseLabel,
+            segments = orderedSegments,
+            team1Id = match.match.team1Id,
+            team2Id = match.match.team2Id,
+            team1Scores = match.match.team1Points,
+            team2Scores = match.match.team2Points,
+            currentSegmentIndex = currentSet,
+        )
+    }
     val canConfirmResult = showOfficialScoreControls &&
         officialCheckedIn &&
         !matchFinished &&
         activeSegment?.status != "COMPLETE"
-    val confirmResultEnabled = canConfirmResult && !segmentConfirmSaving && when (rules.scoringModel) {
-        "SETS" -> team1Score != team2Score
-        "POINTS_ONLY" -> rules.supportsDraw || team1Score != team2Score
-        else -> true
-    }
+    val confirmResultEnabled = canConfirmResult &&
+        !segmentConfirmSaving &&
+        canConfirmCurrentSegment(match.match, rules, event, currentSet)
     val canStartMatch = showOfficialScoreControls &&
         officialCheckedIn &&
         !matchFinished &&
@@ -509,6 +570,12 @@ fun MatchDetailScreen(
     }
     val showTeamIncidentButtons = teamIncidentTypes.isNotEmpty()
     val showTeamAgnosticIncidentButton = !showTeamIncidentButtons && teamAgnosticIncidentTypes.isNotEmpty()
+    val screenBackgroundBrush = Brush.verticalGradient(
+        colors = listOf(
+            MaterialTheme.colorScheme.tertiaryContainer,
+            MaterialTheme.colorScheme.primaryContainer,
+        )
+    )
 
     fun openIncidentDialog(teamId: String?) {
         val resolvedTeamId = teamId?.trim()?.takeIf(String::isNotBlank)
@@ -596,52 +663,6 @@ fun MatchDetailScreen(
         )
     }
 
-    if (showScoreControls && showSetConfirmDialog) {
-        val confirmationTitle = if (rules.scoringModel == "POINTS_ONLY") {
-            "Confirm match result"
-        } else {
-            "Confirm $activeSegmentLabel"
-        }
-        val confirmationMessage = if (rules.scoringModel == "POINTS_ONLY") {
-            "Save the current match result?"
-        } else {
-            "Confirm the result for $activeSegmentLabel?"
-        }
-        AlertDialog(
-            onDismissRequest = { },
-            title = { Text(confirmationTitle) },
-            text = { Text(confirmationMessage) },
-            confirmButton = {
-                Button(
-                    onClick = { component.confirmSet() },
-                    enabled = !segmentConfirmSaving,
-                ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (segmentConfirmSaving) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onPrimary,
-                            )
-                        }
-                        Text("Confirm")
-                    }
-                }
-            },
-            dismissButton = {
-                Button(
-                    onClick = { component.dismissSetDialog() },
-                    enabled = !segmentConfirmSaving,
-                ) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
     if (pendingIncidentTarget != null) {
         val incidentOptions = incidentDialogTypes(
             rules = rules,
@@ -690,14 +711,7 @@ fun MatchDetailScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        MaterialTheme.colorScheme.tertiaryContainer,
-                        MaterialTheme.colorScheme.primaryContainer,
-                    )
-                )
-            ),
+            .background(brush = screenBackgroundBrush),
     ) {
         if (useNativeMapOverlayTransition && nativeMapOverlayProgress > 0.001f) {
             NativeMapRevealOverlay(
@@ -736,7 +750,17 @@ fun MatchDetailScreen(
                 }
             },
             foregroundContent = {
-                Box(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(
+                            if (useNativeMapOverlayTransition) {
+                                Modifier
+                            } else {
+                                Modifier.background(brush = screenBackgroundBrush)
+                            }
+                        )
+                ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -757,7 +781,9 @@ fun MatchDetailScreen(
                 decrease = {
                     component.updateScore(isTeam1 = true, increment = false)
                 },
-                enabled = canIncrement,
+                enabled = canAdjustScore,
+                decreaseEnabled = canAdjustScore,
+                increaseEnabled = canIncrementScore,
                 showControls = showOfficialScoreControls,
                 showAdjustControls = showScoreAdjustButtons,
                 addIncidentLabel = if (showTeamIncidentButtons) {
@@ -796,6 +822,13 @@ fun MatchDetailScreen(
                 }
             }
 
+            if (segmentTrackerEntries.isNotEmpty()) {
+                MatchSegmentScoreTracker(
+                    entries = segmentTrackerEntries,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
             if (showOfficialScoreControls) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -822,7 +855,7 @@ fun MatchDetailScreen(
                         }
                     }
                     Button(
-                        onClick = { component.requestSetConfirmation() },
+                        onClick = { component.confirmSet() },
                         enabled = confirmResultEnabled,
                     ) {
                         Row(
@@ -871,7 +904,9 @@ fun MatchDetailScreen(
                 decrease = {
                     component.updateScore(isTeam1 = false, increment = false)
                 },
-                enabled = canIncrement,
+                enabled = canAdjustScore,
+                decreaseEnabled = canAdjustScore,
+                increaseEnabled = canIncrementScore,
                 showControls = showOfficialScoreControls,
                 showAdjustControls = showScoreAdjustButtons,
                 addIncidentLabel = if (showTeamIncidentButtons) {
@@ -1412,6 +1447,8 @@ fun ScoreCard(
     decrease: () -> Unit,
     increase: () -> Unit,
     enabled: Boolean,
+    decreaseEnabled: Boolean = enabled,
+    increaseEnabled: Boolean = enabled,
     showControls: Boolean,
     showAdjustControls: Boolean = true,
     addIncidentLabel: String? = null,
@@ -1454,7 +1491,7 @@ fun ScoreCard(
                 modifier = Modifier
                 .wrapContentSize()
                 .clickable(
-                    enabled = enabled,
+                    enabled = decreaseEnabled,
                     onClick = decrease,
                 )
             ) {
@@ -1463,7 +1500,9 @@ fun ScoreCard(
                     contentDescription = "Decrease score",
                     modifier = Modifier
                         .size(48.dp),
-                    tint = MaterialTheme.colorScheme.onSurface
+                    tint = MaterialTheme.colorScheme.onSurface.copy(
+                        alpha = if (decreaseEnabled) 1f else 0.38f,
+                    ),
                 )
             }
         } else {
@@ -1500,18 +1539,75 @@ fun ScoreCard(
             Box(
                 modifier = Modifier
                 .wrapContentSize()
-                .clickable(enabled = enabled, onClick = increase)
+                .clickable(enabled = increaseEnabled, onClick = increase)
             ) {
                 Icon(
                     imageVector = Icons.Default.Add,
                     contentDescription = "Increase score",
                     modifier = Modifier
                         .size(48.dp),
-                    tint = MaterialTheme.colorScheme.onSurface
+                    tint = MaterialTheme.colorScheme.onSurface.copy(
+                        alpha = if (increaseEnabled) 1f else 0.38f,
+                    ),
                 )
             }
         } else {
             Box(modifier = Modifier.size(48.dp))
+        }
+    }
+}
+
+@Composable
+internal fun MatchSegmentScoreTracker(
+    entries: List<MatchSegmentTrackerEntry>,
+    modifier: Modifier = Modifier,
+) {
+    if (entries.isEmpty()) {
+        return
+    }
+    Box(
+        modifier = modifier.horizontalScroll(rememberScrollState()),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            modifier = Modifier.wrapContentWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            entries.forEach { entry ->
+                val containerColor = when {
+                    entry.isActive -> MaterialTheme.colorScheme.primaryContainer
+                    entry.isComplete -> MaterialTheme.colorScheme.secondaryContainer
+                    else -> MaterialTheme.colorScheme.surfaceVariant
+                }
+                val contentColor = when {
+                    entry.isActive -> MaterialTheme.colorScheme.onPrimaryContainer
+                    entry.isComplete -> MaterialTheme.colorScheme.onSecondaryContainer
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
+                Surface(
+                    color = containerColor,
+                    contentColor = contentColor,
+                    shape = RoundedCornerShape(18.dp),
+                    tonalElevation = if (entry.isActive) 2.dp else 0.dp,
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Text(
+                            text = entry.label,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        Text(
+                            text = "${entry.team1Score}-${entry.team2Score}",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+            }
         }
     }
 }

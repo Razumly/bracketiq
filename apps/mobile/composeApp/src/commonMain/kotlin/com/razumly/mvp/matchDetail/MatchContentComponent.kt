@@ -4,6 +4,8 @@ package com.razumly.mvp.matchDetail
 
 import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.essenty.instancekeeper.InstanceKeeper
+import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
@@ -27,7 +29,6 @@ import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
 import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
 import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.eventDetail.resolveEventMatchRules
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -58,6 +59,8 @@ private const val MATCH_INCIDENT_DELETE_PENDING = "DELETE_PENDING"
 private const val MATCH_INCIDENT_DELETE_FAILED = "DELETE_FAILED"
 private val INCIDENT_RETRY_DELAYS_MS = longArrayOf(3_000L, 15_000L, 30_000L)
 private const val INCIDENT_CONFIRM_NO_PROGRESS_TIMEOUT_MS = 10_000L
+private const val DIRECT_SCORE_DEBOUNCE_MS = 500L
+private const val MATCH_DETAIL_CLEANUP_KEY = "Cleanup_MatchDetail"
 
 private fun incidentRetryDelayMs(attempt: Int): Long =
     INCIDENT_RETRY_DELAYS_MS[attempt.coerceIn(0, INCIDENT_RETRY_DELAYS_MS.lastIndex)]
@@ -146,7 +149,7 @@ class DefaultMatchContentComponent(
     private val teamRepository: ITeamRepository,
 ) : MatchContentComponent, ComponentContext by componentContext {
 
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val _errorState = MutableStateFlow<String?>(null)
     override val errorState = _errorState.asStateFlow()
@@ -162,10 +165,16 @@ class DefaultMatchContentComponent(
             }.stateIn(scope, SharingStarted.Eagerly, selectedEvent)
 
     private val _optimisticMatch = MutableStateFlow<MatchWithTeams?>(null)
+    @Suppress("unused")
+    private val ignoreMatchRegistration = matchRepository.setIgnoreMatch(selectedMatch.match)
     private val localMatchSaveMutex = Mutex()
     private val scoreSetMutex = Mutex()
     private val incidentQueueMutex = Mutex()
     private var localMatchSaveVersion = 0L
+    private var directScoreSyncJob: Job? = null
+    private var directScoreEditVersion = 0L
+    private var directScoreInvalidatedThroughVersion = 0L
+    private var pendingDirectScoreSync: PendingDirectScoreSync? = null
     private var incidentQueueRetryJob: Job? = null
     private var incidentRetryAttempt = 0
 
@@ -216,9 +225,6 @@ class DefaultMatchContentComponent(
         SharingStarted.Eagerly,
         resolveActiveRules(selectedMatch.match, selectedEvent),
     )
-
-    private val pendingUpdates = mutableListOf<MatchMVP>()
-    private var isProcessingUpdates = false
 
     private val _matchFinished = MutableStateFlow(false)
     override val matchFinished = _matchFinished.asStateFlow()
@@ -308,6 +314,7 @@ class DefaultMatchContentComponent(
     private var setsNeeded = 1
 
     init {
+        instanceKeeper.put(MATCH_DETAIL_CLEANUP_KEY, Cleanup(matchRepository))
         scope.launch {
             event.collect {
                 val normalizedMatch = updateMatchStructureForCurrentContext(matchWithTeams.value.match)
@@ -319,7 +326,6 @@ class DefaultMatchContentComponent(
             }
         }
         scope.launch {
-            matchRepository.setIgnoreMatch(selectedMatch.match)
             matchWithTeams.collect {
                 val normalizedMatch = updateMatchStructureForCurrentContext(it.match)
                 _matchFinished.value = isMatchOver(normalizedMatch)
@@ -583,21 +589,35 @@ class DefaultMatchContentComponent(
         return normalized?.takeIf(String::isNotBlank)
     }
 
+    private fun currentScoringMatch(): MatchMVP =
+        updateMatchStructureForCurrentContext(_optimisticMatch.value?.match ?: matchWithTeams.value.match)
+
+    private fun applyConfirmedMatchState(match: MatchMVP) {
+        _optimisticMatch.value = matchWithTeams.value.copy(match = match)
+        _matchFinished.value = isMatchOver(match)
+        if (_matchFinished.value) {
+            return
+        }
+        _currentSet.value = resolveCurrentSegmentIndex(match)
+    }
+
     override fun updateScore(isTeam1: Boolean, increment: Boolean) {
         if (!isOfficial.value || officialCheckedIn.value != true || matchFinished.value) {
             return
         }
-        val activeRules = resolveActiveRules(matchWithTeams.value.match, event.value)
+        val currentMatch = matchWithTeams.value
+        val scoringMatch = updateMatchStructureForCurrentContext(currentMatch.match)
+        val activeRules = resolveActiveRules(scoringMatch, event.value)
         if (increment && shouldRequireScoringIncident(activeRules, event.value)) {
             _errorState.value = "Scoring details are required for this match."
             return
         }
-
-        val currentMatch = matchWithTeams.value
-        val scoringMatch = updateMatchStructureForCurrentContext(currentMatch.match)
         val setIndex = currentSet.value.coerceIn(0, maxSets - 1)
         val activeSegment = scoringMatch.segments.getOrNull(setIndex) ?: return
         if (activeSegment.status == "COMPLETE") {
+            return
+        }
+        if (increment && !canIncrementCurrentSegment(scoringMatch, activeRules, event.value, setIndex)) {
             return
         }
         val eventTeamId = if (isTeam1) scoringMatch.team1Id else scoringMatch.team2Id
@@ -617,13 +637,20 @@ class DefaultMatchContentComponent(
         _optimisticMatch.value = optimisticMatch
 
         checkSetCompletion(updatedScoringMatch)
-        queueScoreSet(
+        val pendingScoreSync = PendingDirectScoreSync(
             match = updatedScoringMatch,
             segmentId = activeSegment.id,
             sequence = activeSegment.sequence,
             eventTeamId = eventTeamId,
+            editVersion = ++directScoreEditVersion,
             points = updatedScoringMatch.segments.getOrNull(setIndex)?.scores?.get(eventTeamId) ?: 0,
         )
+        scope.launch {
+            if (!persistMatchLocally(updatedScoringMatch, clearOptimisticOnSuccess = false)) {
+                return@launch
+            }
+            scheduleDirectScoreSync(pendingScoreSync)
+        }
     }
 
     override fun recordPointIncident(
@@ -669,6 +696,17 @@ class DefaultMatchContentComponent(
         val scoringIncident = isScoringIncidentType(normalizedIncidentType)
         val normalizedEventTeamId = eventTeamId?.trim()?.takeIf(String::isNotBlank)
         if (scoringIncident && normalizedEventTeamId == null) {
+            return
+        }
+        if (
+            scoringIncident &&
+            !canIncrementCurrentSegment(
+                match = scoringMatch,
+                rules = resolveActiveRules(scoringMatch, event.value),
+                currentEvent = event.value,
+                setIndex = segmentIndex,
+            )
+        ) {
             return
         }
 
@@ -748,54 +786,48 @@ class DefaultMatchContentComponent(
     override fun requestSetConfirmation() {
         if (matchFinished.value || !isOfficial.value || officialCheckedIn.value != true) return
 
-        val scoringMatch = updateMatchStructureForCurrentContext(matchWithTeams.value.match)
+        val scoringMatch = currentScoringMatch()
         val rules = resolveActiveRules(scoringMatch, event.value)
         val setIndex = currentSet.value.coerceIn(0, maxSets - 1)
-        val team1Score = scoringMatch.team1Points.getOrElse(setIndex) { 0 }
-        val team2Score = scoringMatch.team2Points.getOrElse(setIndex) { 0 }
-
-        if (rules.scoringModel == "SETS" && team1Score == team2Score) {
-            _errorState.value = "Set score cannot be tied."
-            return
+        setConfirmationValidationError(
+            match = scoringMatch,
+            rules = rules,
+            setIndex = setIndex,
+        )?.let { error ->
+            _errorState.value = error
         }
-
-        if (rules.scoringModel == "POINTS_ONLY" && !rules.supportsDraw && team1Score == team2Score) {
-            _errorState.value = "Match score cannot be tied."
-            return
-        }
-
-        _showSetConfirmDialog.value = true
     }
 
 
     override fun confirmSet() {
         if (_segmentConfirmSaving.value) return
         if (matchFinished.value || !isOfficial.value || officialCheckedIn.value != true) {
-            _showSetConfirmDialog.value = false
             return
         }
-        _showSetConfirmDialog.value = false
         _segmentConfirmSaving.value = true
 
         scope.launch {
             try {
+                cancelPendingDirectScoreSync(invalidateQueuedSyncs = true)
                 val queueDrained = drainIncidentQueueForConfirmation()
                 if (!queueDrained) {
                     _errorState.value = "Incident updates are still waiting to sync. Please retry once the queue starts moving."
                     return@launch
                 }
 
-                val currentMatch = matchWithTeams.value
-                val scoringMatch = updateMatchStructureForCurrentContext(currentMatch.match)
+                val scoringMatch = currentScoringMatch()
                 val rules = resolveActiveRules(scoringMatch, event.value)
                 val setIndex = currentSet.value.coerceIn(0, maxSets - 1)
-                val team1Score = scoringMatch.team1Points.getOrElse(setIndex) { 0 }
-                val team2Score = scoringMatch.team2Points.getOrElse(setIndex) { 0 }
-
-                if (rules.scoringModel == "SETS" && team1Score == team2Score) {
-                    _errorState.value = "Set score cannot be tied."
+                setConfirmationValidationError(
+                    match = scoringMatch,
+                    rules = rules,
+                    setIndex = setIndex,
+                )?.let { error ->
+                    _errorState.value = error
                     return@launch
                 }
+                val team1Score = scoringMatch.team1Points.getOrElse(setIndex) { 0 }
+                val team2Score = scoringMatch.team2Points.getOrElse(setIndex) { 0 }
 
                 val currentSegment = scoringMatch.segments.getOrNull(setIndex) ?: return@launch
                 val winnerEventTeamId = when {
@@ -827,6 +859,8 @@ class DefaultMatchContentComponent(
                     )
                 }
                 if (!success) return@launch
+                applyConfirmedMatchState(updatedScoringMatch)
+                persistMatchLocally(updatedScoringMatch, clearOptimisticOnSuccess = true)
             } finally {
                 _segmentConfirmSaving.value = false
             }
@@ -834,61 +868,62 @@ class DefaultMatchContentComponent(
     }
 
 
-    private fun queueDatabaseUpdate(match: MatchMVP) {
-        pendingUpdates.add(match)
-        scope.launch {
-            persistMatchLocally(match, clearOptimisticOnSuccess = true)
-        }
-        scope.launch {
-            delay(500)
-            processPendingUpdates()
-        }
-    }
-
-    private fun queueScoreSet(
-        match: MatchMVP,
-        segmentId: String?,
-        sequence: Int,
-        eventTeamId: String,
-        points: Int,
+    private fun scheduleDirectScoreSync(
+        pendingSync: PendingDirectScoreSync,
     ) {
-        scope.launch {
-            if (!persistMatchLocally(match, clearOptimisticOnSuccess = true)) {
-                return@launch
-            }
-            scoreSetMutex.withLock {
-                matchRepository.setMatchScore(
-                    match = match,
-                    segmentId = segmentId,
-                    sequence = sequence,
-                    eventTeamId = eventTeamId,
-                    points = points,
-                ).onSuccess {
-                    _optimisticMatch.value = null
-                }.onFailure { error ->
-                    _errorState.value = "Failed to sync score: ${error.userMessage()}"
-                }
+        if (pendingSync.editVersion <= directScoreInvalidatedThroughVersion) {
+            return
+        }
+        pendingDirectScoreSync = pendingSync
+        directScoreSyncJob?.cancel()
+        directScoreSyncJob = scope.launch {
+            delay(DIRECT_SCORE_DEBOUNCE_MS)
+            directScoreSyncJob = null
+            syncPendingDirectScore(pendingSync.editVersion)
+        }
+    }
+
+    private fun cancelPendingDirectScoreSync(invalidateQueuedSyncs: Boolean = false) {
+        if (invalidateQueuedSyncs) {
+            directScoreInvalidatedThroughVersion = maxOf(
+                directScoreInvalidatedThroughVersion,
+                directScoreEditVersion,
+            )
+        }
+        directScoreSyncJob?.cancel()
+        directScoreSyncJob = null
+        pendingDirectScoreSync = null
+    }
+
+    private suspend fun syncPendingDirectScore(
+        editVersion: Long,
+    ) {
+        if (editVersion <= directScoreInvalidatedThroughVersion) {
+            return
+        }
+        scoreSetMutex.withLock {
+            val pendingSync = pendingDirectScoreSync?.takeIf { pending -> pending.editVersion == editVersion }
+                ?: return
+            pendingDirectScoreSync = null
+
+            matchRepository.setMatchScore(
+                match = pendingSync.match,
+                segmentId = pendingSync.segmentId,
+                sequence = pendingSync.sequence,
+                eventTeamId = pendingSync.eventTeamId,
+                points = pendingSync.points,
+            ).onSuccess {
+                clearOptimisticAfterDirectScoreSync(editVersion)
+            }.onFailure { error ->
+                _errorState.value = "Failed to sync score: ${error.userMessage()}"
+                clearOptimisticAfterDirectScoreSync(editVersion)
             }
         }
     }
 
-    private suspend fun processPendingUpdates() {
-        if (isProcessingUpdates || pendingUpdates.isEmpty()) return
-
-        isProcessingUpdates = true
-
-        try {
-            // Get the latest update (most recent state)
-            val latestUpdate = pendingUpdates.lastOrNull()
-            pendingUpdates.clear()
-
-            latestUpdate?.let { match ->
-                matchRepository.updateMatch(match).onFailure { error ->
-                    _errorState.value = "Failed to update score: ${error.userMessage()}"
-                }
-            }
-        } finally {
-            isProcessingUpdates = false
+    private fun clearOptimisticAfterDirectScoreSync(editVersion: Long) {
+        if (pendingDirectScoreSync == null && directScoreEditVersion == editVersion) {
+            _optimisticMatch.value = null
         }
     }
 
@@ -914,8 +949,7 @@ class DefaultMatchContentComponent(
         time: Instant? = null,
         saveLocallyBeforeRemote: Boolean = true,
     ): Boolean {
-            // Clear any pending updates since we're syncing now
-            pendingUpdates.clear()
+            cancelPendingDirectScoreSync()
             if (saveLocallyBeforeRemote) {
                 if (!persistMatchLocally(match, clearOptimisticOnSuccess = true)) {
                     return false
@@ -1123,25 +1157,36 @@ class DefaultMatchContentComponent(
         if (rules.scoringModel != "SETS") return false
 
         val setIndex = currentSet.value.coerceIn(0, maxSets - 1)
+        if (matchFinished.value) return false
+        return canConfirmCurrentSegment(match, rules, event.value, setIndex)
+    }
+
+    private fun setConfirmationValidationError(
+        match: MatchMVP,
+        rules: ResolvedMatchRulesMVP,
+        setIndex: Int,
+    ): String? {
         val team1Score = match.team1Points.getOrElse(setIndex) { 0 }
         val team2Score = match.team2Points.getOrElse(setIndex) { 0 }
+        return when (rules.scoringModel) {
+            "SETS" -> when {
+                team1Score == team2Score -> "Set score cannot be tied."
+                !canConfirmCurrentSegment(match, rules, event.value, setIndex) -> {
+                    resolvePointsToVictory(match, event.value, setIndex)
+                        ?.let { pointsToVictory -> "Reach $pointsToVictory points to confirm this set." }
+                        ?: "This set is not ready to confirm yet."
+                }
 
-        if (team1Score == team2Score || matchFinished.value) return false
+                else -> null
+            }
 
-        val isTeam1Leader = team1Score > team2Score
-        val leaderScore = if (isTeam1Leader) team1Score else team2Score
-        val followerScore = if (isTeam1Leader) team2Score else team1Score
+            "POINTS_ONLY" -> when {
+                !rules.supportsDraw && team1Score == team2Score -> "Match score cannot be tied."
+                else -> null
+            }
 
-        val pointsToVictory = resolvePointsToVictory(match, setIndex) ?: return false
-
-        val winBy2 = leaderScore - followerScore >= 2 && leaderScore >= pointsToVictory
-
-        if (winBy2) {
-            _showSetConfirmDialog.value = true
-            return true
+            else -> null
         }
-
-        return false
     }
 
     private fun updateMatchStructureForCurrentContext(match: MatchMVP): MatchMVP {
@@ -1157,11 +1202,6 @@ class DefaultMatchContentComponent(
 
     private fun resolveExpectedSetCount(match: MatchMVP): Int {
         val rules = resolveActiveRules(match, event.value)
-        val explicitCount = rules.segmentCount.coerceAtLeast(1)
-        if (match.matchRulesSnapshot != null || match.resolvedMatchRules != null) {
-            return explicitCount
-        }
-
         val fallbackSetCount = listOf(
             match.segments.size,
             match.setResults.size,
@@ -1170,22 +1210,9 @@ class DefaultMatchContentComponent(
             1,
         ).maxOrNull() ?: 1
 
-        if (rules.scoringModel == "POINTS_ONLY") {
-            return 1
-        }
-        if (rules.scoringModel != "SETS") {
-            return fallbackSetCount
-        }
-
-        val currentEvent = event.value ?: return fallbackSetCount
-
-        val isBracketMatch = isBracketMatch(match)
-        return when {
-            match.losersBracket -> currentEvent.loserSetCount.coerceAtLeast(1)
-            currentEvent.eventType == EventType.LEAGUE && !isBracketMatch -> {
-                (currentEvent.setsPerMatch ?: fallbackSetCount).coerceAtLeast(1)
-            }
-            else -> currentEvent.winnerSetCount.coerceAtLeast(1)
+        return when (rules.scoringModel) {
+            "POINTS_ONLY" -> 1
+            else -> maxOf(rules.segmentCount.coerceAtLeast(1), fallbackSetCount)
         }
     }
 
@@ -1512,82 +1539,153 @@ class DefaultMatchContentComponent(
             else -> resolveCurrentSetIndex(match.setResults)
         }
     }
+}
 
-    private fun resolvePointsToVictory(match: MatchMVP, setIndex: Int): Int? {
-        val currentEvent = event.value ?: return null
-        if (resolveActiveRules(match, currentEvent).scoringModel != "SETS") return null
+private fun isBracketMatch(match: MatchMVP): Boolean {
+    return match.losersBracket ||
+        !match.previousLeftId.isNullOrBlank() ||
+        !match.previousRightId.isNullOrBlank() ||
+        !match.winnerNextMatchId.isNullOrBlank() ||
+        !match.loserNextMatchId.isNullOrBlank()
+}
 
-        val points = when {
-            currentEvent.eventType == EventType.LEAGUE && !isBracketMatch(match) ->
-                currentEvent.pointsToVictory.getOrNull(setIndex)
-            match.losersBracket ->
-                currentEvent.loserBracketPointsToVictory.getOrNull(setIndex)
-            else ->
-                currentEvent.winnerBracketPointsToVictory.getOrNull(setIndex)
+internal fun canIncrementCurrentSegment(
+    match: MatchMVP,
+    rules: ResolvedMatchRulesMVP,
+    currentEvent: Event?,
+    setIndex: Int,
+): Boolean {
+    if (rules.scoringModel != "SETS") return true
+    val pointsToVictory = resolvePointsToVictory(match, currentEvent, setIndex) ?: return true
+    val team1Score = match.team1Points.getOrElse(setIndex) { 0 }
+    val team2Score = match.team2Points.getOrElse(setIndex) { 0 }
+    return team1Score < pointsToVictory && team2Score < pointsToVictory
+}
+
+internal fun canConfirmCurrentSegment(
+    match: MatchMVP,
+    rules: ResolvedMatchRulesMVP,
+    currentEvent: Event?,
+    setIndex: Int,
+): Boolean {
+    val team1Score = match.team1Points.getOrElse(setIndex) { 0 }
+    val team2Score = match.team2Points.getOrElse(setIndex) { 0 }
+    return when (rules.scoringModel) {
+        "SETS" -> {
+            if (team1Score == team2Score) {
+                false
+            } else {
+                resolvePointsToVictory(match, currentEvent, setIndex)?.let { pointsToVictory ->
+                    team1Score >= pointsToVictory || team2Score >= pointsToVictory
+                } ?: true
+            }
         }
-        return points?.takeIf { it > 0 }
+
+        "POINTS_ONLY" -> rules.supportsDraw || team1Score != team2Score
+        else -> true
+    }
+}
+
+internal fun resolvePointsToVictory(match: MatchMVP, currentEvent: Event?, setIndex: Int): Int? {
+    if (currentEvent == null || resolveActiveRules(match, currentEvent).scoringModel != "SETS") return null
+
+    val points = when {
+        currentEvent.eventType == EventType.LEAGUE && !isBracketMatch(match) ->
+            currentEvent.pointsToVictory.getOrNull(setIndex)
+        match.losersBracket ->
+            currentEvent.loserBracketPointsToVictory.getOrNull(setIndex)
+        else ->
+            currentEvent.winnerBracketPointsToVictory.getOrNull(setIndex)
+    }
+    return points?.takeIf { it > 0 }
+}
+
+private fun resolveActiveRules(match: MatchMVP, currentEvent: Event?): ResolvedMatchRulesMVP {
+    val eventRules = currentEvent?.let { current ->
+        runCatching { resolveEventMatchRules(current, sport = null) }.getOrNull()
+    }
+    val source = match.matchRulesSnapshot
+        ?: match.resolvedMatchRules
+        ?: eventRules
+    val fallbackModel = if (currentEvent?.usesSets == true) "SETS" else "POINTS_ONLY"
+    val scoringModel = source?.scoringModel
+        ?.trim()
+        ?.uppercase()
+        ?.takeIf { it in setOf("SETS", "PERIODS", "INNINGS", "POINTS_ONLY") }
+        ?: fallbackModel
+    val fallbackSegmentCount = listOf(
+        match.segments.size,
+        match.setResults.size,
+        match.team1Points.size,
+        match.team2Points.size,
+        1,
+    ).maxOrNull() ?: 1
+    val explicitSegmentCount = when {
+        match.matchRulesSnapshot != null -> source?.segmentCount?.takeIf { it > 0 }
+        scoringModel == "SETS" -> null
+        else -> source?.segmentCount?.takeIf { it > 0 }
+    }
+    val contextualSegmentCount = contextualSegmentCountForMatch(
+        match = match,
+        currentEvent = currentEvent,
+        fallbackSegmentCount = fallbackSegmentCount,
+        scoringModel = scoringModel,
+    )
+    val segmentCount = when {
+        explicitSegmentCount != null -> explicitSegmentCount
+        scoringModel == "SETS" -> {
+            listOfNotNull(
+                contextualSegmentCount,
+                source?.segmentCount?.takeIf { it > 0 },
+                fallbackSegmentCount,
+            ).maxOrNull()?.coerceAtLeast(1) ?: 1
+        }
+        scoringModel == "POINTS_ONLY" -> 1
+        else -> listOfNotNull(
+            source?.segmentCount?.takeIf { it > 0 },
+            fallbackSegmentCount,
+        ).maxOrNull()?.coerceAtLeast(1) ?: 1
     }
 
-    private fun resolveActiveRules(match: MatchMVP, currentEvent: Event?): ResolvedMatchRulesMVP {
-        val source = match.matchRulesSnapshot
-            ?: match.resolvedMatchRules
-            ?: currentEvent?.let { current ->
-                runCatching { resolveEventMatchRules(current, sport = null) }.getOrNull()
-            }
-        val fallbackModel = if (currentEvent?.usesSets == true) "SETS" else "POINTS_ONLY"
-        val scoringModel = source?.scoringModel
-            ?.trim()
-            ?.uppercase()
-            ?.takeIf { it in setOf("SETS", "PERIODS", "INNINGS", "POINTS_ONLY") }
-            ?: fallbackModel
-        val explicitSegmentCount = source?.segmentCount?.takeIf { it > 0 }
-        val fallbackSegmentCount = listOf(
-            match.segments.size,
-            match.setResults.size,
-            match.team1Points.size,
-            match.team2Points.size,
-            1,
-        ).maxOrNull() ?: 1
-        val segmentCount = when {
-            explicitSegmentCount != null -> explicitSegmentCount
-            scoringModel == "SETS" -> {
-                val legacyCount = when {
-                    currentEvent == null -> fallbackSegmentCount
-                    match.losersBracket -> currentEvent.loserSetCount.coerceAtLeast(1)
-                    currentEvent.eventType == EventType.LEAGUE && !isBracketMatch(match) ->
-                        (currentEvent.setsPerMatch ?: fallbackSegmentCount).coerceAtLeast(1)
-                    else -> currentEvent.winnerSetCount.coerceAtLeast(1)
-                }
-                legacyCount.coerceAtLeast(1)
-            }
+    val supportsShootout = source?.supportsShootout ?: false
 
-            scoringModel == "POINTS_ONLY" -> 1
-            else -> fallbackSegmentCount.coerceAtLeast(1)
-        }
+    return ResolvedMatchRulesMVP(
+        scoringModel = scoringModel,
+        segmentCount = segmentCount,
+        segmentLabel = source?.segmentLabel?.takeIf(String::isNotBlank) ?: when (scoringModel) {
+            "SETS" -> "Set"
+            "INNINGS" -> "Inning"
+            "POINTS_ONLY" -> "Total"
+            else -> "Period"
+        },
+        supportsDraw = source?.supportsDraw == true && !supportsShootout,
+        supportsOvertime = source?.supportsOvertime ?: false,
+        supportsShootout = supportsShootout,
+        canUseOvertime = source?.canUseOvertime ?: source?.supportsOvertime ?: false,
+        canUseShootout = source?.canUseShootout ?: source?.supportsShootout ?: false,
+        officialRoles = source?.officialRoles ?: emptyList(),
+        supportedIncidentTypes = source?.supportedIncidentTypes
+            ?.takeIf { it.isNotEmpty() }
+            ?: listOf("POINT", "DISCIPLINE", "NOTE", "ADMIN"),
+        autoCreatePointIncidentType = source?.autoCreatePointIncidentType ?: "POINT",
+        pointIncidentRequiresParticipant = source?.pointIncidentRequiresParticipant ?: false,
+    )
+}
 
-        val supportsShootout = source?.supportsShootout ?: false
-
-        return ResolvedMatchRulesMVP(
-            scoringModel = scoringModel,
-            segmentCount = segmentCount,
-            segmentLabel = source?.segmentLabel?.takeIf(String::isNotBlank) ?: when (scoringModel) {
-                "SETS" -> "Set"
-                "INNINGS" -> "Inning"
-                "POINTS_ONLY" -> "Total"
-                else -> "Period"
-            },
-            supportsDraw = source?.supportsDraw == true && !supportsShootout,
-            supportsOvertime = source?.supportsOvertime ?: false,
-            supportsShootout = supportsShootout,
-            canUseOvertime = source?.canUseOvertime ?: source?.supportsOvertime ?: false,
-            canUseShootout = source?.canUseShootout ?: source?.supportsShootout ?: false,
-            officialRoles = source?.officialRoles ?: emptyList(),
-            supportedIncidentTypes = source?.supportedIncidentTypes
-                ?.takeIf { it.isNotEmpty() }
-                ?: listOf("POINT", "DISCIPLINE", "NOTE", "ADMIN"),
-            autoCreatePointIncidentType = source?.autoCreatePointIncidentType ?: "POINT",
-            pointIncidentRequiresParticipant = source?.pointIncidentRequiresParticipant ?: false,
-        )
+private fun contextualSegmentCountForMatch(
+    match: MatchMVP,
+    currentEvent: Event?,
+    fallbackSegmentCount: Int,
+    scoringModel: String,
+): Int? {
+    if (scoringModel != "SETS" || currentEvent == null) {
+        return null
+    }
+    return when {
+        match.losersBracket -> currentEvent.loserSetCount.coerceAtLeast(1)
+        currentEvent.eventType == EventType.LEAGUE && !isBracketMatch(match) ->
+            (currentEvent.setsPerMatch ?: fallbackSegmentCount).coerceAtLeast(1)
+        else -> currentEvent.winnerSetCount.coerceAtLeast(1)
     }
 }
 
@@ -1614,6 +1712,23 @@ private data class PendingIncidentAction(
     val operation: MatchIncidentOperationDto,
     val failureStatus: String,
 )
+
+private data class PendingDirectScoreSync(
+    val match: MatchMVP,
+    val segmentId: String?,
+    val sequence: Int,
+    val eventTeamId: String,
+    val editVersion: Long,
+    val points: Int,
+)
+
+private class Cleanup(
+    private val matchRepository: IMatchRepository,
+) : InstanceKeeper.Instance {
+    override fun onDestroy() {
+        matchRepository.setIgnoreMatch(null)
+    }
+}
 
 private fun officialUserIdsForMatch(match: MatchMVP): List<String> =
     (
