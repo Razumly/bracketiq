@@ -31,16 +31,17 @@ fun BillingAddressDialog(
     var city by remember(initialAddress) { mutableStateOf(initialAddress.city) }
     var state by remember(initialAddress) { mutableStateOf(initialAddress.state) }
     var postalCode by remember(initialAddress) { mutableStateOf(initialAddress.postalCode) }
+    var countryCode by remember(initialAddress) { mutableStateOf(initialAddress.countryCode.ifBlank { "US" }) }
     var attemptedSubmit by remember { mutableStateOf(false) }
 
-    val draft = remember(line1, line2, city, state, postalCode) {
+    val draft = remember(line1, line2, city, state, postalCode, countryCode) {
         BillingAddressDraft(
             line1 = line1,
             line2 = line2.ifBlank { null },
             city = city,
             state = state,
             postalCode = postalCode,
-            countryCode = "US",
+            countryCode = countryCode,
         ).normalized()
     }
     val showError = attemptedSubmit && !draft.isCompleteForUsTax()
@@ -59,10 +60,17 @@ fun BillingAddressDialog(
                     text = "We need a US billing address before we can calculate tax and create the payment.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                StandardTextField(
+                BillingAddressAutocompleteField(
                     value = line1,
                     onValueChange = { line1 = it },
-                    label = "Address line 1",
+                    onAddressSelected = { selectedAddress ->
+                        line1 = selectedAddress.line1
+                        line2 = selectedAddress.line2.orEmpty()
+                        city = selectedAddress.city
+                        state = selectedAddress.state
+                        postalCode = selectedAddress.postalCode
+                        countryCode = selectedAddress.countryCode.ifBlank { "US" }
+                    },
                     isError = showError && draft.line1.isBlank(),
                 )
                 StandardTextField(
@@ -77,10 +85,12 @@ fun BillingAddressDialog(
                     label = "City",
                     isError = showError && draft.city.isBlank(),
                 )
-                StandardTextField(
-                    value = state,
-                    onValueChange = { state = it.uppercase() },
+                PlatformDropdown(
+                    selectedValue = state,
+                    onSelectionChange = { state = it },
+                    options = BillingAddressUsStateOptions,
                     label = "State",
+                    placeholder = "Select state",
                     isError = showError && draft.state.isBlank(),
                 )
                 StandardTextField(
@@ -90,6 +100,14 @@ fun BillingAddressDialog(
                     keyboardType = "number",
                     imeAction = ImeAction.Done,
                     isError = showError && draft.postalCode.isBlank(),
+                )
+                PlatformDropdown(
+                    selectedValue = countryCode,
+                    onSelectionChange = { countryCode = it },
+                    options = BillingAddressCountryOptions,
+                    label = "Country",
+                    placeholder = "Select country",
+                    isError = showError && draft.countryCode != "US",
                 )
                 if (showError) {
                     Text(
