@@ -616,12 +616,35 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
         val signerContext: SignerContext,
         val childUserId: String?,
     )
+    data class TeamRecordSignatureCall(
+        val teamId: String,
+        val templateId: String,
+        val documentId: String,
+        val type: String,
+        val signerContext: SignerContext,
+        val childUserId: String?,
+    )
 
     val purchaseIntentCalls = mutableListOf<PurchaseIntentCall>()
     val teamRegistrationPurchaseIntentCalls = mutableListOf<String>()
+    val teamRegistrationPurchaseTargets = mutableListOf<com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration?>()
     val rentalSignLinksCalls = mutableListOf<RentalSignLinksCall>()
     val recordSignatureCalls = mutableListOf<RecordSignatureCall>()
+    val teamRecordSignatureCalls = mutableListOf<TeamRecordSignatureCall>()
     var rentalSignLinksResult: List<SignStep> = emptyList()
+    var teamSignLinksResult: List<SignStep> = emptyList()
+    var queuedTeamSignLinksResults: MutableList<List<SignStep>> = mutableListOf()
+    var billingAddressProfile: BillingAddressProfile = BillingAddressProfile(
+        billingAddress = BillingAddressDraft(
+            line1 = "1 Test St",
+            city = "Los Angeles",
+            state = "CA",
+            postalCode = "90001",
+            countryCode = "US",
+        ),
+        email = "test@example.com",
+    )
+    val updatedBillingAddresses = mutableListOf<BillingAddressDraft>()
 
     override suspend fun createPurchaseIntent(
         event: Event,
@@ -637,8 +660,15 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
         return Result.success(PurchaseIntent(paymentIntent = "pi_test", publishableKey = "pk_test"))
     }
 
-    override suspend fun createTeamRegistrationPurchaseIntent(team: Team): Result<PurchaseIntent> {
+    suspend fun createTeamRegistrationPurchaseIntent(team: Team): Result<PurchaseIntent> =
+        createTeamRegistrationPurchaseIntent(team, null)
+
+    override suspend fun createTeamRegistrationPurchaseIntent(
+        team: Team,
+        teamRegistration: com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration?,
+    ): Result<PurchaseIntent> {
         teamRegistrationPurchaseIntentCalls += team.id
+        teamRegistrationPurchaseTargets += teamRegistration
         return Result.success(PurchaseIntent(paymentIntent = "pi_team_registration", publishableKey = "pk_test"))
     }
 
@@ -657,6 +687,11 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
 
     override suspend fun getRequiredSignLinks(eventId: String): Result<List<SignStep>> =
         Result.success(emptyList())
+
+    override suspend fun getRequiredTeamSignLinks(teamId: String): Result<List<SignStep>> =
+        Result.success(
+            queuedTeamSignLinksResults.removeFirstOrNull() ?: teamSignLinksResult
+        )
 
     override suspend fun getRequiredRentalSignLinks(
         templateIds: List<String>,
@@ -681,6 +716,25 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
     ): Result<RecordSignatureResult> {
         recordSignatureCalls += RecordSignatureCall(
             eventId = eventId,
+            templateId = templateId,
+            documentId = documentId,
+            type = type,
+            signerContext = signerContext,
+            childUserId = childUserId,
+        )
+        return Result.success(RecordSignatureResult())
+    }
+
+    override suspend fun recordTeamSignature(
+        teamId: String,
+        templateId: String,
+        documentId: String,
+        type: String,
+        signerContext: SignerContext,
+        childUserId: String?,
+    ): Result<RecordSignatureResult> {
+        teamRecordSignatureCalls += TeamRecordSignatureCall(
+            teamId = teamId,
             templateId = templateId,
             documentId = documentId,
             type = type,
@@ -737,20 +791,16 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
     ): Result<Unit> = Result.success(Unit)
     override suspend fun createBillingIntent(billId: String, billPaymentId: String): Result<PurchaseIntent> =
         Result.success(PurchaseIntent(paymentIntent = "pi_bill", publishableKey = "pk_bill"))
-    override suspend fun getBillingAddress(): Result<BillingAddressProfile> = Result.success(
-        BillingAddressProfile(
-            billingAddress = BillingAddressDraft(
-                line1 = "1 Test St",
-                city = "Los Angeles",
-                state = "CA",
-                postalCode = "90001",
-                countryCode = "US",
-            ),
-            email = "test@example.com",
+    override suspend fun getBillingAddress(): Result<BillingAddressProfile> = Result.success(billingAddressProfile)
+    override suspend fun updateBillingAddress(address: BillingAddressDraft): Result<BillingAddressProfile> {
+        val normalizedAddress = address.normalized()
+        updatedBillingAddresses += normalizedAddress
+        billingAddressProfile = BillingAddressProfile(
+            billingAddress = normalizedAddress,
+            email = billingAddressProfile.email,
         )
-    )
-    override suspend fun updateBillingAddress(address: BillingAddressDraft): Result<BillingAddressProfile> =
-        Result.success(BillingAddressProfile(billingAddress = address.normalized(), email = "test@example.com"))
+        return Result.success(billingAddressProfile)
+    }
     override suspend fun listSubscriptions(userId: String, limit: Int): Result<List<Subscription>> =
         Result.success(emptyList())
     override suspend fun cancelSubscription(subscriptionId: String): Result<Boolean> = Result.success(true)

@@ -1525,9 +1525,10 @@ class DefaultProfileComponent(
             return
         }
 
-        val eventId = document.eventId?.trim().orEmpty()
-        if (eventId.isEmpty()) {
-            _errorState.value = ErrorMessage("This document is missing an event id.")
+        val eventId = document.eventId?.trim()?.takeIf(String::isNotBlank)
+        val teamId = document.teamId?.trim()?.takeIf(String::isNotBlank)
+        if (eventId == null && teamId == null) {
+            _errorState.value = ErrorMessage("This document is missing an event or team id.")
             return
         }
 
@@ -1535,12 +1536,21 @@ class DefaultProfileComponent(
             _activeDocumentActionId.value = document.id
             loadingHandler?.showLoading("Preparing document signing ...")
 
-            billingRepository.getRequiredSignLinks(
-                eventId = eventId,
+            val signLinksResult = teamId?.let { normalizedTeamId ->
+                billingRepository.getRequiredTeamSignLinks(
+                    teamId = normalizedTeamId,
+                    signerContext = document.signerContext,
+                    childUserId = document.childUserId,
+                    childUserEmail = document.childEmail,
+                )
+            } ?: billingRepository.getRequiredSignLinks(
+                eventId = eventId.orEmpty(),
                 signerContext = document.signerContext,
                 childUserId = document.childUserId,
                 childUserEmail = document.childEmail,
-            ).onSuccess { steps ->
+            )
+
+            signLinksResult.onSuccess { steps ->
                 val step = steps.firstOrNull { it.templateId == document.templateId }
                     ?: steps.firstOrNull()
                 if (step == null) {
@@ -1637,9 +1647,10 @@ class DefaultProfileComponent(
 
     override fun confirmTextSignature() {
         val prompt = _textSignaturePrompt.value ?: return
-        val eventId = prompt.document.eventId?.trim().orEmpty()
-        if (eventId.isEmpty()) {
-            _errorState.value = ErrorMessage("This document is missing an event id.")
+        val eventId = prompt.document.eventId?.trim()?.takeIf(String::isNotBlank)
+        val teamId = prompt.document.teamId?.trim()?.takeIf(String::isNotBlank)
+        if (eventId == null && teamId == null) {
+            _errorState.value = ErrorMessage("This document is missing an event or team id.")
             return
         }
 
@@ -1650,14 +1661,25 @@ class DefaultProfileComponent(
             val documentId = prompt.step.resolvedDocumentId()
                 ?: "mobile-profile-text-${prompt.step.templateId}-${Clock.System.now().toEpochMilliseconds()}"
 
-            billingRepository.recordSignature(
-                eventId = eventId,
+            val recordSignatureResult = teamId?.let { normalizedTeamId ->
+                billingRepository.recordTeamSignature(
+                    teamId = normalizedTeamId,
+                    templateId = prompt.step.templateId,
+                    documentId = documentId,
+                    type = prompt.step.type,
+                    signerContext = prompt.document.signerContext,
+                    childUserId = prompt.document.childUserId,
+                )
+            } ?: billingRepository.recordSignature(
+                eventId = eventId.orEmpty(),
                 templateId = prompt.step.templateId,
                 documentId = documentId,
                 type = prompt.step.type,
                 signerContext = prompt.document.signerContext,
                 childUserId = prompt.document.childUserId,
-            ).onSuccess {
+            )
+
+            recordSignatureResult.onSuccess {
                 _textSignaturePrompt.value = null
                 _errorState.value = ErrorMessage("Document signed.")
                 refreshDocuments()

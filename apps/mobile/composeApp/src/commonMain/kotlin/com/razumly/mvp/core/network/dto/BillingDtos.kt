@@ -28,6 +28,13 @@ data class BillingTeamRefDto(
     @SerialName("\$id") val legacyId: String? = null,
     val teamId: String? = null,
     val name: String? = null,
+    val registrantId: String? = null,
+    val userId: String? = null,
+    val parentId: String? = null,
+    val registrantType: String? = null,
+    val rosterRole: String? = null,
+    val consentDocumentId: String? = null,
+    val consentStatus: String? = null,
 )
 
 @Serializable

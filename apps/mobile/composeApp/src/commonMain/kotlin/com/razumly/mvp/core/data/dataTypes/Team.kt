@@ -41,6 +41,7 @@ data class Team(
     val createdBy: String? = null,
     val openRegistration: Boolean = false,
     val registrationPriceCents: Int = 0,
+    val requiredTemplateIds: List<String> = emptyList(),
     val playerRegistrations: List<TeamPlayerRegistration> = emptyList(),
     val staffAssignments: List<TeamStaffAssignment> = emptyList(),
     @PrimaryKey override val id: String
@@ -86,6 +87,7 @@ data class Team(
                 createdBy = captainId,
                 openRegistration = false,
                 registrationPriceCents = 0,
+                requiredTemplateIds = emptyList(),
                 playerRegistrations = emptyList(),
                 staffAssignments = emptyList(),
             ).withSynchronizedMembership()
@@ -120,6 +122,7 @@ data class Team(
             createdBy = synced.createdBy,
             openRegistration = synced.openRegistration,
             registrationPriceCents = synced.registrationPriceCents,
+            requiredTemplateIds = synced.requiredTemplateIds,
         )
     }
 }

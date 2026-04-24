@@ -7,6 +7,8 @@ private const val TEAM_MEMBERSHIP_STATUS_INVITED = "INVITED"
 private const val TEAM_MEMBERSHIP_STATUS_STARTED = "STARTED"
 private const val TEAM_MEMBERSHIP_STATUS_LEFT = "LEFT"
 private const val TEAM_MEMBERSHIP_STATUS_REMOVED = "REMOVED"
+private const val TEAM_REGISTRANT_TYPE_SELF = "SELF"
+private const val TEAM_REGISTRANT_TYPE_CHILD = "CHILD"
 
 private const val TEAM_STAFF_STATUS_ACTIVE = "ACTIVE"
 
@@ -21,10 +23,17 @@ data class TeamPlayerRegistration(
     val id: String = "",
     val teamId: String? = null,
     val userId: String = "",
+    val registrantId: String = userId,
+    val parentId: String? = null,
+    val registrantType: String = TEAM_REGISTRANT_TYPE_SELF,
+    val rosterRole: String? = null,
     val status: String = TEAM_MEMBERSHIP_STATUS_ACTIVE,
     val jerseyNumber: String? = null,
     val position: String? = null,
     val isCaptain: Boolean = false,
+    val consentDocumentId: String? = null,
+    val consentStatus: String? = null,
+    val createdBy: String? = null,
 )
 
 @Serializable
@@ -46,6 +55,12 @@ private fun normalizeTeamMembershipStatus(value: String?): String =
         TEAM_MEMBERSHIP_STATUS_LEFT -> TEAM_MEMBERSHIP_STATUS_LEFT
         TEAM_MEMBERSHIP_STATUS_REMOVED -> TEAM_MEMBERSHIP_STATUS_REMOVED
         else -> TEAM_MEMBERSHIP_STATUS_ACTIVE
+    }
+
+private fun normalizeTeamRegistrantType(value: String?): String =
+    when (value?.trim()?.uppercase()) {
+        TEAM_REGISTRANT_TYPE_CHILD -> TEAM_REGISTRANT_TYPE_CHILD
+        else -> TEAM_REGISTRANT_TYPE_SELF
     }
 
 private fun normalizeTeamStaffStatus(value: String?): String =
@@ -115,10 +130,17 @@ private fun Team.normalizeExplicitPlayerRegistrations(): List<TeamPlayerRegistra
                 ),
                 teamId = normalizeIdToken(row.teamId) ?: id,
                 userId = userId,
+                registrantId = normalizeIdToken(row.registrantId) ?: userId,
+                parentId = normalizeIdToken(row.parentId),
+                registrantType = normalizeTeamRegistrantType(row.registrantType),
+                rosterRole = row.rosterRole?.trim()?.takeIf(String::isNotBlank),
                 status = normalizedStatus,
                 jerseyNumber = row.jerseyNumber?.trim()?.takeIf(String::isNotBlank),
                 position = row.position?.trim()?.takeIf(String::isNotBlank),
                 isCaptain = row.isCaptain,
+                consentDocumentId = normalizeIdToken(row.consentDocumentId),
+                consentStatus = row.consentStatus?.trim()?.takeIf(String::isNotBlank),
+                createdBy = normalizeIdToken(row.createdBy),
             )
         }
 
@@ -133,8 +155,15 @@ private fun Team.buildFallbackPlayerRegistrations(): List<TeamPlayerRegistration
                     id = buildTeamPlayerRegistrationId(id, userId, TEAM_MEMBERSHIP_STATUS_ACTIVE),
                     teamId = id,
                     userId = userId,
+                    registrantId = userId,
+                    parentId = null,
+                    registrantType = TEAM_REGISTRANT_TYPE_SELF,
+                    rosterRole = null,
                     status = TEAM_MEMBERSHIP_STATUS_ACTIVE,
                     isCaptain = fallbackCaptainId == userId,
+                    consentDocumentId = null,
+                    consentStatus = null,
+                    createdBy = null,
                 ),
             )
         }
@@ -144,8 +173,15 @@ private fun Team.buildFallbackPlayerRegistrations(): List<TeamPlayerRegistration
                     id = buildTeamPlayerRegistrationId(id, userId, TEAM_MEMBERSHIP_STATUS_INVITED),
                     teamId = id,
                     userId = userId,
+                    registrantId = userId,
+                    parentId = null,
+                    registrantType = TEAM_REGISTRANT_TYPE_SELF,
+                    rosterRole = null,
                     status = TEAM_MEMBERSHIP_STATUS_INVITED,
                     isCaptain = false,
+                    consentDocumentId = null,
+                    consentStatus = null,
+                    createdBy = null,
                 ),
             )
         }
@@ -247,8 +283,15 @@ fun Team.withSynchronizedMembership(): Team {
                 id = buildTeamPlayerRegistrationId(id, derivedCaptainId, TEAM_MEMBERSHIP_STATUS_ACTIVE),
                 teamId = id,
                 userId = derivedCaptainId,
+                registrantId = derivedCaptainId,
+                parentId = null,
+                registrantType = TEAM_REGISTRANT_TYPE_SELF,
+                rosterRole = null,
                 status = TEAM_MEMBERSHIP_STATUS_ACTIVE,
                 isCaptain = true,
+                consentDocumentId = null,
+                consentStatus = null,
+                createdBy = null,
             )
         }
     }

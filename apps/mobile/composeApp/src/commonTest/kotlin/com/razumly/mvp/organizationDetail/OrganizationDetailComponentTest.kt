@@ -4,16 +4,22 @@ import com.arkivanov.decompose.DefaultComponentContext
 import com.arkivanov.essenty.backhandler.BackDispatcher
 import com.arkivanov.essenty.lifecycle.LifecycleRegistry
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
+import com.razumly.mvp.core.data.dataTypes.BillingAddressProfile
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Product
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
+import com.razumly.mvp.core.data.repositories.SignStep
+import com.razumly.mvp.core.data.repositories.TeamRegistrationConsent
+import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
 import com.razumly.mvp.core.presentation.RentalCreateContext
@@ -22,6 +28,7 @@ import com.razumly.mvp.eventCreate.CreateEvent_FakeEventRepository
 import com.razumly.mvp.eventCreate.CreateEvent_FakeFieldRepository
 import com.razumly.mvp.eventCreate.CreateEvent_FakeUserRepository
 import com.razumly.mvp.eventCreate.MainDispatcherTest
+import com.razumly.mvp.eventCreate.createUser
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import com.razumly.mvp.eventDetail.data.StagedMatchCreate
 import kotlinx.coroutines.CompletableDeferred
@@ -31,6 +38,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class OrganizationDetailComponentTest : MainDispatcherTest() {
 
@@ -128,6 +136,170 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
         assertEquals(listOf("org-1", "org-1"), capturedOrganizationIds)
         assertEquals(listOf("team-1"), harness.component.teams.value.map { team -> team.team.id })
     }
+
+    @Test
+    fun startTeamRegistration_withRequiredDocuments_waitsForClearance_thenPromptsBillingAddress_beforeCheckout() =
+        runTest(testDispatcher) {
+            val host = createUser(id = "org-team-host")
+            val userRepository = CreateEvent_FakeUserRepository()
+            val currentUser = userRepository.currentUser.value.getOrNull()!!
+            val organization = Organization(
+                id = "org-join-1",
+                name = "Summit Indoor Volleyball Facility",
+                location = "Washougal, WA",
+                description = "Organization team registration test",
+                logoId = null,
+                ownerId = host.id,
+                website = null,
+                officialIds = emptyList(),
+                hasStripeAccount = true,
+                coordinates = null,
+                fieldIds = emptyList(),
+                productIds = emptyList(),
+                teamIds = listOf("team-org-signing"),
+            )
+            val team = Team(
+                id = "team-org-signing",
+                division = "Open",
+                name = "Org Signing Team",
+                captainId = host.id,
+                managerId = host.id,
+                playerIds = listOf(host.id),
+                teamSize = 6,
+                organizationId = organization.id,
+                openRegistration = true,
+                registrationPriceCents = 5500,
+                requiredTemplateIds = listOf("team-waiver"),
+            )
+            val pendingRegistration = TeamPlayerRegistration(
+                id = "org_team_reg_started",
+                teamId = team.id,
+                userId = currentUser.id,
+                registrantId = currentUser.id,
+                status = "STARTED",
+                registrantType = "SELF",
+                consentStatus = "sent",
+            )
+            val signedRegistration = pendingRegistration.copy(consentStatus = "completed")
+            val signStep = SignStep(
+                templateId = "team-waiver",
+                type = "TEXT",
+                title = "Team Waiver",
+                content = "Please sign this waiver.",
+                documentId = "org_team_doc_1",
+            )
+            val registrationResults = ArrayDeque(
+                listOf(
+                    TeamRegistrationResult(
+                        team = team,
+                        registrationStatus = "STARTED",
+                        registration = pendingRegistration,
+                        consent = TeamRegistrationConsent(
+                            documentId = "org_team_doc_1",
+                            status = "sent",
+                        ),
+                    ),
+                    TeamRegistrationResult(
+                        team = team,
+                        registrationStatus = "STARTED",
+                        registration = signedRegistration,
+                        consent = TeamRegistrationConsent(
+                            documentId = "org_team_doc_1",
+                            status = "completed",
+                        ),
+                    ),
+                )
+            )
+            val billingRepository = OrganizationDetailTestBillingRepository(
+                organization = organization,
+                products = emptyList(),
+            ).apply {
+                testState.queuedTeamSignLinksResults = mutableListOf(
+                    listOf(signStep),
+                    listOf(signStep),
+                    emptyList(),
+                )
+                testState.billingAddressProfile = BillingAddressProfile(
+                    billingAddress = BillingAddressDraft(countryCode = "US"),
+                    email = "user@example.test",
+                )
+            }
+            val teamRepository = object : ITeamRepository by NoopTeamRepository {
+                override suspend fun getTeamsByOrganization(
+                    organizationId: String,
+                    limit: Int,
+                ): Result<List<TeamWithPlayers>> = Result.success(
+                    if (organizationId.trim() == organization.id) {
+                        listOf(
+                            TeamWithPlayers(
+                                team = team,
+                                captain = host,
+                                players = listOf(host),
+                                pendingPlayers = emptyList(),
+                            ),
+                        )
+                    } else {
+                        emptyList()
+                    }
+                )
+
+                override suspend fun requestTeamRegistration(teamId: String): Result<TeamRegistrationResult> =
+                    Result.success(registrationResults.removeFirst())
+            }
+            val component = DefaultOrganizationDetailComponent(
+                componentContext = createTestComponentContext(),
+                organizationId = organization.id,
+                initialTab = OrganizationDetailTab.TEAMS,
+                billingRepository = billingRepository,
+                eventRepository = CreateEvent_FakeEventRepository(),
+                teamRepository = teamRepository,
+                fieldRepository = CreateEvent_FakeFieldRepository(),
+                matchRepository = NoopMatchRepository,
+                userRepository = userRepository,
+                navigationHandler = NoopNavigationHandler,
+            )
+
+            advance()
+
+            component.startTeamRegistration(
+                TeamWithPlayers(
+                    team = team,
+                    captain = host,
+                    players = listOf(host),
+                    pendingPlayers = emptyList(),
+                )
+            )
+            advance()
+
+            assertTrue(component.textSignaturePrompt.value != null)
+            assertTrue(component.billingAddressPrompt.value == null)
+            assertTrue(billingRepository.testState.teamRegistrationPurchaseIntentCalls.isEmpty())
+
+            component.confirmTextSignature()
+            advance()
+
+            assertTrue(component.textSignaturePrompt.value == null)
+            assertTrue(component.billingAddressPrompt.value != null)
+            assertEquals(1, billingRepository.testState.teamRecordSignatureCalls.size)
+            assertTrue(billingRepository.testState.teamRegistrationPurchaseIntentCalls.isEmpty())
+
+            component.submitBillingAddress(
+                BillingAddressDraft(
+                    line1 = "42 Test Ave",
+                    city = "Los Angeles",
+                    state = "CA",
+                    postalCode = "90001",
+                    countryCode = "US",
+                )
+            )
+            advance()
+
+            assertEquals(listOf(team.id), billingRepository.testState.teamRegistrationPurchaseIntentCalls)
+            assertEquals(currentUser.id, billingRepository.testState.teamRegistrationPurchaseTargets.single()?.registrantId)
+            assertEquals("completed", billingRepository.testState.teamRegistrationPurchaseTargets.single()?.consentStatus)
+            assertEquals(1, billingRepository.testState.updatedBillingAddresses.size)
+            assertTrue(component.billingAddressPrompt.value == null)
+        }
 }
 
 private class OrganizationDetailHarness(
@@ -172,7 +344,9 @@ private class OrganizationDetailHarness(
 private class OrganizationDetailTestBillingRepository(
     private val organization: Organization,
     private val products: List<Product>,
-) : com.razumly.mvp.core.data.repositories.IBillingRepository by CreateEvent_FakeBillingRepository() {
+    private val delegate: CreateEvent_FakeBillingRepository = CreateEvent_FakeBillingRepository(),
+) : com.razumly.mvp.core.data.repositories.IBillingRepository by delegate {
+    val testState: CreateEvent_FakeBillingRepository = delegate
     private val productPurchaseGate = CompletableDeferred<Unit>()
     private val productSubscriptionGate = CompletableDeferred<Unit>()
 
@@ -232,6 +406,9 @@ private object NoopTeamRepository : ITeamRepository {
     override suspend fun createTeam(newTeam: Team): Result<Team> = Result.success(newTeam)
 
     override suspend fun updateTeam(newTeam: Team): Result<Team> = Result.success(newTeam)
+
+    override suspend fun requestTeamRegistration(teamId: String): Result<TeamRegistrationResult> =
+        Result.failure(IllegalStateException("unused"))
 
     override suspend fun registerForTeam(teamId: String): Result<Team> =
         Result.failure(IllegalStateException("unused"))

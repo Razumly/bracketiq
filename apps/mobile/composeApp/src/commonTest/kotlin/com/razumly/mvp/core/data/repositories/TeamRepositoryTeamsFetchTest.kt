@@ -499,6 +499,80 @@ class TeamRepositoryTeamsFetchTest {
     }
 
     @Test
+    fun requestTeamRegistration_parses_consent_aware_registration_payload() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/teams/team_1/registrations/self", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+
+            respond(
+                content = """
+                    {
+                      "registrationId": "registration_1",
+                      "status": "STARTED",
+                      "registration": {
+                        "id": "registration_1",
+                        "teamId": "team_1",
+                        "userId": "u1",
+                        "registrantId": "u1",
+                        "parentId": "parent_1",
+                        "registrantType": "CHILD",
+                        "rosterRole": "PARTICIPANT",
+                        "status": "STARTED",
+                        "consentDocumentId": "doc_1",
+                        "consentStatus": "sent",
+                        "createdBy": "parent_1"
+                      },
+                      "consent": {
+                        "documentId": "doc_1",
+                        "status": "sent",
+                        "requiresChildEmail": false
+                      },
+                      "warnings": ["Sign remaining team documents."],
+                      "team": {
+                        "id": "team_1",
+                        "name": "Open Team",
+                        "division": "Open",
+                        "playerIds": ["captain_1"],
+                        "captainId": "captain_1",
+                        "pending": [],
+                        "teamSize": 6,
+                        "openRegistration": true,
+                        "registrationPriceCents": 0,
+                        "requiredTemplateIds": ["template_a", "template_b"]
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        val result = repo.requestTeamRegistration("team_1").getOrThrow()
+
+        assertEquals("STARTED", result.registrationStatus)
+        assertEquals("u1", result.registration?.registrantId)
+        assertEquals("parent_1", result.registration?.parentId)
+        assertEquals("CHILD", result.registration?.registrantType)
+        assertEquals("PARTICIPANT", result.registration?.rosterRole)
+        assertEquals("doc_1", result.registration?.consentDocumentId)
+        assertEquals("sent", result.registration?.consentStatus)
+        assertEquals("sent", result.consent?.status)
+        assertEquals(listOf("Sign remaining team documents."), result.warnings)
+        assertEquals(listOf("template_a", "template_b"), teamDao.getTeam("team_1").requiredTemplateIds)
+    }
+
+    @Test
     fun createTeam_refreshes_current_user_profile_without_user_patch() = runTest {
         val tokenStore = InMemoryAuthTokenStore("t123")
         val teamDao = FakeTeamDao()

@@ -41,6 +41,7 @@ import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamBillingUserOption
 import com.razumly.mvp.core.data.repositories.EventParticipantManagementEntry
+import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
@@ -57,6 +58,7 @@ import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import kotlin.math.round
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
@@ -136,6 +138,7 @@ fun ParticipantsView(
     val divisionTeams by component.divisionTeams.collectAsState()
     val selectedEvent by component.eventWithRelations.collectAsState()
     val currentUser by component.currentUser.collectAsState()
+    val startingTeamRegistrationId by component.startingTeamRegistrationId.collectAsState()
     val participantManagementSnapshot by component.participantManagementSnapshot.collectAsState()
     val participantManagementLoading by component.participantManagementLoading.collectAsState()
     val participants = selectedEvent.players
@@ -221,9 +224,23 @@ fun ParticipantsView(
     val playerInteractionComponent = remember {
         getKoin().get<PlayerInteractionComponent> { parametersOf(component) }
     }
+    val teamRepository = remember {
+        getKoin().get<ITeamRepository>()
+    }
     val userRepository = remember {
         getKoin().get<IUserRepository>()
     }
+    val selectedTeamFlow = remember(selectedTeam?.team?.id) {
+        selectedTeam?.team?.id
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?.let { teamId -> teamRepository.getTeamsFlow(listOf(teamId)) }
+            ?: flowOf(Result.success(emptyList()))
+    }
+    val selectedTeamResult by selectedTeamFlow.collectAsState(
+        initial = Result.success(selectedTeam?.let(::listOf) ?: emptyList()),
+    )
+    val selectedTeamForDialog = selectedTeamResult.getOrNull()?.firstOrNull() ?: selectedTeam
 
     LaunchedEffect(Unit) {
         playerInteractionComponent.setLoadingHandler(loadingHandler)
@@ -234,8 +251,8 @@ fun ParticipantsView(
         }
     }
 
-    LaunchedEffect(showTeamDialog, selectedTeam?.team?.id, currentUser.id, selectedEvent.players) {
-        val team = selectedTeam
+    LaunchedEffect(showTeamDialog, selectedTeamForDialog?.team?.id, currentUser.id, selectedEvent.players) {
+        val team = selectedTeamForDialog
         if (!showTeamDialog || team == null) {
             teamDialogKnownUsers = emptyMap()
             return@LaunchedEffect
@@ -631,9 +648,9 @@ fun ParticipantsView(
 
     }
 
-    if (showTeamDialog && selectedTeam != null) {
+    if (showTeamDialog && selectedTeamForDialog != null) {
         TeamDetailsDialog(
-            team = selectedTeam!!,
+            team = selectedTeamForDialog,
             currentUser = currentUser,
             knownUsers = teamDialogKnownUsers.values.toList(),
             onDismiss = {
@@ -658,6 +675,8 @@ fun ParticipantsView(
             onUnblockPlayer = { user ->
                 playerInteractionComponent.unblockUser(user)
             },
+            isRegistering = startingTeamRegistrationId == selectedTeamForDialog.team.id,
+            onRegisterForTeam = { component.startTeamRegistration(selectedTeamForDialog) },
         )
     }
 

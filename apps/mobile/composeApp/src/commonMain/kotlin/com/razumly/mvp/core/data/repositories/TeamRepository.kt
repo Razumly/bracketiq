@@ -3,6 +3,7 @@ package com.razumly.mvp.core.data.repositories
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -18,9 +19,11 @@ import com.razumly.mvp.core.network.dto.InviteCreateDto
 import com.razumly.mvp.core.network.dto.InvitesResponseDto
 import com.razumly.mvp.core.network.dto.TeamApiDto
 import com.razumly.mvp.core.network.dto.TeamInviteFreeAgentsResponseDto
+import com.razumly.mvp.core.network.dto.TeamPlayerRegistrationApiDto
 import com.razumly.mvp.core.network.dto.TeamRegistrationResponseDto
 import com.razumly.mvp.core.network.dto.TeamsResponseDto
 import com.razumly.mvp.core.network.dto.UpdateTeamRequestDto
+import com.razumly.mvp.core.network.dto.toTeamPlayerRegistrationOrNull
 import com.razumly.mvp.core.network.dto.toUpdateDto
 import com.razumly.mvp.core.network.dto.toUserDataOrNull
 import com.razumly.mvp.core.util.jsonMVP
@@ -56,6 +59,13 @@ interface ITeamRepository : IMVPRepository {
     suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit>
     suspend fun createTeam(newTeam: Team): Result<Team>
     suspend fun updateTeam(newTeam: Team): Result<Team>
+    suspend fun requestTeamRegistration(teamId: String): Result<TeamRegistrationResult>
+    suspend fun requestChildTeamRegistration(
+        teamId: String,
+        childId: String,
+    ): Result<TeamRegistrationResult> = Result.failure(
+        NotImplementedError("Child team registration is not implemented."),
+    )
     suspend fun registerForTeam(teamId: String): Result<Team>
     suspend fun leaveTeam(teamId: String): Result<Team>
     suspend fun deleteTeam(team: TeamWithPlayers): Result<Unit>
@@ -78,6 +88,80 @@ interface ITeamRepository : IMVPRepository {
 private data class TeamRegistrationRequestDto(
     val noop: Boolean = true,
 )
+
+@Serializable
+private data class TeamChildRegistrationRequestDto(
+    val childId: String,
+)
+
+data class TeamRegistrationConsent(
+    val documentId: String? = null,
+    val status: String? = null,
+    val childEmail: String? = null,
+    val requiresChildEmail: Boolean = false,
+)
+
+data class TeamRegistrationResult(
+    val team: Team,
+    val registrationId: String? = null,
+    val registration: TeamPlayerRegistration? = null,
+    val registrationStatus: String? = null,
+    val consent: TeamRegistrationConsent? = null,
+    val warnings: List<String> = emptyList(),
+)
+
+fun TeamRegistrationResult.isActive(): Boolean =
+    registrationStatus.equals("ACTIVE", ignoreCase = true) ||
+        registration?.status.equals("ACTIVE", ignoreCase = true)
+
+fun TeamRegistrationResult.requiresAdditionalSigning(): Boolean =
+    consent != null && !consent.status.equals("completed", ignoreCase = true)
+
+fun TeamRegistrationResult.requiresChildEmail(): Boolean = consent?.requiresChildEmail == true
+
+fun TeamRegistrationResult.userMessage(defaultMessage: String): String {
+    if (requiresChildEmail()) {
+        return warnings.firstOrNull()
+            ?: "Add the child's email before requesting child-signature documents."
+    }
+    if (warnings.isNotEmpty()) {
+        return warnings.first()
+    }
+    if (requiresAdditionalSigning()) {
+        return "Complete the required team documents before continuing."
+    }
+    return defaultMessage
+}
+
+private fun TeamRegistrationResponseDto.toTeamRegistrationResult(): TeamRegistrationResult {
+    error?.takeIf(String::isNotBlank)?.let(::error)
+    val resolvedTeam = team?.toTeamOrNull() ?: error("Team registration response missing team")
+    return TeamRegistrationResult(
+        team = resolvedTeam,
+        registrationId = registrationId?.trim()?.takeIf(String::isNotBlank),
+        registration = registration?.toTeamPlayerRegistrationOrNull(),
+        registrationStatus = status?.trim()?.takeIf(String::isNotBlank)
+            ?: registration?.status?.trim()?.takeIf(String::isNotBlank),
+        consent = consent?.toConsentOrNull(),
+        warnings = warnings.map(String::trim).filter(String::isNotBlank),
+    )
+}
+
+private fun com.razumly.mvp.core.network.dto.TeamRegistrationConsentDto.toConsentOrNull(): TeamRegistrationConsent? {
+    val normalizedStatus = status?.trim()?.takeIf(String::isNotBlank)
+    val normalizedDocumentId = documentId?.trim()?.takeIf(String::isNotBlank)
+    val normalizedChildEmail = childEmail?.trim()?.takeIf(String::isNotBlank)
+    val childEmailRequired = requiresChildEmail == true
+    if (normalizedStatus == null && normalizedDocumentId == null && normalizedChildEmail == null && !childEmailRequired) {
+        return null
+    }
+    return TeamRegistrationConsent(
+        documentId = normalizedDocumentId,
+        status = normalizedStatus,
+        childEmail = normalizedChildEmail,
+        requiresChildEmail = childEmailRequired,
+    )
+}
 
 class TeamRepository(
     private val api: MvpApiClient,
@@ -107,6 +191,7 @@ class TeamRepository(
             "divisionTypeName",
             "openRegistration",
             "registrationPriceCents",
+            "requiredTemplateIds",
             "playerRegistrations",
         )
         val RETRYABLE_TEAM_UPDATE_FIELDS = setOf(
@@ -115,6 +200,7 @@ class TeamRepository(
             "playerRegistrations",
             "openRegistration",
             "registrationPriceCents",
+            "requiredTemplateIds",
         )
         val UNRECOGNIZED_KEYS_REGEX = Regex(
             pattern = "Unrecognized key\\(s\\) in object:\\s*(.+)",
@@ -329,23 +415,42 @@ class TeamRepository(
         onReturn = { team -> team },
     )
 
-    override suspend fun registerForTeam(teamId: String): Result<Team> = singleResponse(
-        networkCall = {
-            val response = api.post<TeamRegistrationRequestDto, TeamRegistrationResponseDto>(
-                path = "api/teams/$teamId/registrations/self",
-                body = TeamRegistrationRequestDto(),
-            )
-            response.error?.takeIf(String::isNotBlank)?.let { message -> error(message) }
-            val team = response.team?.toTeamOrNull() ?: error("Team registration response missing team")
-            ensureUsersCachedForTeam(team)
-            team
-        },
-        saveCall = { team ->
-            databaseService.getTeamDao.upsertTeamWithRelations(team)
-            runCatching { userRepository.getCurrentAccount().getOrThrow() }
-        },
-        onReturn = { team -> team },
-    )
+    override suspend fun requestTeamRegistration(teamId: String): Result<TeamRegistrationResult> = runCatching {
+        val response = api.post<TeamRegistrationRequestDto, TeamRegistrationResponseDto>(
+            path = "api/teams/$teamId/registrations/self",
+            body = TeamRegistrationRequestDto(),
+        )
+        val result = response.toTeamRegistrationResult()
+        ensureUsersCachedForTeam(result.team)
+        databaseService.getTeamDao.upsertTeamWithRelations(result.team)
+        runCatching { userRepository.getCurrentAccount().getOrThrow() }
+        result
+    }
+
+    override suspend fun requestChildTeamRegistration(
+        teamId: String,
+        childId: String,
+    ): Result<TeamRegistrationResult> = runCatching {
+        val normalizedChildId = childId.trim().takeIf(String::isNotBlank)
+            ?: error("Child id is required.")
+        val response = api.post<TeamChildRegistrationRequestDto, TeamRegistrationResponseDto>(
+            path = "api/teams/$teamId/registrations/child",
+            body = TeamChildRegistrationRequestDto(childId = normalizedChildId),
+        )
+        val result = response.toTeamRegistrationResult()
+        ensureUsersCachedForTeam(result.team)
+        databaseService.getTeamDao.upsertTeamWithRelations(result.team)
+        runCatching { userRepository.getCurrentAccount().getOrThrow() }
+        result
+    }
+
+    override suspend fun registerForTeam(teamId: String): Result<Team> =
+        requestTeamRegistration(teamId).mapCatching { result ->
+            if (!result.isActive()) {
+                error(result.userMessage("Team registration requires additional steps."))
+            }
+            result.team
+        }
 
     override suspend fun leaveTeam(teamId: String): Result<Team> = singleResponse(
         networkCall = {
@@ -630,6 +735,7 @@ class TeamRepository(
         if (existingTeam.divisionTypeName != updatedTeam.divisionTypeName) add("divisionTypeName")
         if (existingTeam.openRegistration != updatedTeam.openRegistration) add("openRegistration")
         if (existingTeam.registrationPriceCents != updatedTeam.registrationPriceCents) add("registrationPriceCents")
+        if (existingTeam.requiredTemplateIds != updatedTeam.requiredTemplateIds) add("requiredTemplateIds")
         if (!playerRegistrationsEquivalent(existingTeam, updatedTeam)) add("playerRegistrations")
     }
 

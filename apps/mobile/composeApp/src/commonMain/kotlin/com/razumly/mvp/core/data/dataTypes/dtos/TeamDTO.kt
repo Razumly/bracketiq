@@ -32,6 +32,7 @@ data class TeamDTO (
     val createdBy: String? = null,
     val openRegistration: Boolean = false,
     val registrationPriceCents: Int = 0,
+    val requiredTemplateIds: List<String> = emptyList(),
     @Transient
     val id: String = ""
 )
@@ -62,5 +63,6 @@ fun TeamDTO.toTeam(id: String): Team {
         createdBy = createdBy,
         openRegistration = openRegistration,
         registrationPriceCents = registrationPriceCents.coerceAtLeast(0),
+        requiredTemplateIds = requiredTemplateIds,
     ).withSynchronizedMembership()
 }

@@ -9,6 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.OrganizationVerificationStatus
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
@@ -1000,14 +1001,85 @@ class BillingRepositoryHttpTest {
             openRegistration = true,
             registrationPriceCents = 2500,
         )
-        val intent = repo.createTeamRegistrationPurchaseIntent(team).getOrThrow()
+        val teamRegistration = TeamPlayerRegistration(
+            id = "team_registration_1",
+            teamId = team.id,
+            userId = "u1",
+            registrantId = "u1",
+            parentId = "parent_1",
+            registrantType = "CHILD",
+            rosterRole = "PARTICIPANT",
+            status = "STARTED",
+            consentDocumentId = "consent_doc_1",
+            consentStatus = "completed",
+        )
+        val intent = repo.createTeamRegistrationPurchaseIntent(team, teamRegistration).getOrThrow()
 
         assertEquals("pi_team_registration", intent.paymentIntent)
         assertTrue(capturedBody.contains("\"purchaseType\":\"team_registration\""))
         assertTrue(capturedBody.contains("\"teamRegistration\""))
         assertTrue(capturedBody.contains("\"teamId\":\"team_123\""))
+        assertTrue(capturedBody.contains("\"registrantId\":\"u1\""))
+        assertTrue(capturedBody.contains("\"parentId\":\"parent_1\""))
+        assertTrue(capturedBody.contains("\"registrantType\":\"CHILD\""))
+        assertTrue(capturedBody.contains("\"rosterRole\":\"PARTICIPANT\""))
+        assertTrue(capturedBody.contains("\"consentDocumentId\":\"consent_doc_1\""))
+        assertTrue(capturedBody.contains("\"consentStatus\":\"completed\""))
         assertTrue(capturedBody.contains("\"team\""))
         assertTrue(capturedBody.contains("\"id\":\"team_123\""))
+    }
+
+    @Test
+    fun getRequiredTeamSignLinks_posts_team_sign_request() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/teams/team_1/sign", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "signLinks": [
+                        {
+                          "templateId": "template_1",
+                          "type": "TEXT",
+                          "title": "Team waiver",
+                          "documentId": "doc_1"
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val links = repo.getRequiredTeamSignLinks(
+            teamId = "team_1",
+            signerContext = SignerContext.PARENT_GUARDIAN,
+            childUserId = "child_1",
+            childUserEmail = "child@example.test",
+        ).getOrThrow()
+
+        assertEquals(1, links.size)
+        assertTrue(capturedBody.contains("\"signerContext\":\"parent_guardian\""))
+        assertTrue(capturedBody.contains("\"childUserId\":\"child_1\""))
+        assertTrue(capturedBody.contains("\"childEmail\":\"child@example.test\""))
     }
 
     @Test
@@ -1355,6 +1427,52 @@ class BillingRepositoryHttpTest {
             documentId = "doc_1",
             type = "TEXT",
         ).getOrThrow()
+    }
+
+    @Test
+    fun recordTeamSignature_posts_expected_payload() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/documents/record-signature", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """{"ok": true}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        repo.recordTeamSignature(
+            teamId = "team_1",
+            templateId = "tpl_1",
+            documentId = "doc_1",
+            type = "TEXT",
+            signerContext = SignerContext.CHILD,
+            childUserId = "child_1",
+        ).getOrThrow()
+
+        assertTrue(capturedBody.contains("\"teamId\":\"team_1\""))
+        assertTrue(capturedBody.contains("\"templateId\":\"tpl_1\""))
+        assertTrue(capturedBody.contains("\"documentId\":\"doc_1\""))
+        assertTrue(capturedBody.contains("\"signerContext\":\"child\""))
+        assertTrue(capturedBody.contains("\"childUserId\":\"child_1\""))
     }
 
     @Test

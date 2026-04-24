@@ -30,6 +30,42 @@ import com.razumly.mvp.core.data.dataTypes.isActive
 import com.razumly.mvp.core.data.dataTypes.isStarted
 import com.razumly.mvp.core.data.dataTypes.normalizedRole
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
+import com.razumly.mvp.core.presentation.util.MoneyInputUtils
+
+internal fun canRegisterForTeam(
+    openRegistration: Boolean,
+    isCurrentUserActive: Boolean,
+    isCurrentUserPending: Boolean,
+    teamHasCapacity: Boolean,
+    hasRegisterAction: Boolean,
+): Boolean {
+    return hasRegisterAction &&
+        !isCurrentUserActive &&
+        (isCurrentUserPending || (openRegistration && teamHasCapacity))
+}
+
+internal fun shouldShowTeamRegistrationButton(
+    openRegistration: Boolean,
+    isCurrentUserActive: Boolean,
+    isCurrentUserPending: Boolean,
+): Boolean {
+    return !isCurrentUserActive && (openRegistration || isCurrentUserPending)
+}
+
+internal fun teamRegistrationButtonLabel(
+    isRegistering: Boolean,
+    isCurrentUserPending: Boolean,
+    teamHasCapacity: Boolean,
+    registrationPriceCents: Int,
+): String {
+    return when {
+        isRegistering -> "Registering..."
+        isCurrentUserPending -> "Resume Payment"
+        !teamHasCapacity -> "Team Full"
+        registrationPriceCents > 0 -> "Join for $${MoneyInputUtils.centsToDisplayValue(registrationPriceCents)}"
+        else -> "Join Team"
+    }
+}
 
 @Composable
 fun TeamDetailsDialog(
@@ -72,10 +108,13 @@ fun TeamDetailsDialog(
                     registration.isActive() || registration.isStarted()
                 }.coerceAtLeast(syncedTeam.playerIds.size)
                 val teamHasCapacity = syncedTeam.teamSize <= 0 || reservedOrActiveCount < syncedTeam.teamSize
-                val canRegister = syncedTeam.openRegistration &&
-                    !isCurrentUserActive &&
-                    (isCurrentUserPending || teamHasCapacity) &&
-                    onRegisterForTeam != null
+                val canRegister = canRegisterForTeam(
+                    openRegistration = syncedTeam.openRegistration,
+                    isCurrentUserActive = isCurrentUserActive,
+                    isCurrentUserPending = isCurrentUserPending,
+                    teamHasCapacity = teamHasCapacity,
+                    hasRegisterAction = onRegisterForTeam != null,
+                )
                 val activeStaffAssignments = syncedTeam.staffAssignments
                     .filter(TeamStaffAssignment::isActive)
                     .sortedWith(
@@ -133,7 +172,7 @@ fun TeamDetailsDialog(
                             )
                         } else {
                             Text(
-                                text = "$roleLabel: ${assignment.userId}",
+                                text = roleLabel,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -209,19 +248,25 @@ fun TeamDetailsDialog(
                             Text(if (isLeaving) "Leaving..." else "Leave Team")
                         }
                         Spacer(modifier = Modifier.height(8.dp))
-                    } else if (syncedTeam.openRegistration || isCurrentUserPending) {
+                    } else if (
+                        shouldShowTeamRegistrationButton(
+                            openRegistration = syncedTeam.openRegistration,
+                            isCurrentUserActive = isCurrentUserActive,
+                            isCurrentUserPending = isCurrentUserPending,
+                        )
+                    ) {
                         Button(
                             onClick = { onRegisterForTeam?.invoke() },
                             enabled = canRegister && !isRegistering,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text(
-                                when {
-                                    isRegistering -> "Registering..."
-                                    isCurrentUserPending -> "Resume Payment"
-                                    !teamHasCapacity -> "Team Full"
-                                    else -> "Register for Team"
-                                }
+                                teamRegistrationButtonLabel(
+                                    isRegistering = isRegistering,
+                                    isCurrentUserPending = isCurrentUserPending,
+                                    teamHasCapacity = teamHasCapacity,
+                                    registrationPriceCents = syncedTeam.registrationPriceCents.coerceAtLeast(0),
+                                )
                             )
                         }
                         Spacer(modifier = Modifier.height(8.dp))

@@ -14,10 +14,17 @@ data class TeamPlayerRegistrationApiDto(
     val id: String? = null,
     val teamId: String? = null,
     val userId: String? = null,
+    val registrantId: String? = null,
+    val parentId: String? = null,
+    val registrantType: String? = null,
+    val rosterRole: String? = null,
     val status: String? = null,
     val jerseyNumber: String? = null,
     val position: String? = null,
     val isCaptain: Boolean? = null,
+    val consentDocumentId: String? = null,
+    val consentStatus: String? = null,
+    val createdBy: String? = null,
 )
 
 @Serializable
@@ -60,6 +67,7 @@ data class TeamApiDto(
     val createdBy: String? = null,
     val openRegistration: Boolean? = null,
     val registrationPriceCents: Int? = null,
+    val requiredTemplateIds: List<String>? = null,
     val playerRegistrations: List<TeamPlayerRegistrationApiDto>? = null,
     val staffAssignments: List<TeamStaffAssignmentApiDto>? = null,
 ) {
@@ -69,18 +77,7 @@ data class TeamApiDto(
 
         val resolvedTeamSize = (teamSize ?: 0).takeIf { it > 0 } ?: 2
         val resolvedPlayerRegistrations = playerRegistrations
-            ?.mapNotNull { registration ->
-                val userId = registration.userId?.trim()?.takeIf(String::isNotBlank) ?: return@mapNotNull null
-                TeamPlayerRegistration(
-                    id = registration.id?.trim().orEmpty(),
-                    teamId = registration.teamId?.trim()?.takeIf(String::isNotBlank),
-                    userId = userId,
-                    status = registration.status?.trim().orEmpty(),
-                    jerseyNumber = registration.jerseyNumber?.trim()?.takeIf(String::isNotBlank),
-                    position = registration.position?.trim()?.takeIf(String::isNotBlank),
-                    isCaptain = registration.isCaptain == true,
-                )
-            }
+            ?.mapNotNull(TeamPlayerRegistrationApiDto::toTeamPlayerRegistrationOrNull)
             .orEmpty()
         val resolvedStaffAssignments = staffAssignments
             ?.mapNotNull { assignment ->
@@ -122,11 +119,32 @@ data class TeamApiDto(
             createdBy = createdBy?.trim()?.takeIf(String::isNotBlank),
             openRegistration = openRegistration == true,
             registrationPriceCents = (registrationPriceCents ?: 0).coerceAtLeast(0),
+            requiredTemplateIds = requiredTemplateIds.normalizeDistinctIds(),
             playerRegistrations = resolvedPlayerRegistrations,
             staffAssignments = resolvedStaffAssignments,
             id = resolvedId,
         ).withSynchronizedMembership()
     }
+}
+
+fun TeamPlayerRegistrationApiDto.toTeamPlayerRegistrationOrNull(): TeamPlayerRegistration? {
+    val normalizedUserId = userId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    return TeamPlayerRegistration(
+        id = id?.trim().orEmpty(),
+        teamId = teamId?.trim()?.takeIf(String::isNotBlank),
+        userId = normalizedUserId,
+        registrantId = registrantId?.trim()?.takeIf(String::isNotBlank) ?: normalizedUserId,
+        parentId = parentId?.trim()?.takeIf(String::isNotBlank),
+        registrantType = registrantType?.trim()?.takeIf(String::isNotBlank) ?: "SELF",
+        rosterRole = rosterRole?.trim()?.takeIf(String::isNotBlank),
+        status = status?.trim().orEmpty(),
+        jerseyNumber = jerseyNumber?.trim()?.takeIf(String::isNotBlank),
+        position = position?.trim()?.takeIf(String::isNotBlank),
+        isCaptain = isCaptain == true,
+        consentDocumentId = consentDocumentId?.trim()?.takeIf(String::isNotBlank),
+        consentStatus = consentStatus?.trim()?.takeIf(String::isNotBlank),
+        createdBy = createdBy?.trim()?.takeIf(String::isNotBlank),
+    )
 }
 
 @Serializable
@@ -145,9 +163,20 @@ data class TeamInviteFreeAgentsResponseDto(
 data class TeamRegistrationResponseDto(
     val registrationId: String? = null,
     val status: String? = null,
+    val registration: TeamPlayerRegistrationApiDto? = null,
+    val consent: TeamRegistrationConsentDto? = null,
+    val warnings: List<String> = emptyList(),
     val left: Boolean? = null,
     val team: TeamApiDto? = null,
     val error: String? = null,
+)
+
+@Serializable
+data class TeamRegistrationConsentDto(
+    val documentId: String? = null,
+    val status: String? = null,
+    val childEmail: String? = null,
+    val requiresChildEmail: Boolean? = null,
 )
 
 @Serializable
@@ -169,6 +198,7 @@ data class TeamUpdateDto(
     val divisionTypeName: String? = null,
     val openRegistration: Boolean? = null,
     val registrationPriceCents: Int? = null,
+    val requiredTemplateIds: List<String>? = null,
     val playerRegistrations: List<TeamPlayerRegistrationApiDto>? = null,
 )
 
@@ -183,6 +213,12 @@ private fun normalizeJerseyNumber(value: String?): String? =
         .filter(Char::isDigit)
         .take(3)
         .takeIf(String::isNotBlank)
+
+private fun List<String>?.normalizeDistinctIds(): List<String> =
+    this.orEmpty()
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .distinct()
 
 private fun shouldIncludeTeamUpdateField(
     field: String,
@@ -221,16 +257,26 @@ fun Team.toUpdateDto(
         } else {
             null
         },
+        requiredTemplateIds = synced.requiredTemplateIds
+            .normalizeDistinctIds()
+            .takeIf { shouldIncludeTeamUpdateField("requiredTemplateIds", omitFields, includeFields) },
         playerRegistrations = if (shouldIncludeTeamUpdateField("playerRegistrations", omitFields, includeFields)) {
             synced.playerRegistrations.map { registration ->
                 TeamPlayerRegistrationApiDto(
                     id = registration.id,
                     teamId = registration.teamId,
                     userId = registration.userId,
+                    registrantId = registration.registrantId,
+                    parentId = registration.parentId,
+                    registrantType = registration.registrantType,
+                    rosterRole = registration.rosterRole,
                     status = registration.status,
                     jerseyNumber = normalizeJerseyNumber(registration.jerseyNumber),
                     position = registration.position,
                     isCaptain = registration.isCaptain,
+                    consentDocumentId = registration.consentDocumentId,
+                    consentStatus = registration.consentStatus,
+                    createdBy = registration.createdBy,
                 )
             }
         } else {

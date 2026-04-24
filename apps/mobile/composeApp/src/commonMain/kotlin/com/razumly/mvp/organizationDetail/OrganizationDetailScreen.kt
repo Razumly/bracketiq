@@ -47,12 +47,18 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Product
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.dataTypes.canUsePaidBilling
+import com.razumly.mvp.core.data.repositories.ITeamRepository
+import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.presentation.LockedRentalSelection
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
+import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.composables.EventCard
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.composables.TeamDetailsDialog
@@ -60,6 +66,7 @@ import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.util.moneyFormat
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
+import com.razumly.mvp.eventDetail.TextSignatureDialog
 import com.razumly.mvp.eventSearch.RentalConfirmationContent
 import com.razumly.mvp.eventSearch.RentalDetailsContent
 import com.razumly.mvp.eventSearch.RentalDetailsStep
@@ -78,7 +85,9 @@ import com.razumly.mvp.icons.ProfileActionPayments
 import com.razumly.mvp.icons.ProfileActionTeams
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
+import kotlinx.coroutines.flow.flowOf
 import kotlin.time.Clock
+import org.koin.mp.KoinPlatform.getKoin
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -103,9 +112,29 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val billingAddressPrompt by component.billingAddressPrompt.collectAsState()
     val currentUser by component.currentUser.collectAsState()
     val startingTeamRegistrationId by component.startingTeamRegistrationId.collectAsState()
+    val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
+    val webSignaturePrompt by component.webSignaturePrompt.collectAsState()
 
     var selectedTab by remember(component) { mutableStateOf(component.initialTab) }
     var selectedTeam by remember { mutableStateOf<TeamWithPlayers?>(null) }
+    var teamDialogKnownUsers by remember { mutableStateOf<Map<String, UserData>>(emptyMap()) }
+    val teamRepository = remember {
+        getKoin().get<ITeamRepository>()
+    }
+    val userRepository = remember {
+        getKoin().get<IUserRepository>()
+    }
+    val selectedTeamFlow = remember(selectedTeam?.team?.id) {
+        selectedTeam?.team?.id
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?.let { teamId -> teamRepository.getTeamsFlow(listOf(teamId)) }
+            ?: flowOf(Result.success(emptyList()))
+    }
+    val selectedTeamResult by selectedTeamFlow.collectAsState(
+        initial = Result.success(selectedTeam?.let(::listOf) ?: emptyList()),
+    )
+    val selectedTeamForDialog = selectedTeamResult.getOrNull()?.firstOrNull() ?: selectedTeam
 
     val timeZone = remember { TimeZone.currentSystemDefault() }
     val today = remember(timeZone) { Clock.System.now().toLocalDateTime(timeZone).date }
@@ -249,6 +278,42 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
             selectedRentalDate = today
             nextRentalSelectionId = 1L
             component.clearRentalData()
+        }
+    }
+
+    LaunchedEffect(selectedTeamForDialog?.team?.id, currentUser.id) {
+        val team = selectedTeamForDialog
+        if (team == null) {
+            teamDialogKnownUsers = emptyMap()
+            return@LaunchedEffect
+        }
+
+        val baseKnownUsers = (
+            team.players +
+                team.pendingPlayers +
+                listOfNotNull(team.captain, currentUser)
+            )
+            .distinctBy(UserData::id)
+            .associateBy(UserData::id)
+        teamDialogKnownUsers = baseKnownUsers
+
+        val missingRoleIds = buildSet {
+            val syncedTeam = team.team.withSynchronizedMembership()
+            syncedTeam.captainId.takeIf(String::isNotBlank)?.let(::add)
+            syncedTeam.staffAssignments.forEach { assignment ->
+                assignment.userId.trim().takeIf(String::isNotBlank)?.let(::add)
+            }
+        }.filterNot(baseKnownUsers::containsKey)
+
+        if (missingRoleIds.isEmpty()) return@LaunchedEffect
+
+        userRepository.getUsers(
+            userIds = missingRoleIds,
+            visibilityContext = UserVisibilityContext(teamId = team.team.id),
+        ).onSuccess { loadedUsers ->
+            teamDialogKnownUsers = (baseKnownUsers.values + loadedUsers)
+                .distinctBy(UserData::id)
+                .associateBy(UserData::id)
         }
     }
 
@@ -503,11 +568,11 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
             }
         }
 
-        selectedTeam?.let { team ->
+        selectedTeamForDialog?.let { team ->
             TeamDetailsDialog(
                 team = team,
                 currentUser = currentUser,
-                knownUsers = team.players + team.pendingPlayers + listOfNotNull(team.captain),
+                knownUsers = teamDialogKnownUsers.values.toList(),
                 onDismiss = { selectedTeam = null },
                 onPlayerMessage = {},
                 isRegistering = startingTeamRegistrationId == team.team.id,
@@ -522,6 +587,34 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
             initialAddress = address,
             onConfirm = component::submitBillingAddress,
             onDismiss = component::dismissBillingAddressPrompt,
+        )
+    }
+
+    textSignaturePrompt?.let { prompt ->
+        TextSignatureDialog(
+            prompt = prompt,
+            onConfirm = component::confirmTextSignature,
+            onDismiss = component::dismissTextSignature,
+        )
+    }
+
+    webSignaturePrompt?.let { prompt ->
+        val signerLabel = prompt.step?.requiredSignerLabel
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?.let { label -> "Required signer: $label" }
+        val progressLabel = if (prompt.totalSteps > 1) {
+            "Document ${prompt.currentStep} of ${prompt.totalSteps}"
+        } else {
+            null
+        }
+        val description = listOfNotNull(progressLabel, signerLabel).joinToString(" - ")
+
+        EmbeddedWebModal(
+            title = prompt.step?.title ?: "Sign required document",
+            url = prompt.url,
+            description = description,
+            onDismiss = component::dismissWebSignaturePrompt,
         )
     }
 }

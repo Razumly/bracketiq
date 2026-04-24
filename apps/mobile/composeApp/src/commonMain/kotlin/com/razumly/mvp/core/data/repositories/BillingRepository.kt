@@ -16,6 +16,7 @@ import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
 import com.razumly.mvp.core.data.dataTypes.Subscription
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.stripeRedirectBaseUrl
@@ -88,6 +89,8 @@ data class ProfileDocumentCard(
     val status: ProfileDocumentStatus,
     val eventId: String? = null,
     val eventName: String? = null,
+    val teamId: String? = null,
+    val teamName: String? = null,
     val organizationId: String? = null,
     val organizationName: String,
     val templateId: String,
@@ -236,7 +239,10 @@ interface IBillingRepository : IMVPRepository {
         timeSlotContext: PurchaseIntentTimeSlotContext? = null,
         occurrence: EventOccurrenceSelection? = null,
     ): Result<PurchaseIntent>
-    suspend fun createTeamRegistrationPurchaseIntent(team: Team): Result<PurchaseIntent>
+    suspend fun createTeamRegistrationPurchaseIntent(
+        team: Team,
+        teamRegistration: TeamPlayerRegistration? = null,
+    ): Result<PurchaseIntent>
     suspend fun getRequiredSignLinks(eventId: String): Result<List<SignStep>>
     suspend fun getRequiredSignLinks(
         eventId: String,
@@ -244,6 +250,13 @@ interface IBillingRepository : IMVPRepository {
         childUserId: String? = null,
         childUserEmail: String? = null,
     ): Result<List<SignStep>> = getRequiredSignLinks(eventId)
+    suspend fun getRequiredTeamSignLinks(teamId: String): Result<List<SignStep>>
+    suspend fun getRequiredTeamSignLinks(
+        teamId: String,
+        signerContext: SignerContext,
+        childUserId: String? = null,
+        childUserEmail: String? = null,
+    ): Result<List<SignStep>> = getRequiredTeamSignLinks(teamId)
     suspend fun getRequiredRentalSignLinks(
         templateIds: List<String>,
         eventId: String? = null,
@@ -251,6 +264,14 @@ interface IBillingRepository : IMVPRepository {
     ): Result<List<SignStep>>
     suspend fun recordSignature(
         eventId: String,
+        templateId: String,
+        documentId: String,
+        type: String = "TEXT",
+        signerContext: SignerContext = SignerContext.PARTICIPANT,
+        childUserId: String? = null,
+    ): Result<RecordSignatureResult>
+    suspend fun recordTeamSignature(
+        teamId: String,
         templateId: String,
         documentId: String,
         type: String = "TEXT",
@@ -317,6 +338,9 @@ class BillingRepository(
     private val eventRepository: IEventRepository,
     private val databaseService: DatabaseService,
 ) : IBillingRepository {
+    suspend fun createTeamRegistrationPurchaseIntent(team: Team): Result<PurchaseIntent> =
+        createTeamRegistrationPurchaseIntent(team, null)
+
     override suspend fun createPurchaseIntent(
         event: Event,
         teamId: String?,
@@ -378,7 +402,10 @@ class BillingRepository(
         response
     }
 
-    override suspend fun createTeamRegistrationPurchaseIntent(team: Team): Result<PurchaseIntent> = runCatching {
+    override suspend fun createTeamRegistrationPurchaseIntent(
+        team: Team,
+        teamRegistration: TeamPlayerRegistration?,
+    ): Result<PurchaseIntent> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
         val email = userRepository.currentAccount.value.getOrNull()?.email
         val normalizedTeamId = team.id.trim().takeIf(String::isNotBlank)
@@ -393,7 +420,9 @@ class BillingRepository(
                     id = normalizedTeamId,
                     name = team.name,
                 ),
-                teamRegistration = BillingTeamRefDto(teamId = normalizedTeamId),
+                teamRegistration = teamRegistration
+                    ?.toTeamRegistrationCheckoutTarget(normalizedTeamId)
+                    ?: BillingTeamRefDto(teamId = normalizedTeamId),
             ),
         )
 
@@ -430,6 +459,49 @@ class BillingRepository(
                     childUserId = childUserId?.trim()?.takeIf(String::isNotBlank),
                     childEmail = childUserEmail?.trim()?.takeIf(String::isNotBlank),
                     redirectUrl = buildEmbeddedSigningRedirectUrl(eventId),
+                ),
+            )
+
+            response.error
+                ?.let(::toFriendlyBoldSignMessage)
+                ?.takeIf(String::isNotBlank)
+                ?.let { errorMessage ->
+                    throw Exception(errorMessage)
+                }
+
+            response.signLinks.filter { it.templateId.isNotBlank() }
+        } catch (throwable: Throwable) {
+            throw throwable.withFriendlyBoldSignMessage()
+        }
+    }
+
+    override suspend fun getRequiredTeamSignLinks(teamId: String): Result<List<SignStep>> {
+        return getRequiredTeamSignLinks(
+            teamId = teamId,
+            signerContext = SignerContext.PARTICIPANT,
+            childUserId = null,
+            childUserEmail = null,
+        )
+    }
+
+    override suspend fun getRequiredTeamSignLinks(
+        teamId: String,
+        signerContext: SignerContext,
+        childUserId: String?,
+        childUserEmail: String?,
+    ): Result<List<SignStep>> = runCatching {
+        try {
+            val user = userRepository.currentUser.value.getOrThrow()
+            val email = userRepository.currentAccount.value.getOrNull()?.email
+            val response = api.post<EventSignLinksRequestDto, EventSignLinksResponseDto>(
+                path = "api/teams/$teamId/sign",
+                body = EventSignLinksRequestDto(
+                    userId = user.id,
+                    userEmail = email,
+                    signerContext = signerContext.apiValue,
+                    childUserId = childUserId?.trim()?.takeIf(String::isNotBlank),
+                    childEmail = childUserEmail?.trim()?.takeIf(String::isNotBlank),
+                    redirectUrl = null,
                 ),
             )
 
@@ -503,6 +575,42 @@ class BillingRepository(
                 templateId = templateId,
                 documentId = documentId,
                 eventId = eventId,
+                userId = userId,
+                type = type,
+                signerContext = signerContext.apiValue,
+                childUserId = childUserId?.trim()?.takeIf(String::isNotBlank),
+            ),
+        )
+
+        if (!response.error.isNullOrBlank()) {
+            throw Exception(response.error)
+        }
+
+        if (response.ok == false) {
+            throw Exception("Failed to record signature.")
+        }
+
+        RecordSignatureResult(
+            operationId = response.operationId?.trim()?.takeIf(String::isNotBlank),
+            syncStatus = response.syncStatus?.trim()?.takeIf(String::isNotBlank),
+        )
+    }
+
+    override suspend fun recordTeamSignature(
+        teamId: String,
+        templateId: String,
+        documentId: String,
+        type: String,
+        signerContext: SignerContext,
+        childUserId: String?,
+    ): Result<RecordSignatureResult> = runCatching {
+        val userId = userRepository.currentUser.value.getOrThrow().id
+        val response = api.post<RecordSignatureRequestDto, RecordSignatureResponseDto>(
+            path = "api/documents/record-signature",
+            body = RecordSignatureRequestDto(
+                templateId = templateId,
+                documentId = documentId,
+                teamId = teamId,
                 userId = userId,
                 type = type,
                 signerContext = signerContext.apiValue,
@@ -1143,6 +1251,8 @@ private data class ProfileDocumentCardDto(
     val status: String? = null,
     val eventId: String? = null,
     val eventName: String? = null,
+    val teamId: String? = null,
+    val teamName: String? = null,
     val organizationId: String? = null,
     val organizationName: String? = null,
     val templateId: String? = null,
@@ -1176,6 +1286,8 @@ private fun ProfileDocumentCardDto.toProfileDocumentCardOrNull(
         status = parseProfileDocumentStatus(status, defaultStatus),
         eventId = eventId?.trim()?.takeIf(String::isNotBlank),
         eventName = eventName?.trim()?.takeIf(String::isNotBlank),
+        teamId = teamId?.trim()?.takeIf(String::isNotBlank),
+        teamName = teamName?.trim()?.takeIf(String::isNotBlank),
         organizationId = organizationId?.trim()?.takeIf(String::isNotBlank),
         organizationName = organizationName?.trim()?.takeIf(String::isNotBlank) ?: "Organization",
         templateId = resolvedTemplateId,
@@ -1228,6 +1340,7 @@ private data class RecordSignatureRequestDto(
     val templateId: String,
     val documentId: String,
     val eventId: String? = null,
+    val teamId: String? = null,
     val userId: String? = null,
     val type: String? = null,
     val signerContext: String? = null,
@@ -1270,6 +1383,20 @@ private fun BoldSignOperationStatusDto.toOperationStatus(): BoldSignOperationSta
         templateId = templateId?.trim()?.takeIf(String::isNotBlank),
         documentId = documentId?.trim()?.takeIf(String::isNotBlank),
         updatedAt = updatedAt?.trim()?.takeIf(String::isNotBlank),
+    )
+}
+
+private fun TeamPlayerRegistration.toTeamRegistrationCheckoutTarget(teamId: String): BillingTeamRefDto {
+    val normalizedTeamId = teamId.trim().takeIf(String::isNotBlank) ?: teamId
+    return BillingTeamRefDto(
+        teamId = normalizedTeamId,
+        registrantId = registrantId.trim().takeIf(String::isNotBlank) ?: userId.trim().takeIf(String::isNotBlank),
+        userId = userId.trim().takeIf(String::isNotBlank),
+        parentId = parentId?.trim()?.takeIf(String::isNotBlank),
+        registrantType = registrantType.trim().takeIf(String::isNotBlank),
+        rosterRole = rosterRole?.trim()?.takeIf(String::isNotBlank),
+        consentDocumentId = consentDocumentId?.trim()?.takeIf(String::isNotBlank),
+        consentStatus = consentStatus?.trim()?.takeIf(String::isNotBlank),
     )
 }
 

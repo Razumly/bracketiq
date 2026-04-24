@@ -14,6 +14,12 @@ import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.SignStep
+import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
+import com.razumly.mvp.core.data.repositories.isActive
+import com.razumly.mvp.core.data.repositories.requiresAdditionalSigning
+import com.razumly.mvp.core.data.repositories.requiresChildEmail
+import com.razumly.mvp.core.data.repositories.userMessage
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
@@ -22,6 +28,8 @@ import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
+import com.razumly.mvp.eventDetail.TextSignaturePromptState
+import com.razumly.mvp.eventDetail.WebSignaturePromptState
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import com.razumly.mvp.eventSearch.RentalAvailabilityLoader
 import com.razumly.mvp.eventSearch.RentalBusyBlock
@@ -29,13 +37,16 @@ import com.razumly.mvp.eventSearch.RentalFieldOption
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlin.time.Clock
 
 private fun Product.isSinglePurchase(): Boolean =
     period.trim().equals("SINGLE", ignoreCase = true)
@@ -59,6 +70,8 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     val billingAddressPrompt: StateFlow<BillingAddressDraft?>
     val currentUser: StateFlow<UserData>
     val startingTeamRegistrationId: StateFlow<String?>
+    val textSignaturePrompt: StateFlow<TextSignaturePromptState?>
+    val webSignaturePrompt: StateFlow<WebSignaturePromptState?>
 
     fun setLoadingHandler(handler: LoadingHandler)
     fun refreshOrganization(force: Boolean = false)
@@ -72,6 +85,9 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     fun leaveTeam(team: TeamWithPlayers)
     fun submitBillingAddress(address: BillingAddressDraft)
     fun dismissBillingAddressPrompt()
+    fun confirmTextSignature()
+    fun dismissTextSignature()
+    fun dismissWebSignaturePrompt()
     fun startRentalCreate(context: RentalCreateContext)
     fun viewEvent(event: Event)
     fun onBackClicked()
@@ -139,6 +155,10 @@ class DefaultOrganizationDetailComponent(
     override val message: StateFlow<String?> = _message.asStateFlow()
     private val _billingAddressPrompt = MutableStateFlow<BillingAddressDraft?>(null)
     override val billingAddressPrompt: StateFlow<BillingAddressDraft?> = _billingAddressPrompt.asStateFlow()
+    private val _textSignaturePrompt = MutableStateFlow<TextSignaturePromptState?>(null)
+    override val textSignaturePrompt: StateFlow<TextSignaturePromptState?> = _textSignaturePrompt.asStateFlow()
+    private val _webSignaturePrompt = MutableStateFlow<WebSignaturePromptState?>(null)
+    override val webSignaturePrompt: StateFlow<WebSignaturePromptState?> = _webSignaturePrompt.asStateFlow()
     override val currentUser: StateFlow<UserData> = userRepository.currentUser
         .map { result -> result.getOrNull() ?: UserData() }
         .stateIn(scope, SharingStarted.Eagerly, UserData())
@@ -153,6 +173,11 @@ class DefaultOrganizationDetailComponent(
     private var pendingProductPurchase: Product? = null
     private var pendingTeamRegistration: TeamWithPlayers? = null
     private var pendingBillingAddressAction: (() -> Unit)? = null
+    private var pendingTeamSignatureSteps: List<SignStep> = emptyList()
+    private var pendingTeamSignatureStepIndex = 0
+    private var pendingTeamSignatureTeamId: String? = null
+    private var pendingTeamSignaturePollJob: Job? = null
+    private var pendingPostSignatureAction: (suspend () -> Unit)? = null
 
     private lateinit var loadingHandler: LoadingHandler
 
@@ -399,44 +424,124 @@ class DefaultOrganizationDetailComponent(
                     return@launch
                 }
 
-                if (team.team.registrationPriceCents > 0) {
-                    if (!ensureBillingAddressOrPrompt { startTeamRegistration(team) }) {
-                        return@launch
+                if (::loadingHandler.isInitialized) {
+                    loadingHandler.showLoading("Preparing team registration...")
+                }
+                teamRepository.requestTeamRegistration(teamId)
+                    .onSuccess { result ->
+                        handleTeamRegistrationResult(
+                            team = team,
+                            accountEmail = account?.email.orEmpty(),
+                            payerName = user.fullName,
+                            result = result,
+                        )
                     }
-                    if (::loadingHandler.isInitialized) {
-                        loadingHandler.showLoading("Preparing checkout...")
+                    .onFailure { error ->
+                        _errorState.value = ErrorMessage("Unable to start registration: ${error.userMessage()}")
                     }
-                    billingRepository.createTeamRegistrationPurchaseIntent(team.team)
-                        .onSuccess { intent ->
-                            pendingTeamRegistration = team
-                            showPaymentSheet(intent, account?.email.orEmpty(), user.fullName)
-                        }
-                        .onFailure { error ->
-                            _errorState.value = ErrorMessage("Unable to start registration: ${error.userMessage()}")
-                            if (::loadingHandler.isInitialized) {
-                                loadingHandler.hideLoading()
-                            }
-                        }
-                } else {
-                    if (::loadingHandler.isInitialized) {
-                        loadingHandler.showLoading("Registering...")
-                    }
-                    teamRepository.registerForTeam(teamId)
-                        .onSuccess {
-                            _message.value = "You are registered for ${team.team.name}."
-                            refreshTeams(force = true)
-                        }
-                        .onFailure { error ->
-                            _errorState.value = ErrorMessage("Unable to register: ${error.userMessage()}")
-                        }
-                    if (::loadingHandler.isInitialized) {
-                        loadingHandler.hideLoading()
-                    }
+                if (::loadingHandler.isInitialized) {
+                    loadingHandler.hideLoading()
                 }
             } finally {
                 if (pendingTeamRegistration == null) {
                     _startingTeamRegistrationId.value = null
                 }
+            }
+        }
+    }
+
+    private suspend fun handleTeamRegistrationResult(
+        team: TeamWithPlayers,
+        accountEmail: String,
+        payerName: String,
+        result: TeamRegistrationResult,
+    ) {
+        if (result.requiresChildEmail()) {
+            _errorState.value = ErrorMessage(
+                result.userMessage("Add the child's email before continuing."),
+            )
+            return
+        }
+
+        if (result.requiresAdditionalSigning()) {
+            startTeamSigning(team.team.id) {
+                scope.launch {
+                    _startingTeamRegistrationId.value = team.team.id
+                    if (::loadingHandler.isInitialized) {
+                        loadingHandler.showLoading("Refreshing team registration...")
+                    }
+                    teamRepository.requestTeamRegistration(team.team.id)
+                        .onSuccess { refreshed ->
+                            continueTeamRegistration(team, accountEmail, payerName, refreshed)
+                        }.onFailure { error ->
+                            _errorState.value = ErrorMessage(
+                                "Unable to refresh team registration: ${error.userMessage()}",
+                            )
+                        }
+                    if (::loadingHandler.isInitialized) {
+                        loadingHandler.hideLoading()
+                    }
+                    if (pendingTeamRegistration == null) {
+                        _startingTeamRegistrationId.value = null
+                    }
+                }
+            }
+            return
+        }
+
+        continueTeamRegistration(team, accountEmail, payerName, result)
+    }
+
+    private suspend fun continueTeamRegistration(
+        team: TeamWithPlayers,
+        accountEmail: String,
+        payerName: String,
+        result: TeamRegistrationResult,
+    ) {
+        val teamId = team.team.id.trim()
+        if (teamId.isBlank()) {
+            _errorState.value = ErrorMessage("This team is missing an id.")
+            return
+        }
+
+        _startingTeamRegistrationId.value = teamId
+        try {
+            if (team.team.registrationPriceCents > 0) {
+                if (!ensureBillingAddressOrPrompt {
+                        scope.launch { continueTeamRegistration(team, accountEmail, payerName, result) }
+                    }) {
+                    return
+                }
+                if (::loadingHandler.isInitialized) {
+                    loadingHandler.showLoading("Preparing checkout...")
+                }
+                billingRepository.createTeamRegistrationPurchaseIntent(
+                    team = team.team,
+                    teamRegistration = result.registration,
+                ).onSuccess { intent ->
+                    pendingTeamRegistration = team
+                    showPaymentSheet(intent, accountEmail, payerName)
+                }.onFailure { error ->
+                    _errorState.value = ErrorMessage(
+                        "Unable to start registration: ${error.userMessage(result.userMessage("Unable to start registration."))}",
+                    )
+                    if (::loadingHandler.isInitialized) {
+                        loadingHandler.hideLoading()
+                    }
+                }
+                return
+            }
+
+            if (!result.isActive()) {
+                _errorState.value = ErrorMessage(result.userMessage("Unable to register for this team."))
+                return
+            }
+
+            _message.value = "You are registered for ${team.team.name}."
+            refreshTeams(force = true)
+        } finally {
+            if (pendingTeamRegistration == null) {
+                _startingTeamRegistrationId.value = null
             }
         }
     }
@@ -488,6 +593,50 @@ class DefaultOrganizationDetailComponent(
         pendingBillingAddressAction = null
     }
 
+    override fun confirmTextSignature() {
+        val prompt = _textSignaturePrompt.value ?: return
+        val teamId = pendingTeamSignatureTeamId?.trim().orEmpty()
+        if (teamId.isBlank()) {
+            _errorState.value = ErrorMessage("This document is missing a team id.")
+            return
+        }
+
+        scope.launch {
+            if (::loadingHandler.isInitialized) {
+                loadingHandler.showLoading("Recording signature ...")
+            }
+            val documentId = prompt.step.resolvedDocumentId()
+                ?: "mobile-team-text-${prompt.step.templateId}-${Clock.System.now().toEpochMilliseconds()}"
+
+            billingRepository.recordTeamSignature(
+                teamId = teamId,
+                templateId = prompt.step.templateId,
+                documentId = documentId,
+                type = prompt.step.type,
+            ).onFailure { error ->
+                _errorState.value = ErrorMessage(error.userMessage("Failed to record signature."))
+            }.onSuccess {
+                _textSignaturePrompt.value = null
+                if (awaitTeamSignatureStepClearance(prompt.step)) {
+                    processNextTeamSignatureStep()
+                }
+            }
+            if (::loadingHandler.isInitialized) {
+                loadingHandler.hideLoading()
+            }
+        }
+    }
+
+    override fun dismissTextSignature() {
+        clearPendingTeamSignatureFlow()
+        _errorState.value = ErrorMessage("Document signing canceled.")
+    }
+
+    override fun dismissWebSignaturePrompt() {
+        clearPendingTeamSignatureFlow()
+        _errorState.value = ErrorMessage("Document signing canceled.")
+    }
+
     override fun viewEvent(event: Event) {
         navigationHandler.navigateToEvent(event)
     }
@@ -525,6 +674,148 @@ class DefaultOrganizationDetailComponent(
         pendingBillingAddressAction = onReady
         _billingAddressPrompt.value = billingAddress ?: BillingAddressDraft()
         return false
+    }
+
+    private suspend fun fetchRequiredTeamSignatureSteps(teamId: String): Result<List<SignStep>> =
+        billingRepository.getRequiredTeamSignLinks(teamId)
+
+    private fun SignStep.matchesPendingTeamSignatureStep(other: SignStep): Boolean {
+        if (templateId != other.templateId) {
+            return false
+        }
+        val currentDocumentId = resolvedDocumentId()
+        val otherDocumentId = other.resolvedDocumentId()
+        return currentDocumentId == null || otherDocumentId == null || currentDocumentId == otherDocumentId
+    }
+
+    private suspend fun awaitTeamSignatureStepClearance(
+        step: SignStep,
+        operationId: String? = step.operationId,
+    ): Boolean {
+        val teamId = pendingTeamSignatureTeamId?.trim().orEmpty()
+        if (teamId.isBlank()) {
+            _errorState.value = ErrorMessage("This document is missing a team id.")
+            clearPendingTeamSignatureFlow()
+            return false
+        }
+
+        val normalizedOperationId = operationId?.trim()?.takeIf(String::isNotBlank)
+        if (normalizedOperationId != null) {
+            _errorState.value = ErrorMessage("Waiting for signature sync...")
+            billingRepository.pollBoldSignOperation(normalizedOperationId).getOrElse { error ->
+                Napier.e("Failed to poll team BoldSign operation.", error)
+                _errorState.value = ErrorMessage(error.userMessage("Failed to confirm signature status."))
+                clearPendingTeamSignatureFlow()
+                return false
+            }
+        }
+
+        val intervalMillis = 2_000L
+        val timeoutMillis = 60_000L
+        var elapsedMillis = 0L
+
+        while (elapsedMillis <= timeoutMillis) {
+            _errorState.value = ErrorMessage("Waiting for signature sync...")
+            val refreshedSteps = fetchRequiredTeamSignatureSteps(teamId).getOrElse { error ->
+                _errorState.value = ErrorMessage(error.userMessage("Failed to confirm signature status."))
+                clearPendingTeamSignatureFlow()
+                return false
+            }
+
+            if (refreshedSteps.none { refreshedStep -> refreshedStep.matchesPendingTeamSignatureStep(step) }) {
+                pendingTeamSignatureSteps = refreshedSteps
+                pendingTeamSignatureStepIndex = 0
+                return true
+            }
+
+            if (elapsedMillis >= timeoutMillis) {
+                break
+            }
+
+            delay(intervalMillis)
+            elapsedMillis += intervalMillis
+        }
+
+        clearPendingTeamSignatureFlow()
+        _errorState.value = ErrorMessage("Document synchronization is delayed. Please try again shortly.")
+        return false
+    }
+
+    private suspend fun startTeamSigning(teamId: String, onReady: suspend () -> Unit) {
+        pendingTeamSignatureTeamId = teamId.trim().takeIf(String::isNotBlank)
+        pendingPostSignatureAction = onReady
+        fetchRequiredTeamSignatureSteps(teamId)
+            .onFailure { error ->
+                _errorState.value = ErrorMessage(
+                    "Unable to load required documents: ${error.userMessage("Unknown error")}",
+                )
+            }.onSuccess { steps ->
+                if (steps.isEmpty()) {
+                    val action = pendingPostSignatureAction
+                    clearPendingTeamSignatureFlow()
+                    action?.invoke()
+                    return@onSuccess
+                }
+                pendingTeamSignatureSteps = steps
+                pendingTeamSignatureStepIndex = 0
+                processNextTeamSignatureStep()
+            }
+    }
+
+    private suspend fun processNextTeamSignatureStep() {
+        pendingTeamSignaturePollJob?.cancel()
+        pendingTeamSignaturePollJob = null
+
+        pendingTeamSignatureTeamId ?: return
+        val currentStep = pendingTeamSignatureSteps.getOrNull(pendingTeamSignatureStepIndex)
+        if (currentStep == null) {
+            val action = pendingPostSignatureAction
+            clearPendingTeamSignatureFlow()
+            action?.invoke()
+            return
+        }
+
+        if (currentStep.isTextStep()) {
+            _textSignaturePrompt.value = TextSignaturePromptState(
+                step = currentStep,
+                currentStep = pendingTeamSignatureStepIndex + 1,
+                totalSteps = pendingTeamSignatureSteps.size,
+            )
+            return
+        }
+
+        val signingUrl = currentStep.resolvedSigningUrl()
+        if (signingUrl.isNullOrBlank()) {
+            clearPendingTeamSignatureFlow()
+            _errorState.value = ErrorMessage("A required document is missing a signing URL.")
+            return
+        }
+
+        _webSignaturePrompt.value = WebSignaturePromptState(
+            step = currentStep,
+            url = signingUrl,
+            currentStep = pendingTeamSignatureStepIndex + 1,
+            totalSteps = pendingTeamSignatureSteps.size,
+        )
+
+        _errorState.value = ErrorMessage("Waiting for signature sync...")
+        pendingTeamSignaturePollJob = scope.launch {
+            if (awaitTeamSignatureStepClearance(currentStep)) {
+                _webSignaturePrompt.value = null
+                processNextTeamSignatureStep()
+            }
+        }
+    }
+
+    private fun clearPendingTeamSignatureFlow() {
+        pendingTeamSignaturePollJob?.cancel()
+        pendingTeamSignaturePollJob = null
+        pendingTeamSignatureSteps = emptyList()
+        pendingTeamSignatureStepIndex = 0
+        pendingTeamSignatureTeamId = null
+        pendingPostSignatureAction = null
+        _textSignaturePrompt.value = null
+        _webSignaturePrompt.value = null
     }
 
     private suspend fun loadSavedBillingAddress(): BillingAddressDraft? {

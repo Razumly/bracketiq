@@ -142,4 +142,86 @@ class TeamDtosTest {
         assertTrue(serialized.contains("\"coachIds\":[]"))
         assertTrue(serialized.contains("\"captainId\":\"user-1\""))
     }
+
+    @Test
+    fun team_api_dto_parses_required_templates_and_consent_registration_fields() {
+        val dto = TeamApiDto(
+            id = "team-1",
+            name = "Aces",
+            division = "OPEN",
+            captainId = "user-1",
+            playerIds = listOf("user-1"),
+            teamSize = 6,
+            requiredTemplateIds = listOf(" template-a ", "", "template-a", "template-b "),
+            playerRegistrations = listOf(
+                TeamPlayerRegistrationApiDto(
+                    id = "registration-1",
+                    teamId = "team-1",
+                    userId = "child-1",
+                    registrantId = "child-1",
+                    parentId = "parent-1",
+                    registrantType = "CHILD",
+                    rosterRole = "PARTICIPANT",
+                    status = "STARTED",
+                    consentDocumentId = "doc-1",
+                    consentStatus = "sent",
+                    createdBy = "parent-1",
+                ),
+            ),
+        )
+
+        val team = dto.toTeamOrNull()
+
+        assertEquals(listOf("template-a", "template-b"), team?.requiredTemplateIds)
+        val registration = team?.playerRegistrations?.firstOrNull { it.userId == "child-1" }
+        assertEquals("child-1", registration?.registrantId)
+        assertEquals("parent-1", registration?.parentId)
+        assertEquals("CHILD", registration?.registrantType)
+        assertEquals("PARTICIPANT", registration?.rosterRole)
+        assertEquals("doc-1", registration?.consentDocumentId)
+        assertEquals("sent", registration?.consentStatus)
+        assertEquals("parent-1", registration?.createdBy)
+    }
+
+    @Test
+    fun update_team_request_serialization_includes_required_templates_and_registration_metadata() {
+        val team = Team(
+            division = "OPEN",
+            name = "Aces",
+            captainId = "user-1",
+            playerIds = listOf("user-1"),
+            pending = emptyList(),
+            teamSize = 6,
+            requiredTemplateIds = listOf(" template-a ", "", "template-a", "template-b "),
+            playerRegistrations = listOf(
+                TeamPlayerRegistration(
+                    id = "registration-1",
+                    teamId = "team-1",
+                    userId = "child-1",
+                    registrantId = "child-1",
+                    parentId = "parent-1",
+                    registrantType = "CHILD",
+                    rosterRole = "PARTICIPANT",
+                    status = "STARTED",
+                    consentDocumentId = "doc-1",
+                    consentStatus = "sent",
+                    createdBy = "parent-1",
+                ),
+            ),
+            id = "team-1",
+        )
+
+        val serialized = jsonMVP.encodeToString(
+            UpdateTeamRequestDto(team = team.toUpdateDto()),
+        )
+
+        assertTrue(serialized.contains("\"requiredTemplateIds\":[\"template-a\",\"template-b\"]"))
+        assertTrue(serialized.contains("\"registrantId\":\"child-1\""))
+        assertTrue(serialized.contains("\"parentId\":\"parent-1\""))
+        assertTrue(serialized.contains("\"registrantType\":\"CHILD\""))
+        assertTrue(serialized.contains("\"rosterRole\":\"PARTICIPANT\""))
+        assertTrue(serialized.contains("\"consentDocumentId\":\"doc-1\""))
+        assertTrue(serialized.contains("\"consentStatus\":\"sent\""))
+        assertTrue(serialized.contains("\"createdBy\":\"parent-1\""))
+    }
 }
