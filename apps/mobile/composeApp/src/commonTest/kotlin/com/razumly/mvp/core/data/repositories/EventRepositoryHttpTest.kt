@@ -44,6 +44,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -65,6 +66,7 @@ private class EventRepositoryHttp_FakeEventDao : EventDao {
     val deleteEventsByIdCalls = mutableListOf<List<String>>()
     val deleteEventsWithCrossRefsCalls = mutableListOf<List<String>>()
     val deleteEventWithCrossRefsCalls = mutableListOf<String>()
+    var clearAllEventsWithCrossRefsCalls = 0
 
     override suspend fun upsertEvent(game: Event) {
         events.value = events.value + (game.id to game)
@@ -86,6 +88,10 @@ private class EventRepositoryHttp_FakeEventDao : EventDao {
     override suspend fun deleteAllEvents() {
         // Avoid races with repository init cleanup in tests.
     }
+
+    override suspend fun deleteAllEventUserCrossRefs() {}
+
+    override suspend fun deleteAllEventTeamCrossRefs() {}
 
     override fun getAllCachedEvents(): Flow<List<Event>> = events.map { it.values.toList() }
 
@@ -111,6 +117,10 @@ private class EventRepositoryHttp_FakeEventDao : EventDao {
     override suspend fun deleteEventCrossRefs(eventId: String) {}
     override suspend fun deleteEventUserCrossRefsByEventId(eventId: String) {}
     override suspend fun deleteEventTeamCrossRefsByEventId(eventId: String) {}
+    override suspend fun clearAllEventsWithCrossRefs() {
+        clearAllEventsWithCrossRefsCalls += 1
+        events.value = emptyMap()
+    }
 }
 
 private class EventRepositoryHttp_FakeUserDataDao : UserDataDao {
@@ -308,6 +318,10 @@ private class EventRepositoryHttp_FakeUserRepository(
         currentUserState.value = Result.success(profile)
         return Result.success(profile)
     }
+
+    fun emitCurrentUser(profile: UserData?) {
+        currentUserState.value = profile?.let { Result.success(it) } ?: Result.failure(Exception("No User"))
+    }
 }
 
 private object EventRepositoryHttp_UnusedTeamRepository : ITeamRepository {
@@ -319,6 +333,7 @@ private object EventRepositoryHttp_UnusedTeamRepository : ITeamRepository {
     override suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit> = error("unused")
     override suspend fun createTeam(newTeam: Team): Result<Team> = error("unused")
     override suspend fun updateTeam(newTeam: Team): Result<Team> = error("unused")
+    override suspend fun requestTeamRegistration(teamId: String): Result<TeamRegistrationResult> = error("unused")
     override suspend fun registerForTeam(teamId: String): Result<Team> = error("unused")
     override suspend fun leaveTeam(teamId: String): Result<Team> = error("unused")
     override suspend fun deleteTeam(team: TeamWithPlayers): Result<Unit> = error("unused")
@@ -366,6 +381,39 @@ class EventRepositoryHttpTest {
         val events = repo.getCachedEventsFlow().first().getOrThrow()
 
         assertEquals(listOf("visible_event"), events.map { it.id })
+    }
+
+    @Test
+    fun getCachedEventsFlow_clears_cached_events_when_current_user_changes() = runTest {
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        eventDao.upsertEvents(
+            listOf(
+                makeEvent(id = "hidden_event", hostId = "host_1"),
+                makeEvent(id = "visible_event", hostId = "host_2"),
+            )
+        )
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        val api = MvpApiClient(
+            HttpClient(MockEngine { error("HTTP should not be used in cached-events test") }) {
+                install(ContentNegotiation) { json(jsonMVP) }
+            },
+            "http://localhost",
+            EventRepositoryHttp_InMemoryAuthTokenStore(),
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        userRepo.emitCurrentUser(makeUser("u2"))
+        advanceUntilIdle()
+
+        val events = repo.getCachedEventsFlow().first().getOrThrow()
+
+        assertTrue(events.isEmpty())
+        assertEquals(1, eventDao.clearAllEventsWithCrossRefsCalls)
     }
 
     @Test
@@ -483,6 +531,87 @@ class EventRepositoryHttpTest {
 
         assertEquals(listOf("e1"), events.map { it.id })
         assertEquals("e1", eventDao.getEventById("e1")?.id)
+    }
+
+    @Test
+    fun getEventsByIds_removes_stale_cached_events_missing_from_server() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        eventDao.upsertEvents(
+            listOf(
+                makeEvent(id = "e1", hostId = "h1"),
+                makeEvent(id = "e2", hostId = "h2"),
+            )
+        )
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("/api/events", request.url.encodedPath)
+            assertEquals("ids=e1%2Ce2&limit=2", request.url.encodedQuery)
+            respond(
+                content = """
+                    {
+                      "events": [
+                        {
+                          "id": "e1",
+                          "name": "Event One",
+                          "hostId": "h1",
+                          "coordinates": [-80.0, 25.0],
+                          "start": "2026-02-10T00:00:00Z",
+                          "end": "2026-02-10T01:00:00Z"
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val events = repo.getEventsByIds(listOf("e1", "e2")).getOrThrow()
+
+        assertEquals(listOf("e1"), events.map { it.id })
+        assertEquals(listOf(listOf("e2")), eventDao.deleteEventsWithCrossRefsCalls)
+        assertEquals(null, eventDao.getEventById("e2"))
+    }
+
+    @Test
+    fun getEvent_removes_cached_event_when_server_returns_forbidden() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        eventDao.upsertEvent(makeEvent(id = "e1", hostId = "h1"))
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("/api/events/e1", request.url.encodedPath)
+            respond(
+                content = """{"error":"Forbidden"}""",
+                status = HttpStatusCode.Forbidden,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val result = repo.getEvent("e1")
+
+        assertTrue(result.isFailure)
+        assertEquals(listOf("e1"), eventDao.deleteEventWithCrossRefsCalls)
+        assertEquals(null, eventDao.getEventById("e1"))
     }
 
     @Test

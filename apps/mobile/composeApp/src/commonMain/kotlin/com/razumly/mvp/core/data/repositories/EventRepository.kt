@@ -27,6 +27,7 @@ import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.util.calcDistance
 import dev.icerock.moko.geo.LatLng
+import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.CreateEventRequestDto
 import com.razumly.mvp.core.network.dto.CurrentUserEventRegistrationsResponseDto
@@ -338,6 +339,25 @@ class EventRepository(
         scope.launch {
             databaseService.getEventDao.deleteAllEvents()
         }
+        scope.launch {
+            var hasObservedUser = false
+            var lastUserId: String? = null
+            userRepository.currentUser.collect { currentUserResult ->
+                val currentUserId = currentUserResult.getOrNull()
+                    ?.id
+                    ?.trim()
+                    ?.takeIf(String::isNotBlank)
+                if (!hasObservedUser) {
+                    lastUserId = currentUserId
+                    hasObservedUser = true
+                    return@collect
+                }
+                if (currentUserId != lastUserId) {
+                    clearEventCacheForSessionChange()
+                    lastUserId = currentUserId
+                }
+            }
+        }
     }
 
     private fun filterHiddenEvents(events: List<Event>, currentUser: UserData?): List<Event> {
@@ -621,15 +641,22 @@ class EventRepository(
     }
 
     override suspend fun getEvent(eventId: String): Result<Event> =
-        singleResponse(networkCall = {
-            fetchRemoteEvent(eventId)
-        }, saveCall = { event ->
+        runCatching {
+            val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
+                ?: error("Event id is required.")
+            val event = try {
+                fetchRemoteEvent(normalizedEventId)
+            } catch (throwable: Throwable) {
+                if (shouldEvictEventFromCache(throwable)) {
+                    databaseService.getEventDao.deleteEventWithCrossRefs(normalizedEventId)
+                }
+                throw throwable
+            }
             databaseService.getEventDao.upsertEvent(event)
             persistEventRelations(event)
-        }, onReturn = {
-            databaseService.getEventDao.getEventById(eventId)
-                ?: throw IllegalStateException("Event $eventId not cached")
-        })
+            databaseService.getEventDao.getEventById(normalizedEventId)
+                ?: throw IllegalStateException("Event $normalizedEventId not cached")
+        }
 
     override suspend fun syncEventParticipants(
         event: Event,
@@ -760,6 +787,10 @@ class EventRepository(
         val events = fetchRemoteEventsByIds(ids)
         if (events.isNotEmpty()) {
             databaseService.getEventDao.upsertEvents(events)
+        }
+        val staleIds = ids.toSet() - events.map { event -> event.id }.toSet()
+        if (staleIds.isNotEmpty()) {
+            databaseService.getEventDao.deleteEventsWithCrossRefs(staleIds.toList())
         }
 
         val cachedById = databaseService.getEventDao.getEventsByIds(ids).associateBy { it.id }
@@ -1434,6 +1465,15 @@ class EventRepository(
             emptyList()
         }
         insertEventCrossReferences(event.id, relatedUsers, teams)
+    }
+
+    private suspend fun clearEventCacheForSessionChange() {
+        databaseService.getEventDao.clearAllEventsWithCrossRefs()
+    }
+
+    private fun shouldEvictEventFromCache(throwable: Throwable): Boolean {
+        val apiException = throwable as? ApiException ?: return false
+        return apiException.statusCode == 403 || apiException.statusCode == 404
     }
 
     private fun resolveSelectedDivisionDetail(

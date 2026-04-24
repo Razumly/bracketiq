@@ -23,6 +23,7 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
+import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
 import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
@@ -2082,6 +2083,10 @@ private class MatchDetailFakeTeamRepository(
     override suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit> = Result.success(Unit)
     override suspend fun createTeam(newTeam: Team): Result<Team> = Result.success(newTeam)
     override suspend fun updateTeam(newTeam: Team): Result<Team> = Result.success(newTeam)
+    override suspend fun requestTeamRegistration(teamId: String): Result<TeamRegistrationResult> =
+        teamsById[teamId]?.let { team ->
+            Result.success(TeamRegistrationResult(team = team, registrationStatus = "ACTIVE"))
+        } ?: Result.failure(IllegalStateException("Team $teamId not found"))
     override suspend fun registerForTeam(teamId: String): Result<Team> =
         teamsById[teamId]?.let { team -> Result.success(team) }
             ?: Result.failure(IllegalStateException("Team $teamId not found"))

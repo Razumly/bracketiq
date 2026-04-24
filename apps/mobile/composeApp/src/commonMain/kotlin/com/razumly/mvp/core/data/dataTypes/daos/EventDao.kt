@@ -29,6 +29,12 @@ interface EventDao {
     @Query("DELETE FROM Event")
     suspend fun deleteAllEvents()
 
+    @Query("DELETE FROM user_event_cross_ref")
+    suspend fun deleteAllEventUserCrossRefs()
+
+    @Query("DELETE FROM event_team_cross_ref")
+    suspend fun deleteAllEventTeamCrossRefs()
+
     @Query("SELECT * FROM Event")
     fun getAllCachedEvents(): Flow<List<Event>>
 
@@ -91,6 +97,13 @@ interface EventDao {
     suspend fun deleteEventCrossRefs(eventId: String) {
         deleteEventUserCrossRefsByEventId(eventId)
         deleteEventTeamCrossRefsByEventId(eventId)
+    }
+
+    @Transaction
+    suspend fun clearAllEventsWithCrossRefs() {
+        deleteAllEventUserCrossRefs()
+        deleteAllEventTeamCrossRefs()
+        deleteAllEvents()
     }
 
     @Query("DELETE FROM user_event_cross_ref WHERE eventId = :eventId")
