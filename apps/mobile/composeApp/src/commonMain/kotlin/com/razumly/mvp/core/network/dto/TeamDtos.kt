@@ -157,6 +157,33 @@ data class TeamInviteFreeAgentsResponseDto(
     val users: List<UserProfileDto> = emptyList(),
     val eventIds: List<String> = emptyList(),
     val freeAgentIds: List<String> = emptyList(),
+    val eventTeams: List<TeamInviteEventTeamOptionDto> = emptyList(),
+    val freeAgentEventsByUserId: Map<String, List<String>> = emptyMap(),
+    val freeAgentEventTeamIdsByUserId: Map<String, List<String>> = emptyMap(),
+)
+
+@Serializable
+data class TeamInviteEventTeamOptionDto(
+    val eventId: String = "",
+    val eventTeamId: String = "",
+    val eventName: String = "",
+    val eventStart: String? = null,
+    val eventEnd: String? = null,
+    val teamName: String = "",
+)
+
+@Serializable
+data class TeamMemberInviteRequestDto(
+    val userId: String? = null,
+    val email: String? = null,
+    val role: String = "player",
+    val eventTeamIds: List<String> = emptyList(),
+)
+
+@Serializable
+data class TeamMemberInviteResponseDto(
+    val ok: Boolean = false,
+    val team: TeamApiDto? = null,
 )
 
 @Serializable

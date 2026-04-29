@@ -3,6 +3,7 @@ package com.razumly.mvp.core.network.dto
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.util.jsonMVP
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlin.test.Test
 import kotlin.test.assertFalse
@@ -11,6 +12,81 @@ import kotlin.test.assertTrue
 import kotlin.test.assertNull
 
 class TeamDtosTest {
+    @Test
+    fun invite_free_agents_response_parses_event_team_context() {
+        val dto = jsonMVP.decodeFromString<TeamInviteFreeAgentsResponseDto>(
+            """
+            {
+              "users": [
+                {
+                  "id": "user-1",
+                  "firstName": "Jane",
+                  "lastName": "Free",
+                  "userName": "jane"
+                }
+              ],
+              "eventIds": ["event-1"],
+              "freeAgentIds": ["user-1"],
+              "eventTeams": [
+                {
+                  "eventId": "event-1",
+                  "eventTeamId": "event-team-1",
+                  "eventName": "Summer League",
+                  "eventStart": "2030-05-01T12:00:00.000Z",
+                  "eventEnd": "2030-05-01T14:00:00.000Z",
+                  "teamName": "Aces"
+                }
+              ],
+              "freeAgentEventsByUserId": {
+                "user-1": ["event-1"]
+              },
+              "freeAgentEventTeamIdsByUserId": {
+                "user-1": ["event-team-1"]
+              }
+            }
+            """.trimIndent(),
+        )
+
+        assertEquals(listOf("event-1"), dto.eventIds)
+        assertEquals(listOf("user-1"), dto.freeAgentIds)
+        assertEquals("event-team-1", dto.eventTeams.single().eventTeamId)
+        assertEquals("Summer League", dto.eventTeams.single().eventName)
+        assertEquals(listOf("event-1"), dto.freeAgentEventsByUserId["user-1"])
+        assertEquals(listOf("event-team-1"), dto.freeAgentEventTeamIdsByUserId["user-1"])
+    }
+
+    @Test
+    fun invite_free_agents_response_defaults_extended_fields_for_legacy_payloads() {
+        val dto = jsonMVP.decodeFromString<TeamInviteFreeAgentsResponseDto>(
+            """
+            {
+              "users": [],
+              "eventIds": [],
+              "freeAgentIds": []
+            }
+            """.trimIndent(),
+        )
+
+        assertTrue(dto.eventTeams.isEmpty())
+        assertTrue(dto.freeAgentEventsByUserId.isEmpty())
+        assertTrue(dto.freeAgentEventTeamIdsByUserId.isEmpty())
+    }
+
+    @Test
+    fun team_member_invite_request_serializes_event_team_ids() {
+        val serialized = jsonMVP.encodeToString(
+            TeamMemberInviteRequestDto(
+                userId = "user-1",
+                role = "player",
+                eventTeamIds = listOf("event-team-1", "event-team-2"),
+            ),
+        )
+
+        assertTrue(serialized.contains("\"userId\":\"user-1\""))
+        assertTrue(serialized.contains("\"role\":\"player\""))
+        assertTrue(serialized.contains("\"eventTeamIds\":[\"event-team-1\",\"event-team-2\"]"))
+    }
+
     @Test
     fun to_update_dto_includes_player_registration_jersey_numbers() {
         val team = Team(

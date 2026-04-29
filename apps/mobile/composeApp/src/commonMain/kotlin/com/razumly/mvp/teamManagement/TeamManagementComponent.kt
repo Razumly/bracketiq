@@ -12,6 +12,7 @@ import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
+import com.razumly.mvp.core.data.repositories.TeamInviteFreeAgentContext
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.network.userMessage
@@ -47,6 +48,7 @@ interface TeamManagementComponent {
     val selectedTeam: StateFlow<TeamWithPlayers?>
     val staffUsersById: StateFlow<Map<String, UserData>>
     val suggestedPlayers: StateFlow<List<UserData>>
+    val inviteFreeAgentContext: StateFlow<TeamInviteFreeAgentContext>
     val freeAgentsFiltered: StateFlow<List<UserData>>
     val enableDeleteTeam: StateFlow<Boolean>
     val onBack: () -> Unit
@@ -60,7 +62,13 @@ interface TeamManagementComponent {
     fun deselectTeam()
     fun deleteTeam(team: TeamWithPlayers)
     fun searchPlayers(query: String)
-    fun inviteUserToRole(teamId: String, userId: String, roleInviteType: String)
+    fun inviteUserToRole(
+        teamId: String,
+        userId: String?,
+        roleInviteType: String,
+        eventTeamIds: List<String> = emptyList(),
+        email: String? = null,
+    )
     suspend fun ensureUserByEmail(email: String): Result<UserData>
 }
 
@@ -133,38 +141,40 @@ class DefaultTeamManagementComponent(
     private val _suggestedPlayers = MutableStateFlow<List<UserData>>(listOf())
     override val suggestedPlayers = _suggestedPlayers.asStateFlow()
 
-    override val freeAgentsFiltered = combine(selectedTeam, currentUserState) { team, user ->
-        team to user
-    }.flatMapLatest { (team, currentUserValue) ->
+    override val inviteFreeAgentContext = selectedTeam
+        .flatMapLatest { team ->
             val teamId = team?.team?.id?.trim()?.takeIf(String::isNotBlank)
-            val playerIdsToExclude = buildSet {
-                currentUserValue.id.takeIf(String::isNotBlank)?.let(::add)
-                team?.players?.forEach { add(it.id) }
-            }
-
             flow {
                 if (teamId == null) {
-                    emit(emptyList())
+                    emit(TeamInviteFreeAgentContext())
                     return@flow
                 }
 
-                val inviteFreeAgents = teamRepository.getInviteFreeAgents(teamId).getOrElse {
+                emit(teamRepository.getInviteFreeAgentContext(teamId).getOrElse {
                     _errorState.value = it.userMessage()
-                    emptyList()
-                }
-                val filteredFreeAgents = inviteFreeAgents.filterNot { it.id in playerIdsToExclude }
-                val orderedFreeAgents = normalizedSelectedFreeAgentId?.let { selectedId ->
-                    if (filteredFreeAgents.any { it.id == selectedId }) {
-                        val prioritized = filteredFreeAgents.firstOrNull { it.id == selectedId }
-                        listOfNotNull(prioritized) + filteredFreeAgents.filterNot { it.id == selectedId }
-                    } else {
-                        filteredFreeAgents
-                    }
-                } ?: filteredFreeAgents
-                emit(orderedFreeAgents)
+                    TeamInviteFreeAgentContext()
+                })
             }
         }
-        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+        .stateIn(scope, SharingStarted.Eagerly, TeamInviteFreeAgentContext())
+
+    override val freeAgentsFiltered = combine(inviteFreeAgentContext, selectedTeam, currentUserState) { context, team, user ->
+        Triple(context, team, user)
+    }.map { (context, team, currentUserValue) ->
+        val playerIdsToExclude = buildSet {
+            currentUserValue.id.takeIf(String::isNotBlank)?.let(::add)
+            team?.players?.forEach { add(it.id) }
+        }
+        val filteredFreeAgents = context.users.filterNot { it.id in playerIdsToExclude }
+        normalizedSelectedFreeAgentId?.let { selectedId ->
+            if (filteredFreeAgents.any { it.id == selectedId }) {
+                val prioritized = filteredFreeAgents.firstOrNull { it.id == selectedId }
+                listOfNotNull(prioritized) + filteredFreeAgents.filterNot { it.id == selectedId }
+            } else {
+                filteredFreeAgents
+            }
+        } ?: filteredFreeAgents
+    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     override val selectedFreeAgent = freeAgentsFiltered
         .map { users ->
@@ -340,13 +350,20 @@ class DefaultTeamManagementComponent(
         }
     }
 
-    override fun inviteUserToRole(teamId: String, userId: String, roleInviteType: String) {
+    override fun inviteUserToRole(
+        teamId: String,
+        userId: String?,
+        roleInviteType: String,
+        eventTeamIds: List<String>,
+        email: String?,
+    ) {
         scope.launch {
-            teamRepository.createTeamInvite(
+            teamRepository.createTeamMemberInvite(
                 teamId = teamId,
                 userId = userId,
-                createdBy = currentUser.id,
-                inviteType = roleInviteType,
+                email = email,
+                roleInviteType = roleInviteType,
+                eventTeamIds = eventTeamIds,
             ).onFailure {
                 _errorState.value = it.userMessage()
                 return@launch

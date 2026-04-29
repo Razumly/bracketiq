@@ -56,6 +56,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val friends by component.friends.collectAsState()
     val sports by component.sports.collectAsState()
     val suggestions by component.suggestedPlayers.collectAsState()
+    val inviteFreeAgentContext by component.inviteFreeAgentContext.collectAsState()
     val freeAgents by component.freeAgentsFiltered.collectAsState()
     val selectedFreeAgent by component.selectedFreeAgent.collectAsState()
     val selectedEvent = component.selectedEvent
@@ -86,6 +87,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
             sports = sports,
             friends = friends,
             freeAgents = freeAgents,
+            inviteFreeAgentContext = inviteFreeAgentContext,
             onSearch = { query -> component.searchPlayers(query) },
             suggestions = suggestions,
             onFinish = { newTeam ->
@@ -123,8 +125,8 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
             saveError = saveError,
             staffUsersById = staffUsersById,
             onEnsureUserByEmail = { email -> component.ensureUserByEmail(email) },
-            onInviteTeamRole = { teamId, userId, inviteType ->
-                component.inviteUserToRole(teamId, userId, inviteType)
+            onInviteTeamRole = { teamId, userId, inviteType, eventTeamIds, email ->
+                component.inviteUserToRole(teamId, userId, inviteType, eventTeamIds, email)
             },
         )
         return

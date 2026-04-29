@@ -18,7 +18,10 @@ import com.razumly.mvp.core.network.dto.DeleteInvitesRequestDto
 import com.razumly.mvp.core.network.dto.InviteCreateDto
 import com.razumly.mvp.core.network.dto.InvitesResponseDto
 import com.razumly.mvp.core.network.dto.TeamApiDto
+import com.razumly.mvp.core.network.dto.TeamInviteEventTeamOptionDto
 import com.razumly.mvp.core.network.dto.TeamInviteFreeAgentsResponseDto
+import com.razumly.mvp.core.network.dto.TeamMemberInviteRequestDto
+import com.razumly.mvp.core.network.dto.TeamMemberInviteResponseDto
 import com.razumly.mvp.core.network.dto.TeamPlayerRegistrationApiDto
 import com.razumly.mvp.core.network.dto.TeamRegistrationResponseDto
 import com.razumly.mvp.core.network.dto.TeamsResponseDto
@@ -73,7 +76,19 @@ interface ITeamRepository : IMVPRepository {
     fun getTeamsWithPlayersLoadingFlow(id: String): Flow<Boolean> = flowOf(false)
     fun getTeamWithPlayersFlow(id: String): Flow<Result<TeamWithRelations>>
     suspend fun listTeamInvites(userId: String): Result<List<Invite>>
+    suspend fun getInviteFreeAgentContext(teamId: String): Result<TeamInviteFreeAgentContext> =
+        getInviteFreeAgents(teamId).map { users -> TeamInviteFreeAgentContext(users = users) }
     suspend fun getInviteFreeAgents(teamId: String): Result<List<UserData>>
+    suspend fun createTeamMemberInvite(
+        teamId: String,
+        userId: String? = null,
+        email: String? = null,
+        roleInviteType: String = "player",
+        eventTeamIds: List<String> = emptyList(),
+    ): Result<Unit> = userId
+        ?.takeIf(String::isNotBlank)
+        ?.let { createTeamInvite(teamId = teamId, userId = it, createdBy = "", inviteType = roleInviteType) }
+        ?: Result.failure(IllegalArgumentException("A user id is required for this repository implementation."))
     suspend fun createTeamInvite(
         teamId: String,
         userId: String,
@@ -108,6 +123,24 @@ data class TeamRegistrationResult(
     val registrationStatus: String? = null,
     val consent: TeamRegistrationConsent? = null,
     val warnings: List<String> = emptyList(),
+)
+
+data class TeamInviteEventTeamOption(
+    val eventId: String,
+    val eventTeamId: String,
+    val eventName: String,
+    val eventStart: String?,
+    val eventEnd: String?,
+    val teamName: String,
+)
+
+data class TeamInviteFreeAgentContext(
+    val users: List<UserData> = emptyList(),
+    val eventIds: List<String> = emptyList(),
+    val freeAgentIds: List<String> = emptyList(),
+    val eventTeams: List<TeamInviteEventTeamOption> = emptyList(),
+    val freeAgentEventsByUserId: Map<String, List<String>> = emptyMap(),
+    val freeAgentEventTeamIdsByUserId: Map<String, List<String>> = emptyMap(),
 )
 
 fun TeamRegistrationResult.isActive(): Boolean =
@@ -162,6 +195,35 @@ private fun com.razumly.mvp.core.network.dto.TeamRegistrationConsentDto.toConsen
         requiresChildEmail = childEmailRequired,
     )
 }
+
+private fun TeamInviteEventTeamOptionDto.toDomainOrNull(): TeamInviteEventTeamOption? {
+    val normalizedEventId = eventId.trim().takeIf(String::isNotBlank) ?: return null
+    val normalizedEventTeamId = eventTeamId.trim().takeIf(String::isNotBlank) ?: return null
+    return TeamInviteEventTeamOption(
+        eventId = normalizedEventId,
+        eventTeamId = normalizedEventTeamId,
+        eventName = eventName.trim().ifBlank { "Event" },
+        eventStart = eventStart?.trim()?.takeIf(String::isNotBlank),
+        eventEnd = eventEnd?.trim()?.takeIf(String::isNotBlank),
+        teamName = teamName.trim().ifBlank { "Team" },
+    )
+}
+
+private fun TeamInviteFreeAgentsResponseDto.toDomain(users: List<UserData>): TeamInviteFreeAgentContext =
+    TeamInviteFreeAgentContext(
+        users = users,
+        eventIds = eventIds.map(String::trim).filter(String::isNotBlank).distinct(),
+        freeAgentIds = freeAgentIds.map(String::trim).filter(String::isNotBlank).distinct(),
+        eventTeams = eventTeams.mapNotNull(TeamInviteEventTeamOptionDto::toDomainOrNull),
+        freeAgentEventsByUserId = freeAgentEventsByUserId.normalizeStringListMap(),
+        freeAgentEventTeamIdsByUserId = freeAgentEventTeamIdsByUserId.normalizeStringListMap(),
+    )
+
+private fun Map<String, List<String>>.normalizeStringListMap(): Map<String, List<String>> =
+    mapNotNull { (key, values) ->
+        val normalizedKey = key.trim().takeIf(String::isNotBlank) ?: return@mapNotNull null
+        normalizedKey to values.map(String::trim).filter(String::isNotBlank).distinct()
+    }.toMap()
 
 class TeamRepository(
     private val api: MvpApiClient,
@@ -542,9 +604,9 @@ class TeamRepository(
             .filter { it.teamId != null }
     }
 
-    override suspend fun getInviteFreeAgents(teamId: String): Result<List<UserData>> = runCatching {
+    override suspend fun getInviteFreeAgentContext(teamId: String): Result<TeamInviteFreeAgentContext> = runCatching {
         val normalizedTeamId = teamId.trim().takeIf(String::isNotBlank)
-            ?: return@runCatching emptyList()
+            ?: return@runCatching TeamInviteFreeAgentContext()
         val encodedTeamId = normalizedTeamId.encodeURLQueryComponent()
         val response = api.get<TeamInviteFreeAgentsResponseDto>(
             path = "api/teams/$encodedTeamId/invite-free-agents",
@@ -553,7 +615,40 @@ class TeamRepository(
         if (users.isNotEmpty()) {
             databaseService.getUserDataDao.upsertUsersData(users)
         }
-        users
+        response.toDomain(users)
+    }
+
+    override suspend fun getInviteFreeAgents(teamId: String): Result<List<UserData>> =
+        getInviteFreeAgentContext(teamId).map { context -> context.users }
+
+    override suspend fun createTeamMemberInvite(
+        teamId: String,
+        userId: String?,
+        email: String?,
+        roleInviteType: String,
+        eventTeamIds: List<String>,
+    ): Result<Unit> = runCatching {
+        val normalizedTeamId = teamId.trim().takeIf(String::isNotBlank)
+            ?: error("Team id is required.")
+        val normalizedUserId = userId?.trim()?.takeIf(String::isNotBlank)
+        val normalizedEmail = email?.trim()?.lowercase()?.takeIf(String::isNotBlank)
+        if (normalizedUserId == null && normalizedEmail == null) {
+            error("A user or email is required.")
+        }
+        val encodedTeamId = normalizedTeamId.encodeURLQueryComponent()
+        val response = api.post<TeamMemberInviteRequestDto, TeamMemberInviteResponseDto>(
+            path = "api/teams/$encodedTeamId/member-invites",
+            body = TeamMemberInviteRequestDto(
+                userId = normalizedUserId,
+                email = normalizedEmail,
+                role = roleInviteType.trim().ifBlank { "player" },
+                eventTeamIds = eventTeamIds.map(String::trim).filter(String::isNotBlank).distinct(),
+            ),
+        )
+        response.team?.toTeamOrNull()?.let { updatedTeam ->
+            ensureUsersCachedForTeam(updatedTeam)
+            databaseService.getTeamDao.upsertTeamWithRelations(updatedTeam)
+        }
     }
 
     override suspend fun createTeamInvite(
