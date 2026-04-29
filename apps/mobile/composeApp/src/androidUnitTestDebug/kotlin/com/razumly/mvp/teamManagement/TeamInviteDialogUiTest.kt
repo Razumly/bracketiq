@@ -3,6 +3,7 @@ package com.razumly.mvp.teamManagement
 import android.app.Application
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -99,6 +100,36 @@ class TeamInviteDialogUiTest {
         assertNull(invitedUserId)
         assertEquals("new.player@example.com", invitedEmail)
         assertEquals(listOf("event-team-1"), invitedEventTeamIds)
+    }
+
+    @Test
+    fun full_player_capacity_disables_player_invite_submission() {
+        var inviteSubmitted = false
+        val capacityMessage = "This team already has 2 of 2 player slots filled."
+
+        composeRule.setContent {
+            MaterialTheme {
+                TeamInviteDialog(
+                    teamName = "Test team",
+                    inviteTarget = TeamInviteTarget.PLAYER,
+                    freeAgents = listOf(user("user-free-agent", "Jane", "Free")),
+                    friends = emptyList(),
+                    suggestions = emptyList(),
+                    inviteFreeAgentContext = inviteContext(),
+                    canInvitePlayer = false,
+                    playerCapacityMessage = capacityMessage,
+                    onSearch = {},
+                    onDismiss = {},
+                    onInvite = { _, _, _ -> inviteSubmitted = true },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(capacityMessage).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Invite Jane Free").performClick()
+        composeRule.onNodeWithText("Send Player Invite").assertIsNotEnabled()
+
+        assertEquals(false, inviteSubmitted)
     }
 
     private fun inviteContext(): TeamInviteFreeAgentContext =

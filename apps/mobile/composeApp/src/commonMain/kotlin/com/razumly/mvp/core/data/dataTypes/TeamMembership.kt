@@ -85,6 +85,14 @@ fun TeamPlayerRegistration.isInvited(): Boolean = normalizedStatus() == TEAM_MEM
 
 fun TeamPlayerRegistration.isStarted(): Boolean = normalizedStatus() == TEAM_MEMBERSHIP_STATUS_STARTED
 
+fun TeamPlayerRegistration.countsTowardTeamCapacity(): Boolean =
+    when (normalizedStatus()) {
+        TEAM_MEMBERSHIP_STATUS_ACTIVE,
+        TEAM_MEMBERSHIP_STATUS_INVITED,
+        TEAM_MEMBERSHIP_STATUS_STARTED -> true
+        else -> false
+    }
+
 fun TeamStaffAssignment.normalizedStatus(): String = normalizeTeamStaffStatus(status)
 
 fun TeamStaffAssignment.normalizedRole(): String = normalizeTeamStaffRole(role)
@@ -104,6 +112,21 @@ fun Team.activePlayerRegistrations(): List<TeamPlayerRegistration> =
 
 fun Team.invitedPlayerRegistrations(): List<TeamPlayerRegistration> =
     withSynchronizedMembership().playerRegistrations.filter(TeamPlayerRegistration::isInvited)
+
+fun Team.teamCapacityPlayerCount(): Int {
+    val syncedTeam = withSynchronizedMembership()
+    val registrationUserIds = syncedTeam.playerRegistrations
+        .filter(TeamPlayerRegistration::countsTowardTeamCapacity)
+        .mapNotNull { registration -> normalizeIdToken(registration.userId) }
+        .toSet()
+    val legacyUserIds = (syncedTeam.playerIds + syncedTeam.pending)
+        .mapNotNull(::normalizeIdToken)
+        .toSet()
+    return (registrationUserIds + legacyUserIds).size
+}
+
+fun Team.hasAvailablePlayerSlot(): Boolean =
+    teamSize <= 0 || teamCapacityPlayerCount() < teamSize
 
 fun Team.activeStaffAssignments(): List<TeamStaffAssignment> =
     withSynchronizedMembership().staffAssignments.filter(TeamStaffAssignment::isActive)

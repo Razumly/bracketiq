@@ -54,6 +54,7 @@ import com.razumly.mvp.core.data.dataTypes.TeamStaffAssignment
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
+import com.razumly.mvp.core.data.dataTypes.isStarted
 import com.razumly.mvp.core.data.dataTypes.normalizedRole
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.repositories.TeamInviteEventTeamOption
@@ -211,6 +212,24 @@ fun CreateOrEditTeamScreen(
     val parsedTeamSize = teamSizeInput.toIntOrNull()
     val isTeamSizeValid = parsedTeamSize != null && parsedTeamSize > 0
     val resolvedTeamSize = parsedTeamSize ?: team.team.teamSize
+    val playerCapacityUserIds = remember(playersInTeam, invitedPlayers, syncedTeam.playerRegistrations) {
+        buildSet {
+            playersInTeam.map(UserData::id).filter(String::isNotBlank).forEach(::add)
+            invitedPlayers.map(UserData::id).filter(String::isNotBlank).forEach(::add)
+            syncedTeam.playerRegistrations
+                .filter(TeamPlayerRegistration::isStarted)
+                .map(TeamPlayerRegistration::userId)
+                .filter(String::isNotBlank)
+                .forEach(::add)
+        }
+    }
+    val playerCapacityCount = playerCapacityUserIds.size
+    val canInvitePlayer = resolvedTeamSize <= 0 || playerCapacityCount < resolvedTeamSize
+    val playerCapacityMessage = if (resolvedTeamSize > 0) {
+        "This team already has $playerCapacityCount of $resolvedTeamSize player slots filled. Remove a player or pending invite, or increase team size before inviting another player."
+    } else {
+        ""
+    }
     val registrationPriceCentsInput = (registrationCostInput.toIntOrNull() ?: 0)
         .coerceAtLeast(0)
     val resolvedEventSportName = remember(selectedEvent?.sportId, sports) {
@@ -908,11 +927,17 @@ fun CreateOrEditTeamScreen(
                         }
                     }
                 }
-                if (canEditFields && (playersInTeam.size + invitedPlayers.size < resolvedTeamSize || resolvedTeamSize == 7)) {
+                if (canEditFields && canInvitePlayer) {
                     InvitePlayerCard {
                         inviteTarget = TeamInviteTarget.PLAYER
                         showSearchDialog = true
                     }
+                } else if (canEditFields && !canInvitePlayer) {
+                    Text(
+                        text = playerCapacityMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
             }
 
@@ -1073,11 +1098,17 @@ fun CreateOrEditTeamScreen(
                 playersInTeam.contains(it) || invitedPlayers.contains(it)
             },
             inviteFreeAgentContext = inviteFreeAgentContext,
+            canInvitePlayer = inviteTarget != TeamInviteTarget.PLAYER || canInvitePlayer,
+            playerCapacityMessage = playerCapacityMessage,
             onSearch = onSearch,
             onDismiss = { showSearchDialog = false },
             onInvite = { selectedUser, email, eventTeamIds ->
                 inviteError = null
                 val inviteType = inviteTarget.inviteType ?: return@TeamInviteDialog
+                if (inviteTarget == TeamInviteTarget.PLAYER && !canInvitePlayer) {
+                    inviteError = playerCapacityMessage
+                    return@TeamInviteDialog
+                }
                 if (inviteTarget == TeamInviteTarget.PLAYER && selectedUser != null) {
                     val alreadySelected = playersInTeam.any { it.id == selectedUser.id } ||
                         invitedPlayers.any { it.id == selectedUser.id }
@@ -1116,6 +1147,8 @@ internal fun TeamInviteDialog(
     friends: List<UserData>,
     suggestions: List<UserData>,
     inviteFreeAgentContext: TeamInviteFreeAgentContext,
+    canInvitePlayer: Boolean = true,
+    playerCapacityMessage: String = "",
     onSearch: (String) -> Unit,
     onDismiss: () -> Unit,
     onInvite: (selectedUser: UserData?, email: String?, eventTeamIds: List<String>) -> Unit,
@@ -1159,8 +1192,10 @@ internal fun TeamInviteDialog(
     }
     val canSendEmail = normalizedQuery.isProbablyEmail()
     val showEventTeams = inviteTarget == TeamInviteTarget.PLAYER && inviteFreeAgentContext.eventTeams.isNotEmpty()
+    val playerInviteBlocked = inviteTarget == TeamInviteTarget.PLAYER && !canInvitePlayer
 
     fun chooseUser(user: UserData, precheckFreeAgentEvents: Boolean) {
+        if (playerInviteBlocked) return
         selectedUser = user
         selectedEventTeamIds = if (precheckFreeAgentEvents) {
             inviteFreeAgentContext.freeAgentEventTeamIdsByUserId[user.id].orEmpty()
@@ -1213,6 +1248,14 @@ internal fun TeamInviteDialog(
                     },
                 )
 
+                if (playerInviteBlocked && playerCapacityMessage.isNotBlank()) {
+                    Text(
+                        text = playerCapacityMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+
                 when (mode) {
                     TeamInviteDialogMode.FreeAgents -> {
                         if (filteredFreeAgents.isEmpty()) {
@@ -1231,6 +1274,7 @@ internal fun TeamInviteDialog(
                                         user = user,
                                         supportingText = eventNames.joinToString(", ").ifBlank { "Free agent" },
                                         selected = selectedUser?.id == user.id,
+                                        enabled = !playerInviteBlocked,
                                         onClick = { chooseUser(user, precheckFreeAgentEvents = true) },
                                     )
                                 }
@@ -1245,6 +1289,7 @@ internal fun TeamInviteDialog(
                                     user = user,
                                     supportingText = user.publicHandle.orEmpty(),
                                     selected = selectedUser?.id == user.id,
+                                    enabled = !playerInviteBlocked,
                                     onClick = { chooseUser(user, precheckFreeAgentEvents = false) },
                                 )
                             }
@@ -1279,8 +1324,8 @@ internal fun TeamInviteDialog(
                     }
                 },
                 enabled = when (mode) {
-                    TeamInviteDialogMode.InviteByEmail -> canSendEmail
-                    else -> selectedUser != null
+                    TeamInviteDialogMode.InviteByEmail -> canSendEmail && !playerInviteBlocked
+                    else -> selectedUser != null && !playerInviteBlocked
                 },
             ) {
                 Text("Send ${inviteTarget.label} Invite")
@@ -1299,6 +1344,7 @@ private fun UserInviteRow(
     user: UserData,
     supportingText: String,
     selected: Boolean,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     Card(
@@ -1306,7 +1352,7 @@ private fun UserInviteRow(
             .fillMaxWidth()
             .padding(vertical = 4.dp)
             .semantics { contentDescription = "Invite ${user.fullName}" }
-            .clickable(onClick = onClick),
+            .clickable(enabled = enabled, onClick = onClick),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(8.dp),
@@ -1322,7 +1368,11 @@ private fun UserInviteRow(
                     modifier = Modifier.weight(1f),
                 )
             }
-            Checkbox(checked = selected, onCheckedChange = { onClick() })
+            Checkbox(
+                checked = selected,
+                enabled = enabled,
+                onCheckedChange = { if (enabled) onClick() },
+            )
         }
     }
 }
@@ -1335,7 +1385,7 @@ private fun EventTeamCheckboxes(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
-            text = "Update future event teams",
+            text = "Update your team in upcoming events",
             style = MaterialTheme.typography.titleSmall,
         )
         options.forEach { option ->

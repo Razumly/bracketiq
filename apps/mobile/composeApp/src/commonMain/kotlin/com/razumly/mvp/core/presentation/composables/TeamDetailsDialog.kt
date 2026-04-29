@@ -26,6 +26,7 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
+import com.razumly.mvp.core.data.dataTypes.countsTowardTeamCapacity
 import com.razumly.mvp.core.data.dataTypes.isActive
 import com.razumly.mvp.core.data.dataTypes.isStarted
 import com.razumly.mvp.core.data.dataTypes.normalizedRole
@@ -104,9 +105,13 @@ fun TeamDetailsDialog(
                 val isCurrentUserActive = currentUserRegistration?.isActive() == true ||
                     syncedTeam.playerIds.contains(currentUser.id)
                 val isCurrentUserPending = currentUserRegistration?.isStarted() == true
-                val reservedOrActiveCount = syncedTeam.playerRegistrations.count { registration ->
-                    registration.isActive() || registration.isStarted()
-                }.coerceAtLeast(syncedTeam.playerIds.size)
+                val reservedOrActiveCount = syncedTeam.playerRegistrations
+                    .filter(TeamPlayerRegistration::countsTowardTeamCapacity)
+                    .map(TeamPlayerRegistration::userId)
+                    .filter(String::isNotBlank)
+                    .toSet()
+                    .size
+                    .coerceAtLeast((syncedTeam.playerIds + syncedTeam.pending).filter(String::isNotBlank).toSet().size)
                 val teamHasCapacity = syncedTeam.teamSize <= 0 || reservedOrActiveCount < syncedTeam.teamSize
                 val canRegister = canRegisterForTeam(
                     openRegistration = syncedTeam.openRegistration,
