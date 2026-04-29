@@ -58,7 +58,7 @@
                 <data
                     android:scheme="https"
                     android:host="bracket-iq.com"
-                    android:pathPrefix="/" />
+                    android:pathPattern="/..*" />
             </intent-filter>
 
             <intent-filter android:label="@string/app_deep_links" android:autoVerify="true">
@@ -68,7 +68,7 @@
                 <data
                     android:scheme="https"
                     android:host="www.bracket-iq.com"
-                    android:pathPrefix="/" />
+                    android:pathPattern="/..*" />
             </intent-filter>
         </activity>
     </application>
