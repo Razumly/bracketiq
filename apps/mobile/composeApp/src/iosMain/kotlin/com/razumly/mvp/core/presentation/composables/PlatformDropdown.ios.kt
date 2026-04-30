@@ -31,7 +31,6 @@ import kotlinx.cinterop.ObjCAction
 import kotlinx.cinterop.ObjCSignatureOverride
 import kotlinx.cinterop.StableRef
 import kotlinx.cinterop.cstr
-import platform.CoreGraphics.CGRectMake
 import platform.Foundation.*
 import platform.UIKit.*
 import platform.UIKit.UIBarButtonItem
@@ -91,6 +90,16 @@ actual fun PlatformDropdown(
     } else {
         Modifier
     }
+    val displayText = dropdownDisplayText(
+        selectedValue = selectedValue,
+        selectedValues = selectedValues,
+        options = options,
+        multiSelect = multiSelect,
+    )
+    val hasSelection = if (multiSelect) selectedValues.isNotEmpty() else selectedValue.isNotBlank()
+    val sheetTitle = label.ifBlank {
+        if (multiSelect) "Select Options" else "Select Option"
+    }
 
     Column(modifier = modifier.then(paddingModifier)) {
         // Label above the dropdown
@@ -119,15 +128,11 @@ actual fun PlatformDropdown(
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text(
-                        text = if (multiSelect) {
-                            selectedValues.joinToString(", ").ifBlank { placeholder }
-                        } else {
-                            selectedValue.ifBlank { placeholder }
-                        },
+                        text = displayText.ifBlank { placeholder },
                         style = MaterialTheme.typography.bodyMedium,
                         color = when {
                             !enabled -> readableDisabled
-                            ((if (multiSelect) selectedValues.isEmpty() else selectedValue.isBlank())) -> readablePlaceholder
+                            !hasSelection -> readablePlaceholder
                             else -> MaterialTheme.colorScheme.onSurface
                         },
                         maxLines = 1,
@@ -140,15 +145,17 @@ actual fun PlatformDropdown(
                 }
             }
         } else {
-            // Native iOS dropdown using UIButton + UIMenu
             UIKitView(
                 factory = {
                     createNativeDropdownButton(
-                        selectedValue = if (multiSelect) selectedValues.joinToString(", ") else selectedValue,
+                        displayText = displayText,
+                        hasSelection = hasSelection,
                         placeholder = placeholder,
+                        sheetTitle = sheetTitle,
                         options = options,
                         enabled = enabled,
                         multiSelect = multiSelect,
+                        selectedValue = selectedValue,
                         selectedValues = selectedValues,
                         onSingleSelectionChange = onSelectionChange,
                         onMultiSelectionChange = onMultiSelectionChange,
@@ -167,11 +174,14 @@ actual fun PlatformDropdown(
                 update = { button ->
                     updateNativeDropdownButton(
                         button = button,
-                        selectedValue = if (multiSelect) selectedValues.joinToString(", ") else selectedValue,
+                        displayText = displayText,
+                        hasSelection = hasSelection,
                         placeholder = placeholder,
+                        sheetTitle = sheetTitle,
                         options = options,
                         enabled = enabled,
                         multiSelect = multiSelect,
+                        selectedValue = selectedValue,
                         selectedValues = selectedValues,
                         onSingleSelectionChange = onSelectionChange,
                         onMultiSelectionChange = onMultiSelectionChange,
@@ -203,15 +213,20 @@ data class DropdownCallbacks(
     val onSingleSelectionChange: (String) -> Unit,
     val onMultiSelectionChange: (List<String>) -> Unit,
     val multiSelect: Boolean,
+    val placeholder: String,
+    val selectedValue: String,
     val selectedValues: List<String>
 )
 
 fun createNativeDropdownButton(
-    selectedValue: String,
+    displayText: String,
+    hasSelection: Boolean,
     placeholder: String,
+    sheetTitle: String,
     options: List<DropdownOption>,
     enabled: Boolean,
     multiSelect: Boolean,
+    selectedValue: String,
     selectedValues: List<String>,
     onSingleSelectionChange: (String) -> Unit,
     onMultiSelectionChange: (List<String>) -> Unit,
@@ -226,8 +241,7 @@ fun createNativeDropdownButton(
     val button = UIButton.buttonWithType(UIButtonTypeSystem)
 
     // Set initial title
-    val displayText = selectedValue.ifEmpty { placeholder }
-    button.setTitle(displayText, forState = UIControlStateNormal)
+    button.setTitle(displayText.ifEmpty { placeholder }, forState = UIControlStateNormal)
 
     // Style the button to look like a dropdown field
     button.backgroundColor = if (enabled) fillColor else disabledFillColor
@@ -240,7 +254,7 @@ fun createNativeDropdownButton(
     button.setTitleColor(
         when {
             !enabled -> disabledTextColor
-            selectedValue.isEmpty() -> placeholderColor
+            !hasSelection -> placeholderColor
             else -> textColor
         },
         forState = UIControlStateNormal
@@ -268,6 +282,8 @@ fun createNativeDropdownButton(
         onSingleSelectionChange = onSingleSelectionChange,
         onMultiSelectionChange = onMultiSelectionChange,
         multiSelect = multiSelect,
+        placeholder = placeholder,
+        selectedValue = selectedValue,
         selectedValues = selectedValues
     )
 
@@ -278,117 +294,100 @@ fun createNativeDropdownButton(
         OBJC_ASSOCIATION_RETAIN_NONATOMIC
     )
 
-    // Create UIMenu for the dropdown
-    updateButtonMenu(button, options, callbacks)
+    updateButtonSelectionAction(button, options, callbacks, sheetTitle)
 
     return button
 }
 
 @OptIn(BetaInteropApi::class)
-fun updateButtonMenu(
+fun updateButtonSelectionAction(
     button: UIButton,
     options: List<DropdownOption>,
-    callbacks: DropdownCallbacks
+    callbacks: DropdownCallbacks,
+    sheetTitle: String,
 ) {
-    if (callbacks.multiSelect) {
-        // For multiselect, use action sheet approach instead of menu
-        button.showsMenuAsPrimaryAction = false
-        button.menu = null
+    button.showsMenuAsPrimaryAction = false
+    button.menu = null
+    button.removeTarget(null, action = null, forControlEvents = UIControlEventAllEvents)
 
-        // Remove any existing targets
-        button.removeTarget(null, action = null, forControlEvents = UIControlEventAllEvents)
-
-        // Add target for multiselect action sheet
-        val target = object : NSObject() {
-            @ObjCAction
-            @Suppress("UNUSED")
-            fun showMultiSelectSheet() {
-                showMultiSelectActionSheet(
-                    button = button,
-                    options = options,
-                    selectedValues = callbacks.selectedValues,
-                    onSelectionChange = callbacks.onMultiSelectionChange
-                )
-            }
+    val target = object : NSObject() {
+        @ObjCAction
+        @Suppress("UNUSED")
+        fun showSelectionSheet() {
+            showSelectionSheet(
+                button = button,
+                title = sheetTitle,
+                options = options,
+                selectedValue = callbacks.selectedValue,
+                selectedValues = callbacks.selectedValues,
+                multiSelect = callbacks.multiSelect,
+                placeholder = callbacks.placeholder,
+                onSingleSelectionChange = callbacks.onSingleSelectionChange,
+                onMultiSelectionChange = callbacks.onMultiSelectionChange,
+            )
         }
-
-        button.addTarget(
-            target = target,
-            action = sel_registerName("showMultiSelectSheet"),
-            forControlEvents = UIControlEventTouchUpInside
-        )
-
-        // Store target to prevent garbage collection
-        objc_setAssociatedObject(
-            button as Any,
-            "actionTarget".cstr as CValuesRef<*>?,
-            StableRef.create(target).asCPointer(),
-            OBJC_ASSOCIATION_RETAIN_NONATOMIC
-        )
-    } else {
-        // Single select uses the normal menu approach
-        val menuActions = mutableListOf<UIAction>()
-
-        options.forEach { option ->
-            val action = UIAction.actionWithTitle(
-                title = option.label,
-                image = null,
-                identifier = null
-            ) { _ ->
-                callbacks.onSingleSelectionChange(option.value)
-                button.setTitle(option.label, forState = UIControlStateNormal)
-            }
-
-            if (!option.enabled) {
-                action.attributes = UIMenuElementAttributesDisabled
-            }
-
-            menuActions.add(action)
-        }
-
-        val menu = UIMenu.menuWithTitle(
-            title = "",
-            children = menuActions
-        )
-
-        button.menu = menu
-        button.showsMenuAsPrimaryAction = true
     }
+
+    button.addTarget(
+        target = target,
+        action = sel_registerName("showSelectionSheet"),
+        forControlEvents = UIControlEventTouchUpInside
+    )
+
+    objc_setAssociatedObject(
+        button as Any,
+        "actionTarget".cstr as CValuesRef<*>?,
+        StableRef.create(target).asCPointer(),
+        OBJC_ASSOCIATION_RETAIN_NONATOMIC
+    )
 }
 
-fun showMultiSelectActionSheet(
+fun showSelectionSheet(
     button: UIButton,
+    title: String,
     options: List<DropdownOption>,
+    selectedValue: String,
     selectedValues: List<String>,
-    onSelectionChange: (List<String>) -> Unit
+    multiSelect: Boolean,
+    placeholder: String,
+    onSingleSelectionChange: (String) -> Unit,
+    onMultiSelectionChange: (List<String>) -> Unit
 ) {
     val rootViewController = button.window?.rootViewController ?: return
+    val presentingViewController = rootViewController.topPresentedViewController()
 
-    val multiSelectVC = createMultiSelectViewController(
+    val selectionVC = createSelectionViewController(
+        title = title,
         options = options,
+        selectedValue = selectedValue,
         selectedValues = selectedValues,
-        onSelectionChange = onSelectionChange,
+        multiSelect = multiSelect,
+        onSingleSelectionChange = { option ->
+            onSingleSelectionChange(option.value)
+            button.setTitle(option.label, forState = UIControlStateNormal)
+        },
+        onMultiSelectionChange = onMultiSelectionChange,
         onDismiss = { finalSelection ->
-            // Update button title when done
-            val displayText = if (finalSelection.isEmpty()) {
-                "Select options"
-            } else {
-                finalSelection.mapNotNull { value ->
-                    options.find { it.value == value }?.label
-                }.joinToString(", ")
-            }
-            button.setTitle(displayText, forState = UIControlStateNormal)
+            val displayText = finalSelection
+                .map { value -> options.firstOrNull { it.value == value }?.label ?: value }
+                .filter(String::isNotBlank)
+                .joinToString(", ")
+            button.setTitle(displayText.ifEmpty { placeholder }, forState = UIControlStateNormal)
         }
     )
 
-    rootViewController.presentViewController(multiSelectVC, animated = true, completion = null)
+    presentingViewController.presentViewController(selectionVC, animated = true, completion = null)
 }
 
 @OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
-fun createMultiSelectViewController(
+fun createSelectionViewController(
+    title: String,
     options: List<DropdownOption>,
+    selectedValue: String,
     selectedValues: List<String>,
-    onSelectionChange: (List<String>) -> Unit,
+    multiSelect: Boolean,
+    onSingleSelectionChange: (DropdownOption) -> Unit,
+    onMultiSelectionChange: (List<String>) -> Unit,
     onDismiss: (List<String>) -> Unit
 ): UIViewController {
     val viewController = UIViewController()
@@ -399,15 +398,18 @@ fun createMultiSelectViewController(
 
     // Set up the view
     viewController.view.backgroundColor = UIColor.systemBackgroundColor
-    viewController.title = "Select Options"
+    viewController.title = title
 
-    val doneButton = UIBarButtonItem(
-        title = "Done",
-        style = UIBarButtonItemStyle.UIBarButtonItemStyleDone,
-        target = viewController,
-        action = sel_registerName("donePressed")
-    )
-    viewController.navigationItem.rightBarButtonItem = doneButton
+    val doneButton = if (multiSelect) {
+        UIBarButtonItem(
+            title = "Done",
+            style = UIBarButtonItemStyle.UIBarButtonItemStyleDone,
+            target = viewController,
+            action = sel_registerName("donePressed")
+        ).also { viewController.navigationItem.rightBarButtonItem = it }
+    } else {
+        null
+    }
 
     val cancelButton = UIBarButtonItem(
         title = "Cancel",
@@ -431,14 +433,15 @@ fun createMultiSelectViewController(
     ))
 
     // Create table view delegate/datasource
-    val tableDelegate = MultiSelectTableDelegate(
+    val tableDelegate = SelectionTableDelegate(
         options = options,
+        selectedValue = selectedValue,
         selectedValues = mutableSelection,
-        onSelectionChange = { newSelection ->
-            mutableSelection.clear()
-            mutableSelection.addAll(newSelection)
-            onSelectionChange(mutableSelection.toList())
-        }
+        multiSelect = multiSelect,
+        onSingleSelectionChange = { option ->
+            onSingleSelectionChange(option)
+            viewController.dismissViewControllerAnimated(true, completion = null)
+        },
     )
 
     tableView.delegate = tableDelegate
@@ -457,6 +460,7 @@ fun createMultiSelectViewController(
         @ObjCAction
         @Suppress("UNUSED")
         fun donePressed() {
+            onMultiSelectionChange(mutableSelection.toList())
             onDismiss(mutableSelection.toList())
             viewController.dismissViewControllerAnimated(true, completion = null)
         }
@@ -477,18 +481,20 @@ fun createMultiSelectViewController(
     )
 
     // Update button targets
-    doneButton.target = target
-    doneButton.action = sel_registerName("donePressed")
+    doneButton?.target = target
+    doneButton?.action = sel_registerName("donePressed")
     cancelButton.target = target
     cancelButton.action = sel_registerName("cancelPressed")
 
     return navController
 }
 
-class MultiSelectTableDelegate(
+class SelectionTableDelegate(
     private val options: List<DropdownOption>,
+    private val selectedValue: String,
     private val selectedValues: MutableList<String>,
-    private val onSelectionChange: (List<String>) -> Unit
+    private val multiSelect: Boolean,
+    private val onSingleSelectionChange: (DropdownOption) -> Unit,
 ) : NSObject(), UITableViewDelegateProtocol, UITableViewDataSourceProtocol {
 
     override fun numberOfSectionsInTableView(tableView: UITableView): Long = 1
@@ -508,12 +514,16 @@ class MultiSelectTableDelegate(
             )
         }
 
-        // Fix: Use 'cellForRowAtIndexPath' parameter name
         val option = options[cellForRowAtIndexPath.row.toInt()]
         cell.textLabel?.text = option.label
 
-        // Set checkmark if selected
-        if (selectedValues.contains(option.value)) {
+        val isSelected = if (multiSelect) {
+            selectedValues.contains(option.value)
+        } else {
+            option.value == selectedValue
+        }
+
+        if (isSelected) {
             cell.accessoryType = UITableViewCellAccessoryType.UITableViewCellAccessoryCheckmark
         } else {
             cell.accessoryType = UITableViewCellAccessoryType.UITableViewCellAccessoryNone
@@ -535,27 +545,25 @@ class MultiSelectTableDelegate(
     override fun tableView(tableView: UITableView, didSelectRowAtIndexPath: NSIndexPath) {
         tableView.deselectRowAtIndexPath(didSelectRowAtIndexPath, animated = true)
 
-        // Fix: Use 'didSelectRowAtIndexPath' parameter name
         val option = options[didSelectRowAtIndexPath.row.toInt()]
         if (!option.enabled) return
 
-        // Toggle selection
-        if (selectedValues.contains(option.value)) {
-            selectedValues.remove(option.value)
-        } else {
-            selectedValues.add(option.value)
-        }
+        if (multiSelect) {
+            if (selectedValues.contains(option.value)) {
+                selectedValues.remove(option.value)
+            } else {
+                selectedValues.add(option.value)
+            }
 
-        // Update the cell
-        val cell = tableView.cellForRowAtIndexPath(didSelectRowAtIndexPath)
-        cell?.accessoryType = if (selectedValues.contains(option.value)) {
-            UITableViewCellAccessoryType.UITableViewCellAccessoryCheckmark
+            val cell = tableView.cellForRowAtIndexPath(didSelectRowAtIndexPath)
+            cell?.accessoryType = if (selectedValues.contains(option.value)) {
+                UITableViewCellAccessoryType.UITableViewCellAccessoryCheckmark
+            } else {
+                UITableViewCellAccessoryType.UITableViewCellAccessoryNone
+            }
         } else {
-            UITableViewCellAccessoryType.UITableViewCellAccessoryNone
+            onSingleSelectionChange(option)
         }
-
-        // Notify of change
-        onSelectionChange(selectedValues.toList())
     }
 }
 
@@ -564,11 +572,14 @@ class MultiSelectTableDelegate(
 @OptIn(ExperimentalForeignApi::class)
 fun updateNativeDropdownButton(
     button: UIButton,
-    selectedValue: String,
+    displayText: String,
+    hasSelection: Boolean,
     placeholder: String,
+    sheetTitle: String,
     options: List<DropdownOption>,
     enabled: Boolean,
     multiSelect: Boolean,
+    selectedValue: String,
     selectedValues: List<String>,
     onSingleSelectionChange: (String) -> Unit,
     onMultiSelectionChange: (List<String>) -> Unit,
@@ -580,9 +591,9 @@ fun updateNativeDropdownButton(
     borderColor: UIColor,
 ) {
     // Update button title
-    val displayText = selectedValue.ifEmpty { placeholder }
-    if (button.currentTitle != displayText) {
-        button.setTitle(displayText, forState = UIControlStateNormal)
+    val buttonTitle = displayText.ifEmpty { placeholder }
+    if (button.currentTitle != buttonTitle) {
+        button.setTitle(buttonTitle, forState = UIControlStateNormal)
     }
 
     button.enabled = enabled
@@ -591,7 +602,7 @@ fun updateNativeDropdownButton(
     button.setTitleColor(
         when {
             !enabled -> disabledTextColor
-            selectedValue.isEmpty() -> placeholderColor
+            !hasSelection -> placeholderColor
             else -> textColor
         },
         forState = UIControlStateNormal
@@ -602,6 +613,8 @@ fun updateNativeDropdownButton(
         onSingleSelectionChange = onSingleSelectionChange,
         onMultiSelectionChange = onMultiSelectionChange,
         multiSelect = multiSelect,
+        placeholder = placeholder,
+        selectedValue = selectedValue,
         selectedValues = selectedValues
     )
 
@@ -612,8 +625,34 @@ fun updateNativeDropdownButton(
         OBJC_ASSOCIATION_RETAIN_NONATOMIC
     )
 
-    // Update the menu with current callbacks
-    updateButtonMenu(button, options, callbacks)
+    updateButtonSelectionAction(button, options, callbacks, sheetTitle)
+}
+
+private fun dropdownDisplayText(
+    selectedValue: String,
+    selectedValues: List<String>,
+    options: List<DropdownOption>,
+    multiSelect: Boolean,
+): String {
+    return if (multiSelect) {
+        selectedValues
+            .map { value -> options.firstOrNull { it.value == value }?.label ?: value }
+            .filter(String::isNotBlank)
+            .joinToString(", ")
+    } else {
+        selectedValue
+            .takeIf(String::isNotBlank)
+            ?.let { value -> options.firstOrNull { it.value == value }?.label ?: value }
+            .orEmpty()
+    }
+}
+
+private fun UIViewController.topPresentedViewController(): UIViewController {
+    var current = this
+    while (current.presentedViewController != null) {
+        current = current.presentedViewController!!
+    }
+    return current
 }
 
 private fun Color.toUIColor(): UIColor =
