@@ -99,7 +99,9 @@ fun UnifiedCard(
 
         // Horizontal divider
         HorizontalDivider(
-            modifier = Modifier.padding(start = UIConstants.PROFILE_PICTURE_HEIGHT.dp + 32.dp),
+            modifier = Modifier
+                .fillMaxWidth(0.75f)
+                .align(Alignment.End),
             color = MaterialTheme.colorScheme.outlineVariant,
             thickness = 0.5.dp
         )

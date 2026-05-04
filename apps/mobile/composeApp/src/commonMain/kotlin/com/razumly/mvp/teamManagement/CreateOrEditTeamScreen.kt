@@ -1,9 +1,9 @@
 package com.razumly.mvp.teamManagement
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -99,8 +99,14 @@ private val TEAM_DIVISION_GENDER_OPTIONS = listOf(
     DropdownOption(value = "C", label = "Coed"),
 )
 
+private const val JerseyNumberMaxDigits = 3
+
 private fun normalizeJerseyNumberInput(value: String?): String =
-    value.orEmpty().filter(Char::isDigit).take(3)
+    value.orEmpty().filter(Char::isDigit).take(JerseyNumberMaxDigits)
+
+private val TeamPlayerInlineMinWidth = 440.dp
+private val JerseyNumberFieldWidth = 88.dp
+private val JerseyNumberFieldHeight = 56.dp
 
 internal fun formatRegistrationCostInput(registrationPriceCents: Int): String =
     registrationPriceCents
@@ -866,66 +872,26 @@ fun CreateOrEditTeamScreen(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 playersInTeam.forEach { player ->
                     val jerseyNumber = jerseyNumberForUser(player.id)
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        PlayerCard(
-                            player = player,
-                            modifier = Modifier.weight(1f),
-                            jerseyNumber = jerseyNumber,
-                            trailingContent = {
-                                JerseyNumberField(
-                                    value = jerseyNumber,
-                                    onValueChange = { updateJerseyNumber(player.id, it) },
-                                    canEdit = canEditFields,
-                                )
-                            },
-                        )
-                        if (showEditDetails) {
-                            Button(
-                                onClick = {
-                                    playersInTeam = playersInTeam - player
-                                },
-                                enabled = canEditFields,
-                            ) {
-                                Text("Remove")
-                            }
-                        }
-                    }
+                    TeamPlayerRosterRow(
+                        player = player,
+                        jerseyNumber = jerseyNumber,
+                        showEditDetails = showEditDetails,
+                        canEditFields = canEditFields,
+                        onJerseyNumberChange = { updateJerseyNumber(player.id, it) },
+                        onRemove = { playersInTeam = playersInTeam - player },
+                    )
                 }
                 invitedPlayers.forEach { player ->
                     val jerseyNumber = jerseyNumberForUser(player.id)
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        PlayerCard(
-                            player = player,
-                            isPending = true,
-                            modifier = Modifier.weight(1f),
-                            jerseyNumber = jerseyNumber,
-                            trailingContent = {
-                                JerseyNumberField(
-                                    value = jerseyNumber,
-                                    onValueChange = { updateJerseyNumber(player.id, it) },
-                                    canEdit = canEditFields,
-                                )
-                            },
-                        )
-                        if (showEditDetails) {
-                            Button(
-                                onClick = {
-                                    invitedPlayers = invitedPlayers - player
-                                },
-                                enabled = canEditFields,
-                            ) {
-                                Text("Remove")
-                            }
-                        }
-                    }
+                    TeamPlayerRosterRow(
+                        player = player,
+                        isPending = true,
+                        jerseyNumber = jerseyNumber,
+                        showEditDetails = showEditDetails,
+                        canEditFields = canEditFields,
+                        onJerseyNumberChange = { updateJerseyNumber(player.id, it) },
+                        onRemove = { invitedPlayers = invitedPlayers - player },
+                    )
                 }
                 if (canEditFields && canInvitePlayer) {
                     InvitePlayerCard {
@@ -1421,6 +1387,95 @@ private fun EventTeamCheckboxes(
 }
 
 @Composable
+private fun TeamPlayerRosterRow(
+    player: UserData,
+    isPending: Boolean = false,
+    jerseyNumber: String,
+    showEditDetails: Boolean,
+    canEditFields: Boolean,
+    onJerseyNumberChange: (String) -> Unit,
+    onRemove: () -> Unit,
+) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val shouldStackControls = maxWidth < TeamPlayerInlineMinWidth
+        if (shouldStackControls) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                PlayerCard(
+                    player = player,
+                    isPending = isPending,
+                    modifier = Modifier.fillMaxWidth(),
+                    jerseyNumber = jerseyNumber,
+                )
+                TeamPlayerControlsRow(
+                    jerseyNumber = jerseyNumber,
+                    showEditDetails = showEditDetails,
+                    canEditFields = canEditFields,
+                    onJerseyNumberChange = onJerseyNumberChange,
+                    onRemove = onRemove,
+                    modifier = Modifier.fillMaxWidth(),
+                    expandRemoveButton = true,
+                )
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                PlayerCard(
+                    player = player,
+                    isPending = isPending,
+                    modifier = Modifier.weight(1f),
+                    jerseyNumber = jerseyNumber,
+                )
+                TeamPlayerControlsRow(
+                    jerseyNumber = jerseyNumber,
+                    showEditDetails = showEditDetails,
+                    canEditFields = canEditFields,
+                    onJerseyNumberChange = onJerseyNumberChange,
+                    onRemove = onRemove,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TeamPlayerControlsRow(
+    jerseyNumber: String,
+    showEditDetails: Boolean,
+    canEditFields: Boolean,
+    onJerseyNumberChange: (String) -> Unit,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier,
+    expandRemoveButton: Boolean = false,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        JerseyNumberField(
+            value = jerseyNumber,
+            onValueChange = onJerseyNumberChange,
+            canEdit = canEditFields,
+        )
+        if (showEditDetails) {
+            Button(
+                onClick = onRemove,
+                enabled = canEditFields,
+                modifier = if (expandRemoveButton) Modifier.weight(1f) else Modifier,
+            ) {
+                Text("Remove")
+            }
+        }
+    }
+}
+
+@Composable
 private fun JerseyNumberField(
     value: String,
     onValueChange: (String) -> Unit,
@@ -1431,23 +1486,31 @@ private fun JerseyNumberField(
         return
     }
 
-    StandardTextField(
-        value = value,
-        onValueChange = onValueChange,
-        modifier = Modifier.width(96.dp),
-        label = "Jersey",
-        keyboardType = "number",
-        inputFilter = { input -> input.filter(Char::isDigit).take(3) },
-        readOnly = !canEdit,
-        height = 56.dp,
-        contentPadding = PaddingValues(0.dp),
-    )
+    Column(
+        modifier = Modifier.width(JerseyNumberFieldWidth),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = "Jersey",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        StandardTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth(),
+            keyboardType = "number",
+            inputFilter = { input -> input.filter(Char::isDigit).take(JerseyNumberMaxDigits) },
+            readOnly = !canEdit,
+            height = JerseyNumberFieldHeight,
+        )
+    }
 }
 
 @Composable
 private fun JerseyNumberReadOnlyView(value: String) {
     Column(
-        modifier = Modifier.width(96.dp),
+        modifier = Modifier.width(JerseyNumberFieldWidth),
         horizontalAlignment = Alignment.Start,
         verticalArrangement = Arrangement.Center,
     ) {
