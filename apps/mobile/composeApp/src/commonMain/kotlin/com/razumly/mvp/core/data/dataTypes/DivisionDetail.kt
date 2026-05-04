@@ -23,6 +23,7 @@ data class DivisionDetail(
     val allowPaymentPlans: Boolean? = null,
     val installmentCount: Int? = null,
     val installmentDueDates: List<String> = emptyList(),
+    val installmentDueRelativeDays: List<Int> = emptyList(),
     val installmentAmounts: List<Int> = emptyList(),
     val sportId: String? = null,
     val ageCutoffDate: String? = null,

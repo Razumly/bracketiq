@@ -17,6 +17,8 @@ internal fun validatePaymentPlans(
         installmentCount: Int?,
         installmentAmounts: List<Int>,
         installmentDueDates: List<String>,
+        installmentDueRelativeDays: List<Int>,
+        useRelativeDueDates: Boolean,
     ): List<String> {
         if (!allowPaymentPlans) return emptyList()
 
@@ -25,10 +27,11 @@ internal fun validatePaymentPlans(
         val normalizedDueDates = installmentDueDates
             .map { dueDate -> dueDate.trim() }
             .filter(String::isNotBlank)
+        val normalizedRelativeDueDays = installmentDueRelativeDays
         val normalizedCount = maxOf(
             installmentCount ?: 0,
             normalizedAmounts.size,
-            normalizedDueDates.size,
+            if (useRelativeDueDates) normalizedRelativeDueDays.size else normalizedDueDates.size,
         )
 
         if (priceCents <= 0) {
@@ -40,19 +43,25 @@ internal fun validatePaymentPlans(
         if (normalizedAmounts.size != normalizedCount) {
             errors += "$label: installment count must match installment amounts."
         }
-        if (normalizedDueDates.size != normalizedCount) {
+        if (useRelativeDueDates) {
+            if (normalizedRelativeDueDays.size != normalizedCount) {
+                errors += "$label: installment count must match installment due offsets."
+            }
+        } else if (normalizedDueDates.size != normalizedCount) {
             errors += "$label: installment count must match installment due dates."
         }
 
-        val parsedDueDates = normalizedDueDates.mapIndexed { index, dueDate ->
-            runCatching { LocalDate.parse(dueDate) }
-                .getOrElse {
-                    errors += "$label: installment ${index + 1} due date must use YYYY-MM-DD."
-                    null
-                }
-        }
-        if (parsedDueDates.filterNotNull().zipWithNext().any { (previous, next) -> next < previous }) {
-            errors += "$label: installment due dates must be in chronological order."
+        if (!useRelativeDueDates) {
+            val parsedDueDates = normalizedDueDates.mapIndexed { index, dueDate ->
+                runCatching { LocalDate.parse(dueDate) }
+                    .getOrElse {
+                        errors += "$label: installment ${index + 1} due date must use YYYY-MM-DD."
+                        null
+                    }
+            }
+            if (parsedDueDates.filterNotNull().zipWithNext().any { (previous, next) -> next < previous }) {
+                errors += "$label: installment due dates must be in chronological order."
+            }
         }
 
         if (normalizedAmounts.sum() != priceCents) {
@@ -70,6 +79,8 @@ internal fun validatePaymentPlans(
             installmentCount = event.installmentCount,
             installmentAmounts = event.installmentAmounts,
             installmentDueDates = event.installmentDueDates,
+            installmentDueRelativeDays = event.installmentDueRelativeDays,
+            useRelativeDueDates = event.eventType == EventType.WEEKLY_EVENT,
         ).distinct()
     }
 
@@ -81,6 +92,8 @@ internal fun validatePaymentPlans(
         installmentCount = event.installmentCount,
         installmentAmounts = event.installmentAmounts,
         installmentDueDates = event.installmentDueDates,
+        installmentDueRelativeDays = event.installmentDueRelativeDays,
+        useRelativeDueDates = event.eventType == EventType.WEEKLY_EVENT,
     )
 
     divisionDetails.forEach { detail ->
@@ -92,6 +105,8 @@ internal fun validatePaymentPlans(
             installmentCount = detail.installmentCount,
             installmentAmounts = detail.installmentAmounts,
             installmentDueDates = detail.installmentDueDates,
+            installmentDueRelativeDays = detail.installmentDueRelativeDays,
+            useRelativeDueDates = event.eventType == EventType.WEEKLY_EVENT,
         )
     }
 

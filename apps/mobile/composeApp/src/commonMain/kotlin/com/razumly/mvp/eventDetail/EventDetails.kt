@@ -408,18 +408,26 @@ fun EventDetails(
         editEvent.allowPaymentPlans,
         editEvent.installmentCount,
         editEvent.installmentDueDates,
+        editEvent.installmentDueRelativeDays,
         editEvent.installmentAmounts,
+        editEvent.eventType,
     ) {
+        val useRelativeInstallmentDueDates = editEvent.eventType == EventType.WEEKLY_EVENT
         val defaultInstallmentAmounts = editEvent.installmentAmounts.map { amount ->
             amount.coerceAtLeast(0)
         }
         val defaultInstallmentDueDates = editEvent.installmentDueDates
             .map { dueDate -> dueDate.trim() }
             .filter(String::isNotBlank)
+        val defaultInstallmentDueRelativeDays = editEvent.installmentDueRelativeDays
         val defaultInstallmentCount = maxOf(
             editEvent.installmentCount ?: 0,
             defaultInstallmentAmounts.size,
-            defaultInstallmentDueDates.size,
+            if (useRelativeInstallmentDueDates) {
+                defaultInstallmentDueRelativeDays.size
+            } else {
+                defaultInstallmentDueDates.size
+            },
         ).takeIf { count -> count > 0 }
         val defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true &&
             defaultInstallmentCount != null &&
@@ -438,10 +446,15 @@ fun EventDetails(
             val detailInstallmentDueDates = detail.installmentDueDates
                 .map { dueDate -> dueDate.trim() }
                 .filter(String::isNotBlank)
+            val detailInstallmentDueRelativeDays = detail.installmentDueRelativeDays
             val detailInstallmentCount = maxOf(
                 detail.installmentCount ?: 0,
                 detailInstallmentAmounts.size,
-                detailInstallmentDueDates.size,
+                if (useRelativeInstallmentDueDates) {
+                    detailInstallmentDueRelativeDays.size
+                } else {
+                    detailInstallmentDueDates.size
+                },
             ).takeIf { count -> count > 0 }
             val detailAllowPaymentPlans = when {
                 editEvent.singleDivision -> defaultAllowPaymentPlans
@@ -469,11 +482,22 @@ fun EventDetails(
                     else -> null
                 },
                 installmentDueDates = when {
+                    useRelativeInstallmentDueDates -> emptyList()
                     editEvent.singleDivision -> defaultInstallmentDueDates
                     detailAllowPaymentPlans -> if (detailInstallmentDueDates.isNotEmpty()) {
                         detailInstallmentDueDates
                     } else {
                         defaultInstallmentDueDates
+                    }
+                    else -> emptyList()
+                },
+                installmentDueRelativeDays = when {
+                    !useRelativeInstallmentDueDates -> emptyList()
+                    editEvent.singleDivision -> defaultInstallmentDueRelativeDays
+                    detailAllowPaymentPlans -> if (detailInstallmentDueRelativeDays.isNotEmpty()) {
+                        detailInstallmentDueRelativeDays
+                    } else {
+                        defaultInstallmentDueRelativeDays
                     }
                     else -> emptyList()
                 },
@@ -515,6 +539,7 @@ fun EventDetails(
                 defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true,
                 defaultInstallmentCount = editEvent.installmentCount,
                 defaultInstallmentDueDates = editEvent.installmentDueDates,
+                defaultInstallmentDueRelativeDays = editEvent.installmentDueRelativeDays,
                 defaultInstallmentAmounts = editEvent.installmentAmounts,
             ),
         )
@@ -547,6 +572,7 @@ fun EventDetails(
             defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true,
             defaultInstallmentCount = editEvent.installmentCount,
             defaultInstallmentDueDates = editEvent.installmentDueDates,
+            defaultInstallmentDueRelativeDays = editEvent.installmentDueRelativeDays,
             defaultInstallmentAmounts = editEvent.installmentAmounts,
         )
     }
@@ -628,13 +654,18 @@ fun EventDetails(
     }
     fun syncDivisionInstallmentCount(count: Int) {
         val safeCount = count.coerceAtLeast(1)
+        val useRelativeDueDates = editEvent.eventType == EventType.WEEKLY_EVENT
         val nextAmounts = divisionEditor.installmentAmounts.toMutableList()
         val nextDueDates = divisionEditor.installmentDueDates.toMutableList()
+        val nextRelativeDueDays = divisionEditor.installmentDueRelativeDays.toMutableList()
         while (nextAmounts.size < safeCount) {
             nextAmounts.add(0)
         }
         while (nextDueDates.size < safeCount) {
             nextDueDates.add("")
+        }
+        while (nextRelativeDueDays.size < safeCount) {
+            nextRelativeDueDays.add(0)
         }
         if (nextAmounts.size > safeCount) {
             nextAmounts.subList(safeCount, nextAmounts.size).clear()
@@ -642,10 +673,14 @@ fun EventDetails(
         if (nextDueDates.size > safeCount) {
             nextDueDates.subList(safeCount, nextDueDates.size).clear()
         }
+        if (nextRelativeDueDays.size > safeCount) {
+            nextRelativeDueDays.subList(safeCount, nextRelativeDueDays.size).clear()
+        }
         divisionEditor = divisionEditor.copy(
             installmentCount = safeCount,
             installmentAmounts = nextAmounts,
-            installmentDueDates = nextDueDates,
+            installmentDueDates = if (useRelativeDueDates) emptyList() else nextDueDates,
+            installmentDueRelativeDays = if (useRelativeDueDates) nextRelativeDueDays else emptyList(),
             error = null,
         )
     }
@@ -657,29 +692,37 @@ fun EventDetails(
                 installmentCount = 0,
                 installmentAmounts = emptyList(),
                 installmentDueDates = emptyList(),
+                installmentDueRelativeDays = emptyList(),
                 error = null,
             )
             return
         }
+        val useRelativeDueDates = editEvent.eventType == EventType.WEEKLY_EVENT
         val fallbackCount = maxOf(
             divisionEditor.installmentCount,
             divisionEditor.installmentAmounts.size,
             divisionEditor.installmentDueDates.size,
+            divisionEditor.installmentDueRelativeDays.size,
             1,
         )
         val nextAmounts = divisionEditor.installmentAmounts.toMutableList()
         val nextDueDates = divisionEditor.installmentDueDates.toMutableList()
+        val nextRelativeDueDays = divisionEditor.installmentDueRelativeDays.toMutableList()
         while (nextAmounts.size < fallbackCount) {
             nextAmounts.add(0)
         }
         while (nextDueDates.size < fallbackCount) {
             nextDueDates.add("")
         }
+        while (nextRelativeDueDays.size < fallbackCount) {
+            nextRelativeDueDays.add(0)
+        }
         divisionEditor = divisionEditor.copy(
             allowPaymentPlans = true,
             installmentCount = fallbackCount,
             installmentAmounts = nextAmounts,
-            installmentDueDates = nextDueDates,
+            installmentDueDates = if (useRelativeDueDates) emptyList() else nextDueDates,
+            installmentDueRelativeDays = if (useRelativeDueDates) nextRelativeDueDays else emptyList(),
             error = null,
         )
     }
@@ -688,6 +731,7 @@ fun EventDetails(
             divisionEditor.installmentCount,
             divisionEditor.installmentAmounts.size,
             divisionEditor.installmentDueDates.size,
+            divisionEditor.installmentDueRelativeDays.size,
             index + 1,
             1,
         )
@@ -699,6 +743,13 @@ fun EventDetails(
         divisionEditor = divisionEditor.copy(
             installmentCount = normalizedCount,
             installmentAmounts = nextAmounts,
+            installmentDueRelativeDays = if (editEvent.eventType == EventType.WEEKLY_EVENT) {
+                List(normalizedCount) { dueIndex ->
+                    divisionEditor.installmentDueRelativeDays.getOrNull(dueIndex) ?: 0
+                }
+            } else {
+                emptyList()
+            },
             error = null,
         )
     }
@@ -707,6 +758,7 @@ fun EventDetails(
             divisionEditor.installmentCount,
             divisionEditor.installmentAmounts.size,
             divisionEditor.installmentDueDates.size,
+            divisionEditor.installmentDueRelativeDays.size,
             index + 1,
             1,
         )
@@ -717,7 +769,14 @@ fun EventDetails(
         nextDueDates[index] = dueDate.trim()
         divisionEditor = divisionEditor.copy(
             installmentCount = normalizedCount,
-            installmentDueDates = nextDueDates,
+            installmentDueDates = if (editEvent.eventType == EventType.WEEKLY_EVENT) emptyList() else nextDueDates,
+            installmentDueRelativeDays = if (editEvent.eventType == EventType.WEEKLY_EVENT) {
+                List(normalizedCount) { dueIndex ->
+                    divisionEditor.installmentDueRelativeDays.getOrNull(dueIndex) ?: 0
+                }
+            } else {
+                emptyList()
+            },
             error = null,
         )
     }
@@ -728,23 +787,29 @@ fun EventDetails(
                 divisionEditor.installmentCount,
                 divisionEditor.installmentAmounts.size,
                 divisionEditor.installmentDueDates.size,
+                divisionEditor.installmentDueRelativeDays.size,
             ) + 1,
         )
     }
     fun removeDivisionInstallmentRow(index: Int) {
         val nextAmounts = divisionEditor.installmentAmounts.toMutableList()
         val nextDueDates = divisionEditor.installmentDueDates.toMutableList()
-        if (index !in nextAmounts.indices || index !in nextDueDates.indices) {
+        val nextRelativeDueDays = divisionEditor.installmentDueRelativeDays.toMutableList()
+        if (index !in nextAmounts.indices) {
             return
         }
         nextAmounts.removeAt(index)
-        nextDueDates.removeAt(index)
-        val nextCount = maxOf(nextAmounts.size, nextDueDates.size, 1)
+        if (index in nextDueDates.indices) nextDueDates.removeAt(index)
+        if (index in nextRelativeDueDays.indices) nextRelativeDueDays.removeAt(index)
+        val nextCount = maxOf(nextAmounts.size, nextDueDates.size, nextRelativeDueDays.size, 1)
         while (nextAmounts.size < nextCount) {
             nextAmounts.add(0)
         }
         while (nextDueDates.size < nextCount) {
             nextDueDates.add("")
+        }
+        while (nextRelativeDueDays.size < nextCount) {
+            nextRelativeDueDays.add(0)
         }
         if (divisionInstallmentDueDatePickerIndex == index) {
             divisionInstallmentDueDatePickerIndex = null
@@ -752,7 +817,12 @@ fun EventDetails(
         divisionEditor = divisionEditor.copy(
             installmentCount = nextCount,
             installmentAmounts = nextAmounts,
-            installmentDueDates = nextDueDates,
+            installmentDueDates = if (editEvent.eventType == EventType.WEEKLY_EVENT) emptyList() else nextDueDates,
+            installmentDueRelativeDays = if (editEvent.eventType == EventType.WEEKLY_EVENT) {
+                nextRelativeDueDays
+            } else {
+                emptyList()
+            },
             error = null,
         )
     }
@@ -857,10 +927,12 @@ fun EventDetails(
         val defaultInstallmentDueDates = editEvent.installmentDueDates
             .map { dueDate -> dueDate.trim() }
             .filter(String::isNotBlank)
+        val defaultInstallmentDueRelativeDays = editEvent.installmentDueRelativeDays
+        val useRelativeDueDates = editEvent.eventType == EventType.WEEKLY_EVENT
         val defaultInstallmentCount = maxOf(
             editEvent.installmentCount ?: 0,
             defaultInstallmentAmounts.size,
-            defaultInstallmentDueDates.size,
+            if (useRelativeDueDates) defaultInstallmentDueRelativeDays.size else defaultInstallmentDueDates.size,
         ).takeIf { count -> count > 0 }
         val defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true &&
             defaultInstallmentCount != null &&
@@ -871,10 +943,11 @@ fun EventDetails(
         val editorInstallmentDueDates = divisionEditor.installmentDueDates
             .map { dueDate -> dueDate.trim() }
             .filter(String::isNotBlank)
+        val editorInstallmentDueRelativeDays = divisionEditor.installmentDueRelativeDays
         val editorInstallmentCount = maxOf(
             divisionEditor.installmentCount,
             editorInstallmentAmounts.size,
-            editorInstallmentDueDates.size,
+            if (useRelativeDueDates) editorInstallmentDueRelativeDays.size else editorInstallmentDueDates.size,
         ).takeIf { count -> count > 0 }
         val normalizedAllowPaymentPlans = if (editEvent.singleDivision) {
             defaultAllowPaymentPlans
@@ -900,10 +973,21 @@ fun EventDetails(
             emptyList()
         }
         val normalizedInstallmentDueDates = if (normalizedAllowPaymentPlans) {
-            if (editEvent.singleDivision) {
+            if (useRelativeDueDates) {
+                emptyList()
+            } else if (editEvent.singleDivision) {
                 defaultInstallmentDueDates
             } else {
                 editorInstallmentDueDates
+            }
+        } else {
+            emptyList()
+        }
+        val normalizedInstallmentDueRelativeDays = if (normalizedAllowPaymentPlans && useRelativeDueDates) {
+            if (editEvent.singleDivision) {
+                defaultInstallmentDueRelativeDays
+            } else {
+                editorInstallmentDueRelativeDays
             }
         } else {
             emptyList()
@@ -921,7 +1005,13 @@ fun EventDetails(
                 )
                 return
             }
-            if (normalizedInstallmentDueDates.size != normalizedInstallmentCount) {
+            if (useRelativeDueDates && normalizedInstallmentDueRelativeDays.size != normalizedInstallmentCount) {
+                divisionEditor = divisionEditor.copy(
+                    error = "Installment count must match installment due offsets.",
+                )
+                return
+            }
+            if (!useRelativeDueDates && normalizedInstallmentDueDates.size != normalizedInstallmentCount) {
                 divisionEditor = divisionEditor.copy(
                     error = "Installment count must match installment due dates.",
                 )
@@ -952,6 +1042,7 @@ fun EventDetails(
             allowPaymentPlans = normalizedAllowPaymentPlans,
             installmentCount = normalizedInstallmentCount,
             installmentDueDates = normalizedInstallmentDueDates,
+            installmentDueRelativeDays = normalizedInstallmentDueRelativeDays,
             installmentAmounts = normalizedInstallmentAmounts,
         )
         val nextDivisionDetails = if (divisionEditor.editingId.isNullOrBlank()) {
@@ -1019,8 +1110,10 @@ fun EventDetails(
                 detail.installmentCount ?: 0,
                 detail.installmentAmounts.size,
                 detail.installmentDueDates.size,
+                detail.installmentDueRelativeDays.size,
             ).takeIf { count -> count > 0 } ?: 0,
             installmentDueDates = detail.installmentDueDates,
+            installmentDueRelativeDays = detail.installmentDueRelativeDays,
             installmentAmounts = detail.installmentAmounts,
             nameTouched = true,
             error = null,
@@ -1683,6 +1776,9 @@ fun EventDetails(
     }
     val eventDetailsMode = remember(editView) {
         if (editView) EventDetailsMode.EDIT else EventDetailsMode.READ_ONLY
+    }
+    val showMatchRulesSection = remember(editEvent.eventType) {
+        shouldShowMatchRulesSection(editEvent.eventType)
     }
     val readOnlyActions = remember(
         onOpenLocationMap,
@@ -2512,7 +2608,7 @@ fun EventDetails(
                         }
 
                         FormSectionDivider()
-                        if (isNewEvent) {
+                        if (isNewEvent && editEvent.eventType != EventType.WEEKLY_EVENT) {
                             Text(
                                 text = "Payment plans can be configured on the web version.",
                                 style = MaterialTheme.typography.bodySmall,
@@ -2546,11 +2642,16 @@ fun EventDetails(
                                 onCheckedChange = onSetPaymentPlansEnabled,
                             )
                             if (editEvent.allowPaymentPlans == true) {
+                                val useRelativeDueDates = editEvent.eventType == EventType.WEEKLY_EVENT
                                 val installmentCount =
                                     maxOf(
                                         editEvent.installmentCount ?: 0,
                                         editEvent.installmentAmounts.size,
-                                        editEvent.installmentDueDates.size,
+                                        if (useRelativeDueDates) {
+                                            editEvent.installmentDueRelativeDays.size
+                                        } else {
+                                            editEvent.installmentDueDates.size
+                                        },
                                         1,
                                     )
 
@@ -2573,6 +2674,7 @@ fun EventDetails(
                                 repeat(installmentCount) { index ->
                                     val amountCents = editEvent.installmentAmounts.getOrNull(index) ?: 0
                                     val dueDate = editEvent.installmentDueDates.getOrNull(index).orEmpty()
+                                    val dueOffset = editEvent.installmentDueRelativeDays.getOrNull(index) ?: 0
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2587,15 +2689,44 @@ fun EventDetails(
                                             },
                                             modifier = Modifier.weight(1f),
                                         )
-                                        StandardTextField(
-                                            value = dueDate,
-                                            onValueChange = {},
-                                            label = "Due Date",
-                                            placeholder = "YYYY-MM-DD",
-                                            modifier = Modifier.weight(1f),
-                                            readOnly = true,
-                                            onTap = { installmentDueDatePickerIndex = index },
-                                        )
+                                        if (useRelativeDueDates) {
+                                            StandardTextField(
+                                                value = dueOffset.toString(),
+                                                onValueChange = { newValue ->
+                                                    val parsed = newValue.toIntOrNull() ?: 0
+                                                    onEditEvent {
+                                                        val targetCount = maxOf(
+                                                            installmentCount,
+                                                            installmentAmounts.size,
+                                                            installmentDueRelativeDays.size,
+                                                        )
+                                                        val nextRelativeDueDays = MutableList(targetCount) { dueIndex ->
+                                                            installmentDueRelativeDays.getOrNull(dueIndex) ?: 0
+                                                        }
+                                                        if (index in nextRelativeDueDays.indices) {
+                                                            nextRelativeDueDays[index] = parsed
+                                                        }
+                                                        copy(
+                                                            installmentDueDates = emptyList(),
+                                                            installmentDueRelativeDays = nextRelativeDueDays,
+                                                        )
+                                                    }
+                                                },
+                                                label = "Due Offset",
+                                                placeholder = "0",
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                        } else {
+                                            StandardTextField(
+                                                value = dueDate,
+                                                onValueChange = {},
+                                                label = "Due Date",
+                                                placeholder = "YYYY-MM-DD",
+                                                modifier = Modifier.weight(1f),
+                                                readOnly = true,
+                                                onTap = { installmentDueDatePickerIndex = index },
+                                            )
+                                        }
                                     }
                                     if (installmentCount > 1) {
                                         Row(
@@ -2652,175 +2783,231 @@ fun EventDetails(
                     },
                 )
 
-                animatedCardSection(
-                    sectionId = readOnlyUiModel.matchRules.sectionId,
-                    sectionExpansionStates = sectionExpansionStates,
-                    sectionTitle = readOnlyUiModel.matchRules.title,
-                    collapsibleInEditMode = true,
-                    collapsibleInViewMode = true,
-                    viewSummary = readOnlyUiModel.matchRules.summary,
-                    isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
-                    lazyListState = lazyListState,
-                    stickyHeaderTopInset = stickyHeaderTopInset,
-                    animationDelay = 250,
-                    viewContent = {
-                        DetailKeyValueList(
-                            rows = buildList {
-                                add(
-                                    DetailRowSpec(
-                                        "Scoring model",
-                                        matchScoringModelLabel(resolvedMatchRules.scoringModel),
-                                    ),
-                                )
-                                add(
-                                    DetailRowSpec(
-                                        "${resolvedMatchRules.segmentLabel} count",
-                                        resolvedMatchRules.segmentCount.toString(),
-                                    ),
-                                )
-                                add(
-                                    DetailRowSpec(
-                                        "Point incident type",
-                                        matchIncidentTypeLabel(autoPointIncidentType),
-                                    ),
-                                )
-                                if (resolvedMatchRules.canUseOvertime) {
+                if (showMatchRulesSection) {
+                    animatedCardSection(
+                        sectionId = readOnlyUiModel.matchRules.sectionId,
+                        sectionExpansionStates = sectionExpansionStates,
+                        sectionTitle = readOnlyUiModel.matchRules.title,
+                        collapsibleInEditMode = true,
+                        collapsibleInViewMode = true,
+                        viewSummary = readOnlyUiModel.matchRules.summary,
+                        isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
+                        lazyListState = lazyListState,
+                        stickyHeaderTopInset = stickyHeaderTopInset,
+                        animationDelay = 250,
+                        viewContent = {
+                            DetailKeyValueList(
+                                rows = buildList {
                                     add(
                                         DetailRowSpec(
-                                            "Allow overtime",
-                                            if (resolvedMatchRules.supportsOvertime) "Yes" else "No",
+                                            "Scoring model",
+                                            matchScoringModelLabel(resolvedMatchRules.scoringModel),
                                         ),
                                     )
-                                }
-                                if (resolvedMatchRules.canUseShootout) {
                                     add(
                                         DetailRowSpec(
-                                            "Allow shootout / tiebreak",
-                                            if (resolvedMatchRules.supportsShootout) "Yes" else "No",
+                                            "${resolvedMatchRules.segmentLabel} count",
+                                            resolvedMatchRules.segmentCount.toString(),
                                         ),
                                     )
-                                }
-                                add(
-                                    DetailRowSpec(
-                                        "Automatic point incidents",
-                                        if (event.autoCreatePointMatchIncidents) "Yes" else "No",
+                                    add(
+                                        DetailRowSpec(
+                                            "Point incident type",
+                                            matchIncidentTypeLabel(autoPointIncidentType),
+                                        ),
+                                    )
+                                    if (resolvedMatchRules.canUseOvertime) {
+                                        add(
+                                            DetailRowSpec(
+                                                "Allow overtime",
+                                                if (resolvedMatchRules.supportsOvertime) "Yes" else "No",
+                                            ),
+                                        )
+                                    }
+                                    if (resolvedMatchRules.canUseShootout) {
+                                        add(
+                                            DetailRowSpec(
+                                                "Allow shootout / tiebreak",
+                                                if (resolvedMatchRules.supportsShootout) "Yes" else "No",
+                                            ),
+                                        )
+                                    }
+                                    add(
+                                        DetailRowSpec(
+                                            "Automatic point incidents",
+                                            if (event.autoCreatePointMatchIncidents) "Yes" else "No",
+                                        ),
+                                    )
+                                    add(
+                                        DetailRowSpec(
+                                            "Point incidents require participant",
+                                            if (resolvedMatchRules.pointIncidentRequiresParticipant) "Yes" else "No",
+                                        ),
+                                    )
+                                    if (selectedMatchIncidentTypes.isNotEmpty()) {
+                                        add(
+                                            DetailRowSpec(
+                                                "Incident types",
+                                                selectedMatchIncidentTypes.joinToString(", ") { incidentType ->
+                                                    matchIncidentTypeLabel(incidentType)
+                                                },
+                                            ),
+                                        )
+                                    }
+                                    if (resolvedMatchRules.officialRoles.isNotEmpty()) {
+                                        add(
+                                            DetailRowSpec(
+                                                "Suggested officials",
+                                                resolvedMatchRules.officialRoles.joinToString(", "),
+                                            ),
+                                        )
+                                    }
+                                },
+                            )
+                        },
+                        editContent = {
+                            Text(
+                                text = "The sport defines the match format. This event can adjust segment count, supported result paths, and incident capture without changing the sport default.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(localImageScheme.current.onSurfaceVariant),
+                            )
+                            DetailStatsGrid(
+                                items = listOf(
+                                    DetailGridItem(
+                                        label = "Scoring model",
+                                        value = matchScoringModelLabel(resolvedMatchRules.scoringModel),
                                     ),
-                                )
-                                add(
-                                    DetailRowSpec(
-                                        "Point incidents require participant",
-                                        if (resolvedMatchRules.pointIncidentRequiresParticipant) "Yes" else "No",
+                                    DetailGridItem(
+                                        label = "Segment label",
+                                        value = resolvedMatchRules.segmentLabel,
                                     ),
-                                )
-                                if (selectedMatchIncidentTypes.isNotEmpty()) {
-                                    add(
-                                        DetailRowSpec(
-                                            "Incident types",
-                                            selectedMatchIncidentTypes.joinToString(", ") { incidentType ->
-                                                matchIncidentTypeLabel(incidentType)
-                                            },
-                                        ),
-                                    )
-                                }
-                                if (resolvedMatchRules.officialRoles.isNotEmpty()) {
-                                    add(
-                                        DetailRowSpec(
-                                            "Suggested officials",
-                                            resolvedMatchRules.officialRoles.joinToString(", "),
-                                        ),
-                                    )
-                                }
-                            },
-                        )
-                    },
-                    editContent = {
-                        Text(
-                            text = "The sport defines the match format. This event can adjust segment count, supported result paths, and incident capture without changing the sport default.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(localImageScheme.current.onSurfaceVariant),
-                        )
-                        DetailStatsGrid(
-                            items = listOf(
-                                DetailGridItem(
-                                    label = "Scoring model",
-                                    value = matchScoringModelLabel(resolvedMatchRules.scoringModel),
+                                    DetailGridItem(
+                                        label = "Point incident type",
+                                        value = matchIncidentTypeLabel(autoPointIncidentType),
+                                    ),
                                 ),
-                                DetailGridItem(
-                                    label = "Segment label",
-                                    value = resolvedMatchRules.segmentLabel,
-                                ),
-                                DetailGridItem(
-                                    label = "Point incident type",
-                                    value = matchIncidentTypeLabel(autoPointIncidentType),
-                                ),
-                            ),
-                        )
-                        FormSectionDivider()
-                        NumberInputField(
-                            value = editEvent.matchRulesOverride?.segmentCount?.toString().orEmpty(),
-                            label = "${resolvedMatchRules.segmentLabel} Count",
-                            placeholder = baseMatchRules.segmentCount.toString(),
-                            supportingText = "Leave blank to use the sport default of ${baseMatchRules.segmentCount}.",
-                            onValueChange = { newValue ->
-                                if (newValue.isNotEmpty() && !newValue.all { it.isDigit() }) return@NumberInputField
-                                val nextValue = newValue.toIntOrNull()
-                                    ?.takeIf { it > 0 }
-                                    ?.takeUnless { it == baseMatchRules.segmentCount }
-                                onEditEvent {
-                                    copy(
-                                        matchRulesOverride = copyMatchRulesOverride(
-                                            current = matchRulesOverride,
-                                            segmentCount = nextValue,
-                                        ),
+                            )
+                            FormSectionDivider()
+                            NumberInputField(
+                                value = editEvent.matchRulesOverride?.segmentCount?.toString().orEmpty(),
+                                label = "${resolvedMatchRules.segmentLabel} Count",
+                                placeholder = baseMatchRules.segmentCount.toString(),
+                                supportingText = "Leave blank to use the sport default of ${baseMatchRules.segmentCount}.",
+                                onValueChange = { newValue ->
+                                    if (newValue.isNotEmpty() && !newValue.all { it.isDigit() }) return@NumberInputField
+                                    val nextValue = newValue.toIntOrNull()
+                                        ?.takeIf { it > 0 }
+                                        ?.takeUnless { it == baseMatchRules.segmentCount }
+                                    onEditEvent {
+                                        copy(
+                                            matchRulesOverride = copyMatchRulesOverride(
+                                                current = matchRulesOverride,
+                                                segmentCount = nextValue,
+                                            ),
+                                        )
+                                    }
+                                },
+                                isError = false,
+                            )
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                if (baseMatchRules.canUseOvertime) {
+                                    LabeledCheckboxRow(
+                                        checked = resolvedMatchRules.supportsOvertime,
+                                        label = "Allow overtime",
+                                        onCheckedChange = { checked ->
+                                            onEditEvent {
+                                                copy(
+                                                    matchRulesOverride = copyMatchRulesOverride(
+                                                        current = matchRulesOverride,
+                                                        supportsOvertime = checked.takeUnless { it == baseMatchRules.supportsOvertime },
+                                                    ),
+                                                )
+                                            }
+                                        },
                                     )
                                 }
-                            },
-                            isError = false,
-                        )
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            if (baseMatchRules.canUseOvertime) {
+                                if (baseMatchRules.canUseShootout) {
+                                    LabeledCheckboxRow(
+                                        checked = resolvedMatchRules.supportsShootout,
+                                        label = "Allow shootout / tiebreak",
+                                        onCheckedChange = { checked ->
+                                            onEditEvent {
+                                                copy(
+                                                    matchRulesOverride = copyMatchRulesOverride(
+                                                        current = matchRulesOverride,
+                                                        supportsShootout = checked.takeUnless { it == baseMatchRules.supportsShootout },
+                                                    ),
+                                                )
+                                            }
+                                        },
+                                    )
+                                }
                                 LabeledCheckboxRow(
-                                    checked = resolvedMatchRules.supportsOvertime,
-                                    label = "Allow overtime",
+                                    checked = editEvent.autoCreatePointMatchIncidents,
+                                    label = "Create a scoring incident for each point / goal",
+                                    onCheckedChange = { checked ->
+                                        val enforcedIncidentTypes = enforceAutoPointIncidentType(
+                                            selected = selectedMatchIncidentTypes,
+                                            autoPointIncidentType = autoPointIncidentType,
+                                            enabled = checked,
+                                        )
+                                        val incidentOverride = supportedIncidentTypesOverrideOrNull(
+                                            selected = enforcedIncidentTypes,
+                                            defaults = baseMatchRules.supportedIncidentTypes,
+                                        )
+                                        onEditEvent {
+                                            copy(
+                                                autoCreatePointMatchIncidents = checked,
+                                                matchRulesOverride = copyMatchRulesOverride(
+                                                    current = matchRulesOverride,
+                                                    supportedIncidentTypes = incidentOverride,
+                                                ),
+                                            )
+                                        }
+                                    },
+                                )
+                                Text(
+                                    text = if (editEvent.autoCreatePointMatchIncidents) {
+                                        "${matchIncidentTypeLabel(autoPointIncidentType)} incidents will stay available while automatic scoring capture is on."
+                                    } else {
+                                        "Officials can still add incidents manually when needed."
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(localImageScheme.current.onSurfaceVariant),
+                                )
+                                LabeledCheckboxRow(
+                                    checked = resolvedMatchRules.pointIncidentRequiresParticipant,
+                                    label = "Point incidents require a participant",
                                     onCheckedChange = { checked ->
                                         onEditEvent {
                                             copy(
                                                 matchRulesOverride = copyMatchRulesOverride(
                                                     current = matchRulesOverride,
-                                                    supportsOvertime = checked.takeUnless { it == baseMatchRules.supportsOvertime },
+                                                    pointIncidentRequiresParticipant = checked.takeUnless {
+                                                        it == baseMatchRules.pointIncidentRequiresParticipant
+                                                    },
                                                 ),
                                             )
                                         }
                                     },
                                 )
                             }
-                            if (baseMatchRules.canUseShootout) {
-                                LabeledCheckboxRow(
-                                    checked = resolvedMatchRules.supportsShootout,
-                                    label = "Allow shootout / tiebreak",
-                                    onCheckedChange = { checked ->
-                                        onEditEvent {
-                                            copy(
-                                                matchRulesOverride = copyMatchRulesOverride(
-                                                    current = matchRulesOverride,
-                                                    supportsShootout = checked.takeUnless { it == baseMatchRules.supportsShootout },
-                                                ),
-                                            )
-                                        }
-                                    },
-                                )
-                            }
-                            LabeledCheckboxRow(
-                                checked = editEvent.autoCreatePointMatchIncidents,
-                                label = "Create a scoring incident for each point / goal",
-                                onCheckedChange = { checked ->
+                            PlatformDropdown(
+                                selectedValue = "",
+                                onSelectionChange = {},
+                                options = matchIncidentOptions,
+                                label = "Incident types available in matches",
+                                modifier = Modifier.fillMaxWidth(),
+                                multiSelect = true,
+                                selectedValues = selectedMatchIncidentTypes,
+                                onMultiSelectionChange = { selectedValues ->
                                     val enforcedIncidentTypes = enforceAutoPointIncidentType(
-                                        selected = selectedMatchIncidentTypes,
+                                        selected = selectedValues,
                                         autoPointIncidentType = autoPointIncidentType,
-                                        enabled = checked,
+                                        enabled = editEvent.autoCreatePointMatchIncidents,
                                     )
                                     val incidentOverride = supportedIncidentTypesOverrideOrNull(
                                         selected = enforcedIncidentTypes,
@@ -2828,7 +3015,6 @@ fun EventDetails(
                                     )
                                     onEditEvent {
                                         copy(
-                                            autoCreatePointMatchIncidents = checked,
                                             matchRulesOverride = copyMatchRulesOverride(
                                                 current = matchRulesOverride,
                                                 supportedIncidentTypes = incidentOverride,
@@ -2837,84 +3023,31 @@ fun EventDetails(
                                     }
                                 },
                             )
-                            Text(
-                                text = if (editEvent.autoCreatePointMatchIncidents) {
-                                    "${matchIncidentTypeLabel(autoPointIncidentType)} incidents will stay available while automatic scoring capture is on."
-                                } else {
-                                    "Officials can still add incidents manually when needed."
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(localImageScheme.current.onSurfaceVariant),
-                            )
-                            LabeledCheckboxRow(
-                                checked = resolvedMatchRules.pointIncidentRequiresParticipant,
-                                label = "Point incidents require a participant",
-                                onCheckedChange = { checked ->
-                                    onEditEvent {
-                                        copy(
-                                            matchRulesOverride = copyMatchRulesOverride(
-                                                current = matchRulesOverride,
-                                                pointIncidentRequiresParticipant = checked.takeUnless {
-                                                    it == baseMatchRules.pointIncidentRequiresParticipant
-                                                },
-                                            ),
-                                        )
-                                    }
-                                },
-                            )
-                        }
-                        PlatformDropdown(
-                            selectedValue = "",
-                            onSelectionChange = {},
-                            options = matchIncidentOptions,
-                            label = "Incident types available in matches",
-                            modifier = Modifier.fillMaxWidth(),
-                            multiSelect = true,
-                            selectedValues = selectedMatchIncidentTypes,
-                            onMultiSelectionChange = { selectedValues ->
-                                val enforcedIncidentTypes = enforceAutoPointIncidentType(
-                                    selected = selectedValues,
-                                    autoPointIncidentType = autoPointIncidentType,
-                                    enabled = editEvent.autoCreatePointMatchIncidents,
+                            if (resolvedMatchRules.officialRoles.isNotEmpty()) {
+                                Text(
+                                    text = "Suggested officials: ${resolvedMatchRules.officialRoles.joinToString(", ")}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(localImageScheme.current.onSurfaceVariant),
                                 )
-                                val incidentOverride = supportedIncidentTypesOverrideOrNull(
-                                    selected = enforcedIncidentTypes,
-                                    defaults = baseMatchRules.supportedIncidentTypes,
-                                )
-                                onEditEvent {
-                                    copy(
-                                        matchRulesOverride = copyMatchRulesOverride(
-                                            current = matchRulesOverride,
-                                            supportedIncidentTypes = incidentOverride,
-                                        ),
-                                    )
-                                }
-                            },
-                        )
-                        if (resolvedMatchRules.officialRoles.isNotEmpty()) {
-                            Text(
-                                text = "Suggested officials: ${resolvedMatchRules.officialRoles.joinToString(", ")}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(localImageScheme.current.onSurfaceVariant),
-                            )
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End,
-                        ) {
-                            TextButton(
-                                onClick = {
-                                    onEditEvent {
-                                        copy(matchRulesOverride = null)
-                                    }
-                                },
-                                enabled = editEvent.matchRulesOverride != null,
-                            ) {
-                                Text("Reset to sport defaults")
                             }
-                        }
-                    },
-                )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                            ) {
+                                TextButton(
+                                    onClick = {
+                                        onEditEvent {
+                                            copy(matchRulesOverride = null)
+                                        }
+                                    },
+                                    enabled = editEvent.matchRulesOverride != null,
+                                ) {
+                                    Text("Reset to sport defaults")
+                                }
+                            }
+                        },
+                    )
+                }
 
                 if (showOfficialsPanel) {
                     animatedCardSection(
@@ -3514,10 +3647,16 @@ fun EventDetails(
                                     val defaultInstallmentDueDates = editEvent.installmentDueDates
                                         .map { dueDate -> dueDate.trim() }
                                         .filter(String::isNotBlank)
+                                    val defaultInstallmentDueRelativeDays = editEvent.installmentDueRelativeDays
+                                    val useRelativeDueDates = editEvent.eventType == EventType.WEEKLY_EVENT
                                     val defaultInstallmentCount = maxOf(
                                         editEvent.installmentCount ?: 0,
                                         defaultInstallmentAmounts.size,
-                                        defaultInstallmentDueDates.size,
+                                        if (useRelativeDueDates) {
+                                            defaultInstallmentDueRelativeDays.size
+                                        } else {
+                                            defaultInstallmentDueDates.size
+                                        },
                                     ).takeIf { count -> count > 0 }
                                     val defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true &&
                                         defaultInstallmentCount != null &&
@@ -3542,7 +3681,12 @@ fun EventDetails(
                                                     allowPaymentPlans = defaultAllowPaymentPlans,
                                                     installmentCount = defaultInstallmentCount,
                                                     installmentDueDates = if (defaultAllowPaymentPlans) {
-                                                        defaultInstallmentDueDates
+                                                        if (useRelativeDueDates) emptyList() else defaultInstallmentDueDates
+                                                    } else {
+                                                        emptyList()
+                                                    },
+                                                    installmentDueRelativeDays = if (defaultAllowPaymentPlans && useRelativeDueDates) {
+                                                        defaultInstallmentDueRelativeDays
                                                     } else {
                                                         emptyList()
                                                     },
@@ -3558,10 +3702,15 @@ fun EventDetails(
                                                 val existingInstallmentDueDates = existing.installmentDueDates
                                                     .map { dueDate -> dueDate.trim() }
                                                     .filter(String::isNotBlank)
+                                                val existingInstallmentDueRelativeDays = existing.installmentDueRelativeDays
                                                 val existingInstallmentCount = maxOf(
                                                     existing.installmentCount ?: 0,
                                                     existingInstallmentAmounts.size,
-                                                    existingInstallmentDueDates.size,
+                                                    if (useRelativeDueDates) {
+                                                        existingInstallmentDueRelativeDays.size
+                                                    } else {
+                                                        existingInstallmentDueDates.size
+                                                    },
                                                 ).takeIf { count -> count > 0 } ?: defaultInstallmentCount
                                                 val existingAllowPaymentPlans = when (existing.allowPaymentPlans) {
                                                     null -> defaultAllowPaymentPlans
@@ -3576,10 +3725,21 @@ fun EventDetails(
                                                         null
                                                     },
                                                     installmentDueDates = if (existingAllowPaymentPlans) {
-                                                        if (existingInstallmentDueDates.isNotEmpty()) {
+                                                        if (useRelativeDueDates) {
+                                                            emptyList()
+                                                        } else if (existingInstallmentDueDates.isNotEmpty()) {
                                                             existingInstallmentDueDates
                                                         } else {
                                                             defaultInstallmentDueDates
+                                                        }
+                                                    } else {
+                                                        emptyList()
+                                                    },
+                                                    installmentDueRelativeDays = if (existingAllowPaymentPlans && useRelativeDueDates) {
+                                                        if (existingInstallmentDueRelativeDays.isNotEmpty()) {
+                                                            existingInstallmentDueRelativeDays
+                                                        } else {
+                                                            defaultInstallmentDueRelativeDays
                                                         }
                                                     } else {
                                                         emptyList()
@@ -3824,10 +3984,15 @@ fun EventDetails(
                             },
                         )
                         if (divisionEditor.allowPaymentPlans) {
+                            val useRelativeDueDates = editEvent.eventType == EventType.WEEKLY_EVENT
                             val installmentCount = maxOf(
                                 divisionEditor.installmentCount,
                                 divisionEditor.installmentAmounts.size,
-                                divisionEditor.installmentDueDates.size,
+                                if (useRelativeDueDates) {
+                                    divisionEditor.installmentDueRelativeDays.size
+                                } else {
+                                    divisionEditor.installmentDueDates.size
+                                },
                                 1,
                             )
                             NumberInputField(
@@ -3844,6 +4009,7 @@ fun EventDetails(
                             repeat(installmentCount) { index ->
                                 val amountCents = divisionEditor.installmentAmounts.getOrNull(index) ?: 0
                                 val dueDate = divisionEditor.installmentDueDates.getOrNull(index).orEmpty()
+                                val dueOffset = divisionEditor.installmentDueRelativeDays.getOrNull(index) ?: 0
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -3858,15 +4024,43 @@ fun EventDetails(
                                         },
                                         modifier = Modifier.weight(1f),
                                     )
-                                    StandardTextField(
-                                        value = dueDate,
-                                        onValueChange = {},
-                                        label = "Due Date",
-                                        placeholder = "YYYY-MM-DD",
-                                        modifier = Modifier.weight(1f),
-                                        readOnly = true,
-                                        onTap = { divisionInstallmentDueDatePickerIndex = index },
-                                    )
+                                    if (useRelativeDueDates) {
+                                        StandardTextField(
+                                            value = dueOffset.toString(),
+                                            onValueChange = { newValue ->
+                                                val parsed = newValue.toIntOrNull() ?: 0
+                                                val targetCount = maxOf(
+                                                    installmentCount,
+                                                    divisionEditor.installmentAmounts.size,
+                                                    divisionEditor.installmentDueRelativeDays.size,
+                                                )
+                                                val nextRelativeDueDays = MutableList(targetCount) { dueIndex ->
+                                                    divisionEditor.installmentDueRelativeDays.getOrNull(dueIndex) ?: 0
+                                                }
+                                                if (index in nextRelativeDueDays.indices) {
+                                                    nextRelativeDueDays[index] = parsed
+                                                }
+                                                divisionEditor = divisionEditor.copy(
+                                                    installmentDueDates = emptyList(),
+                                                    installmentDueRelativeDays = nextRelativeDueDays,
+                                                    error = null,
+                                                )
+                                            },
+                                            label = "Due Offset",
+                                            placeholder = "0",
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    } else {
+                                        StandardTextField(
+                                            value = dueDate,
+                                            onValueChange = {},
+                                            label = "Due Date",
+                                            placeholder = "YYYY-MM-DD",
+                                            modifier = Modifier.weight(1f),
+                                            readOnly = true,
+                                            onTap = { divisionInstallmentDueDatePickerIndex = index },
+                                        )
+                                    }
                                 }
                                 if (installmentCount > 1) {
                                     Row(

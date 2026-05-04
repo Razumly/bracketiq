@@ -796,6 +796,72 @@ class BillingRepositoryHttpTest {
     }
 
     @Test
+    fun createBill_posts_weekly_occurrence_relative_installments() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/billing/bills", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "bill": {
+                        "id": "bill_weekly_1",
+                        "ownerType": "USER",
+                        "ownerId": "u1",
+                        "eventId": "weekly_event_1",
+                        "organizationId": "org_1",
+                        "totalAmountCents": 4500,
+                        "paidAmountCents": 0,
+                        "status": "OPEN",
+                        "paymentPlanEnabled": true,
+                        "allowSplit": false,
+                        "createdBy": "u1"
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.Created,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        repo.createBill(
+            CreateBillRequest(
+                ownerType = "user",
+                ownerId = "u1",
+                totalAmountCents = 4500,
+                eventId = "weekly_event_1",
+                slotId = "slot_1",
+                occurrenceDate = "2026-08-03",
+                organizationId = "org_1",
+                installmentAmounts = listOf(1500, 1500, 1500),
+                installmentDueRelativeDays = listOf(0, 7, 14),
+                paymentPlanEnabled = true,
+            )
+        ).getOrThrow()
+
+        assertTrue(capturedBody.contains("\"slotId\":\"slot_1\""))
+        assertTrue(capturedBody.contains("\"occurrenceDate\":\"2026-08-03\""))
+        assertTrue(capturedBody.contains("\"installmentDueRelativeDays\":[0,7,14]"))
+        assertFalse(capturedBody.contains("\"installmentDueDates\""))
+    }
+
+    @Test
     fun listSubscriptions_returns_empty_when_candidate_paths_404_with_api_exception() = runTest {
         val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
         val userRepo = BillingRepositoryHttp_FakeUserRepository(

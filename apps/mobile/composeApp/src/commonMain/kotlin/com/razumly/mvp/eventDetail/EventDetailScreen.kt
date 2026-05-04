@@ -4622,18 +4622,27 @@ private fun PaymentPlanPreviewDialog(
     onContinue: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    val installmentRows = remember(dialogState.installmentAmounts, dialogState.installmentDueDates) {
+    val installmentRows = remember(
+        dialogState.installmentAmounts,
+        dialogState.installmentDueDates,
+        dialogState.installmentDueRelativeDays,
+    ) {
+        val usesRelativeDueDates = dialogState.installmentDueRelativeDays.isNotEmpty()
         val rowCount = maxOf(
             dialogState.installmentAmounts.size,
-            dialogState.installmentDueDates.size,
+            if (usesRelativeDueDates) {
+                dialogState.installmentDueRelativeDays.size
+            } else {
+                dialogState.installmentDueDates.size
+            },
         )
         List(rowCount) { index ->
             val amountCents = dialogState.installmentAmounts.getOrNull(index)?.coerceAtLeast(0) ?: 0
-            val dueDate = dialogState.installmentDueDates
-                .getOrNull(index)
-                ?.trim()
-                ?.takeIf(String::isNotBlank)
-                ?: "TBD"
+            val dueDate = if (usesRelativeDueDates) {
+                formatPaymentPlanRelativeDueDay(dialogState.installmentDueRelativeDays.getOrNull(index) ?: 0)
+            } else {
+                formatPaymentPlanFixedDueDate(dialogState.installmentDueDates.getOrNull(index))
+            }
             Triple(index + 1, amountCents, dueDate)
         }
     }
@@ -4645,13 +4654,13 @@ private fun PaymentPlanPreviewDialog(
 
     AlertDialog(
         onDismissRequest = onCancel,
-        title = { Text("Payment Plan Preview") },
+        title = { Text("Payment plan preview") },
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    text = "Continuing will join the event and start a payment plan for $ownerSubject.",
+                    text = "Continuing will join this event and start a payment plan for $ownerSubject.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 dialogState.divisionLabel
@@ -4667,17 +4676,18 @@ private fun PaymentPlanPreviewDialog(
                 HorizontalDivider()
 
                 FeeRow(
-                    label = "Plan Total",
-                    amount = "$${dialogState.totalAmountCents.centsToDollars()}",
+                    label = "Plan total",
+                    amount = dialogState.totalAmountCents.toPaymentPlanPreviewAmount(),
                     isTotal = true,
                 )
 
                 if (installmentRows.isNotEmpty()) {
                     HorizontalDivider()
                     installmentRows.forEach { (sequence, amountCents, dueDate) ->
-                        FeeRow(
-                            label = "Installment $sequence (Due $dueDate)",
-                            amount = "$${amountCents.centsToDollars()}",
+                        PaymentPlanInstallmentRow(
+                            installmentNumber = sequence,
+                            dueDateLabel = dueDate,
+                            amount = amountCents.toPaymentPlanPreviewAmount(),
                         )
                     }
                 } else {
@@ -4700,6 +4710,69 @@ private fun PaymentPlanPreviewDialog(
             }
         },
     )
+}
+
+private fun Int.toPaymentPlanPreviewAmount(): String = "$${coerceAtLeast(0).centsToDollars()} + fees"
+
+private fun formatPaymentPlanFixedDueDate(value: String?): String {
+    val rawValue = value
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: "TBD"
+    val parsed = runCatching { LocalDate.parse(rawValue) }.getOrNull()
+    return parsed?.let(::formatPaymentPlanDueDate) ?: rawValue
+}
+
+private fun formatPaymentPlanRelativeDueDay(offsetDays: Int): String {
+    if (offsetDays == 0) return "Session day"
+    val absDays = kotlin.math.abs(offsetDays)
+    val unit = if (absDays == 1) "day" else "days"
+    return if (offsetDays > 0) {
+        "$absDays $unit after session"
+    } else {
+        "$absDays $unit before session"
+    }
+}
+
+private fun formatPaymentPlanDueDate(date: LocalDate): String {
+    val month = date.month.name.take(3).lowercase().replaceFirstChar { char ->
+        if (char.isLowerCase()) char.titlecase() else char.toString()
+    }
+    return "$month ${date.day}, ${date.year}"
+}
+
+@Composable
+private fun PaymentPlanInstallmentRow(
+    installmentNumber: Int,
+    dueDateLabel: String,
+    amount: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top,
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = "Installment $installmentNumber",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = "Due $dueDateLabel",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Text(
+            text = amount,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
 }
 
 @Composable

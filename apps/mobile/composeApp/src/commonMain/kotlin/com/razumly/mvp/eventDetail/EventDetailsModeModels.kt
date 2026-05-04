@@ -48,6 +48,9 @@ internal data class EditSectionModel(
     val requiredMissingCount: Int = 0,
 )
 
+internal fun shouldShowMatchRulesSection(eventType: EventType): Boolean =
+    eventType != EventType.EVENT && eventType != EventType.WEEKLY_EVENT
+
 internal data class EventDetailsReadOnlyActions(
     val onOpenLocationMap: () -> Unit = {},
     val onMessageUser: (UserData) -> Unit = {},
