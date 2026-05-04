@@ -18,6 +18,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -144,7 +145,6 @@ import com.razumly.mvp.core.presentation.composables.StripeButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
-import com.razumly.mvp.core.presentation.util.createEventUrl
 import com.razumly.mvp.core.presentation.util.getEventQrCodeUrl
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.presentation.util.toNameCase
@@ -3970,10 +3970,9 @@ fun EventDetailScreen(
             if (showQrCodeDialog && canShowQrCode) {
                 EventQrCodeDialog(
                     eventName = selectedEvent.event.name,
-                    eventUrl = createEventUrl(selectedEvent.event),
                     qrImageUrl = getEventQrCodeUrl(selectedEvent.event.id),
                     onDismiss = { showQrCodeDialog = false },
-                    onShareLink = component::shareEvent,
+                    onShareQrCode = component::shareEventQrCode,
                 )
             }
             if (showDeleteConfirmation) {
@@ -4129,10 +4128,9 @@ fun EventDetailScreen(
 @Composable
 private fun EventQrCodeDialog(
     eventName: String,
-    eventUrl: String,
     qrImageUrl: String,
     onDismiss: () -> Unit,
-    onShareLink: () -> Unit,
+    onShareQrCode: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -4143,20 +4141,22 @@ private fun EventQrCodeDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Surface(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f),
                     shape = RoundedCornerShape(16.dp),
                     color = Color.White,
                 ) {
                     Box(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center,
                     ) {
                         AsyncImage(
                             model = qrImageUrl,
                             contentDescription = "QR code for $eventName",
                             modifier = Modifier
-                                .size(260.dp)
-                                .padding(12.dp),
+                                .fillMaxSize()
+                                .padding(4.dp),
                             contentScale = ContentScale.Fit,
                         )
                     }
@@ -4167,17 +4167,11 @@ private fun EventQrCodeDialog(
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center,
                 )
-                Text(
-                    text = eventUrl,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                )
             }
         },
         confirmButton = {
-            TextButton(onClick = onShareLink) {
-                Text("Share Link")
+            TextButton(onClick = onShareQrCode) {
+                Text("Share QR Code")
             }
         },
         dismissButton = {

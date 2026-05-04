@@ -70,6 +70,7 @@ import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
+import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
@@ -77,6 +78,7 @@ import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.core.presentation.util.ShareServiceProvider
 import com.razumly.mvp.core.presentation.util.convertPhotoResultToUploadFile
 import com.razumly.mvp.core.presentation.util.createEventUrl
+import com.razumly.mvp.core.presentation.util.getEventQrCodePath
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.newId
@@ -225,6 +227,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun deleteEvent()
     fun reportEvent(notes: String? = null)
     fun shareEvent()
+    fun shareEventQrCode()
     fun openEventDirections()
     fun createNewTeam()
     fun inviteFreeAgentToTeam(userId: String)
@@ -598,6 +601,7 @@ class DefaultEventDetailComponent(
     private val sportsRepository: ISportsRepository,
     private val imageRepository: IImagesRepository,
     private val navigationHandler: INavigationHandler,
+    private val apiClient: MvpApiClient? = null,
 
 ) : EventDetailComponent, PaymentProcessor(), ComponentContext by componentContext {
     private companion object {
@@ -4732,6 +4736,30 @@ class DefaultEventDetailComponent(
         shareService.share(
             selectedEvent.value.name, createEventUrl(selectedEvent.value)
         )
+    }
+
+    override fun shareEventQrCode() {
+        val targetEvent = selectedEvent.value
+        val client = apiClient ?: run {
+            _errorState.value = ErrorMessage("Failed to share QR code.")
+            return
+        }
+        scope.launch {
+            runCatching {
+                client.getBytes(getEventQrCodePath(targetEvent.id))
+            }.onSuccess { imageBytes ->
+                shareServiceProvider.getShareService().shareImage(
+                    title = "${targetEvent.name} QR Code",
+                    imageBytes = imageBytes,
+                    fileName = "event-qr-code.png",
+                    mimeType = "image/png",
+                )
+            }.onFailure { throwable ->
+                _errorState.value = ErrorMessage(
+                    throwable.userMessage("Failed to share QR code.")
+                )
+            }
+        }
     }
 
     override fun openEventDirections() {

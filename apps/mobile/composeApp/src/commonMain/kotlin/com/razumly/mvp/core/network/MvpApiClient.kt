@@ -9,6 +9,7 @@ import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.put
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsBytes
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -34,6 +35,13 @@ class MvpApiClient(
         return http.get(urlFor(path)) {
             if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
         }.body()
+    }
+
+    suspend fun getBytes(path: String): ByteArray {
+        val token = tokenStore.get()
+        return http.get(urlFor(path)) {
+            if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+        }.bodyAsBytes()
     }
 
     suspend inline fun <reified Req : Any, reified Res> post(path: String, body: Req): Res {

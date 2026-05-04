@@ -248,12 +248,13 @@ fun createEventUrl(event: Event): String {
     return "https://bracket-iq.com/events/${event.id}"
 }
 
+fun getEventQrCodePath(eventId: String): String =
+    "/api/events/$eventId/qr?brand=event"
+
 fun getEventQrCodeUrl(eventId: String): String =
     buildString {
         append(apiBaseUrl.trimEnd('/'))
-        append("/api/events/")
-        append(eventId)
-        append("/qr")
+        append(getEventQrCodePath(eventId))
     }
 
 fun getImageUrl(fileId: String, width: Int? = null, height: Int? = null): String =
