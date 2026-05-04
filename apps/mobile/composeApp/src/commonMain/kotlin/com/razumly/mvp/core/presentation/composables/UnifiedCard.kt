@@ -101,7 +101,7 @@ fun UnifiedCard(
         HorizontalDivider(
             modifier = Modifier
                 .fillMaxWidth(0.75f)
-                .align(Alignment.End),
+                .align(Alignment.CenterHorizontally),
             color = MaterialTheme.colorScheme.outlineVariant,
             thickness = 0.5.dp
         )
