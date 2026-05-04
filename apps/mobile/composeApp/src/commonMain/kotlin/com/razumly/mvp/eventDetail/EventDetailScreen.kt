@@ -4532,18 +4532,31 @@ private fun PaymentPlanPreviewDialog(
     onContinue: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    val installmentRows = remember(dialogState.installmentAmounts, dialogState.installmentDueDates) {
+    val installmentRows = remember(
+        dialogState.installmentAmounts,
+        dialogState.installmentDueDates,
+        dialogState.installmentDueRelativeDays,
+    ) {
+        val usesRelativeDueDates = dialogState.installmentDueRelativeDays.isNotEmpty()
         val rowCount = maxOf(
             dialogState.installmentAmounts.size,
-            dialogState.installmentDueDates.size,
+            if (usesRelativeDueDates) {
+                dialogState.installmentDueRelativeDays.size
+            } else {
+                dialogState.installmentDueDates.size
+            },
         )
         List(rowCount) { index ->
             val amountCents = dialogState.installmentAmounts.getOrNull(index)?.coerceAtLeast(0) ?: 0
-            val dueDate = dialogState.installmentDueDates
-                .getOrNull(index)
-                ?.trim()
-                ?.takeIf(String::isNotBlank)
-                ?: "TBD"
+            val dueDate = if (usesRelativeDueDates) {
+                formatPaymentPlanRelativeDueDay(dialogState.installmentDueRelativeDays.getOrNull(index) ?: 0)
+            } else {
+                dialogState.installmentDueDates
+                    .getOrNull(index)
+                    ?.trim()
+                    ?.takeIf(String::isNotBlank)
+                    ?: "TBD"
+            }
             Triple(index + 1, amountCents, dueDate)
         }
     }
@@ -4610,6 +4623,17 @@ private fun PaymentPlanPreviewDialog(
             }
         },
     )
+}
+
+private fun formatPaymentPlanRelativeDueDay(offsetDays: Int): String {
+    if (offsetDays == 0) return "occurrence day"
+    val absDays = kotlin.math.abs(offsetDays)
+    val unit = if (absDays == 1) "day" else "days"
+    return if (offsetDays > 0) {
+        "$absDays $unit after occurrence"
+    } else {
+        "$absDays $unit before occurrence"
+    }
 }
 
 @Composable

@@ -26,6 +26,7 @@ internal data class DivisionEditorState(
     val allowPaymentPlans: Boolean = false,
     val installmentCount: Int = 0,
     val installmentDueDates: List<String> = emptyList(),
+    val installmentDueRelativeDays: List<Int> = emptyList(),
     val installmentAmounts: List<Int> = emptyList(),
     val nameTouched: Boolean = false,
     val error: String? = null,
@@ -54,6 +55,7 @@ internal fun defaultDivisionEditorState(
     defaultAllowPaymentPlans: Boolean,
     defaultInstallmentCount: Int?,
     defaultInstallmentDueDates: List<String>,
+    defaultInstallmentDueRelativeDays: List<Int> = emptyList(),
     defaultInstallmentAmounts: List<Int>,
 ): DivisionEditorState {
     val fallbackMax = defaultMaxParticipants.coerceAtLeast(2)
@@ -64,10 +66,12 @@ internal fun defaultDivisionEditorState(
     val normalizedInstallmentDueDates = defaultInstallmentDueDates
         .map { dueDate -> dueDate.trim() }
         .filter(String::isNotBlank)
+    val normalizedInstallmentDueRelativeDays = defaultInstallmentDueRelativeDays
     val normalizedInstallmentCount = maxOf(
         defaultInstallmentCount ?: 0,
         normalizedInstallmentAmounts.size,
         normalizedInstallmentDueDates.size,
+        normalizedInstallmentDueRelativeDays.size,
     ).takeIf { count -> count > 0 } ?: 0
     val normalizedAllowPaymentPlans = defaultAllowPaymentPlans &&
         normalizedInstallmentCount > 0 &&
@@ -86,6 +90,11 @@ internal fun defaultDivisionEditorState(
         allowPaymentPlans = normalizedAllowPaymentPlans,
         installmentCount = if (normalizedAllowPaymentPlans) normalizedInstallmentCount else 0,
         installmentDueDates = if (normalizedAllowPaymentPlans) normalizedInstallmentDueDates else emptyList(),
+        installmentDueRelativeDays = if (normalizedAllowPaymentPlans) {
+            normalizedInstallmentDueRelativeDays
+        } else {
+            emptyList()
+        },
         installmentAmounts = if (normalizedAllowPaymentPlans) normalizedInstallmentAmounts else emptyList(),
         nameTouched = false,
         error = null,

@@ -26,12 +26,14 @@ internal fun Event.applyCreateSelectionRules(isRentalFlow: Boolean): Event {
         allowPaymentPlans = false,
         installmentCount = null,
         installmentDueDates = emptyList(),
+        installmentDueRelativeDays = emptyList(),
         installmentAmounts = emptyList(),
         divisionDetails = typeNormalizedEvent.divisionDetails.map { detail ->
             detail.copy(
                 allowPaymentPlans = false,
                 installmentCount = null,
                 installmentDueDates = emptyList(),
+                installmentDueRelativeDays = emptyList(),
                 installmentAmounts = emptyList(),
             )
         },

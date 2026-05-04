@@ -112,6 +112,7 @@ data class EventApiDto(
     val allowPaymentPlans: Boolean? = null,
     val installmentCount: Int? = null,
     val installmentDueDates: List<String>? = null,
+    val installmentDueRelativeDays: List<Int>? = null,
     val installmentAmounts: List<Int>? = null,
     val allowTeamSplitDefault: Boolean? = null,
     val requiredTemplateIds: List<String>? = null,
@@ -161,10 +162,12 @@ data class EventApiDto(
         val resolvedEventInstallmentDueDates = (installmentDueDates ?: emptyList())
             .map { dueDate -> dueDate.trim() }
             .filter(String::isNotBlank)
+        val resolvedEventInstallmentDueRelativeDays = (installmentDueRelativeDays ?: emptyList())
         val resolvedEventInstallmentCount = maxOf(
             installmentCount ?: 0,
             resolvedEventInstallmentAmounts.size,
             resolvedEventInstallmentDueDates.size,
+            resolvedEventInstallmentDueRelativeDays.size,
         ).takeIf { count -> count > 0 }
         val resolvedEventAllowPaymentPlans = allowPaymentPlans == true &&
             resolvedEventInstallmentCount != null &&
@@ -199,6 +202,7 @@ data class EventApiDto(
                         detail.installmentCount ?: 0,
                         detail.installmentAmounts.size,
                         detail.installmentDueDates.size,
+                        detail.installmentDueRelativeDays.size,
                     ).takeIf { count -> count > 0 } ?: resolvedEventInstallmentCount
                 },
                 installmentDueDates = if (singleDivision != false) {
@@ -208,6 +212,15 @@ data class EventApiDto(
                         .map { dueDate -> dueDate.trim() }
                         .filter(String::isNotBlank)
                     if (normalized.isNotEmpty()) normalized else resolvedEventInstallmentDueDates
+                },
+                installmentDueRelativeDays = if (singleDivision != false) {
+                    resolvedEventInstallmentDueRelativeDays
+                } else {
+                    if (detail.installmentDueRelativeDays.isNotEmpty()) {
+                        detail.installmentDueRelativeDays
+                    } else {
+                        resolvedEventInstallmentDueRelativeDays
+                    }
                 },
                 installmentAmounts = if (singleDivision != false) {
                     resolvedEventInstallmentAmounts
@@ -290,6 +303,7 @@ data class EventApiDto(
             allowPaymentPlans = resolvedEventAllowPaymentPlans,
             installmentCount = resolvedEventInstallmentCount,
             installmentDueDates = resolvedEventInstallmentDueDates,
+            installmentDueRelativeDays = resolvedEventInstallmentDueRelativeDays,
             installmentAmounts = resolvedEventInstallmentAmounts,
             allowTeamSplitDefault = allowTeamSplitDefault,
             requiredTemplateIds = requiredTemplateIds ?: emptyList(),
@@ -567,6 +581,7 @@ data class EventUpdateDto(
     val allowPaymentPlans: Boolean? = null,
     val installmentCount: Int? = null,
     val installmentDueDates: List<String>? = null,
+    val installmentDueRelativeDays: List<Int>? = null,
     val installmentAmounts: List<Int>? = null,
     val allowTeamSplitDefault: Boolean? = null,
     val requiredTemplateIds: List<String>? = null,
@@ -612,10 +627,12 @@ fun Event.toUpdateDto(
         val defaultInstallmentDueDates = installmentDueDates
             .map { dueDate -> dueDate.trim() }
             .filter(String::isNotBlank)
+        val defaultInstallmentDueRelativeDays = installmentDueRelativeDays
         val defaultInstallmentCount = maxOf(
             installmentCount ?: 0,
             defaultInstallmentAmounts.size,
             defaultInstallmentDueDates.size,
+            defaultInstallmentDueRelativeDays.size,
         ).takeIf { count -> count > 0 }
         val defaultAllowPaymentPlans = allowPaymentPlans == true &&
             defaultInstallmentCount != null &&
@@ -629,6 +646,7 @@ fun Event.toUpdateDto(
             detail.installmentCount ?: 0,
             detailInstallmentAmounts.size,
             detailInstallmentDueDates.size,
+            detail.installmentDueRelativeDays.size,
         ).takeIf { count -> count > 0 }
         val detailAllowPaymentPlans = detail.allowPaymentPlans == true &&
             detailInstallmentCount != null &&
@@ -665,6 +683,13 @@ fun Event.toUpdateDto(
                 defaultInstallmentDueDates
             } else if (detailAllowPaymentPlans) {
                 detailInstallmentDueDates
+            } else {
+                emptyList()
+            },
+            installmentDueRelativeDays = if (singleDivision) {
+                defaultInstallmentDueRelativeDays
+            } else if (detailAllowPaymentPlans) {
+                detail.installmentDueRelativeDays
             } else {
                 emptyList()
             },
@@ -746,6 +771,7 @@ fun Event.toUpdateDto(
         allowPaymentPlans = allowPaymentPlans,
         installmentCount = installmentCount,
         installmentDueDates = installmentDueDates,
+        installmentDueRelativeDays = installmentDueRelativeDays,
         installmentAmounts = installmentAmounts,
         allowTeamSplitDefault = allowTeamSplitDefault,
         requiredTemplateIds = resolvedRequiredTemplateIds,

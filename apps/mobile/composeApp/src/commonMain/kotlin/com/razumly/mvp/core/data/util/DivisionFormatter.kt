@@ -450,6 +450,7 @@ fun inferDivisionDetail(
         allowPaymentPlans = null,
         installmentCount = null,
         installmentDueDates = emptyList(),
+        installmentDueRelativeDays = emptyList(),
         installmentAmounts = emptyList(),
         playoffPlacementDivisionIds = emptyList(),
     )
@@ -517,10 +518,15 @@ fun DivisionDetail.normalizeDivisionDetail(eventId: String? = null): DivisionDet
     val normalizedInstallmentDueDates = installmentDueDates
         .map { dueDate -> dueDate.trim() }
         .filter(String::isNotBlank)
+    val normalizedInstallmentDueRelativeDays = installmentDueRelativeDays
     val normalizedInstallmentCount = installmentCount
         ?.coerceAtLeast(0)
         ?.takeIf { count -> count > 0 }
-        ?: maxOf(normalizedInstallmentAmounts.size, normalizedInstallmentDueDates.size).takeIf { count -> count > 0 }
+        ?: maxOf(
+            normalizedInstallmentAmounts.size,
+            normalizedInstallmentDueDates.size,
+            normalizedInstallmentDueRelativeDays.size,
+        ).takeIf { count -> count > 0 }
     val normalizedAllowPaymentPlans = allowPaymentPlans == true
         && normalizedInstallmentCount != null
     val normalizedPlayoffPlacementDivisionIds = playoffPlacementDivisionIds.map { divisionId ->
@@ -556,6 +562,11 @@ fun DivisionDetail.normalizeDivisionDetail(eventId: String? = null): DivisionDet
         },
         installmentDueDates = if (normalizedAllowPaymentPlans) {
             normalizedInstallmentDueDates
+        } else {
+            emptyList()
+        },
+        installmentDueRelativeDays = if (normalizedAllowPaymentPlans) {
+            normalizedInstallmentDueRelativeDays
         } else {
             emptyList()
         },

@@ -345,6 +345,7 @@ data class PaymentPlanPreviewDialogState(
     val totalAmountCents: Int,
     val installmentAmounts: List<Int>,
     val installmentDueDates: List<String>,
+    val installmentDueRelativeDays: List<Int> = emptyList(),
     val divisionLabel: String? = null,
 )
 
@@ -2333,6 +2334,7 @@ class DefaultEventDetailComponent(
             totalAmountCents = paymentPlan.priceCents,
             installmentAmounts = paymentPlan.installmentAmounts,
             installmentDueDates = paymentPlan.installmentDueDates,
+            installmentDueRelativeDays = paymentPlan.installmentDueRelativeDays,
             divisionLabel = divisionLabel,
         )
     }
@@ -2459,8 +2461,33 @@ class DefaultEventDetailComponent(
             return Result.failure(IllegalArgumentException("This event does not have a price set for a payment plan."))
         }
 
-        val installmentDueDates = paymentPlan.installmentDueDates
-            .mapNotNull { dueDate -> dueDate.trim().takeIf(String::isNotBlank) }
+        val useRelativeDueDates = isWeeklyParentEvent(event)
+        val selectedOccurrence = if (useRelativeDueDates) {
+            currentWeeklyOccurrenceSelection()
+        } else {
+            null
+        }
+        if (useRelativeDueDates && selectedOccurrence == null) {
+            return Result.failure(
+                IllegalArgumentException("Select an occurrence before starting a weekly payment plan."),
+            )
+        }
+        val installmentDueDates = if (useRelativeDueDates) {
+            emptyList()
+        } else {
+            paymentPlan.installmentDueDates
+                .mapNotNull { dueDate -> dueDate.trim().takeIf(String::isNotBlank) }
+        }
+        val installmentDueRelativeDays = if (useRelativeDueDates) {
+            paymentPlan.installmentDueRelativeDays
+        } else {
+            emptyList()
+        }
+        if (useRelativeDueDates && installmentDueRelativeDays.size != paymentPlan.installmentAmounts.size) {
+            return Result.failure(
+                IllegalArgumentException("Weekly payment plans need a due offset for each installment."),
+            )
+        }
 
         return billingRepository.createBill(
             CreateBillRequest(
@@ -2468,9 +2495,12 @@ class DefaultEventDetailComponent(
                 ownerId = normalizedOwnerId,
                 totalAmountCents = paymentPlan.priceCents,
                 eventId = event.id,
+                slotId = selectedOccurrence?.slotId,
+                occurrenceDate = selectedOccurrence?.occurrenceDate,
                 organizationId = event.organizationId,
                 installmentAmounts = paymentPlan.installmentAmounts,
                 installmentDueDates = installmentDueDates,
+                installmentDueRelativeDays = installmentDueRelativeDays,
                 allowSplit = allowSplit,
                 paymentPlanEnabled = true,
             )
@@ -5015,6 +5045,7 @@ class DefaultEventDetailComponent(
         val allowPaymentPlans: Boolean,
         val installmentAmounts: List<Int>,
         val installmentDueDates: List<String>,
+        val installmentDueRelativeDays: List<Int>,
     )
 
     private fun resolveSelectedDivisionDetail(
@@ -5054,6 +5085,7 @@ class DefaultEventDetailComponent(
             null -> event.allowPaymentPlans == true
             else -> selectedDivision.allowPaymentPlans == true
         }
+        val useRelativeDueDates = isWeeklyParentEvent(event)
 
         return EffectivePaymentPlan(
             priceCents = event.resolvedDivisionPriceCents(preferredDivisionId),
@@ -5066,13 +5098,21 @@ class DefaultEventDetailComponent(
             } else {
                 emptyList()
             },
-            installmentDueDates = if (allowPaymentPlans) {
+            installmentDueDates = if (allowPaymentPlans && !useRelativeDueDates) {
                 val configuredDueDates = selectedDivision?.installmentDueDates
                     ?.takeIf { dueDates -> dueDates.isNotEmpty() }
                     ?: event.installmentDueDates
                 configuredDueDates
                     .map { dueDate -> dueDate.trim() }
                     .filter(String::isNotBlank)
+            } else {
+                emptyList()
+            },
+            installmentDueRelativeDays = if (allowPaymentPlans && useRelativeDueDates) {
+                val configuredRelativeDays = selectedDivision?.installmentDueRelativeDays
+                    ?.takeIf { dueDays -> dueDays.isNotEmpty() }
+                    ?: event.installmentDueRelativeDays
+                configuredRelativeDays
             } else {
                 emptyList()
             },

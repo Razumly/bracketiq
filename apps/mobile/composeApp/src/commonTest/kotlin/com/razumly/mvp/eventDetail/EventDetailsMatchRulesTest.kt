@@ -13,6 +13,14 @@ import kotlin.test.assertTrue
 
 class EventDetailsMatchRulesTest {
     @Test
+    fun given_event_or_weekly_event_when_checking_visibility_then_match_rules_section_is_hidden() {
+        assertFalse(shouldShowMatchRulesSection(EventType.EVENT))
+        assertFalse(shouldShowMatchRulesSection(EventType.WEEKLY_EVENT))
+        assertTrue(shouldShowMatchRulesSection(EventType.LEAGUE))
+        assertTrue(shouldShowMatchRulesSection(EventType.TOURNAMENT))
+    }
+
+    @Test
     fun given_baseball_selected_without_server_template_when_resolving_rules_then_baseball_defaults_replace_stale_rules() {
         val event = Event(
             sportId = "Baseball",

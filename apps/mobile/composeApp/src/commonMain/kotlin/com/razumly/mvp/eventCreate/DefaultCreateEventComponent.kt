@@ -637,15 +637,19 @@ class DefaultCreateEventComponent(
                     allowPaymentPlans = false,
                     installmentCount = null,
                     installmentDueDates = emptyList(),
+                    installmentDueRelativeDays = emptyList(),
                     installmentAmounts = emptyList(),
                 )
             } else {
                 val targetCount = currentInstallmentCount().coerceAtLeast(1)
                 val (amounts, dueDates) = normalizeInstallments(targetCount)
+                val relativeDueDays = normalizeInstallmentDueRelativeDays(targetCount)
+                val useRelativeDueDates = eventType == EventType.WEEKLY_EVENT
                 copy(
                     allowPaymentPlans = true,
                     installmentCount = targetCount,
-                    installmentDueDates = dueDates,
+                    installmentDueDates = if (useRelativeDueDates) emptyList() else dueDates,
+                    installmentDueRelativeDays = if (useRelativeDueDates) relativeDueDays else emptyList(),
                     installmentAmounts = amounts,
                 )
             }
@@ -656,10 +660,13 @@ class DefaultCreateEventComponent(
         val targetCount = count.coerceAtLeast(1)
         updateEventFieldWithoutSelectionRules {
             val (amounts, dueDates) = normalizeInstallments(targetCount)
+            val relativeDueDays = normalizeInstallmentDueRelativeDays(targetCount)
+            val useRelativeDueDates = eventType == EventType.WEEKLY_EVENT
             copy(
                 allowPaymentPlans = true,
                 installmentCount = targetCount,
-                installmentDueDates = dueDates,
+                installmentDueDates = if (useRelativeDueDates) emptyList() else dueDates,
+                installmentDueRelativeDays = if (useRelativeDueDates) relativeDueDays else emptyList(),
                 installmentAmounts = amounts,
             )
         }
@@ -680,7 +687,12 @@ class DefaultCreateEventComponent(
                 allowPaymentPlans = true,
                 installmentCount = targetCount,
                 installmentAmounts = updatedAmounts,
-                installmentDueDates = dueDates,
+                installmentDueDates = if (eventType == EventType.WEEKLY_EVENT) emptyList() else dueDates,
+                installmentDueRelativeDays = if (eventType == EventType.WEEKLY_EVENT) {
+                    normalizeInstallmentDueRelativeDays(targetCount)
+                } else {
+                    emptyList()
+                },
             )
         }
     }
@@ -700,7 +712,12 @@ class DefaultCreateEventComponent(
                 allowPaymentPlans = true,
                 installmentCount = targetCount,
                 installmentAmounts = amounts,
-                installmentDueDates = updatedDueDates,
+                installmentDueDates = if (eventType == EventType.WEEKLY_EVENT) emptyList() else updatedDueDates,
+                installmentDueRelativeDays = if (eventType == EventType.WEEKLY_EVENT) {
+                    normalizeInstallmentDueRelativeDays(targetCount)
+                } else {
+                    emptyList()
+                },
             )
         }
     }
@@ -709,11 +726,14 @@ class DefaultCreateEventComponent(
         updateEventFieldWithoutSelectionRules {
             val targetCount = currentInstallmentCount().coerceAtLeast(0) + 1
             val (amounts, dueDates) = normalizeInstallments(targetCount)
+            val relativeDueDays = normalizeInstallmentDueRelativeDays(targetCount)
+            val useRelativeDueDates = eventType == EventType.WEEKLY_EVENT
             copy(
                 allowPaymentPlans = true,
                 installmentCount = targetCount,
                 installmentAmounts = amounts,
-                installmentDueDates = dueDates,
+                installmentDueDates = if (useRelativeDueDates) emptyList() else dueDates,
+                installmentDueRelativeDays = if (useRelativeDueDates) relativeDueDays else emptyList(),
             )
         }
     }
@@ -734,13 +754,24 @@ class DefaultCreateEventComponent(
                     installmentCount = null,
                     installmentAmounts = emptyList(),
                     installmentDueDates = emptyList(),
+                    installmentDueRelativeDays = emptyList(),
                 )
             } else {
+                val updatedRelativeDueDays = normalizeInstallmentDueRelativeDays(targetCount)
+                    .toMutableList()
+                    .apply {
+                        if (index in indices) removeAt(index)
+                    }
                 copy(
                     allowPaymentPlans = true,
                     installmentCount = updatedAmounts.size,
                     installmentAmounts = updatedAmounts,
-                    installmentDueDates = updatedDueDates,
+                    installmentDueDates = if (eventType == EventType.WEEKLY_EVENT) emptyList() else updatedDueDates,
+                    installmentDueRelativeDays = if (eventType == EventType.WEEKLY_EVENT) {
+                        updatedRelativeDueDays
+                    } else {
+                        emptyList()
+                    },
                 )
             }
         }
@@ -2043,6 +2074,7 @@ class DefaultCreateEventComponent(
             installmentCount ?: 0,
             installmentAmounts.size,
             installmentDueDates.size,
+            installmentDueRelativeDays.size,
         ).coerceAtLeast(0)
     }
 
@@ -2055,6 +2087,13 @@ class DefaultCreateEventComponent(
             installmentDueDates.getOrNull(index)?.trim().orEmpty()
         }
         return amounts to dueDates
+    }
+
+    private fun Event.normalizeInstallmentDueRelativeDays(targetCount: Int): List<Int> {
+        val normalizedCount = targetCount.coerceAtLeast(0)
+        return List(normalizedCount) { index ->
+            installmentDueRelativeDays.getOrNull(index) ?: 0
+        }
     }
 
     private fun List<String>.normalizeDistinctIds(): List<String> {

@@ -112,6 +112,46 @@ class EventDtosTest {
     }
 
     @Test
+    fun to_update_dto_includes_weekly_relative_installment_due_days() {
+        val event = Event(
+            id = "weekly-event-1",
+            name = "Weekly Clinic",
+            eventType = EventType.WEEKLY_EVENT,
+            hostId = "host-weekly",
+            start = Instant.fromEpochMilliseconds(1_700_000_000_000),
+            end = Instant.fromEpochMilliseconds(1_700_003_600_000),
+            singleDivision = false,
+            priceCents = 6000,
+            allowPaymentPlans = true,
+            installmentCount = 2,
+            installmentAmounts = listOf(3000, 3000),
+            installmentDueRelativeDays = listOf(-1, 0),
+            divisions = listOf("weekly-event-1__division__open"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "weekly-event-1__division__open",
+                    key = "open",
+                    name = "Open",
+                    divisionTypeId = "open",
+                    divisionTypeName = "Open",
+                    ratingType = "SKILL",
+                    gender = "C",
+                    price = 6000,
+                    allowPaymentPlans = true,
+                    installmentCount = 2,
+                    installmentAmounts = listOf(3000, 3000),
+                    installmentDueRelativeDays = listOf(0, 7),
+                ),
+            ),
+        )
+
+        val dto = event.toUpdateDto()
+
+        assertEquals(listOf(-1, 0), dto.installmentDueRelativeDays)
+        assertEquals(listOf(0, 7), dto.divisionDetails.first().installmentDueRelativeDays)
+    }
+
+    @Test
     fun to_update_dto_includes_league_scoring_config_when_override_is_provided() {
         val event = Event(
             name = "League Event",
@@ -420,6 +460,46 @@ class EventDtosTest {
         assertEquals(listOf("event-11__division__open"), event?.divisions)
         assertEquals("Open", event?.divisionDetails?.firstOrNull()?.name)
         assertEquals(true, event?.noFixedEndDateTime)
+    }
+
+    @Test
+    fun event_api_dto_maps_weekly_relative_installment_due_days() {
+        val dto = EventApiDto(
+            id = "weekly-event-2",
+            name = "Weekly API Event",
+            hostId = "host-weekly",
+            eventType = EventType.WEEKLY_EVENT.name,
+            singleDivision = false,
+            price = 9000,
+            allowPaymentPlans = true,
+            installmentCount = 3,
+            installmentAmounts = listOf(3000, 3000, 3000),
+            installmentDueRelativeDays = listOf(-1, 0, 7),
+            start = "2026-02-10T00:00:00Z",
+            end = "2026-02-10T01:00:00Z",
+            divisions = listOf("weekly-event-2__division__open"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "weekly-event-2__division__open",
+                    key = "open",
+                    name = "Open",
+                    divisionTypeId = "open",
+                    divisionTypeName = "Open",
+                    ratingType = "SKILL",
+                    gender = "C",
+                    price = 9000,
+                    allowPaymentPlans = true,
+                    installmentCount = 3,
+                    installmentAmounts = listOf(3000, 3000, 3000),
+                    installmentDueRelativeDays = listOf(0, 7, 14),
+                )
+            ),
+        )
+
+        val event = dto.toEventOrNull()
+
+        assertEquals(listOf(-1, 0, 7), event?.installmentDueRelativeDays)
+        assertEquals(listOf(0, 7, 14), event?.divisionDetails?.firstOrNull()?.installmentDueRelativeDays)
     }
 
     @Test
