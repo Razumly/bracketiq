@@ -247,6 +247,15 @@ fun AnimatedContentTransitionScope<Boolean>.buttonTransitionSpec() =
 fun createEventUrl(event: Event): String {
     return "https://bracket-iq.com/events/${event.id}"
 }
+
+fun getEventQrCodeUrl(eventId: String): String =
+    buildString {
+        append(apiBaseUrl.trimEnd('/'))
+        append("/api/events/")
+        append(eventId)
+        append("/qr")
+    }
+
 fun getImageUrl(fileId: String, width: Int? = null, height: Int? = null): String =
     buildString {
         append(apiBaseUrl.trimEnd('/'))

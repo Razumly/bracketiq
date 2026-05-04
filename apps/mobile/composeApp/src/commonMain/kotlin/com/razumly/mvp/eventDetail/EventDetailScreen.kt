@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -92,6 +93,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -114,6 +116,8 @@ import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
+import com.razumly.mvp.core.data.dataTypes.isDraftLikeState
+import com.razumly.mvp.core.data.dataTypes.isPrivateState
 import com.razumly.mvp.core.data.dataTypes.resolvedDivisionPriceCents
 import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.removeOfficialUser
@@ -140,6 +144,8 @@ import com.razumly.mvp.core.presentation.composables.StripeButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
+import com.razumly.mvp.core.presentation.util.createEventUrl
+import com.razumly.mvp.core.presentation.util.getEventQrCodeUrl
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.presentation.util.toNameCase
 import com.razumly.mvp.core.presentation.util.toTitleCase
@@ -160,6 +166,7 @@ import com.razumly.mvp.icons.MVPIcons
 import com.razumly.mvp.icons.ProfileActionEvents
 import com.razumly.mvp.icons.TournamentBracket
 import com.razumly.mvp.icons.Trophy
+import coil3.compose.AsyncImage
 import dev.icerock.moko.geo.LatLng
 import kotlin.math.round
 import kotlin.time.Clock
@@ -2004,6 +2011,9 @@ fun EventDetailScreen(
     val isDark = isSystemInDarkTheme()
     val isEditingMatches by component.isEditingMatches.collectAsState()
     val isTemplateEvent = selectedEvent.event.state.equals("TEMPLATE", ignoreCase = true)
+    val canShowQrCode = !isTemplateEvent &&
+        !selectedEvent.event.isDraftLikeState() &&
+        !selectedEvent.event.isPrivateState()
     val eventType = selectedEvent.event.eventType
     val isTournamentEvent = eventType == EventType.TOURNAMENT
     val hasBracketView = isTournamentEvent ||
@@ -2160,6 +2170,7 @@ fun EventDetailScreen(
     var showTeamSelectionDialog by remember { mutableStateOf(false) }
     var showFab by remember { mutableStateOf(false) }
     var showOptionsDropdown by remember { mutableStateOf(false) }
+    var showQrCodeDialog by remember { mutableStateOf(false) }
     var showEventStateDropdown by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     var showWithdrawTargetDialog by remember { mutableStateOf(false) }
@@ -3161,6 +3172,19 @@ fun EventDetailScreen(
                                         Icon(Icons.Default.Share, contentDescription = null)
                                     })
 
+                                    if (canShowQrCode) {
+                                        DropdownMenuItem(
+                                            text = { Text("QR Code") },
+                                            onClick = {
+                                                showQrCodeDialog = true
+                                                showOptionsDropdown = false
+                                            },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.QrCode, contentDescription = null)
+                                            },
+                                        )
+                                    }
+
                                     if (!isHost) {
                                         DropdownMenuItem(
                                             text = { Text("Report Event") },
@@ -3943,6 +3967,15 @@ fun EventDetailScreen(
                     },
                 )
             }
+            if (showQrCodeDialog && canShowQrCode) {
+                EventQrCodeDialog(
+                    eventName = selectedEvent.event.name,
+                    eventUrl = createEventUrl(selectedEvent.event),
+                    qrImageUrl = getEventQrCodeUrl(selectedEvent.event.id),
+                    onDismiss = { showQrCodeDialog = false },
+                    onShareLink = component::shareEvent,
+                )
+            }
             if (showDeleteConfirmation) {
                 AlertDialog(
                     onDismissRequest = { showDeleteConfirmation = false },
@@ -4092,6 +4125,69 @@ fun EventDetailScreen(
         }
     }
 }
+
+@Composable
+private fun EventQrCodeDialog(
+    eventName: String,
+    eventUrl: String,
+    qrImageUrl: String,
+    onDismiss: () -> Unit,
+    onShareLink: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Event QR Code") },
+        text = {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.White,
+                ) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        AsyncImage(
+                            model = qrImageUrl,
+                            contentDescription = "QR code for $eventName",
+                            modifier = Modifier
+                                .size(260.dp)
+                                .padding(12.dp),
+                            contentScale = ContentScale.Fit,
+                        )
+                    }
+                }
+                Text(
+                    text = eventName,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = eventUrl,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onShareLink) {
+                Text("Share Link")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+    )
+}
+
 @Composable
 fun TeamSelectionDialog(
     eventSportLabel: String,
