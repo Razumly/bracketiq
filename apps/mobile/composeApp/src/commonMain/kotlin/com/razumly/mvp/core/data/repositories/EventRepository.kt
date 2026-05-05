@@ -34,6 +34,10 @@ import com.razumly.mvp.core.network.dto.CurrentUserEventRegistrationsResponseDto
 import com.razumly.mvp.core.network.dto.EventApiDto
 import com.razumly.mvp.core.network.dto.EventChildRegistrationRequestDto
 import com.razumly.mvp.core.network.dto.EventChildRegistrationResponseDto
+import com.razumly.mvp.core.network.dto.EventComplianceDocumentCountsDto
+import com.razumly.mvp.core.network.dto.EventCompliancePaymentSummaryDto
+import com.razumly.mvp.core.network.dto.EventComplianceRequiredDocumentDto
+import com.razumly.mvp.core.network.dto.EventComplianceUserSummaryDto
 import com.razumly.mvp.core.network.dto.EventParticipantEntryDto
 import com.razumly.mvp.core.network.dto.EventParticipantRegistrationSectionsDto
 import com.razumly.mvp.core.network.dto.EventParticipantsSnapshotResponseDto
@@ -43,6 +47,9 @@ import com.razumly.mvp.core.network.dto.EventResponseDto
 import com.razumly.mvp.core.network.dto.EventSearchFiltersDto
 import com.razumly.mvp.core.network.dto.EventSearchRequestDto
 import com.razumly.mvp.core.network.dto.EventSearchUserLocationDto
+import com.razumly.mvp.core.network.dto.EventTeamComplianceResponseDto
+import com.razumly.mvp.core.network.dto.EventTeamComplianceSummaryDto
+import com.razumly.mvp.core.network.dto.EventUserComplianceResponseDto
 import com.razumly.mvp.core.network.dto.EventsResponseDto
 import com.razumly.mvp.core.network.dto.ProfileScheduleResponseDto
 import com.razumly.mvp.core.network.dto.ScheduleEventRequestDto
@@ -119,6 +126,12 @@ interface IEventRepository : IMVPRepository {
         preferredDivisionId: String? = null,
         occurrence: EventOccurrenceSelection? = null,
     ): Result<SelfRegistrationResult>
+    suspend fun addPlayerToEvent(
+        event: Event,
+        player: UserData,
+        preferredDivisionId: String? = null,
+        occurrence: EventOccurrenceSelection? = null,
+    ): Result<SelfRegistrationResult>
     suspend fun requestCurrentUserRegistration(
         event: Event,
         preferredDivisionId: String? = null,
@@ -140,6 +153,12 @@ interface IEventRepository : IMVPRepository {
         preferredDivisionId: String? = null,
         occurrence: EventOccurrenceSelection? = null,
     ): Result<Unit>
+    suspend fun moveTeamParticipantDivision(
+        event: Event,
+        team: Team,
+        preferredDivisionId: String,
+        occurrence: EventOccurrenceSelection? = null,
+    ): Result<Unit> = Result.failure(NotImplementedError("Team division moves are not implemented."))
     suspend fun syncEventParticipants(
         event: Event,
         occurrence: EventOccurrenceSelection? = null,
@@ -152,6 +171,10 @@ interface IEventRepository : IMVPRepository {
         eventId: String,
         occurrence: EventOccurrenceSelection? = null,
     ): Result<EventParticipantManagementSnapshot> = Result.success(EventParticipantManagementSnapshot())
+    suspend fun getEventTeamCompliance(eventId: String): Result<List<EventTeamComplianceSummary>> =
+        Result.failure(NotImplementedError("Event team compliance is not implemented."))
+    suspend fun getEventUserCompliance(eventId: String): Result<List<EventComplianceUserSummary>> =
+        Result.failure(NotImplementedError("Event user compliance is not implemented."))
     suspend fun getLeagueDivisionStandings(eventId: String, divisionId: String): Result<LeagueDivisionStandings>
     suspend fun confirmLeagueDivisionStandings(
         eventId: String,
@@ -234,6 +257,53 @@ data class EventParticipantManagementSnapshot(
     val freeAgentRegistrations: List<EventParticipantManagementEntry> = emptyList(),
 )
 
+data class EventCompliancePaymentSummary(
+    val hasBill: Boolean = false,
+    val billId: String? = null,
+    val totalAmountCents: Int = 0,
+    val paidAmountCents: Int = 0,
+    val status: String? = null,
+    val isPaidInFull: Boolean = false,
+    val inheritedFromTeamBill: Boolean = false,
+)
+
+data class EventComplianceDocumentCounts(
+    val signedCount: Int = 0,
+    val requiredCount: Int = 0,
+)
+
+data class EventComplianceRequiredDocument(
+    val key: String,
+    val templateId: String,
+    val title: String,
+    val type: String,
+    val signerContext: String,
+    val signerLabel: String,
+    val signOnce: Boolean,
+    val status: String,
+    val signedDocumentRecordId: String? = null,
+    val signedAt: String? = null,
+)
+
+data class EventComplianceUserSummary(
+    val userId: String,
+    val fullName: String,
+    val userName: String? = null,
+    val isMinorAtEvent: Boolean = false,
+    val registrationType: String = "ADULT",
+    val payment: EventCompliancePaymentSummary = EventCompliancePaymentSummary(),
+    val documents: EventComplianceDocumentCounts = EventComplianceDocumentCounts(),
+    val requiredDocuments: List<EventComplianceRequiredDocument> = emptyList(),
+)
+
+data class EventTeamComplianceSummary(
+    val teamId: String,
+    val teamName: String,
+    val payment: EventCompliancePaymentSummary = EventCompliancePaymentSummary(),
+    val documents: EventComplianceDocumentCounts = EventComplianceDocumentCounts(),
+    val users: List<EventComplianceUserSummary> = emptyList(),
+)
+
 data class ChildRegistrationResult(
     val registrationStatus: String? = null,
     val consentStatus: String? = null,
@@ -289,6 +359,76 @@ private fun EventParticipantRegistrationSectionsDto?.toManagementSnapshot(): Eve
         childRegistrations = children.mapNotNull(EventParticipantEntryDto::toManagementEntryOrNull),
         waitlistRegistrations = waitlist.mapNotNull(EventParticipantEntryDto::toManagementEntryOrNull),
         freeAgentRegistrations = freeAgents.mapNotNull(EventParticipantEntryDto::toManagementEntryOrNull),
+    )
+}
+
+private fun EventCompliancePaymentSummaryDto?.toCompliancePaymentSummary(): EventCompliancePaymentSummary {
+    if (this == null) {
+        return EventCompliancePaymentSummary()
+    }
+    return EventCompliancePaymentSummary(
+        hasBill = hasBill == true,
+        billId = billId?.trim()?.takeIf(String::isNotBlank),
+        totalAmountCents = totalAmountCents ?: 0,
+        paidAmountCents = paidAmountCents ?: 0,
+        status = status?.trim()?.takeIf(String::isNotBlank),
+        isPaidInFull = isPaidInFull == true,
+        inheritedFromTeamBill = inheritedFromTeamBill == true,
+    )
+}
+
+private fun EventComplianceDocumentCountsDto?.toComplianceDocumentCounts(): EventComplianceDocumentCounts {
+    if (this == null) {
+        return EventComplianceDocumentCounts()
+    }
+    return EventComplianceDocumentCounts(
+        signedCount = signedCount ?: 0,
+        requiredCount = requiredCount ?: 0,
+    )
+}
+
+private fun EventComplianceRequiredDocumentDto.toComplianceRequiredDocumentOrNull(): EventComplianceRequiredDocument? {
+    val normalizedKey = key?.trim()?.takeIf(String::isNotBlank)
+    val normalizedTemplateId = templateId?.trim()?.takeIf(String::isNotBlank)
+    if (normalizedKey == null || normalizedTemplateId == null) {
+        return null
+    }
+    return EventComplianceRequiredDocument(
+        key = normalizedKey,
+        templateId = normalizedTemplateId,
+        title = title?.trim()?.takeIf(String::isNotBlank) ?: "Required document",
+        type = type?.trim()?.takeIf(String::isNotBlank) ?: "PDF",
+        signerContext = signerContext?.trim()?.takeIf(String::isNotBlank) ?: "participant",
+        signerLabel = signerLabel?.trim()?.takeIf(String::isNotBlank) ?: "Participant",
+        signOnce = signOnce == true,
+        status = status?.trim()?.takeIf(String::isNotBlank) ?: "UNSIGNED",
+        signedDocumentRecordId = signedDocumentRecordId?.trim()?.takeIf(String::isNotBlank),
+        signedAt = signedAt?.trim()?.takeIf(String::isNotBlank),
+    )
+}
+
+private fun EventComplianceUserSummaryDto.toComplianceUserSummaryOrNull(): EventComplianceUserSummary? {
+    val normalizedUserId = userId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    return EventComplianceUserSummary(
+        userId = normalizedUserId,
+        fullName = fullName?.trim()?.takeIf(String::isNotBlank) ?: normalizedUserId,
+        userName = userName?.trim()?.takeIf(String::isNotBlank),
+        isMinorAtEvent = isMinorAtEvent == true,
+        registrationType = registrationType?.trim()?.takeIf(String::isNotBlank) ?: "ADULT",
+        payment = payment.toCompliancePaymentSummary(),
+        documents = documents.toComplianceDocumentCounts(),
+        requiredDocuments = requiredDocuments.mapNotNull(EventComplianceRequiredDocumentDto::toComplianceRequiredDocumentOrNull),
+    )
+}
+
+private fun EventTeamComplianceSummaryDto.toTeamComplianceSummaryOrNull(): EventTeamComplianceSummary? {
+    val normalizedTeamId = teamId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    return EventTeamComplianceSummary(
+        teamId = normalizedTeamId,
+        teamName = teamName?.trim()?.takeIf(String::isNotBlank) ?: "Team",
+        payment = payment.toCompliancePaymentSummary(),
+        documents = documents.toComplianceDocumentCounts(),
+        users = users.mapNotNull(EventComplianceUserSummaryDto::toComplianceUserSummaryOrNull),
     )
 }
 
@@ -701,6 +841,22 @@ class EventRepository(
             snapshot = snapshot,
         )
         snapshot.registrations.toManagementSnapshot()
+    }
+
+    override suspend fun getEventTeamCompliance(eventId: String): Result<List<EventTeamComplianceSummary>> = runCatching {
+        val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
+            ?: error("Event id is required.")
+        api.get<EventTeamComplianceResponseDto>(
+            path = "api/events/$normalizedEventId/teams/compliance",
+        ).teams.mapNotNull(EventTeamComplianceSummaryDto::toTeamComplianceSummaryOrNull)
+    }
+
+    override suspend fun getEventUserCompliance(eventId: String): Result<List<EventComplianceUserSummary>> = runCatching {
+        val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
+            ?: error("Event id is required.")
+        api.get<EventUserComplianceResponseDto>(
+            path = "api/events/$normalizedEventId/users/compliance",
+        ).users.mapNotNull(EventComplianceUserSummaryDto::toComplianceUserSummaryOrNull)
     }
 
     override suspend fun syncCurrentUserRegistrationCache(): Result<Unit> = runCatching {
@@ -1169,6 +1325,43 @@ class EventRepository(
             )
         }
 
+    override suspend fun addPlayerToEvent(
+        event: Event,
+        player: UserData,
+        preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<SelfRegistrationResult> =
+        runCatching {
+            val normalizedUserId = player.id.trim()
+            if (normalizedUserId.isBlank()) {
+                error("User id is required.")
+            }
+            val divisionPayload = resolveRegistrationDivisionPayload(
+                event = event,
+                preferredDivisionId = preferredDivisionId,
+            )
+            val response = api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
+                path = "api/events/${event.id}/participants",
+                body = EventParticipantsRequestDto(
+                    userId = normalizedUserId,
+                    divisionId = divisionPayload.divisionId,
+                    divisionTypeId = divisionPayload.divisionTypeId,
+                    divisionTypeKey = divisionPayload.divisionTypeKey,
+                    slotId = occurrence?.slotId,
+                    occurrenceDate = occurrence?.occurrenceDate,
+                ),
+            )
+            response.error?.takeIf(String::isNotBlank)?.let { error(it) }
+
+            val updatedEvent = response.event?.toEventOrNull() ?: event
+            syncEventParticipantsAfterMutation(updatedEvent, occurrence)
+
+            SelfRegistrationResult(
+                requiresParentApproval = response.requiresParentApproval == true,
+                joinedWaitlist = false,
+            )
+        }
+
     override suspend fun requestCurrentUserRegistration(
         event: Event,
         preferredDivisionId: String?,
@@ -1299,6 +1492,36 @@ class EventRepository(
                     body = request,
                 )
             }.event?.toEventOrNull() ?: event
+
+            syncEventParticipantsAfterMutation(updated, occurrence)
+        }
+
+    override suspend fun moveTeamParticipantDivision(
+        event: Event,
+        team: Team,
+        preferredDivisionId: String,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<Unit> =
+        runCatching {
+            val normalizedTeamId = team.id.trim().takeIf(String::isNotBlank)
+                ?: error("Team id is required.")
+            val divisionPreference = preferredDivisionId.trim().takeIf(String::isNotBlank)
+                ?: error("Division id is required.")
+            val divisionPayload = resolveRegistrationDivisionPayload(
+                event = event,
+                preferredDivisionId = divisionPreference,
+            )
+            val updated = api.post<EventParticipantsRequestDto, EventResponseDto>(
+                path = "api/events/${event.id}/participants",
+                body = EventParticipantsRequestDto(
+                    teamId = normalizedTeamId,
+                    divisionId = divisionPayload.divisionId,
+                    divisionTypeId = divisionPayload.divisionTypeId,
+                    divisionTypeKey = divisionPayload.divisionTypeKey,
+                    slotId = occurrence?.slotId,
+                    occurrenceDate = occurrence?.occurrenceDate,
+                ),
+            ).event?.toEventOrNull() ?: event
 
             syncEventParticipantsAfterMutation(updated, occurrence)
         }

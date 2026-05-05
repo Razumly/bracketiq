@@ -58,6 +58,14 @@ interface ITeamRepository : IMVPRepository {
         organizationId: String,
         limit: Int = 200,
     ): Result<List<TeamWithPlayers>> = Result.failure(NotImplementedError("Organization team lookup is not implemented."))
+    suspend fun searchTeamsForEventInvite(
+        query: String,
+        eventId: String? = null,
+        organizationId: String? = null,
+        sportName: String? = null,
+        excludeTeamIds: Set<String> = emptySet(),
+        limit: Int = 200,
+    ): Result<List<Team>> = Result.failure(NotImplementedError("Team invite search is not implemented."))
     suspend fun addPlayerToTeam(team: Team, player: UserData): Result<Unit>
     suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit>
     suspend fun createTeam(newTeam: Team): Result<Team>
@@ -318,6 +326,58 @@ class TeamRepository(
         }
         databaseService.getTeamDao.upsertTeamsWithRelations(teams)
         databaseService.getTeamDao.getTeamsWithPlayersFlowByIds(teams.map(Team::id)).first()
+    }
+
+    override suspend fun searchTeamsForEventInvite(
+        query: String,
+        eventId: String?,
+        organizationId: String?,
+        sportName: String?,
+        excludeTeamIds: Set<String>,
+        limit: Int,
+    ): Result<List<Team>> = runCatching {
+        val normalizedQuery = query.trim().lowercase()
+        if (normalizedQuery.length < 2) {
+            return@runCatching emptyList()
+        }
+        val safeLimit = limit.coerceIn(1, 200)
+        val normalizedOrganizationId = organizationId?.trim()?.takeIf(String::isNotBlank)
+        val normalizedSportName = sportName.toInviteSportKey()
+        val excludedIds = excludeTeamIds
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .toSet()
+
+        val teamsById = linkedMapOf<String, Team>()
+        if (normalizedOrganizationId != null) {
+            fetchRemoteTeamsByOrganization(normalizedOrganizationId, safeLimit).forEach { team ->
+                teamsById[team.id] = team
+            }
+        }
+        fetchRemoteTeamsForSearch(safeLimit).forEach { team ->
+            teamsById.putIfAbsent(team.id, team)
+        }
+
+        val filteredTeams = teamsById.values
+            .asSequence()
+            .filterNot { team ->
+                val parentTeamId = team.parentTeamId?.trim()?.takeIf(String::isNotBlank)
+                team.id in excludedIds ||
+                    (parentTeamId != null && parentTeamId in excludedIds)
+            }
+            .filter { team ->
+                normalizedSportName.isBlank() || team.sport.toInviteSportKey() == normalizedSportName
+            }
+            .filter { team ->
+                team.inviteSearchText().contains(normalizedQuery)
+            }
+            .take(24)
+            .toList()
+
+        if (filteredTeams.isNotEmpty()) {
+            databaseService.getTeamDao.upsertTeamsWithRelations(filteredTeams)
+        }
+        filteredTeams
     }
 
     override suspend fun addPlayerToTeam(team: Team, player: UserData): Result<Unit> {
@@ -737,6 +797,33 @@ class TeamRepository(
         val teams = res.teams.mapNotNull { it.toTeamOrNull() }
         ensureUsersCachedForTeams(teams)
         return teams
+    }
+
+    private suspend fun fetchRemoteTeamsForSearch(limit: Int): List<Team> {
+        val safeLimit = limit.coerceIn(1, 200)
+        val res = api.get<TeamsResponseDto>("api/teams?limit=$safeLimit")
+        val teams = res.teams.mapNotNull { it.toTeamOrNull() }
+        ensureUsersCachedForTeams(teams)
+        return teams
+    }
+
+    private fun Team.inviteSearchText(): String {
+        return listOf(
+            name,
+            sport.orEmpty(),
+            division,
+            divisionTypeName.orEmpty(),
+            skillDivisionTypeName.orEmpty(),
+            ageDivisionTypeName.orEmpty(),
+        ).joinToString(" ").lowercase()
+    }
+
+    private fun String?.toInviteSportKey(): String {
+        return this
+            ?.trim()
+            ?.lowercase()
+            ?.filter { it.isLetterOrDigit() }
+            .orEmpty()
     }
 
     private suspend fun fetchRemoteTeam(teamId: String): Team {

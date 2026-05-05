@@ -10,7 +10,7 @@ fun MoneyInputField(
     onValueChange: (String) -> Unit,
     modifier: Modifier = Modifier,
     label: String = "Amount",
-    placeholder: String = "0.00",
+    placeholder: String = "0",
     isError: Boolean = false,
     supportingText: String = "",
     enabled: Boolean = true,

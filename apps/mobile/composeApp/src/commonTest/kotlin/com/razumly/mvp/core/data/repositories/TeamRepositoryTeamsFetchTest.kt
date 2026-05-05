@@ -164,6 +164,7 @@ private class FakeDatabaseService(
 
 private class FakeUserRepository : IUserRepository {
     var lastGetUsersInput: List<String>? = null
+    val getUsersInputs = mutableListOf<List<String>>()
     var lastListInvitesInput: Pair<String, String?>? = null
     var invitesResult: List<com.razumly.mvp.core.data.dataTypes.Invite> = emptyList()
     var refreshCurrentUserProfileCalls: Int = 0
@@ -186,6 +187,7 @@ private class FakeUserRepository : IUserRepository {
         visibilityContext: UserVisibilityContext,
     ): Result<List<UserData>> {
         lastGetUsersInput = userIds
+        getUsersInputs += userIds
         return Result.success(emptyList())
     }
 
@@ -399,6 +401,102 @@ class TeamRepositoryTeamsFetchTest {
         assertEquals("t1", cached.first().id)
 
         assertEquals(listOf("u1"), userRepo.lastGetUsersInput)
+    }
+
+    @Test
+    fun searchTeamsForEventInvite_empty_query_returns_empty_without_fetch() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val db = FakeDatabaseService(FakeTeamDao())
+        val userRepo = FakeUserRepository()
+        var requestCount = 0
+
+        val engine = MockEngine {
+            requestCount += 1
+            error("Team invite search should not fetch teams for an empty query.")
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        val teams = repo.searchTeamsForEventInvite(query = "").getOrThrow()
+
+        assertTrue(teams.isEmpty())
+        assertEquals(0, requestCount)
+    }
+
+    @Test
+    fun searchTeamsForEventInvite_fetches_bounded_pool_and_filters_query_sport_and_existing_teams() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/teams", request.url.encodedPath)
+            assertEquals("200", request.url.parameters["limit"])
+            assertEquals(null, request.url.parameters["ids"])
+
+            respond(
+                content = """
+                    {
+                      "teams": [
+                        {
+                          "id": "team_volley",
+                          "name": "Shoreline Spikers",
+                          "division": "Open",
+                          "sport": "Volleyball",
+                          "playerIds": ["u1"],
+                          "captainId": "u1",
+                          "pending": [],
+                          "teamSize": 4
+                        },
+                        {
+                          "id": "team_existing",
+                          "name": "Existing Volleyball Team",
+                          "division": "Open",
+                          "sport": "Volleyball",
+                          "playerIds": ["u2"],
+                          "captainId": "u2",
+                          "pending": [],
+                          "teamSize": 4
+                        },
+                        {
+                          "id": "team_basketball",
+                          "name": "Volley Baseline Five",
+                          "division": "Open",
+                          "sport": "Basketball",
+                          "playerIds": ["u3"],
+                          "captainId": "u3",
+                          "pending": [],
+                          "teamSize": 5
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        val teams = repo.searchTeamsForEventInvite(
+            query = "volley",
+            eventId = "event_1",
+            sportName = "Volleyball",
+            excludeTeamIds = setOf("team_existing"),
+        ).getOrThrow()
+
+        assertEquals(listOf("team_volley"), teams.map(Team::id))
+        assertEquals("team_volley", teamDao.getTeam("team_volley").id)
+        assertEquals(listOf("u1", "u2", "u3"), userRepo.getUsersInputs.flatten())
     }
 
     @Test

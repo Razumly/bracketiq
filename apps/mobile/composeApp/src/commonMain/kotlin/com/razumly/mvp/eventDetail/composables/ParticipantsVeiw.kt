@@ -13,9 +13,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -30,17 +37,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
 import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
 import com.razumly.mvp.core.data.dataTypes.isCaptainOrManager
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
-import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamBillingUserOption
-import com.razumly.mvp.core.data.repositories.EventParticipantManagementEntry
+import com.razumly.mvp.core.data.repositories.EventComplianceDocumentCounts
+import com.razumly.mvp.core.data.repositories.EventCompliancePaymentSummary
+import com.razumly.mvp.core.data.repositories.EventComplianceRequiredDocument
+import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
+import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
@@ -49,6 +60,7 @@ import com.razumly.mvp.core.presentation.PlayerInteractionComponent
 import com.razumly.mvp.core.presentation.composables.MoneyInputField
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.PlayerAction
+import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.PlayerCardWithActions
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.composables.TeamDetailsDialog
@@ -57,6 +69,10 @@ import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
+import com.razumly.mvp.eventDetail.EventDetailDivisionOption
+import com.razumly.mvp.eventDetail.matchesDivisionIdentifier
+import com.razumly.mvp.eventDetail.resolveSelectedEventDivisionId
+import com.razumly.mvp.eventDetail.visibleTeams
 import kotlin.math.round
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
@@ -70,6 +86,11 @@ enum class ParticipantsSection(val label: String) {
     PARTICIPANTS("Participants"),
     FREE_AGENTS("Free Agents"),
 }
+
+internal fun visibleParticipantTeams(
+    event: Event,
+    teams: Iterable<TeamWithPlayers>,
+): List<TeamWithPlayers> = event.visibleTeams(teams.toList())
 
 private enum class ParticipantCardType {
     TEAM,
@@ -93,37 +114,61 @@ private data class ParticipantRemoveTarget(
     val userId: String? = null,
 )
 
-private fun EventParticipantManagementEntry.requiresDocumentAttention(): Boolean {
-    val normalizedConsentStatus = consentStatus?.trim()?.lowercase()
-    return status.equals("STARTED", ignoreCase = true) ||
-        normalizedConsentStatus == "guardian_approval_required" ||
-        normalizedConsentStatus == "child_email_required" ||
-        normalizedConsentStatus == "send_failed" ||
-        normalizedConsentStatus == "sent"
+private data class ParticipantManagementTarget(
+    val cardType: ParticipantCardType,
+    val title: String,
+    val team: TeamWithPlayers? = null,
+    val user: UserData? = null,
+    val billingContext: ParticipantBillingContext? = null,
+    val teamCompliance: EventTeamComplianceSummary? = null,
+    val userCompliance: EventComplianceUserSummary? = null,
+)
+
+private fun EventCompliancePaymentSummary.paymentStatusText(cardType: ParticipantCardType): String {
+    if (!hasBill) {
+        return if (cardType == ParticipantCardType.TEAM) "No team bill yet" else "No bill yet"
+    }
+    if (isPaidInFull) {
+        return "Paid in full (${formatCurrency(totalAmountCents)})"
+    }
+    val prefix = if (inheritedFromTeamBill) "Team bill" else "Bill"
+    return "$prefix: ${formatCurrency(paidAmountCents)} of ${formatCurrency(totalAmountCents)} paid"
 }
 
-private fun EventParticipantManagementEntry.hostStatusText(): String {
-    val normalizedConsentStatus = consentStatus?.trim()?.lowercase()
-    return when {
-        normalizedConsentStatus == "child_email_required" -> "Missing child email for required documents"
-        normalizedConsentStatus == "guardian_approval_required" -> "Parent approval required"
-        normalizedConsentStatus == "send_failed" -> "Required documents failed to send"
-        normalizedConsentStatus == "sent" || status.equals("STARTED", ignoreCase = true) ->
-            "Required documents pending"
-        normalizedConsentStatus == "completed" || status.equals("ACTIVE", ignoreCase = true) ->
-            "Registered"
-        status.equals("BLOCKED", ignoreCase = true) -> "Registration blocked"
-        status.equals("CANCELLED", ignoreCase = true) -> "Registration cancelled"
-        status.equals("CONSENTFAILED", ignoreCase = true) -> "Required documents failed"
-        else -> "Registration status unavailable"
+private fun EventComplianceDocumentCounts.documentStatusText(): String {
+    if (requiredCount <= 0) {
+        return "No required documents"
+    }
+    return "$signedCount/$requiredCount signatures complete"
+}
+
+private fun EventComplianceDocumentCounts.needsAttention(): Boolean {
+    return requiredCount > 0 && signedCount < requiredCount
+}
+
+private fun EventCompliancePaymentSummary.needsAttention(): Boolean {
+    return hasBill && !isPaidInFull && totalAmountCents > 0
+}
+
+private fun EventComplianceUserSummary.registrationLabel(): String {
+    return if (registrationType.equals("CHILD", ignoreCase = true)) {
+        "Child registration"
+    } else {
+        "Adult registration"
     }
 }
 
-private fun preferredRegistrationEntry(
-    entries: List<EventParticipantManagementEntry>,
-): EventParticipantManagementEntry? {
-    return entries.firstOrNull(EventParticipantManagementEntry::requiresDocumentAttention)
-        ?: entries.firstOrNull()
+private fun TeamWithPlayers.resolveParticipantDivisionId(
+    divisionOptions: List<EventDetailDivisionOption>,
+    fallbackDivisionId: String?,
+): String? {
+    if (divisionOptions.isEmpty()) return null
+    val teamDivision = team.division.trim().takeIf(String::isNotBlank)
+    val teamDivisionTypeId = team.divisionTypeId?.trim()?.takeIf(String::isNotBlank)
+    return divisionOptions.firstOrNull { option ->
+        option.matchesDivisionIdentifier(teamDivision) ||
+            option.matchesDivisionIdentifier(teamDivisionTypeId)
+    }?.id ?: divisionOptions.resolveSelectedEventDivisionId(fallbackDivisionId)
 }
 
 @Composable
@@ -133,16 +178,27 @@ fun ParticipantsView(
     onNavigateToChat: (UserData) -> Unit,
     manageMode: Boolean = false,
     canManageParticipants: Boolean = false,
+    selectedDivisionId: String? = null,
+    divisionOptions: List<EventDetailDivisionOption> = emptyList(),
+    onTeamDivisionSelected: (TeamWithPlayers, String) -> Unit = { _, _ -> },
 ) {
     val component = LocalTournamentComponent.current
     val divisionTeams by component.divisionTeams.collectAsState()
     val selectedEvent by component.eventWithRelations.collectAsState()
     val currentUser by component.currentUser.collectAsState()
     val startingTeamRegistrationId by component.startingTeamRegistrationId.collectAsState()
-    val participantManagementSnapshot by component.participantManagementSnapshot.collectAsState()
     val participantManagementLoading by component.participantManagementLoading.collectAsState()
+    val teamComplianceSummaries by component.teamComplianceSummaries.collectAsState()
+    val userComplianceSummaries by component.userComplianceSummaries.collectAsState()
+    val participantComplianceLoading by component.participantComplianceLoading.collectAsState()
     val participants = selectedEvent.players
     val teamSignup = selectedEvent.event.teamSignup
+    val eventTeams = remember(selectedEvent.event.eventType, teamSignup, selectedEvent.teams) {
+        visibleParticipantTeams(selectedEvent.event, selectedEvent.teams)
+    }
+    val visibleDivisionTeams = remember(selectedEvent.event.eventType, teamSignup, divisionTeams) {
+        visibleParticipantTeams(selectedEvent.event, divisionTeams.values)
+    }
     val participantIds = remember(selectedEvent.event.playerIds) {
         selectedEvent.event.playerIds
             .map(String::trim)
@@ -163,13 +219,13 @@ fun ParticipantsView(
         val playersById = selectedEvent.players.associateBy(UserData::id)
         freeAgentIds.mapNotNull(playersById::get)
     }
-    val participantUsers = remember(selectedEvent.players, selectedEvent.teams, freeAgentUsers) {
-        val teamPlayers = selectedEvent.teams.flatMap { team -> team.players }
+    val participantUsers = remember(selectedEvent.players, eventTeams, freeAgentUsers) {
+        val teamPlayers = eventTeams.flatMap { team -> team.players }
         (teamPlayers + selectedEvent.players + freeAgentUsers).distinctBy(UserData::id)
     }
-    val participantsTeamsByUserId = remember(selectedEvent.teams) {
+    val participantsTeamsByUserId = remember(eventTeams) {
         mutableMapOf<String, TeamWithPlayers>().apply {
-            selectedEvent.teams.forEach { teamWithPlayers: TeamWithPlayers ->
+            eventTeams.forEach { teamWithPlayers: TeamWithPlayers ->
                 val team = teamWithPlayers.team.withSynchronizedMembership()
                 val memberIds = buildSet {
                     addAll(team.activePlayerRegistrations().map { it.userId })
@@ -185,8 +241,8 @@ fun ParticipantsView(
             }
         }.toMap()
     }
-    val canInviteToTeam = remember(selectedEvent.teams, currentUser.id) {
-        selectedEvent.teams.any { teamWithPlayers ->
+    val canInviteToTeam = remember(eventTeams, currentUser.id) {
+        eventTeams.any { teamWithPlayers ->
             teamWithPlayers.team.isCaptainOrManager(currentUser.id)
         }
     }
@@ -202,6 +258,7 @@ fun ParticipantsView(
     var showTeamDialog by remember { mutableStateOf(false) }
     var teamDialogKnownUsers by remember { mutableStateOf<Map<String, UserData>>(emptyMap()) }
 
+    var managementTarget by remember { mutableStateOf<ParticipantManagementTarget?>(null) }
     var removeTarget by remember { mutableStateOf<ParticipantRemoveTarget?>(null) }
 
     var refundContext by remember { mutableStateOf<ParticipantBillingContext?>(null) }
@@ -216,8 +273,8 @@ fun ParticipantsView(
     var creatingBill by remember { mutableStateOf(false) }
     var createBillOwnerType by remember { mutableStateOf("TEAM") }
     var createBillOwnerId by remember { mutableStateOf<String?>(null) }
-    var createBillAmount by remember { mutableStateOf("0.00") }
-    var createBillTax by remember { mutableStateOf("0.00") }
+    var createBillAmount by remember { mutableStateOf("0") }
+    var createBillTax by remember { mutableStateOf("0") }
     var createBillAllowSplit by remember { mutableStateOf(false) }
     var createBillLabel by remember { mutableStateOf("Event registration") }
 
@@ -363,10 +420,108 @@ fun ParticipantsView(
         )
     }
 
-    val participantRegistrationByUserId = remember(participantManagementSnapshot) {
-        (participantManagementSnapshot.userRegistrations + participantManagementSnapshot.childRegistrations)
-            .groupBy(EventParticipantManagementEntry::registrantId)
-            .mapValues { (_, entries) -> preferredRegistrationEntry(entries) }
+    fun teamManagementTarget(team: TeamWithPlayers): ParticipantManagementTarget {
+        return ParticipantManagementTarget(
+            cardType = ParticipantCardType.TEAM,
+            title = team.team.name.ifBlank { "Team" },
+            team = team,
+            billingContext = buildTeamBillingContext(team),
+            teamCompliance = teamComplianceSummaries[team.team.id],
+        )
+    }
+
+    fun userManagementTarget(user: UserData): ParticipantManagementTarget {
+        val teamSummary = participantsTeamsByUserId[user.id]
+            ?.team
+            ?.id
+            ?.let(teamComplianceSummaries::get)
+        val compliance = userComplianceSummaries[user.id]
+            ?: teamSummary?.users?.firstOrNull { summary -> summary.userId == user.id }
+        return ParticipantManagementTarget(
+            cardType = ParticipantCardType.USER,
+            title = toDisplayName(user),
+            user = user,
+            billingContext = buildUserBillingContext(user),
+            teamCompliance = teamSummary,
+            userCompliance = compliance,
+        )
+    }
+
+    fun fallbackComplianceUser(user: UserData): EventComplianceUserSummary {
+        return EventComplianceUserSummary(
+            userId = user.id,
+            fullName = toDisplayName(user),
+            userName = user.userName.trim().takeIf(String::isNotBlank),
+        )
+    }
+
+    fun fallbackTeamComplianceUsers(team: TeamWithPlayers): List<EventComplianceUserSummary> {
+        val syncedTeam = team.team.withSynchronizedMembership()
+        val knownUsers = (
+            selectedEvent.players +
+                team.players +
+                team.pendingPlayers +
+                listOfNotNull(team.captain)
+            )
+            .distinctBy(UserData::id)
+            .associateBy(UserData::id)
+        val rosterIds = buildSet {
+            addAll(syncedTeam.activePlayerRegistrations().map { registration -> registration.userId })
+            syncedTeam.captainId.takeIf(String::isNotBlank)?.let(::add)
+            addAll(syncedTeam.activeStaffAssignments().map { assignment -> assignment.userId })
+        }
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+
+        val rosterUsers = rosterIds.map { userId ->
+            knownUsers[userId]?.let(::fallbackComplianceUser)
+                ?: EventComplianceUserSummary(userId = userId, fullName = userId)
+        }
+        return rosterUsers.ifEmpty {
+            team.players.distinctBy(UserData::id).map(::fallbackComplianceUser)
+        }
+    }
+
+    fun fallbackComplianceUsersForTarget(target: ParticipantManagementTarget): List<EventComplianceUserSummary> {
+        return when (target.cardType) {
+            ParticipantCardType.TEAM -> {
+                target.teamCompliance?.users?.takeIf { users -> users.isNotEmpty() }
+                    ?: target.team?.let(::fallbackTeamComplianceUsers)
+                    ?: emptyList()
+            }
+            ParticipantCardType.USER -> {
+                listOfNotNull(
+                    target.userCompliance
+                        ?: target.user?.let(::fallbackComplianceUser),
+                )
+            }
+        }
+    }
+
+    fun buildRemoveTarget(target: ParticipantManagementTarget): ParticipantRemoveTarget? {
+        return when (target.cardType) {
+            ParticipantCardType.TEAM -> {
+                val team = target.team ?: return null
+                ParticipantRemoveTarget(
+                    cardType = ParticipantCardType.TEAM,
+                    title = "Remove ${target.title}?",
+                    subtitle = "This removes the team from the event.",
+                    team = team,
+                )
+            }
+            ParticipantCardType.USER -> {
+                val userId = target.user?.id
+                    ?: target.userCompliance?.userId
+                    ?: return null
+                ParticipantRemoveTarget(
+                    cardType = ParticipantCardType.USER,
+                    title = "Remove ${target.title}?",
+                    subtitle = "This removes the participant from the event.",
+                    userId = userId,
+                )
+            }
+        }
     }
 
     fun closeRefundModal() {
@@ -391,7 +546,7 @@ fun ParticipantsView(
                     refundAmountDraftByPaymentId = snapshot.bills
                         .flatMap { bill -> bill.payments }
                         .associate { payment ->
-                            payment.id to centsToAmountText(payment.refundableAmountCents)
+                            payment.id to payment.refundableAmountCents.coerceAtLeast(0).toString()
                         }
                 }
                 .onFailure { throwable ->
@@ -407,8 +562,8 @@ fun ParticipantsView(
         creatingBill = false
         createBillOwnerType = context.defaultOwnerType
         createBillOwnerId = context.defaultOwnerId ?: context.userOptions.firstOrNull()?.id
-        createBillAmount = "0.00"
-        createBillTax = "0.00"
+        createBillAmount = "0"
+        createBillTax = "0"
         createBillAllowSplit = false
         createBillLabel = "Event registration"
     }
@@ -434,7 +589,7 @@ fun ParticipantsView(
 
         when (section) {
             ParticipantsSection.TEAMS -> {
-                if (!teamSignup || divisionTeams.isEmpty()) {
+                if (!teamSignup || visibleDivisionTeams.isEmpty()) {
                     item(key = "teams-empty") {
                         Text(
                             "No teams yet.",
@@ -444,10 +599,9 @@ fun ParticipantsView(
                     }
                 } else {
                     items(
-                        divisionTeams.values.toList(),
+                        visibleDivisionTeams,
                         key = { it.team.id },
                     ) { team ->
-                        val isPlaceholderTeam = team.team.isPlaceholderSlot(selectedEvent.event.eventType)
                         Column(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -455,46 +609,14 @@ fun ParticipantsView(
                             TeamCard(
                                 team = team,
                                 modifier = Modifier.clickable {
-                                    selectedTeam = team
-                                    showTeamDialog = true
+                                    if (manageMode && canManageParticipants) {
+                                        managementTarget = teamManagementTarget(team)
+                                    } else {
+                                        selectedTeam = team
+                                        showTeamDialog = true
+                                    }
                                 },
                             )
-                            if (manageMode && canManageParticipants && !isPlaceholderTeam) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    OutlinedButton(
-                                        onClick = {
-                                            loadRefundSnapshot(buildTeamBillingContext(team))
-                                        },
-                                        modifier = Modifier.weight(1f),
-                                    ) {
-                                        Text("Refund")
-                                    }
-                                    OutlinedButton(
-                                        onClick = {
-                                            openCreateBillModal(buildTeamBillingContext(team))
-                                        },
-                                        modifier = Modifier.weight(1f),
-                                    ) {
-                                        Text("Send Bill")
-                                    }
-                                    OutlinedButton(
-                                        onClick = {
-                                            removeTarget = ParticipantRemoveTarget(
-                                                cardType = ParticipantCardType.TEAM,
-                                                title = team.team.name.ifBlank { "Remove team" },
-                                                subtitle = "Remove this team from participants?",
-                                                team = team,
-                                            )
-                                        },
-                                        modifier = Modifier.weight(1f),
-                                    ) {
-                                        Text("Remove")
-                                    }
-                                }
-                            }
                         }
                     }
                 }
@@ -548,10 +670,10 @@ fun ParticipantsView(
                 } else {
                     participantUsersFromEvent.ifEmpty { participants }
                 }
-                if (manageMode && canManageParticipants && participantManagementLoading) {
+                if (manageMode && canManageParticipants && (participantManagementLoading || participantComplianceLoading)) {
                     item(key = "participants-manage-loading") {
                         Text(
-                            "Loading registration status...",
+                            "Loading registration details...",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -567,78 +689,40 @@ fun ParticipantsView(
                     }
                 } else {
                     items(visibleParticipants, key = { it.id }) { participant ->
-                        val billingContext = buildUserBillingContext(participant)
-                        val registrationEntry = participantRegistrationByUserId[participant.id]
                         Column(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            PlayerCardWithActions(
-                                player = participant,
-                                currentUser = currentUser,
-                                onMessage = { user ->
-                                    onNavigateToChat(user)
-                                },
-                                onSendFriendRequest = { user ->
-                                    playerInteractionComponent.sendFriendRequest(user)
-                                },
-                                onFollow = { user ->
-                                    playerInteractionComponent.followUser(user)
-                                },
-                                onUnfollow = { user ->
-                                    playerInteractionComponent.unfollowUser(user)
-                                },
-                                onBlock = { user, leaveSharedChats ->
-                                    playerInteractionComponent.blockUser(user, leaveSharedChats)
-                                },
-                                onUnblock = { user ->
-                                    playerInteractionComponent.unblockUser(user)
-                                },
-                            )
-                            if (manageMode && canManageParticipants && registrationEntry != null) {
-                                Text(
-                                    text = registrationEntry.hostStatusText(),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (registrationEntry.requiresDocumentAttention()) {
-                                        MaterialTheme.colorScheme.error
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
+                            if (manageMode && canManageParticipants) {
+                                PlayerCard(
+                                    player = participant,
+                                    modifier = Modifier.clickable {
+                                        managementTarget = userManagementTarget(participant)
                                     },
                                 )
-                            }
-                            if (manageMode && canManageParticipants) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    OutlinedButton(
-                                        onClick = { billingContext?.let(::loadRefundSnapshot) },
-                                        enabled = billingContext != null,
-                                        modifier = Modifier.weight(1f),
-                                    ) {
-                                        Text("Refund")
-                                    }
-                                    OutlinedButton(
-                                        onClick = { billingContext?.let(::openCreateBillModal) },
-                                        enabled = billingContext != null,
-                                        modifier = Modifier.weight(1f),
-                                    ) {
-                                        Text("Send Bill")
-                                    }
-                                    OutlinedButton(
-                                        onClick = {
-                                            removeTarget = ParticipantRemoveTarget(
-                                                cardType = ParticipantCardType.USER,
-                                                title = toDisplayName(participant),
-                                                subtitle = "Remove this participant from the event?",
-                                                userId = participant.id,
-                                            )
-                                        },
-                                        modifier = Modifier.weight(1f),
-                                    ) {
-                                        Text("Remove")
-                                    }
-                                }
+                            } else {
+                                PlayerCardWithActions(
+                                    player = participant,
+                                    currentUser = currentUser,
+                                    onMessage = { user ->
+                                        onNavigateToChat(user)
+                                    },
+                                    onSendFriendRequest = { user ->
+                                        playerInteractionComponent.sendFriendRequest(user)
+                                    },
+                                    onFollow = { user ->
+                                        playerInteractionComponent.followUser(user)
+                                    },
+                                    onUnfollow = { user ->
+                                        playerInteractionComponent.unfollowUser(user)
+                                    },
+                                    onBlock = { user, leaveSharedChats ->
+                                        playerInteractionComponent.blockUser(user, leaveSharedChats)
+                                    },
+                                    onUnblock = { user ->
+                                        playerInteractionComponent.unblockUser(user)
+                                    },
+                                )
                             }
                         }
                     }
@@ -677,6 +761,40 @@ fun ParticipantsView(
             },
             isRegistering = startingTeamRegistrationId == selectedTeamForDialog.team.id,
             onRegisterForTeam = { component.startTeamRegistration(selectedTeamForDialog) },
+        )
+    }
+
+    managementTarget?.let { selectedTarget ->
+        val target = when (selectedTarget.cardType) {
+            ParticipantCardType.TEAM -> selectedTarget.team?.let(::teamManagementTarget) ?: selectedTarget
+            ParticipantCardType.USER -> selectedTarget.user?.let(::userManagementTarget) ?: selectedTarget
+        }
+        ParticipantManagementDialog(
+            target = target,
+            fallbackUsers = fallbackComplianceUsersForTarget(target),
+            complianceLoading = participantComplianceLoading,
+            selectedDivisionId = selectedDivisionId,
+            divisionOptions = divisionOptions,
+            onTeamDivisionSelected = onTeamDivisionSelected,
+            onDismiss = { managementTarget = null },
+            onRefund = {
+                target.billingContext?.let { billingContext ->
+                    managementTarget = null
+                    loadRefundSnapshot(billingContext)
+                }
+            },
+            onSendBill = {
+                target.billingContext?.let { billingContext ->
+                    managementTarget = null
+                    openCreateBillModal(billingContext)
+                }
+            },
+            onRemove = {
+                buildRemoveTarget(target)?.let { nextRemoveTarget ->
+                    managementTarget = null
+                    removeTarget = nextRemoveTarget
+                }
+            },
         )
     }
 
@@ -762,7 +880,7 @@ fun ParticipantsView(
 
                                     bill.payments.forEach { payment ->
                                         val draft = refundAmountDraftByPaymentId[payment.id]
-                                            ?: centsToAmountText(payment.refundableAmountCents)
+                                            ?: payment.refundableAmountCents.coerceAtLeast(0).toString()
                                         Column(
                                             modifier = Modifier.fillMaxWidth(),
                                             verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -783,25 +901,26 @@ fun ParticipantsView(
                                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                                     verticalAlignment = Alignment.CenterVertically,
                                                 ) {
-                                                    StandardTextField(
+                                                    MoneyInputField(
                                                         value = draft,
                                                         onValueChange = { value ->
                                                             refundAmountDraftByPaymentId =
-                                                                refundAmountDraftByPaymentId + (payment.id to value)
+                                                                refundAmountDraftByPaymentId +
+                                                                (payment.id to value.filter(Char::isDigit))
                                                         },
                                                         modifier = Modifier.weight(1f),
-                                                        placeholder = "0.00",
+                                                        placeholder = "0",
                                                     )
                                                     OutlinedButton(
                                                         enabled = refundingPaymentId == null ||
                                                             refundingPaymentId == payment.id,
                                                         onClick = {
                                                             val amountCents =
-                                                                parseCurrencyTextToCents(
+                                                                parseCentsInputToCents(
                                                                     refundAmountDraftByPaymentId[payment.id]
-                                                                        ?: centsToAmountText(
-                                                                            payment.refundableAmountCents,
-                                                                        ),
+                                                                        ?: payment.refundableAmountCents
+                                                                            .coerceAtLeast(0)
+                                                                            .toString(),
                                                                 )
                                                             if (amountCents == null || amountCents <= 0) {
                                                                 refundError = "Enter a refund amount greater than $0.00"
@@ -855,8 +974,8 @@ fun ParticipantsView(
     billContext?.let { context ->
         val availableUserOwners = context.userOptions
         val isUserOnlyOwner = !context.allowTeamOwner
-        val previewEventAmountCents = (parseCurrencyTextToCents(createBillAmount) ?: 0).coerceAtLeast(0)
-        val previewTaxAmountCents = (parseCurrencyTextToCents(createBillTax) ?: 0).coerceAtLeast(0)
+        val previewEventAmountCents = (parseCentsInputToCents(createBillAmount) ?: 0).coerceAtLeast(0)
+        val previewTaxAmountCents = (parseCentsInputToCents(createBillTax) ?: 0).coerceAtLeast(0)
         val previewTotalAmountCents = previewEventAmountCents + previewTaxAmountCents
         val previewLabel = createBillLabel.trim().ifBlank { "Event registration" }
 
@@ -922,17 +1041,21 @@ fun ParticipantsView(
 
                     MoneyInputField(
                         value = createBillAmount,
-                        onValueChange = { createBillAmount = it },
+                        onValueChange = { value ->
+                            createBillAmount = value.filter(Char::isDigit)
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         label = "Price",
-                        placeholder = "0.00",
+                        placeholder = "0",
                     )
                     MoneyInputField(
                         value = createBillTax,
-                        onValueChange = { createBillTax = it },
+                        onValueChange = { value ->
+                            createBillTax = value.filter(Char::isDigit)
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         label = "Tax",
-                        placeholder = "0.00",
+                        placeholder = "0",
                     )
                     StandardTextField(
                         value = createBillLabel,
@@ -984,12 +1107,12 @@ fun ParticipantsView(
             confirmButton = {
                 Button(
                     onClick = {
-                        val amountCents = parseCurrencyTextToCents(createBillAmount)
+                        val amountCents = parseCentsInputToCents(createBillAmount)
                         if (amountCents == null || amountCents <= 0) {
                             createBillError = "Enter an amount greater than $0.00"
                             return@Button
                         }
-                        val taxCents = parseCurrencyTextToCents(createBillTax) ?: 0
+                        val taxCents = parseCentsInputToCents(createBillTax) ?: 0
                         if (taxCents < 0) {
                             createBillError = "Tax cannot be negative"
                             return@Button
@@ -1044,6 +1167,413 @@ fun ParticipantsView(
     }
 }
 
+@Composable
+private fun ParticipantManagementDialog(
+    target: ParticipantManagementTarget,
+    fallbackUsers: List<EventComplianceUserSummary>,
+    complianceLoading: Boolean,
+    selectedDivisionId: String?,
+    divisionOptions: List<EventDetailDivisionOption>,
+    onTeamDivisionSelected: (TeamWithPlayers, String) -> Unit,
+    onDismiss: () -> Unit,
+    onRefund: () -> Unit,
+    onSendBill: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    var expandedUserIds by remember(target.cardType, target.title, target.team?.team?.id, target.user?.id) {
+        mutableStateOf<Set<String>>(emptySet())
+    }
+    val paymentSummary = when (target.cardType) {
+        ParticipantCardType.TEAM -> target.teamCompliance?.payment
+        ParticipantCardType.USER -> target.userCompliance?.payment
+    } ?: EventCompliancePaymentSummary()
+    val documentSummary = when (target.cardType) {
+        ParticipantCardType.TEAM -> target.teamCompliance?.documents
+        ParticipantCardType.USER -> target.userCompliance?.documents
+    } ?: EventComplianceDocumentCounts()
+    val users = when (target.cardType) {
+        ParticipantCardType.TEAM -> target.teamCompliance?.users?.takeIf { users -> users.isNotEmpty() }
+        ParticipantCardType.USER -> target.userCompliance?.let(::listOf)
+    } ?: fallbackUsers
+    val hasComplianceSummary = when (target.cardType) {
+        ParticipantCardType.TEAM -> target.teamCompliance != null
+        ParticipantCardType.USER -> target.userCompliance != null
+    }
+    val targetTeam = target.team
+    val initialTargetDivisionId = remember(targetTeam?.team?.id, targetTeam?.team?.division, divisionOptions, selectedDivisionId) {
+        targetTeam?.resolveParticipantDivisionId(
+            divisionOptions = divisionOptions,
+            fallbackDivisionId = selectedDivisionId,
+        )
+    }
+    var dialogDivisionId by remember(targetTeam?.team?.id, initialTargetDivisionId) {
+        mutableStateOf(initialTargetDivisionId)
+    }
+    val showDivisionSelector = target.cardType == ParticipantCardType.TEAM &&
+        divisionOptions.size > 1
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(target.title)
+                if (showDivisionSelector && targetTeam != null) {
+                    ParticipantDivisionDropdown(
+                        selectedDivisionId = dialogDivisionId,
+                        divisionOptions = divisionOptions,
+                        onDivisionSelected = { divisionId ->
+                            dialogDivisionId = divisionId
+                            onTeamDivisionSelected(targetTeam, divisionId)
+                        },
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 460.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                if (complianceLoading && !hasComplianceSummary) {
+                    Text(
+                        text = "Loading registration details...",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    ComplianceSummaryCard(
+                        title = "Payment",
+                        value = paymentSummary.paymentStatusText(target.cardType),
+                        needsAttention = paymentSummary.needsAttention(),
+                        modifier = Modifier.weight(1f),
+                    )
+                    ComplianceSummaryCard(
+                        title = "Required signatures",
+                        value = documentSummary.documentStatusText(),
+                        needsAttention = documentSummary.needsAttention(),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+
+                if (users.isEmpty()) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        ),
+                    ) {
+                        Text(
+                            text = if (target.cardType == ParticipantCardType.TEAM) {
+                                "No users were found on this team."
+                            } else {
+                                "Participant details are not available yet."
+                            },
+                            modifier = Modifier.padding(12.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(users, key = { user -> user.userId }) { userSummary ->
+                            val expanded = expandedUserIds.contains(userSummary.userId)
+                            ComplianceUserCard(
+                                userSummary = userSummary,
+                                cardType = target.cardType,
+                                expanded = expanded,
+                                onClick = {
+                                    expandedUserIds = if (expanded) {
+                                        expandedUserIds - userSummary.userId
+                                    } else {
+                                        expandedUserIds + userSummary.userId
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = onRefund,
+                        enabled = target.billingContext != null,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Refund")
+                    }
+                    OutlinedButton(
+                        onClick = onSendBill,
+                        enabled = target.billingContext != null,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Send Bill")
+                    }
+                }
+                Button(
+                    onClick = onRemove,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
+                ) {
+                    Text("Remove")
+                }
+            }
+        },
+        dismissButton = {},
+    )
+}
+
+@Composable
+private fun ParticipantDivisionDropdown(
+    selectedDivisionId: String?,
+    divisionOptions: List<EventDetailDivisionOption>,
+    onDivisionSelected: (String) -> Unit,
+) {
+    val resolvedDivisionId = divisionOptions.resolveSelectedEventDivisionId(selectedDivisionId)
+    val selectedLabel = divisionOptions
+        .firstOrNull { option -> option.id == resolvedDivisionId }
+        ?.label
+        .orEmpty()
+
+    DropdownField(
+        modifier = Modifier.fillMaxWidth(),
+        value = selectedLabel,
+        label = "Division",
+    ) { dismiss ->
+        divisionOptions.forEach { option ->
+            DropdownMenuItem(
+                text = { Text(option.label) },
+                onClick = {
+                    dismiss()
+                    onDivisionSelected(option.id)
+                },
+                leadingIcon = {
+                    if (option.id == resolvedDivisionId) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                        )
+                    }
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ComplianceSummaryCard(
+    title: String,
+    value: String,
+    needsAttention: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (needsAttention) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ComplianceUserCard(
+    userSummary: EventComplianceUserSummary,
+    cardType: ParticipantCardType,
+    expanded: Boolean,
+    onClick: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = userSummary.fullName,
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    userSummary.userName?.let { userName ->
+                        Text(
+                            text = "@$userName",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        text = userSummary.registrationLabel(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    text = if (expanded) "Hide" else "Details",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+
+            if (expanded) {
+                HorizontalDivider()
+                ComplianceDetailSection(
+                    title = "Bills",
+                    value = userSummary.payment.paymentStatusText(cardType),
+                    needsAttention = userSummary.payment.needsAttention(),
+                )
+                ComplianceDetailSection(
+                    title = "Documents",
+                    value = userSummary.documents.documentStatusText(),
+                    needsAttention = userSummary.documents.needsAttention(),
+                )
+                if (userSummary.requiredDocuments.isEmpty()) {
+                    Text(
+                        text = "No required documents for this user.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    userSummary.requiredDocuments.forEach { document ->
+                        ComplianceDocumentRow(document)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ComplianceDetailSection(
+    title: String,
+    value: String,
+    needsAttention: Boolean,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (needsAttention) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
+        )
+    }
+}
+
+@Composable
+private fun ComplianceDocumentRow(document: EventComplianceRequiredDocument) {
+    val signed = document.status.equals("SIGNED", ignoreCase = true) ||
+        document.status.equals("COMPLETED", ignoreCase = true)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = document.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        text = "${document.signerLabel} | " +
+                            (if (document.signOnce) "Sign once" else "Event-specific"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    text = if (signed) "Signed" else "Needs signature",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (signed) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                )
+            }
+            document.signedAt?.let { signedAt ->
+                Text(
+                    text = signedAt,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
 private fun formatCurrency(amountCents: Int): String = "$${centsToAmountText(amountCents)}"
 
 private fun centsToAmountText(amountCents: Int): String {
@@ -1060,10 +1590,8 @@ private fun centsToAmountText(amountCents: Int): String {
     }
 }
 
-private fun parseCurrencyTextToCents(value: String): Int? {
-    val numeric = value.trim().replace("$", "").takeIf(String::isNotBlank)?.toDoubleOrNull() ?: return null
-    if (!numeric.isFinite()) return null
-    return round(numeric * 100).toInt()
+private fun parseCentsInputToCents(value: String): Int? {
+    return value.filter(Char::isDigit).toIntOrNull()
 }
 
 @Composable

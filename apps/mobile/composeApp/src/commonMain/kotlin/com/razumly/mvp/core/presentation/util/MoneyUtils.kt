@@ -4,44 +4,8 @@ import kotlin.math.round
 
 object MoneyInputUtils {
 
-    /**
-     * Filters input to allow only valid money format
-     * - Only digits and single decimal point
-     * - Maximum 2 decimal places
-     * - No leading zeros (except 0.xx)
-     */
     fun moneyInputFilter(input: String): String {
-        // Remove any non-digit and non-decimal characters
-        val filtered = input.filter { it.isDigit() || it == '.' }
-
-        // Handle empty input
-        if (filtered.isEmpty()) return ""
-
-        // Handle single decimal point
-        if (filtered == ".") return "0."
-
-        // Split by decimal point
-        val parts = filtered.split(".")
-
-        return when {
-            // No decimal point
-            parts.size == 1 -> {
-                val integerPart = parts[0].trimStart('0').takeIf { it.isNotEmpty() } ?: "0"
-                integerPart
-            }
-            // One decimal point
-            parts.size == 2 -> {
-                val integerPart = parts[0].trimStart('0').takeIf { it.isNotEmpty() } ?: "0"
-                val decimalPart = parts[1].take(2) // Limit to 2 decimal places
-                "$integerPart.$decimalPart"
-            }
-            // Multiple decimal points - take only first two parts
-            else -> {
-                val integerPart = parts[0].trimStart('0').takeIf { it.isNotEmpty() } ?: "0"
-                val decimalPart = parts[1].take(2)
-                "$integerPart.$decimalPart"
-            }
-        }
+        return input.filter(Char::isDigit).trimStart('0')
     }
 
     /**

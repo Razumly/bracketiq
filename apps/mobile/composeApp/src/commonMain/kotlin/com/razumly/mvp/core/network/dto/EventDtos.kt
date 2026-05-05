@@ -480,6 +480,68 @@ data class EventParticipantsSnapshotResponseDto(
 )
 
 @Serializable
+data class EventCompliancePaymentSummaryDto(
+    val hasBill: Boolean? = null,
+    val billId: String? = null,
+    val totalAmountCents: Int? = null,
+    val paidAmountCents: Int? = null,
+    val status: String? = null,
+    val isPaidInFull: Boolean? = null,
+    val inheritedFromTeamBill: Boolean? = null,
+)
+
+@Serializable
+data class EventComplianceDocumentCountsDto(
+    val signedCount: Int? = null,
+    val requiredCount: Int? = null,
+)
+
+@Serializable
+data class EventComplianceRequiredDocumentDto(
+    val key: String? = null,
+    val templateId: String? = null,
+    val title: String? = null,
+    val type: String? = null,
+    val signerContext: String? = null,
+    val signerLabel: String? = null,
+    val signOnce: Boolean? = null,
+    val status: String? = null,
+    val signedDocumentRecordId: String? = null,
+    val signedAt: String? = null,
+)
+
+@Serializable
+data class EventComplianceUserSummaryDto(
+    val userId: String? = null,
+    val fullName: String? = null,
+    val userName: String? = null,
+    val isMinorAtEvent: Boolean? = null,
+    val registrationType: String? = null,
+    val payment: EventCompliancePaymentSummaryDto? = null,
+    val documents: EventComplianceDocumentCountsDto? = null,
+    val requiredDocuments: List<EventComplianceRequiredDocumentDto> = emptyList(),
+)
+
+@Serializable
+data class EventTeamComplianceSummaryDto(
+    val teamId: String? = null,
+    val teamName: String? = null,
+    val payment: EventCompliancePaymentSummaryDto? = null,
+    val documents: EventComplianceDocumentCountsDto? = null,
+    val users: List<EventComplianceUserSummaryDto> = emptyList(),
+)
+
+@Serializable
+data class EventTeamComplianceResponseDto(
+    val teams: List<EventTeamComplianceSummaryDto> = emptyList(),
+)
+
+@Serializable
+data class EventUserComplianceResponseDto(
+    val users: List<EventComplianceUserSummaryDto> = emptyList(),
+)
+
+@Serializable
 data class CurrentUserEventRegistrationDto(
     val id: String? = null,
     val eventId: String? = null,

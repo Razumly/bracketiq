@@ -429,6 +429,12 @@ internal class CreateEvent_FakeEventRepository(
         preferredDivisionId: String?,
         occurrence: EventOccurrenceSelection?,
     ): Result<SelfRegistrationResult> = Result.success(SelfRegistrationResult())
+    override suspend fun addPlayerToEvent(
+        event: Event,
+        player: UserData,
+        preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<SelfRegistrationResult> = Result.success(SelfRegistrationResult())
     override suspend fun registerChildForEvent(
         eventId: String,
         childUserId: String,

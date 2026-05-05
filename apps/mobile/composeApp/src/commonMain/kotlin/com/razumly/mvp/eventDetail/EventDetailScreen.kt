@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Share
@@ -72,8 +73,11 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -114,6 +118,7 @@ import com.razumly.mvp.core.data.dataTypes.divisionPriceRange
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
@@ -138,6 +143,7 @@ import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
 import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
+import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
@@ -151,6 +157,7 @@ import com.razumly.mvp.core.presentation.util.toNameCase
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
+import com.razumly.mvp.eventDetail.composables.DropdownField
 import com.razumly.mvp.eventDetail.composables.MatchEditDialog
 import com.razumly.mvp.eventDetail.composables.ParticipantsSection
 import com.razumly.mvp.eventDetail.composables.ParticipantsView
@@ -1608,6 +1615,8 @@ private fun ParticipantsFloatingBar(
     isManagingParticipants: Boolean = false,
     onStartManagingParticipants: (() -> Unit)? = null,
     onStopManagingParticipants: (() -> Unit)? = null,
+    inviteActionLabel: String? = null,
+    onInviteClick: (() -> Unit)? = null,
     selectedWeeklyOccurrenceLabel: String? = null,
     onClearSelectedWeeklyOccurrence: (() -> Unit)? = null,
     onShowDetailsClick: () -> Unit,
@@ -1673,6 +1682,24 @@ private fun ParticipantsFloatingBar(
                     }
                 }
             }
+            if (!inviteActionLabel.isNullOrBlank() && onInviteClick != null) {
+                Button(onClick = onInviteClick) {
+                    Icon(
+                        imageVector = if (inviteActionLabel.contains("Team", ignoreCase = true)) {
+                            MVPIcons.Groups
+                        } else {
+                            Icons.Default.PersonAdd
+                        },
+                        contentDescription = null,
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = inviteActionLabel,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
             if (showManageAction) {
                 if (isManagingParticipants && onStopManagingParticipants != null) {
                     Button(onClick = onStopManagingParticipants) {
@@ -1695,6 +1722,307 @@ private fun ParticipantsFloatingBar(
             }
         }
     }
+}
+
+private enum class EventPlayerInviteMode(val label: String) {
+    Search("Search"),
+    Email("Email"),
+}
+
+@Composable
+internal fun EventTeamInviteDialog(
+    teams: List<Team>,
+    isLoading: Boolean,
+    selectedDivisionId: String?,
+    divisionOptions: List<EventDetailDivisionOption>,
+    onSearch: (String) -> Unit,
+    onDivisionSelected: (String) -> Unit,
+    onTeamSelected: (Team) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    val resolvedDivisionId = divisionOptions.resolveSelectedEventDivisionId(selectedDivisionId)
+    val selectedDivisionLabel = divisionOptions
+        .firstOrNull { option -> option.id == resolvedDivisionId }
+        ?.label
+        .orEmpty()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Invite Team") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (divisionOptions.size > 1) {
+                    DropdownField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = selectedDivisionLabel,
+                        label = "Assign to division",
+                    ) { dismiss ->
+                        divisionOptions.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option.label) },
+                                onClick = {
+                                    dismiss()
+                                    onDivisionSelected(option.id)
+                                },
+                                leadingIcon = {
+                                    if (option.id == resolvedDivisionId) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                        )
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+                StandardTextField(
+                    value = query,
+                    onValueChange = { value ->
+                        query = value
+                        onSearch(value)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "Search teams",
+                )
+                when {
+                    isLoading -> Text(
+                        text = "Loading teams...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    query.trim().length < 2 -> Text(
+                        text = "Type at least 2 characters to search.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    teams.isEmpty() -> Text(
+                        text = "No teams match your search.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    else -> LazyColumn(
+                        modifier = Modifier.heightIn(max = 320.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(teams, key = { it.id }) { team ->
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onTeamSelected(team) },
+                                shape = RoundedCornerShape(8.dp),
+                                tonalElevation = 1.dp,
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                                    ) {
+                                        Text(
+                                            text = team.name.ifBlank { "Team" },
+                                            style = MaterialTheme.typography.titleSmall,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            text = team.inviteSubtitle(),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    TextButton(onClick = { onTeamSelected(team) }) {
+                                        Text("Invite")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun EventPlayerInviteDialog(
+    eventName: String,
+    suggestions: List<UserData>,
+    existingParticipantIds: Set<String>,
+    onSearch: (String) -> Unit,
+    onPlayerSelected: (UserData) -> Unit,
+    onInviteByEmail: (firstName: String, lastName: String, email: String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var mode by remember { mutableStateOf(EventPlayerInviteMode.Search) }
+    var query by remember { mutableStateOf("") }
+    var firstName by remember { mutableStateOf("") }
+    var lastName by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
+    val filteredSuggestions = remember(suggestions, existingParticipantIds) {
+        suggestions.filterNot { user -> existingParticipantIds.contains(user.id.trim()) }
+    }
+    val canSendEmail = firstName.trim().isNotBlank() &&
+        lastName.trim().isNotBlank() &&
+        email.trim().isValidInviteEmail()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Invite Player") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                PrimaryTabRow(selectedTabIndex = mode.ordinal) {
+                    EventPlayerInviteMode.values().forEach { tab ->
+                        Tab(
+                            selected = mode == tab,
+                            onClick = {
+                                mode = tab
+                                query = ""
+                                onSearch("")
+                            },
+                            text = { Text(tab.label) },
+                        )
+                    }
+                }
+
+                when (mode) {
+                    EventPlayerInviteMode.Search -> {
+                        StandardTextField(
+                            value = query,
+                            onValueChange = { value ->
+                                query = value
+                                onSearch(value)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = "Search players",
+                        )
+                        when {
+                            query.trim().length < 2 -> Text(
+                                text = "Type at least 2 characters to search.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+
+                            filteredSuggestions.isEmpty() -> Text(
+                                text = "No players match your search.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+
+                            else -> LazyColumn(
+                                modifier = Modifier.heightIn(max = 320.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                items(filteredSuggestions, key = { it.id }) { user ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { onPlayerSelected(user) }
+                                            .padding(vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        PlayerCard(
+                                            player = user,
+                                            modifier = Modifier.weight(1f),
+                                            trailingContent = {
+                                                TextButton(onClick = { onPlayerSelected(user) }) {
+                                                    Text("Invite")
+                                                }
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    EventPlayerInviteMode.Email -> {
+                        Text(
+                            text = "Invite a player to $eventName by email.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            StandardTextField(
+                                value = firstName,
+                                onValueChange = { firstName = it },
+                                modifier = Modifier.weight(1f),
+                                label = "First name",
+                            )
+                            StandardTextField(
+                                value = lastName,
+                                onValueChange = { lastName = it },
+                                modifier = Modifier.weight(1f),
+                                label = "Last name",
+                            )
+                        }
+                        StandardTextField(
+                            value = email,
+                            onValueChange = { email = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = "Email",
+                            keyboardType = "email",
+                            supportingText = if (email.isNotBlank() && !email.trim().isValidInviteEmail()) {
+                                "Enter a valid email address."
+                            } else {
+                                ""
+                            },
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (mode == EventPlayerInviteMode.Email) {
+                Button(
+                    onClick = { onInviteByEmail(firstName, lastName, email) },
+                    enabled = canSendEmail,
+                ) {
+                    Text("Send Invite")
+                }
+            } else {
+                TextButton(onClick = onDismiss) {
+                    Text("Close")
+                }
+            }
+        },
+        dismissButton = {
+            if (mode == EventPlayerInviteMode.Email) {
+                OutlinedButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
+            }
+        },
+    )
+}
+
+private fun Team.inviteSubtitle(): String {
+    val parts = listOf(
+        sport?.trim()?.takeIf(String::isNotBlank),
+        division.trim().takeIf(String::isNotBlank),
+    ).filterNotNull()
+    val rosterLabel = "${playerIds.distinct().size}/${teamSize} players"
+    return (parts + rosterLabel).joinToString(" | ")
+}
+
+private fun String.isValidInviteEmail(): Boolean {
+    val normalized = trim()
+    return normalized.isNotBlank() && normalized.matches(com.razumly.mvp.core.util.emailAddressRegex)
 }
 
 @Composable
@@ -1996,6 +2324,8 @@ fun EventDetailScreen(
     val leagueDivisionStandingsLoading by component.leagueDivisionStandingsLoading.collectAsState()
     val leagueStandingsConfirming by component.leagueStandingsConfirming.collectAsState()
     val suggestedUsers by component.suggestedUsers.collectAsState()
+    val inviteTeamSuggestions by component.inviteTeamSuggestions.collectAsState()
+    val inviteTeamsLoading by component.inviteTeamsLoading.collectAsState()
     val pendingStaffInvites by component.pendingStaffInvites.collectAsState()
     val editableLeagueTimeSlots by component.editableLeagueTimeSlots.collectAsState()
     val editableFieldsForDetails by component.editableFields.collectAsState()
@@ -2181,6 +2511,8 @@ fun EventDetailScreen(
     var refundReason by remember { mutableStateOf("") }
     var showNotifyDialog by remember { mutableStateOf(false) }
     var showJoinOptionsSheet by remember { mutableStateOf(false) }
+    var showInviteTeamDialog by rememberSaveable { mutableStateOf(false) }
+    var showInvitePlayerDialog by rememberSaveable { mutableStateOf(false) }
     var selectedJoinOptionDivisionId by rememberSaveable { mutableStateOf<String?>(null) }
     var showStandingsConfirmDialog by remember { mutableStateOf(false) }
     var showBuildBracketConfirmDialog by remember { mutableStateOf(false) }
@@ -2506,6 +2838,26 @@ fun EventDetailScreen(
                 .ifEmpty { joinDivisionOptions }
         }
     }
+    val registrationDivisionOptions = remember(
+        selectedEvent.event.divisions,
+        selectedEvent.event.divisionDetails,
+    ) {
+        buildRegistrationDivisionOptions(selectedEvent.event)
+    }
+    val splitRegistrationDivisionOptions = remember(
+        selectedEvent.event.teamSignup,
+        selectedEvent.event.singleDivision,
+        registrationDivisionOptions,
+    ) {
+        if (selectedEvent.event.teamSignup &&
+            !selectedEvent.event.singleDivision &&
+            registrationDivisionOptions.size > 1
+        ) {
+            registrationDivisionOptions
+        } else {
+            emptyList()
+        }
+    }
     val playoffDivisionOptions = remember(
         joinDivisionOptions,
         playoffDivisionIds,
@@ -2524,6 +2876,17 @@ fun EventDetailScreen(
         joinDivisionOptions,
     ) {
         joinDivisionOptions.resolveSelectedDivisionId(selectedDivision)
+    }
+    LaunchedEffect(showInviteTeamDialog, splitRegistrationDivisionOptions, selectedDivision) {
+        if (!showInviteTeamDialog || splitRegistrationDivisionOptions.isEmpty()) {
+            return@LaunchedEffect
+        }
+        val resolvedDivisionId = splitRegistrationDivisionOptions
+            .resolveSelectedEventDivisionId(selectedDivision)
+            ?: return@LaunchedEffect
+        if (selectedDivision?.normalizeDivisionIdentifier() != resolvedDivisionId) {
+            component.selectDivision(resolvedDivisionId)
+        }
     }
     LaunchedEffect(showJoinOptionsSheet) {
         if (showJoinOptionsSheet) {
@@ -3576,6 +3939,13 @@ fun EventDetailScreen(
                                             onNavigateToChat = component::onNavigateToChat,
                                             manageMode = isManagingParticipants,
                                             canManageParticipants = canManageParticipantsFromDock,
+                                            selectedDivisionId = selectedDivision,
+                                            divisionOptions = if (isManagingParticipants) {
+                                                splitRegistrationDivisionOptions
+                                            } else {
+                                                emptyList()
+                                            },
+                                            onTeamDivisionSelected = component::moveTeamParticipantDivision,
                                         )
                                     }
                                 }
@@ -3711,6 +4081,24 @@ fun EventDetailScreen(
                                         onStopManagingParticipants = {
                                             isManagingParticipants = false
                                             component.stopManagingParticipants()
+                                        },
+                                        inviteActionLabel = if (canManageParticipantsFromDock && isManagingParticipants) {
+                                            if (selectedEvent.event.teamSignup) "Invite Team" else "Invite Player"
+                                        } else {
+                                            null
+                                        },
+                                        onInviteClick = if (canManageParticipantsFromDock && isManagingParticipants) {
+                                            {
+                                                if (selectedEvent.event.teamSignup) {
+                                                    component.searchInviteTeams("")
+                                                    showInviteTeamDialog = true
+                                                } else {
+                                                    component.searchUsers("")
+                                                    showInvitePlayerDialog = true
+                                                }
+                                            }
+                                        } else {
+                                            null
                                         },
                                         selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
                                         onClearSelectedWeeklyOccurrence = if (isWeeklyParentEvent) {
@@ -4018,6 +4406,44 @@ fun EventDetailScreen(
                 }, onDismiss = {
                     showNotifyDialog = false
                 })
+            }
+
+            if (showInviteTeamDialog) {
+                EventTeamInviteDialog(
+                    teams = inviteTeamSuggestions,
+                    isLoading = inviteTeamsLoading,
+                    selectedDivisionId = selectedDivision,
+                    divisionOptions = splitRegistrationDivisionOptions,
+                    onSearch = component::searchInviteTeams,
+                    onDivisionSelected = component::selectDivision,
+                    onTeamSelected = { team ->
+                        component.inviteTeamToEvent(team)
+                        showInviteTeamDialog = false
+                    },
+                    onDismiss = { showInviteTeamDialog = false },
+                )
+            }
+
+            if (showInvitePlayerDialog) {
+                EventPlayerInviteDialog(
+                    eventName = selectedEvent.event.name,
+                    suggestions = suggestedUsers,
+                    existingParticipantIds = (
+                        selectedEvent.event.playerIds +
+                            selectedEvent.event.waitListIds +
+                            selectedEvent.event.freeAgentIds
+                        ).map(String::trim).filter(String::isNotBlank).toSet(),
+                    onSearch = component::searchUsers,
+                    onPlayerSelected = { user ->
+                        component.invitePlayerToEvent(user)
+                        showInvitePlayerDialog = false
+                    },
+                    onInviteByEmail = { firstName, lastName, email ->
+                        component.invitePlayerToEventByEmail(firstName, lastName, email)
+                        showInvitePlayerDialog = false
+                    },
+                    onDismiss = { showInvitePlayerDialog = false },
+                )
             }
 
             if (showReportEventDialog) {

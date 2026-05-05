@@ -1744,6 +1744,101 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
         assertEquals(1, billingRepository.updatedBillingAddresses.size)
         assertTrue(component.billingAddressPrompt.value == null)
     }
+
+    @Test
+    fun invitePlayerToEvent_adds_existing_user_to_event_participants() = runTest(testDispatcher) {
+        val host = mobileUser(id = "host_1", firstName = "Host", lastName = "User")
+        val target = mobileUser(id = "player_1", firstName = "Target", lastName = "Player")
+        val event = Event(
+            id = "event_1",
+            name = "Friday Open Play",
+            hostId = host.id,
+            teamSignup = false,
+            organizationId = "org_1",
+        )
+        val userRepository = EventDetailFakeUserRepository(host)
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = event,
+            host = host,
+            currentUser = host,
+            players = emptyList(),
+            teams = emptyList(),
+            staffInvites = emptyList(),
+        )
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = userRepository,
+            fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
+            event = event,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(emptyList(), emptyMap(), emptyMap()),
+            teamRepository = EventDetailFakeTeamRepository(emptyList(), listOf(host, target)),
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+        advance()
+
+        component.invitePlayerToEvent(target)
+        advance()
+
+        assertEquals(listOf("player_1"), eventRepository.addedPlayerIds)
+        assertEquals("event_1", eventRepository.addPlayerEvents.single().id)
+        assertTrue(userRepository.createdInviteRequests.isEmpty())
+    }
+
+    @Test
+    fun invitePlayerToEventByEmail_creates_event_invite_with_name_and_email() = runTest(testDispatcher) {
+        val host = mobileUser(id = "host_1", firstName = "Host", lastName = "User")
+        val event = Event(
+            id = "event_1",
+            name = "Friday Open Play",
+            hostId = host.id,
+            teamSignup = false,
+            organizationId = "org_1",
+        )
+        val userRepository = EventDetailFakeUserRepository(host)
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = userRepository,
+            fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
+            event = event,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = EventDetailFakeEventRepository(
+                initialEvent = event,
+                host = host,
+                currentUser = host,
+                players = emptyList(),
+                teams = emptyList(),
+                staffInvites = emptyList(),
+            ),
+            matchRepository = EventDetailFakeMatchRepository(emptyList(), emptyMap(), emptyMap()),
+            teamRepository = EventDetailFakeTeamRepository(emptyList(), listOf(host)),
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+        advance()
+
+        component.invitePlayerToEventByEmail("Alex", "Morgan", "alex@example.com")
+        advance()
+
+        val invite = userRepository.createdInviteRequests.single()
+        assertEquals("EVENT", invite.type)
+        assertEquals("PENDING", invite.status)
+        assertEquals("event_1", invite.eventId)
+        assertEquals("org_1", invite.organizationId)
+        assertEquals("alex@example.com", invite.email)
+        assertEquals("Alex", invite.firstName)
+        assertEquals("Morgan", invite.lastName)
+        assertNull(invite.userId)
+        assertEquals("host_1", invite.createdBy)
+    }
 }
 
 private const val UPLOADED_DB_IMAGE_ID = "camka_upload_upscaled_cc_indoor_sports_024be2e8d5cdead5_jpg"
@@ -1775,6 +1870,8 @@ private class EventDetailFakeEventRepository(
     var joinCallCount = 0
     var syncCallCount = 0
     var lastSyncedOccurrence: EventOccurrenceSelection? = null
+    val addedPlayerIds = mutableListOf<String>()
+    val addPlayerEvents = mutableListOf<Event>()
 
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> = eventFlow
 
@@ -1804,6 +1901,23 @@ private class EventDetailFakeEventRepository(
             userIds = (currentRelations.event.userIds + currentUser.id).distinct(),
         )
         val updatedPlayers = (currentRelations.players + currentUser).distinctBy(UserData::id)
+        eventFlow.value = Result.success(updatedEvent.toRelations(host, updatedPlayers, teams))
+        return Result.success(SelfRegistrationResult())
+    }
+
+    override suspend fun addPlayerToEvent(
+        event: Event,
+        player: UserData,
+        preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<SelfRegistrationResult> {
+        addedPlayerIds += player.id
+        addPlayerEvents += event
+        val currentRelations = eventFlow.value.getOrThrow()
+        val updatedEvent = currentRelations.event.copy(
+            userIds = (currentRelations.event.userIds + player.id).distinct(),
+        )
+        val updatedPlayers = (currentRelations.players + player).distinctBy(UserData::id)
         eventFlow.value = Result.success(updatedEvent.toRelations(host, updatedPlayers, teams))
         return Result.success(SelfRegistrationResult())
     }
@@ -2005,6 +2119,7 @@ private class EventDetailFakeTeamRepository(
 private class EventDetailFakeUserRepository(
     currentUserData: UserData,
 ) : IUserRepository by com.razumly.mvp.eventCreate.CreateEvent_FakeUserRepository() {
+    val createdInviteRequests = mutableListOf<InviteCreateDto>()
     private val account = AuthAccount(
         id = currentUserData.id,
         email = "${currentUserData.id}@example.test",
@@ -2035,7 +2150,10 @@ private class EventDetailFakeUserRepository(
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = Result.success(emptyList())
     override suspend fun ensureUserByEmail(email: String): Result<UserData> =
         Result.success(mobileUser(id = email.substringBefore('@'), firstName = "Email", lastName = "User"))
-    override suspend fun createInvites(invites: List<InviteCreateDto>): Result<List<Invite>> = Result.success(emptyList())
+    override suspend fun createInvites(invites: List<InviteCreateDto>): Result<List<Invite>> {
+        createdInviteRequests += invites
+        return Result.success(emptyList())
+    }
     override suspend fun deleteInvite(inviteId: String): Result<Unit> = Result.success(Unit)
     override suspend fun findEmailMembership(
         emails: List<String>,

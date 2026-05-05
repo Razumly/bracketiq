@@ -25,6 +25,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Sport
+import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
@@ -54,11 +55,13 @@ import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.CreateBillRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
+import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
 import com.razumly.mvp.core.data.repositories.EventParticipantRefundMode
 import com.razumly.mvp.core.data.repositories.EventParticipantManagementEntry
 import com.razumly.mvp.core.data.repositories.EventParticipantManagementSnapshot
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
+import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.data.repositories.isActive
 import com.razumly.mvp.core.data.repositories.requiresAdditionalSigning
@@ -71,6 +74,7 @@ import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.network.MvpApiClient
+import com.razumly.mvp.core.network.dto.InviteCreateDto
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
@@ -81,6 +85,7 @@ import com.razumly.mvp.core.presentation.util.createEventUrl
 import com.razumly.mvp.core.presentation.util.getEventQrCodePath
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
+import com.razumly.mvp.core.util.emailAddressRegex
 import com.razumly.mvp.core.util.newId
 import com.razumly.mvp.eventDetail.data.BracketNode
 import com.razumly.mvp.eventDetail.data.IMatchRepository
@@ -137,6 +142,9 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val eventTeamsAndParticipantsLoading: StateFlow<Boolean>
     val participantManagementSnapshot: StateFlow<EventParticipantManagementSnapshot>
     val participantManagementLoading: StateFlow<Boolean>
+    val teamComplianceSummaries: StateFlow<Map<String, EventTeamComplianceSummary>>
+    val userComplianceSummaries: StateFlow<Map<String, EventComplianceUserSummary>>
+    val participantComplianceLoading: StateFlow<Boolean>
     val eventMatchesLoading: StateFlow<Boolean>
     val errorState: StateFlow<ErrorMessage?>
     val eventWithRelations: StateFlow<EventWithFullRelations>
@@ -177,6 +185,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val leagueDivisionStandingsLoading: StateFlow<Boolean>
     val leagueStandingsConfirming: StateFlow<Boolean>
     val suggestedUsers: StateFlow<List<UserData>>
+    val inviteTeamSuggestions: StateFlow<List<Team>>
+    val inviteTeamsLoading: StateFlow<Boolean>
     val pendingStaffInvites: StateFlow<List<PendingStaffInviteDraft>>
     val editableLeagueTimeSlots: StateFlow<List<TimeSlot>>
     val editableFields: StateFlow<List<Field>>
@@ -233,6 +243,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun inviteFreeAgentToTeam(userId: String)
     fun startManagingParticipants()
     fun stopManagingParticipants()
+    fun moveTeamParticipantDivision(team: TeamWithPlayers, divisionId: String)
     fun removeTeamParticipant(team: TeamWithPlayers)
     fun removeUserParticipant(userId: String)
     fun startTeamRegistration(team: TeamWithPlayers)
@@ -289,6 +300,10 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun deleteImage(imageId: String)
     fun sendNotification(title: String, message: String)
     fun searchUsers(query: String)
+    fun searchInviteTeams(query: String)
+    fun inviteTeamToEvent(team: Team)
+    fun invitePlayerToEvent(user: UserData)
+    fun invitePlayerToEventByEmail(firstName: String, lastName: String, email: String)
     suspend fun addPendingStaffInvite(
         firstName: String,
         lastName: String,
@@ -691,6 +706,10 @@ class DefaultEventDetailComponent(
     }.stateIn(scope, SharingStarted.Eagerly, AuthAccount.empty())
     private val _suggestedUsers = MutableStateFlow<List<UserData>>(emptyList())
     override val suggestedUsers = _suggestedUsers.asStateFlow()
+    private val _inviteTeamSuggestions = MutableStateFlow<List<Team>>(emptyList())
+    override val inviteTeamSuggestions = _inviteTeamSuggestions.asStateFlow()
+    private val _inviteTeamsLoading = MutableStateFlow(false)
+    override val inviteTeamsLoading = _inviteTeamsLoading.asStateFlow()
     private val _pendingStaffInvites = MutableStateFlow<List<PendingStaffInviteDraft>>(emptyList())
     override val pendingStaffInvites = _pendingStaffInvites.asStateFlow()
     private val _eventStaffInvites = MutableStateFlow<List<Invite>>(emptyList())
@@ -1023,6 +1042,15 @@ class DefaultEventDetailComponent(
     private val _participantManagementLoading = MutableStateFlow(false)
     override val participantManagementLoading = _participantManagementLoading.asStateFlow()
 
+    private val _teamComplianceSummaries = MutableStateFlow<Map<String, EventTeamComplianceSummary>>(emptyMap())
+    override val teamComplianceSummaries = _teamComplianceSummaries.asStateFlow()
+
+    private val _userComplianceSummaries = MutableStateFlow<Map<String, EventComplianceUserSummary>>(emptyMap())
+    override val userComplianceSummaries = _userComplianceSummaries.asStateFlow()
+
+    private val _participantComplianceLoading = MutableStateFlow(false)
+    override val participantComplianceLoading = _participantComplianceLoading.asStateFlow()
+
     private val _eventMatchesLoading = MutableStateFlow(false)
     override val eventMatchesLoading = _eventMatchesLoading.asStateFlow()
 
@@ -1031,6 +1059,7 @@ class DefaultEventDetailComponent(
     private var weeklyOccurrenceSummaryPrefetchJob: Job? = null
     private var participantManagementActive: Boolean = false
     private var participantManagementRequestToken: Long = 0L
+    private var participantComplianceRequestToken: Long = 0L
 
     private val _showFeeBreakdown = MutableStateFlow(false)
     override val showFeeBreakdown = _showFeeBreakdown.asStateFlow()
@@ -1467,6 +1496,7 @@ class DefaultEventDetailComponent(
         eventRepository.syncEventParticipants(event = event)
             .onSuccess { result ->
                 refreshParticipantManagementSnapshotIfNeeded(result.event)
+                refreshParticipantComplianceIfNeeded(result.event)
             }
             .onFailure { throwable ->
                 _errorState.value = ErrorMessage(
@@ -1780,6 +1810,54 @@ class DefaultEventDetailComponent(
         }
     }
 
+    private suspend fun loadParticipantComplianceSummaries(
+        event: Event = selectedEvent.value,
+        reportErrors: Boolean = true,
+    ) {
+        val eventId = event.id.trim()
+        if (!participantManagementActive || eventId.isEmpty()) {
+            _participantComplianceLoading.value = false
+            return
+        }
+
+        participantComplianceRequestToken += 1
+        val requestToken = participantComplianceRequestToken
+        _participantComplianceLoading.value = true
+
+        val result = if (event.teamSignup) {
+            eventRepository.getEventTeamCompliance(eventId)
+                .map { summaries ->
+                    if (requestToken != participantComplianceRequestToken) return@map
+                    _teamComplianceSummaries.value = summaries.associateBy(EventTeamComplianceSummary::teamId)
+                    _userComplianceSummaries.value = emptyMap()
+                }
+        } else {
+            eventRepository.getEventUserCompliance(eventId)
+                .map { summaries ->
+                    if (requestToken != participantComplianceRequestToken) return@map
+                    _teamComplianceSummaries.value = emptyMap()
+                    _userComplianceSummaries.value = summaries.associateBy(EventComplianceUserSummary::userId)
+                }
+        }
+
+        result.onFailure { throwable ->
+            if (requestToken != participantComplianceRequestToken) return@onFailure
+            _teamComplianceSummaries.value = emptyMap()
+            _userComplianceSummaries.value = emptyMap()
+            if (reportErrors) {
+                _errorState.value = ErrorMessage(
+                    throwable.userMessage("Failed to load participant payment and document status."),
+                )
+            } else {
+                Napier.w("Failed to refresh participant compliance.", throwable)
+            }
+        }
+
+        if (requestToken == participantComplianceRequestToken) {
+            _participantComplianceLoading.value = false
+        }
+    }
+
     private suspend fun refreshParticipantManagementSnapshotIfNeeded(
         event: Event = selectedEvent.value,
     ) {
@@ -1787,6 +1865,18 @@ class DefaultEventDetailComponent(
             return
         }
         loadParticipantManagementSnapshot(
+            event = event,
+            reportErrors = false,
+        )
+    }
+
+    private suspend fun refreshParticipantComplianceIfNeeded(
+        event: Event = selectedEvent.value,
+    ) {
+        if (!participantManagementActive) {
+            return
+        }
+        loadParticipantComplianceSummaries(
             event = event,
             reportErrors = false,
         )
@@ -1900,6 +1990,7 @@ class DefaultEventDetailComponent(
                 }
             }
             refreshParticipantManagementSnapshotIfNeeded(result.event)
+            refreshParticipantComplianceIfNeeded(result.event)
         }.onFailure { throwable ->
             if (reportErrors) {
                 _errorState.value = ErrorMessage(
@@ -1932,6 +2023,7 @@ class DefaultEventDetailComponent(
                 if (!isWeeklyParentEvent(refreshed) || currentWeeklyOccurrenceSelection() == null) {
                     refreshParticipantManagementSnapshotIfNeeded(refreshed)
                 }
+                refreshParticipantComplianceIfNeeded(refreshed)
             }.onFailure { throwable ->
                 Napier.w(warningMessage, throwable)
             }
@@ -3431,6 +3523,7 @@ class DefaultEventDetailComponent(
                         null
                     }
                     refreshParticipantManagementSnapshotIfNeeded(result.event)
+                    refreshParticipantComplianceIfNeeded(result.event)
                 }.onFailure { throwable ->
                     if (requestToken != eventDetailHydrationToken) return@onFailure
                     _errorState.value = ErrorMessage(
@@ -3555,6 +3648,231 @@ class DefaultEventDetailComponent(
                     emptyList()
                 }
         }
+    }
+
+    override fun searchInviteTeams(query: String) {
+        val normalizedQuery = query.trim()
+        if (normalizedQuery.length < 2) {
+            _inviteTeamSuggestions.value = emptyList()
+            _inviteTeamsLoading.value = false
+            return
+        }
+        val event = selectedEvent.value
+        if (!event.teamSignup) {
+            _inviteTeamSuggestions.value = emptyList()
+            _inviteTeamsLoading.value = false
+            return
+        }
+
+        scope.launch {
+            _inviteTeamsLoading.value = true
+            teamRepository.searchTeamsForEventInvite(
+                query = normalizedQuery,
+                eventId = event.id,
+                organizationId = currentInviteOrganizationId(event),
+                sportName = currentInviteSportName(event),
+                excludeTeamIds = eventParticipantTeamIdsForInviteSearch(event),
+            ).onSuccess { teams ->
+                _inviteTeamSuggestions.value = teams
+            }.onFailure { error ->
+                _inviteTeamSuggestions.value = emptyList()
+                _errorState.value = ErrorMessage(error.userMessage("Unable to search teams."))
+            }
+            _inviteTeamsLoading.value = false
+        }
+    }
+
+    override fun inviteTeamToEvent(team: Team) {
+        val normalizedTeamId = team.id.trim()
+        if (normalizedTeamId.isBlank()) {
+            _errorState.value = ErrorMessage("Team id is required.")
+            return
+        }
+
+        scope.launch {
+            val event = selectedEvent.value
+            if (!event.teamSignup) {
+                _errorState.value = ErrorMessage("This event accepts individual players, not teams.")
+                return@launch
+            }
+            if (eventParticipantTeamIdsForInviteSearch(event).contains(normalizedTeamId)) {
+                _errorState.value = ErrorMessage("${team.name.ifBlank { "Team" }} is already in this event.")
+                return@launch
+            }
+            val occurrence = if (isWeeklyParentEvent(event)) {
+                requireSelectedWeeklyOccurrence(
+                    event = event,
+                    errorMessage = "Select an occurrence before inviting a team.",
+                ) ?: return@launch
+            } else {
+                null
+            }
+
+            loadingHandler.showLoading("Adding team...")
+            eventRepository.addTeamToEvent(
+                event = event,
+                team = team,
+                preferredDivisionId = selectedDivision.value,
+                occurrence = occurrence,
+            ).onSuccess {
+                refreshEventAfterParticipantMutation(
+                    eventId = event.id,
+                    warningMessage = "Failed to refresh event after adding team participant.",
+                )
+                _inviteTeamSuggestions.value = _inviteTeamSuggestions.value.filterNot { candidate ->
+                    candidate.id == normalizedTeamId
+                }
+                _errorState.value = ErrorMessage("${team.name.ifBlank { "Team" }} added to the event.")
+            }.onFailure { error ->
+                _errorState.value = ErrorMessage(error.userMessage("Unable to add team."))
+            }
+            loadingHandler.hideLoading()
+        }
+    }
+
+    override fun invitePlayerToEvent(user: UserData) {
+        val normalizedUserId = user.id.trim()
+        if (normalizedUserId.isBlank()) {
+            _errorState.value = ErrorMessage("User id is required.")
+            return
+        }
+
+        scope.launch {
+            val event = selectedEvent.value
+            if (event.teamSignup) {
+                _errorState.value = ErrorMessage("This event accepts teams, not individual players.")
+                return@launch
+            }
+            if (eventParticipantUserIdsForInviteSearch(event).contains(normalizedUserId)) {
+                _errorState.value = ErrorMessage("${user.fullName.ifBlank { "Player" }} is already in this event.")
+                return@launch
+            }
+            val occurrence = if (isWeeklyParentEvent(event)) {
+                requireSelectedWeeklyOccurrence(
+                    event = event,
+                    errorMessage = "Select an occurrence before inviting a player.",
+                ) ?: return@launch
+            } else {
+                null
+            }
+
+            loadingHandler.showLoading("Adding player...")
+            eventRepository.addPlayerToEvent(
+                event = event,
+                player = user,
+                preferredDivisionId = selectedDivision.value,
+                occurrence = occurrence,
+            ).onSuccess {
+                refreshEventAfterParticipantMutation(
+                    eventId = event.id,
+                    warningMessage = "Failed to refresh event after adding player participant.",
+                )
+                _suggestedUsers.value = _suggestedUsers.value.filterNot { candidate ->
+                    candidate.id == normalizedUserId
+                }
+                _errorState.value = ErrorMessage("${user.fullName.ifBlank { "Player" }} added to the event.")
+            }.onFailure { error ->
+                _errorState.value = ErrorMessage(error.userMessage("Unable to add player."))
+            }
+            loadingHandler.hideLoading()
+        }
+    }
+
+    override fun invitePlayerToEventByEmail(firstName: String, lastName: String, email: String) {
+        val normalizedFirstName = firstName.trim()
+        val normalizedLastName = lastName.trim()
+        val normalizedEmail = email.trim().lowercase()
+        if (normalizedFirstName.isBlank() || normalizedLastName.isBlank() || !normalizedEmail.matches(emailAddressRegex)) {
+            _errorState.value = ErrorMessage("Enter first name, last name, and a valid email.")
+            return
+        }
+
+        scope.launch {
+            val event = selectedEvent.value
+            if (event.teamSignup) {
+                _errorState.value = ErrorMessage("This event accepts teams, not individual players.")
+                return@launch
+            }
+
+            loadingHandler.showLoading("Sending invite...")
+            createEventPlayerInvite(
+                event = event,
+                userId = null,
+                email = normalizedEmail,
+                firstName = normalizedFirstName,
+                lastName = normalizedLastName,
+            ).onSuccess {
+                _errorState.value = ErrorMessage("Event invite sent to $normalizedEmail.")
+            }.onFailure { error ->
+                _errorState.value = ErrorMessage(error.userMessage("Unable to invite player by email."))
+            }
+            loadingHandler.hideLoading()
+        }
+    }
+
+    private fun currentInviteOrganizationId(event: Event = selectedEvent.value): String? {
+        return event.organizationId
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: eventWithRelations.value.organization?.id?.trim()?.takeIf(String::isNotBlank)
+    }
+
+    private fun currentInviteSportName(event: Event = selectedEvent.value): String? {
+        return eventWithRelations.value.sport?.name
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: event.sportId?.trim()?.takeIf(String::isNotBlank)
+    }
+
+    private fun eventParticipantTeamIdsForInviteSearch(event: Event = selectedEvent.value): Set<String> = buildSet {
+        event.teamIds
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .forEach(::add)
+        eventWithRelations.value.teams.forEach { teamWithPlayers ->
+            val team = teamWithPlayers.team
+            team.id.trim().takeIf(String::isNotBlank)?.let(::add)
+            team.parentTeamId?.trim()?.takeIf(String::isNotBlank)?.let(::add)
+        }
+    }
+
+    private fun eventParticipantUserIdsForInviteSearch(event: Event = selectedEvent.value): Set<String> = buildSet {
+        addAll(event.playerIds.map(String::trim).filter(String::isNotBlank))
+        addAll(event.waitListIds.map(String::trim).filter(String::isNotBlank))
+        addAll(event.freeAgentIds.map(String::trim).filter(String::isNotBlank))
+        eventWithRelations.value.players
+            .map { player -> player.id.trim() }
+            .filter(String::isNotBlank)
+            .forEach(::add)
+    }
+
+    private suspend fun createEventPlayerInvite(
+        event: Event,
+        userId: String?,
+        email: String?,
+        firstName: String?,
+        lastName: String?,
+    ): Result<List<Invite>> {
+        val eventId = event.id.trim()
+        if (eventId.isBlank()) {
+            return Result.failure(IllegalArgumentException("Event id is required."))
+        }
+        val creatorId = currentUser.value.id.trim().takeIf(String::isNotBlank)
+        return userRepository.createInvites(
+            invites = listOf(
+                InviteCreateDto(
+                    type = "EVENT",
+                    status = "PENDING",
+                    eventId = eventId,
+                    organizationId = currentInviteOrganizationId(event),
+                    userId = userId?.trim()?.takeIf(String::isNotBlank),
+                    email = email?.trim()?.lowercase()?.takeIf(String::isNotBlank),
+                    firstName = firstName?.trim()?.takeIf(String::isNotBlank),
+                    lastName = lastName?.trim()?.takeIf(String::isNotBlank),
+                    createdBy = creatorId,
+                ),
+            ),
+        )
     }
 
     override suspend fun addPendingStaffInvite(
@@ -3866,14 +4184,81 @@ class DefaultEventDetailComponent(
                 event = event,
                 reportErrors = true,
             )
+            loadParticipantComplianceSummaries(
+                event = event,
+                reportErrors = true,
+            )
         }
     }
 
     override fun stopManagingParticipants() {
         participantManagementActive = false
         participantManagementRequestToken += 1
+        participantComplianceRequestToken += 1
         _participantManagementLoading.value = false
         _participantManagementSnapshot.value = EventParticipantManagementSnapshot()
+        _participantComplianceLoading.value = false
+        _teamComplianceSummaries.value = emptyMap()
+        _userComplianceSummaries.value = emptyMap()
+    }
+
+    override fun moveTeamParticipantDivision(team: TeamWithPlayers, divisionId: String) {
+        val normalizedDivisionId = divisionId.normalizeDivisionIdentifier().takeIf(String::isNotBlank)
+        if (normalizedDivisionId == null) {
+            _errorState.value = ErrorMessage("Select a division before moving the team.")
+            return
+        }
+        val currentDivision = team.team.division.normalizeDivisionIdentifier()
+        val currentDivisionTypeId = team.team.divisionTypeId?.normalizeDivisionIdentifier().orEmpty()
+        if (
+            divisionsEquivalent(currentDivision, normalizedDivisionId) ||
+            divisionsEquivalent(currentDivisionTypeId, normalizedDivisionId)
+        ) {
+            return
+        }
+
+        scope.launch {
+            val event = selectedEvent.value
+            val weeklyOccurrence = if (isWeeklyParentEvent(event)) {
+                requireSelectedWeeklyOccurrence(
+                    event = event,
+                    errorMessage = "Select an occurrence before moving teams.",
+                ) ?: return@launch
+            } else {
+                null
+            }
+            val canonicalTeamId = team.team.parentTeamId
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+                ?: team.team.id.trim().takeIf(String::isNotBlank)
+            if (canonicalTeamId == null) {
+                _errorState.value = ErrorMessage("Team id is required.")
+                return@launch
+            }
+            val canonicalTeam = team.team.copy(id = canonicalTeamId)
+
+            loadingHandler.showLoading("Moving team...")
+            eventRepository.moveTeamParticipantDivision(
+                event = event,
+                team = canonicalTeam,
+                preferredDivisionId = normalizedDivisionId,
+                occurrence = weeklyOccurrence,
+            )
+                .onSuccess {
+                    selectDivision(normalizedDivisionId)
+                    refreshEventAfterParticipantMutation(
+                        eventId = event.id,
+                        warningMessage = "Failed to refresh event after moving team division.",
+                    )
+                    _errorState.value = ErrorMessage("${team.team.name.ifBlank { "Team" }} moved to a new division.")
+                }
+                .onFailure { throwable ->
+                    _errorState.value = ErrorMessage(
+                        throwable.userMessage("Failed to move team division."),
+                    )
+                }
+            loadingHandler.hideLoading()
+        }
     }
 
     override fun removeTeamParticipant(team: TeamWithPlayers) {
@@ -3966,11 +4351,15 @@ class DefaultEventDetailComponent(
                 IllegalArgumentException("Event and participant team ids are required."),
             )
         }
-        return billingRepository.createEventTeamBill(
+        val result = billingRepository.createEventTeamBill(
             eventId = normalizedEventId,
             teamId = normalizedTeamId,
             request = request,
         ).map { }
+        if (result.isSuccess) {
+            refreshParticipantComplianceIfNeeded(selectedEvent.value)
+        }
+        return result
     }
 
     override suspend fun refundParticipantPayment(
@@ -3985,12 +4374,16 @@ class DefaultEventDetailComponent(
                 IllegalArgumentException("Event and participant team ids are required."),
             )
         }
-        return billingRepository.refundEventTeamBillPayment(
+        val result = billingRepository.refundEventTeamBillPayment(
             eventId = normalizedEventId,
             teamId = normalizedTeamId,
             billPaymentId = billPaymentId,
             amountCents = amountCents,
         )
+        if (result.isSuccess) {
+            refreshParticipantComplianceIfNeeded(selectedEvent.value)
+        }
+        return result
     }
 
     override fun selectPlace(place: MVPPlace?) {

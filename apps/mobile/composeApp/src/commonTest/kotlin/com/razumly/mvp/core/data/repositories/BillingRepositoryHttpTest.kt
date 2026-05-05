@@ -255,6 +255,12 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
         preferredDivisionId: String?,
         occurrence: EventOccurrenceSelection?,
     ): Result<SelfRegistrationResult> = error("unused")
+    override suspend fun addPlayerToEvent(
+        event: Event,
+        player: UserData,
+        preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<SelfRegistrationResult> = error("unused")
     override suspend fun registerChildForEvent(
         eventId: String,
         childUserId: String,
@@ -340,6 +346,12 @@ private class BillingRepositoryHttp_FakeEventRepository(
     override suspend fun deleteEvent(eventId: String): Result<Unit> = error("unused")
     override suspend fun addCurrentUserToEvent(
         event: Event,
+        preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<SelfRegistrationResult> = error("unused")
+    override suspend fun addPlayerToEvent(
+        event: Event,
+        player: UserData,
         preferredDivisionId: String?,
         occurrence: EventOccurrenceSelection?,
     ): Result<SelfRegistrationResult> = error("unused")

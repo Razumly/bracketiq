@@ -1165,6 +1165,94 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    fun addPlayerToEvent_posts_selected_user_to_participants_endpoint() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("host_1"))
+        var capturedPath = ""
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            when (request.method) {
+                HttpMethod.Post -> {
+                    capturedPath = request.url.encodedPath
+                    capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                        ?.bytes()
+                        ?.decodeToString()
+                        .orEmpty()
+
+                    respond(
+                        content = """
+                            {
+                              "event": {
+                                "id": "e1",
+                                "name": "Event One",
+                                "hostId": "host_1",
+                                "start": "2026-02-10T00:00:00Z",
+                                "end": "2026-02-10T01:00:00Z",
+                                "coordinates": [-80.0, 25.0],
+                                "userIds": ["player_1"],
+                                "teamIds": []
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                HttpMethod.Get -> respond(
+                    content = """
+                        {
+                          "event": {
+                            "id": "e1",
+                            "name": "Event One",
+                            "hostId": "host_1",
+                            "start": "2026-02-10T00:00:00Z",
+                            "end": "2026-02-10T01:00:00Z",
+                            "coordinates": [-80.0, 25.0],
+                            "userIds": ["player_1"],
+                            "teamIds": []
+                          },
+                          "participants": {
+                            "teamIds": [],
+                            "userIds": ["player_1"],
+                            "waitListIds": [],
+                            "freeAgentIds": [],
+                            "divisions": []
+                          },
+                          "users": [{"id":"player_1","firstName":"Target","lastName":"Player","userName":"target"}],
+                          "participantCount": 1
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("unexpected method: ${request.method}")
+            }
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+        val event = makeEvent(id = "e1", hostId = "host_1", userIds = emptyList()).copy(
+            teamSignup = false,
+        )
+
+        repo.addPlayerToEvent(event, makeUser("player_1")).getOrThrow()
+
+        assertEquals("/api/events/e1/participants", capturedPath)
+        assertTrue(capturedBody.contains("\"userId\":\"player_1\""))
+        assertEquals(listOf("player_1"), eventDao.getEventById("e1")?.userIds)
+    }
+
+    @Test
     fun addCurrentUserToEvent_succeeds_when_participant_refresh_fails_after_post() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()
@@ -1855,6 +1943,157 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    fun moveTeamParticipantDivision_posts_participants_endpoint_without_waitlist_routing() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        val divisionOpenId = "e1__division__open"
+        val divisionAdvancedId = "e1__division__advanced"
+        var capturedPath = ""
+        var capturedBody = ""
+
+        val team = Team(
+            division = divisionOpenId,
+            name = "Team One",
+            captainId = "u1",
+            managerId = "u1",
+            playerIds = listOf("u1"),
+            teamSize = 2,
+            id = "canonical_t1",
+        )
+
+        val teamRepository = object : ITeamRepository by EventRepositoryHttp_UnusedTeamRepository {
+            override suspend fun getTeams(ids: List<String>): Result<List<Team>> {
+                return Result.success(
+                    if (ids.contains(team.id)) {
+                        listOf(team.copy(division = divisionAdvancedId))
+                    } else {
+                        emptyList()
+                    }
+                )
+            }
+        }
+
+        val engine = MockEngine { request ->
+            when (request.method) {
+                HttpMethod.Post -> {
+                    capturedPath = request.url.encodedPath
+                    capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                        ?.bytes()
+                        ?.decodeToString()
+                        .orEmpty()
+
+                    respond(
+                        content = """
+                            {
+                              "event": {
+                                "id": "e1",
+                                "name": "Event One",
+                                "hostId": "h1",
+                                "start": "2026-02-10T00:00:00Z",
+                                "end": "2026-02-10T01:00:00Z",
+                                "coordinates": [-80.0, 25.0],
+                                "userIds": [],
+                                "teamIds": ["canonical_t1"]
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                HttpMethod.Get -> respond(
+                    content = """
+                        {
+                          "event": {
+                            "id": "e1",
+                            "name": "Event One",
+                            "hostId": "h1",
+                            "start": "2026-02-10T00:00:00Z",
+                            "end": "2026-02-10T01:00:00Z",
+                            "coordinates": [-80.0, 25.0],
+                            "userIds": [],
+                            "teamIds": ["canonical_t1"]
+                          },
+                          "participants": {
+                            "teamIds": ["canonical_t1"],
+                            "userIds": [],
+                            "waitListIds": [],
+                            "freeAgentIds": [],
+                            "divisions": []
+                          },
+                          "teams": [{"id":"canonical_t1","name":"Team One","captainId":"u1","managerId":"u1","playerIds":["u1"],"teamSize":2,"division":"e1__division__advanced"}],
+                          "users": [],
+                          "participantCount": 1
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("unexpected method: ${request.method}")
+            }
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, teamRepository, userRepo)
+
+        val event = Event(
+            id = "e1",
+            name = "Event One",
+            hostId = "h1",
+            coordinates = listOf(-80.0, 25.0),
+            start = Instant.parse("2026-02-10T00:00:00Z"),
+            end = Instant.parse("2026-02-10T01:00:00Z"),
+            maxParticipants = 1,
+            teamSignup = true,
+            singleDivision = false,
+            teamIds = listOf("canonical_t1"),
+            divisions = listOf(divisionOpenId, divisionAdvancedId),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = divisionOpenId,
+                    key = "open",
+                    name = "Open",
+                    divisionTypeId = "open",
+                    divisionTypeName = "Open",
+                    ratingType = "SKILL",
+                    gender = "C",
+                ),
+                DivisionDetail(
+                    id = divisionAdvancedId,
+                    key = "advanced",
+                    name = "Advanced",
+                    divisionTypeId = "advanced",
+                    divisionTypeName = "Advanced",
+                    ratingType = "SKILL",
+                    gender = "C",
+                ),
+            ),
+        )
+
+        repo.moveTeamParticipantDivision(
+            event = event,
+            team = team,
+            preferredDivisionId = divisionAdvancedId,
+        ).getOrThrow()
+
+        assertEquals("/api/events/e1/participants", capturedPath)
+        assertFalse(capturedPath.contains("waitlist"))
+        assertTrue(capturedBody.contains("\"teamId\":\"canonical_t1\""))
+        assertTrue(capturedBody.contains("\"divisionId\":\"$divisionAdvancedId\""))
+        assertTrue(capturedBody.contains("\"divisionTypeId\":\"advanced\""))
+        assertTrue(capturedBody.contains("\"divisionTypeKey\":\"advanced\""))
+    }
+
+    @Test
     fun addCurrentUserToEvent_uses_occurrence_scoped_participant_snapshot_for_weekly_events() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()
@@ -2194,6 +2433,180 @@ class EventRepositoryHttpTest {
         assertEquals(0, result.rows.first().draws)
         assertEquals(10.0, result.rows.first().finalPoints)
         assertEquals(1.0, result.rows.first().pointsDelta)
+    }
+
+    @Test
+    fun getEventTeamCompliance_fetches_team_payment_and_document_status() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("host_1"))
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/e1/teams/compliance", request.url.encodedPath)
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            respond(
+                content = """
+                    {
+                      "teams": [
+                        {
+                          "teamId": "team_1",
+                          "teamName": "Aces",
+                          "payment": {
+                            "hasBill": true,
+                            "billId": "bill_1",
+                            "totalAmountCents": 10000,
+                            "paidAmountCents": 2500,
+                            "status": "PARTIAL",
+                            "isPaidInFull": false
+                          },
+                          "documents": {
+                            "signedCount": 1,
+                            "requiredCount": 2
+                          },
+                          "users": [
+                            {
+                              "userId": "user_1",
+                              "fullName": "Test Player",
+                              "userName": "testplayer",
+                              "isMinorAtEvent": false,
+                              "registrationType": "ADULT",
+                              "payment": {
+                                "hasBill": true,
+                                "billId": "bill_1",
+                                "totalAmountCents": 10000,
+                                "paidAmountCents": 2500,
+                                "status": "PARTIAL",
+                                "isPaidInFull": false,
+                                "inheritedFromTeamBill": true
+                              },
+                              "documents": {
+                                "signedCount": 0,
+                                "requiredCount": 1
+                              },
+                              "requiredDocuments": [
+                                {
+                                  "key": "doc_1",
+                                  "templateId": "template_1",
+                                  "title": "Waiver",
+                                  "type": "PDF",
+                                  "signerContext": "participant",
+                                  "signerLabel": "Participant",
+                                  "signOnce": false,
+                                  "status": "UNSIGNED"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val teams = repo.getEventTeamCompliance(" e1 ").getOrThrow()
+
+        assertEquals(1, teams.size)
+        assertEquals("team_1", teams.first().teamId)
+        assertEquals("Aces", teams.first().teamName)
+        assertEquals(10000, teams.first().payment.totalAmountCents)
+        assertEquals(2500, teams.first().payment.paidAmountCents)
+        assertEquals(1, teams.first().documents.signedCount)
+        assertEquals(2, teams.first().documents.requiredCount)
+        assertEquals("user_1", teams.first().users.first().userId)
+        assertTrue(teams.first().users.first().payment.inheritedFromTeamBill)
+        assertEquals("Waiver", teams.first().users.first().requiredDocuments.first().title)
+    }
+
+    @Test
+    fun getEventUserCompliance_fetches_user_payment_and_document_status() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("host_1"))
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/e1/users/compliance", request.url.encodedPath)
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            respond(
+                content = """
+                    {
+                      "users": [
+                        {
+                          "userId": "user_1",
+                          "fullName": "Solo Player",
+                          "userName": "solo",
+                          "isMinorAtEvent": true,
+                          "registrationType": "CHILD",
+                          "payment": {
+                            "hasBill": true,
+                            "billId": "bill_2",
+                            "totalAmountCents": 5000,
+                            "paidAmountCents": 5000,
+                            "status": "PAID",
+                            "isPaidInFull": true
+                          },
+                          "documents": {
+                            "signedCount": 1,
+                            "requiredCount": 1
+                          },
+                          "requiredDocuments": [
+                            {
+                              "key": "doc_2",
+                              "templateId": "template_2",
+                              "title": "Guardian consent",
+                              "type": "TEXT",
+                              "signerContext": "parent_guardian",
+                              "signerLabel": "Parent/guardian",
+                              "signOnce": true,
+                              "status": "SIGNED",
+                              "signedDocumentRecordId": "signed_1",
+                              "signedAt": "2026-05-01T12:00:00.000Z"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val users = repo.getEventUserCompliance("e1").getOrThrow()
+
+        assertEquals(1, users.size)
+        assertEquals("user_1", users.first().userId)
+        assertEquals("Solo Player", users.first().fullName)
+        assertTrue(users.first().isMinorAtEvent)
+        assertEquals("CHILD", users.first().registrationType)
+        assertTrue(users.first().payment.isPaidInFull)
+        assertEquals(1, users.first().documents.requiredCount)
+        assertEquals("Guardian consent", users.first().requiredDocuments.first().title)
+        assertEquals("signed_1", users.first().requiredDocuments.first().signedDocumentRecordId)
     }
 
     @Test
