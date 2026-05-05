@@ -389,7 +389,11 @@ internal class CreateEvent_FakeEventRepository(
         newEvent
     }
 
-    override suspend fun scheduleEvent(eventId: String, participantCount: Int?): Result<Event> =
+    override suspend fun scheduleEvent(
+        eventId: String,
+        participantCount: Int?,
+        includePlaceholderTeams: Boolean?,
+    ): Result<Event> =
         Result.failure(IllegalStateException("unused"))
 
     override suspend fun updateEvent(

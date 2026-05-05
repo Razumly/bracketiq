@@ -325,6 +325,7 @@ data class EventResponseDto(
 @Serializable
 data class ScheduleEventRequestDto(
     val participantCount: Int? = null,
+    val includePlaceholderTeams: Boolean? = null,
 )
 
 @Serializable

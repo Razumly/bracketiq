@@ -93,7 +93,11 @@ interface IEventRepository : IMVPRepository {
         fields: List<Field>? = null,
         timeSlots: List<TimeSlot>? = null,
     ): Result<Event>
-    suspend fun scheduleEvent(eventId: String, participantCount: Int? = null): Result<Event>
+    suspend fun scheduleEvent(
+        eventId: String,
+        participantCount: Int? = null,
+        includePlaceholderTeams: Boolean? = null,
+    ): Result<Event>
     suspend fun updateEvent(
         newEvent: Event,
         fields: List<Field>? = null,
@@ -1005,14 +1009,21 @@ class EventRepository(
             event
         })
 
-    override suspend fun scheduleEvent(eventId: String, participantCount: Int?): Result<Event> =
+    override suspend fun scheduleEvent(
+        eventId: String,
+        participantCount: Int?,
+        includePlaceholderTeams: Boolean?,
+    ): Result<Event> =
         singleResponse(
             networkCall = {
                 val normalizedId = eventId.trim()
                 if (normalizedId.isEmpty()) error("Schedule event requires an event id")
                 api.post<ScheduleEventRequestDto, ScheduleEventResponseDto>(
                     path = "api/events/$normalizedId/schedule",
-                    body = ScheduleEventRequestDto(participantCount = participantCount),
+                    body = ScheduleEventRequestDto(
+                        participantCount = participantCount,
+                        includePlaceholderTeams = includePlaceholderTeams,
+                    ),
                 ).event?.toEventOrNull() ?: error("Schedule event response missing event")
             },
             saveCall = { event ->

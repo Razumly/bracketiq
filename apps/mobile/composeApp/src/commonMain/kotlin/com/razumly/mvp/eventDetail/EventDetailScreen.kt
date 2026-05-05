@@ -2516,6 +2516,7 @@ fun EventDetailScreen(
     var selectedJoinOptionDivisionId by rememberSaveable { mutableStateOf<String?>(null) }
     var showStandingsConfirmDialog by remember { mutableStateOf(false) }
     var showBuildBracketConfirmDialog by remember { mutableStateOf(false) }
+    var showRebuildWithoutPlaceholdersConfirmDialog by remember { mutableStateOf(false) }
     var showStickyDockByScroll by remember { mutableStateOf(true) }
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
     var pendingMapPlace by remember { mutableStateOf<MVPPlace?>(null) }
@@ -3393,32 +3394,32 @@ fun EventDetailScreen(
                                                 }
                                             }
                                         }
-                                        if (canBuildBracketsForEditedEvent) {
-                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                Button(
-                                                    onClick = { component.rescheduleEvent() },
-                                                    enabled = isValid,
-                                                    colors = buttonColors,
-                                                    modifier = Modifier.weight(1f),
-                                                ) {
-                                                    Text("Reschedule Event")
-                                                }
-                                                Button(
-                                                    onClick = { showBuildBracketConfirmDialog = true },
-                                                    enabled = isValid,
-                                                    colors = buttonColors,
-                                                    modifier = Modifier.weight(1f),
-                                                ) {
-                                                    Text("Build Bracket(s)")
-                                                }
-                                            }
-                                        } else if (canRescheduleEditedEvent) {
+                                        if (canRescheduleEditedEvent) {
                                             Button(
                                                 onClick = { component.rescheduleEvent() },
                                                 enabled = isValid,
                                                 colors = buttonColors,
+                                                modifier = Modifier.fillMaxWidth(),
                                             ) {
                                                 Text("Reschedule Event")
+                                            }
+                                            if (canBuildBracketsForEditedEvent) {
+                                                Button(
+                                                    onClick = { showBuildBracketConfirmDialog = true },
+                                                    enabled = isValid,
+                                                    colors = buttonColors,
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                ) {
+                                                    Text("Build Bracket(s)")
+                                                }
+                                            }
+                                            Button(
+                                                onClick = { showRebuildWithoutPlaceholdersConfirmDialog = true },
+                                                enabled = isValid,
+                                                colors = buttonColors,
+                                                modifier = Modifier.fillMaxWidth(),
+                                            ) {
+                                                Text("Rebuild Without Placeholders")
                                             }
                                         }
                                         Button(
@@ -4349,6 +4350,34 @@ fun EventDetailScreen(
                     dismissButton = {
                         TextButton(
                             onClick = { showBuildBracketConfirmDialog = false }
+                        ) {
+                            Text("Cancel")
+                        }
+                    },
+                )
+            }
+            if (showRebuildWithoutPlaceholdersConfirmDialog) {
+                AlertDialog(
+                    onDismissRequest = { showRebuildWithoutPlaceholdersConfirmDialog = false },
+                    title = { Text("Rebuild Without Placeholders") },
+                    text = {
+                        Text(
+                            "This removes empty placeholder teams and rebuilds matches from registered teams only."
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                showRebuildWithoutPlaceholdersConfirmDialog = false
+                                component.rebuildWithoutPlaceholderTeams()
+                            }
+                        ) {
+                            Text("Rebuild")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = { showRebuildWithoutPlaceholdersConfirmDialog = false }
                         ) {
                             Text("Cancel")
                         }

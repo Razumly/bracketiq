@@ -224,7 +224,11 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
         fields: List<com.razumly.mvp.core.data.dataTypes.Field>?,
         timeSlots: List<com.razumly.mvp.core.data.dataTypes.TimeSlot>?,
     ): Result<Event> = error("unused")
-    override suspend fun scheduleEvent(eventId: String, participantCount: Int?): Result<Event> = error("unused")
+    override suspend fun scheduleEvent(
+        eventId: String,
+        participantCount: Int?,
+        includePlaceholderTeams: Boolean?,
+    ): Result<Event> = error("unused")
     override suspend fun updateEvent(
         newEvent: Event,
         fields: List<com.razumly.mvp.core.data.dataTypes.Field>?,
@@ -318,7 +322,11 @@ private class BillingRepositoryHttp_FakeEventRepository(
         fields: List<com.razumly.mvp.core.data.dataTypes.Field>?,
         timeSlots: List<com.razumly.mvp.core.data.dataTypes.TimeSlot>?,
     ): Result<Event> = error("unused")
-    override suspend fun scheduleEvent(eventId: String, participantCount: Int?): Result<Event> = error("unused")
+    override suspend fun scheduleEvent(
+        eventId: String,
+        participantCount: Int?,
+        includePlaceholderTeams: Boolean?,
+    ): Result<Event> = error("unused")
     override suspend fun updateEvent(
         newEvent: Event,
         fields: List<com.razumly.mvp.core.data.dataTypes.Field>?,

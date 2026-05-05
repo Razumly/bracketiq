@@ -234,6 +234,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun updateEvent()
     fun rescheduleEvent()
     fun buildBrackets()
+    fun rebuildWithoutPlaceholderTeams()
     fun createTemplateFromCurrentEvent()
     fun publishEvent()
     fun deleteEvent()
@@ -4073,6 +4074,51 @@ class DefaultEventDetailComponent(
             if (shouldExitEditMode) {
                 cancelEditingEvent()
                 _errorState.value = ErrorMessage("Bracket build completed.")
+            }
+        }
+    }
+
+    override fun rebuildWithoutPlaceholderTeams() {
+        scope.launch {
+            loadingHandler.showLoading("Rebuilding without placeholder teams...")
+            var shouldExitEditMode = false
+            runCatching {
+                val prepared = prepareEventForUpdate()
+                logPreparedFieldOwnership("rebuild_without_placeholders", prepared)
+                val updated = eventRepository.updateEvent(
+                    newEvent = prepared.event,
+                    fields = prepared.fields,
+                    timeSlots = prepared.timeSlots,
+                    leagueScoringConfig = prepared.leagueScoringConfig,
+                ).getOrThrow()
+                matchRepository.deleteMatchesOfTournament(updated.id).getOrThrow()
+                val scheduledEvent = eventRepository.scheduleEvent(
+                    eventId = updated.id,
+                    includePlaceholderTeams = false,
+                ).getOrThrow()
+
+                val scheduledMatches = matchRepository.getMatchesOfTournament(updated.id).getOrThrow()
+                val bracketMatches = scheduledMatches.filter { match ->
+                    shouldResetBracketMatch(updated, match)
+                }
+                if (bracketMatches.isNotEmpty()) {
+                    matchRepository.updateMatchesBulk(
+                        bracketMatches.map { match -> match.toEmptyBracketMatch() },
+                    ).getOrThrow()
+                }
+
+                matchRepository.getMatchesOfTournament(updated.id).getOrThrow()
+                refreshLeagueStandingsAfterSchedule(scheduledEvent)
+                shouldExitEditMode = true
+            }.onFailure { throwable ->
+                _errorState.value = ErrorMessage(
+                    throwable.userMessage("Failed to rebuild without placeholder teams."),
+                )
+            }
+            loadingHandler.hideLoading()
+            if (shouldExitEditMode) {
+                cancelEditingEvent()
+                _errorState.value = ErrorMessage("Schedule rebuilt without placeholder teams.")
             }
         }
     }
