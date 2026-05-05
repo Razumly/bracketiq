@@ -243,7 +243,16 @@ internal fun computeEventValidationResult(
         }
     } else if (editEvent.eventType == EventType.TOURNAMENT) {
         isLeagueGamesValid = true
-        isLeaguePlayoffTeamsValid = true
+        isLeaguePlayoffTeamsValid = if (!editEvent.includePlayoffs) {
+            true
+        } else {
+            val details = mergeDivisionDetailsForDivisions(
+                divisions = editEvent.divisions,
+                existingDetails = editEvent.divisionDetails,
+                eventId = editEvent.id,
+            )
+            details.isNotEmpty() && details.all(::isTournamentPoolDivisionValid)
+        }
         isLeaguePointsValid = true
         isLeagueDurationValid = if (editEvent.usesSets) {
             (editEvent.setDurationMinutes ?: 0) >= 5
@@ -346,7 +355,9 @@ internal fun computeEventValidationResult(
         }
         if (!isLeaguePlayoffTeamsValid) {
             add(
-                if (editEvent.singleDivision) {
+                if (editEvent.eventType == EventType.TOURNAMENT) {
+                    "Each tournament division needs pool count, bracket team count, and even pool sizing when pool play is enabled."
+                } else if (editEvent.singleDivision) {
                     "Playoff team count must be at least 2 when playoffs are enabled."
                 } else {
                     "Each division must have a playoff team count of at least 2 when playoffs are enabled."

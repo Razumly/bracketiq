@@ -23,6 +23,7 @@ internal data class DivisionEditorState(
     val priceCents: Int = 0,
     val maxParticipants: Int = 2,
     val playoffTeamCount: Int? = null,
+    val poolCount: Int? = null,
     val allowPaymentPlans: Boolean = false,
     val installmentCount: Int = 0,
     val installmentDueDates: List<String> = emptyList(),

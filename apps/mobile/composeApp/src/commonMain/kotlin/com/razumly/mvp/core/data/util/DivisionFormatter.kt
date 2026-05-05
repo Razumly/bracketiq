@@ -447,6 +447,8 @@ fun inferDivisionDetail(
         price = null,
         maxParticipants = null,
         playoffTeamCount = null,
+        poolCount = null,
+        poolTeamCount = null,
         allowPaymentPlans = null,
         installmentCount = null,
         installmentDueDates = emptyList(),
@@ -554,6 +556,10 @@ fun DivisionDetail.normalizeDivisionDetail(eventId: String? = null): DivisionDet
             ?.takeIf { participantCount -> participantCount >= 2 },
         playoffTeamCount = playoffTeamCount
             ?.takeIf { participantCount -> participantCount >= 2 },
+        poolCount = poolCount
+            ?.takeIf { count -> count >= 1 },
+        poolTeamCount = poolTeamCount
+            ?.takeIf { count -> count >= 1 },
         allowPaymentPlans = if (normalizedAllowPaymentPlans) true else false,
         installmentCount = if (normalizedAllowPaymentPlans) {
             normalizedInstallmentCount

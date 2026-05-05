@@ -20,6 +20,8 @@ data class DivisionDetail(
     val price: Int? = null,
     val maxParticipants: Int? = null,
     val playoffTeamCount: Int? = null,
+    val poolCount: Int? = null,
+    val poolTeamCount: Int? = null,
     val allowPaymentPlans: Boolean? = null,
     val installmentCount: Int? = null,
     val installmentDueDates: List<String> = emptyList(),

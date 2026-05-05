@@ -433,6 +433,7 @@ fun EventDetails(
             defaultInstallmentCount != null &&
             editEvent.priceCents.coerceAtLeast(0) > 0
 
+        val tournamentPoolPlayEnabled = editEvent.isTournamentPoolPlayEnabled()
         normalizedDivisionDetails.map { detail ->
             val fallbackMaxParticipants = editEvent.maxParticipants.coerceAtLeast(2)
             val effectiveDivisionPrice = if (editEvent.singleDivision) {
@@ -474,6 +475,19 @@ fun EventDetails(
                     !editEvent.includePlayoffs -> null
                     editEvent.singleDivision -> editEvent.playoffTeamCount ?: detail.playoffTeamCount
                     else -> detail.playoffTeamCount
+                },
+                poolCount = if (tournamentPoolPlayEnabled) detail.poolCount else null,
+                poolTeamCount = if (tournamentPoolPlayEnabled) {
+                    derivePoolTeamCount(
+                        maxTeams = if (editEvent.singleDivision) {
+                            fallbackMaxParticipants
+                        } else {
+                            (detail.maxParticipants ?: fallbackMaxParticipants).coerceAtLeast(2)
+                        },
+                        poolCount = detail.poolCount,
+                    )
+                } else {
+                    null
                 },
                 allowPaymentPlans = detailAllowPaymentPlans,
                 installmentCount = when {
@@ -905,6 +919,8 @@ fun EventDetails(
             divisionEditor.maxParticipants.coerceAtLeast(2)
         }
         val divisionPlayoffTeamCount = divisionEditor.playoffTeamCount
+        val tournamentPoolPlayEnabled = editEvent.isTournamentPoolPlayEnabled()
+        val divisionPoolCount = divisionEditor.poolCount
         if (
             editEvent.eventType == EventType.LEAGUE &&
             editEvent.includePlayoffs &&
@@ -916,9 +932,39 @@ fun EventDetails(
             )
             return
         }
+        if (tournamentPoolPlayEnabled) {
+            if (divisionPoolCount == null || divisionPoolCount < 1) {
+                divisionEditor = divisionEditor.copy(
+                    error = "Pool count is required when pool play is enabled.",
+                )
+                return
+            }
+            if (divisionPlayoffTeamCount == null || divisionPlayoffTeamCount < 2) {
+                divisionEditor = divisionEditor.copy(
+                    error = "Bracket team count is required when pool play is enabled.",
+                )
+                return
+            }
+            if (normalizedMaxParticipants % divisionPoolCount != 0) {
+                divisionEditor = divisionEditor.copy(
+                    error = "Division max teams must divide evenly by pool count.",
+                )
+                return
+            }
+            if (divisionPlayoffTeamCount % divisionPoolCount != 0) {
+                divisionEditor = divisionEditor.copy(
+                    error = "Bracket team count must divide evenly by pool count.",
+                )
+                return
+            }
+        }
         val normalizedPlayoffTeamCount = when {
-            editEvent.eventType != EventType.LEAGUE || !editEvent.includePlayoffs -> null
-            editEvent.singleDivision -> editEvent.playoffTeamCount ?: divisionPlayoffTeamCount
+            !editEvent.includePlayoffs -> null
+            editEvent.eventType == EventType.LEAGUE && editEvent.singleDivision -> {
+                editEvent.playoffTeamCount ?: divisionPlayoffTeamCount
+            }
+            editEvent.eventType == EventType.LEAGUE -> divisionPlayoffTeamCount
+            editEvent.eventType == EventType.TOURNAMENT -> divisionPlayoffTeamCount
             else -> divisionPlayoffTeamCount
         }
         val defaultInstallmentAmounts = editEvent.installmentAmounts.map { amount ->
@@ -1039,6 +1085,15 @@ fun EventDetails(
             price = normalizedPrice,
             maxParticipants = normalizedMaxParticipants,
             playoffTeamCount = normalizedPlayoffTeamCount,
+            poolCount = if (tournamentPoolPlayEnabled) divisionPoolCount else null,
+            poolTeamCount = if (tournamentPoolPlayEnabled) {
+                derivePoolTeamCount(
+                    maxTeams = normalizedMaxParticipants,
+                    poolCount = divisionPoolCount,
+                )
+            } else {
+                null
+            },
             allowPaymentPlans = normalizedAllowPaymentPlans,
             installmentCount = normalizedInstallmentCount,
             installmentDueDates = normalizedInstallmentDueDates,
@@ -1105,6 +1160,7 @@ fun EventDetails(
             } else {
                 detail.playoffTeamCount
             },
+            poolCount = detail.poolCount,
             allowPaymentPlans = detail.allowPaymentPlans == true,
             installmentCount = maxOf(
                 detail.installmentCount ?: 0,
@@ -1747,6 +1803,7 @@ fun EventDetails(
             !isPriceValid,
             !isPaymentPlansValid,
             editEvent.eventType == EventType.LEAGUE && editEvent.singleDivision && !isLeaguePlayoffTeamsValid,
+            editEvent.eventType == EventType.TOURNAMENT && editEvent.includePlayoffs && editEvent.singleDivision && !isLeaguePlayoffTeamsValid,
         ).count { it }
     } else {
         0
@@ -1770,6 +1827,7 @@ fun EventDetails(
             editEvent.eventType == EventType.TOURNAMENT && editEvent.doubleElimination && !isLoserSetCountValid,
             editEvent.eventType == EventType.TOURNAMENT && editEvent.doubleElimination && !isLoserPointsValid,
             editEvent.eventType == EventType.LEAGUE && !editEvent.singleDivision && !isLeaguePlayoffTeamsValid,
+            editEvent.eventType == EventType.TOURNAMENT && editEvent.includePlayoffs && !editEvent.singleDivision && !isLeaguePlayoffTeamsValid,
         ).count { it }
     } else {
         0
@@ -2439,7 +2497,7 @@ fun EventDetails(
                                 )
                             }
                         }
-                        val leaguePlayoffInputs: @Composable () -> Unit = {
+                        val playoffsOrPoolsInputs: @Composable () -> Unit = {
                             if (editEvent.eventType == EventType.LEAGUE) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -2506,14 +2564,43 @@ fun EventDetails(
                                         },
                                     )
                                 }
+                            } else if (editEvent.eventType == EventType.TOURNAMENT) {
+                                LabeledCheckboxRow(
+                                    checked = editEvent.includePlayoffs,
+                                    label = "Include Pool Play",
+                                    onCheckedChange = { checked ->
+                                        onEditEvent {
+                                            val nextDivisionDetails = mergeDivisionDetailsForDivisions(
+                                                divisions = divisions,
+                                                existingDetails = divisionDetails,
+                                                eventId = id,
+                                            ).map { detail ->
+                                                if (checked) {
+                                                    detail.withDerivedTournamentPoolTeamCount(enabled = true)
+                                                } else {
+                                                    detail.copy(
+                                                        playoffTeamCount = null,
+                                                        poolCount = null,
+                                                        poolTeamCount = null,
+                                                    )
+                                                }
+                                            }
+                                            copy(
+                                                includePlayoffs = checked,
+                                                playoffTeamCount = if (checked) playoffTeamCount else null,
+                                                divisionDetails = nextDivisionDetails,
+                                            )
+                                        }
+                                    },
+                                )
                             }
                         }
                         if (isMobileEventDetailsLayout) {
                             teamCapacityInputs()
-                            leaguePlayoffInputs()
+                            playoffsOrPoolsInputs()
                         } else {
                             teamCapacityInputs()
-                            leaguePlayoffInputs()
+                            playoffsOrPoolsInputs()
                         }
                         FormSectionDivider()
 
@@ -3963,6 +4050,84 @@ fun EventDetails(
                                 null
                             },
                         )
+                    } else if (editEvent.eventType == EventType.TOURNAMENT) {
+                        val tournamentPoolPlayEnabled = editEvent.isTournamentPoolPlayEnabled()
+                        val divisionMaxTeams = if (editEvent.singleDivision) {
+                            editEvent.maxParticipants.coerceAtLeast(2)
+                        } else {
+                            divisionEditor.maxParticipants.coerceAtLeast(2)
+                        }
+                        val derivedPoolTeamCount = derivePoolTeamCount(
+                            maxTeams = divisionMaxTeams,
+                            poolCount = divisionEditor.poolCount,
+                        )
+                        val divisionPoolCount = divisionEditor.poolCount
+                        val divisionBracketTeamCount = divisionEditor.playoffTeamCount
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            NumberInputField(
+                                modifier = Modifier.weight(1f),
+                                value = divisionBracketTeamCount?.toString().orEmpty(),
+                                label = "Bracket Teams",
+                                enabled = tournamentPoolPlayEnabled && divisionEditorReady,
+                                onValueChange = { value ->
+                                    if (!divisionEditorReady || !tournamentPoolPlayEnabled) {
+                                        return@NumberInputField
+                                    }
+                                    if (value.isEmpty() || value.all { it.isDigit() }) {
+                                        divisionEditor = divisionEditor.copy(
+                                            playoffTeamCount = if (value.isBlank()) null else value.toIntOrNull(),
+                                            error = null,
+                                        )
+                                    }
+                                },
+                                isError = tournamentPoolPlayEnabled &&
+                                    ((divisionBracketTeamCount ?: 0) < 2 ||
+                                        (
+                                            divisionPoolCount != null &&
+                                                divisionBracketTeamCount != null &&
+                                                divisionBracketTeamCount % divisionPoolCount != 0
+                                            )),
+                                errorMessage = "Must be at least 2 and divide evenly by pools.",
+                            )
+                            NumberInputField(
+                                modifier = Modifier.weight(1f),
+                                value = divisionPoolCount?.toString().orEmpty(),
+                                label = "Pool Count",
+                                enabled = tournamentPoolPlayEnabled && divisionEditorReady,
+                                onValueChange = { value ->
+                                    if (!divisionEditorReady || !tournamentPoolPlayEnabled) {
+                                        return@NumberInputField
+                                    }
+                                    if (value.isEmpty() || value.all { it.isDigit() }) {
+                                        divisionEditor = divisionEditor.copy(
+                                            poolCount = if (value.isBlank()) null else value.toIntOrNull(),
+                                            error = null,
+                                        )
+                                    }
+                                },
+                                isError = tournamentPoolPlayEnabled &&
+                                    ((divisionPoolCount ?: 0) < 1 ||
+                                        (
+                                            divisionPoolCount != null &&
+                                                divisionMaxTeams % divisionPoolCount != 0
+                                            )),
+                                errorMessage = "Max teams must divide evenly by pools.",
+                            )
+                        }
+                        NumberInputField(
+                            modifier = Modifier.fillMaxWidth(),
+                            value = derivedPoolTeamCount?.toString().orEmpty(),
+                            label = "Pool Team Count",
+                            enabled = false,
+                            onValueChange = {},
+                            isError = tournamentPoolPlayEnabled && derivedPoolTeamCount == null,
+                            errorMessage = "Set an even pool count to calculate pool team count.",
+                            supportingText = "Calculated from division max teams divided by pool count.",
+                        )
                     }
 
                     if (!isNewEvent && !editEvent.singleDivision) {
@@ -4103,10 +4268,16 @@ fun EventDetails(
 
                     if (editEvent.singleDivision) {
                         Text(
-                            text = if (editEvent.eventType == EventType.LEAGUE) {
-                                "Division price, capacity, payment plan, and playoff team count mirror event-level values while single division is enabled."
-                            } else {
-                                "Division price, capacity, and payment plan mirror event-level values while single division is enabled."
+                            text = when (editEvent.eventType) {
+                                EventType.LEAGUE -> {
+                                    "Division price, capacity, payment plan, and playoff team count mirror event-level values while single division is enabled."
+                                }
+                                EventType.TOURNAMENT -> {
+                                    "Division price, capacity, and payment plan mirror event-level values while bracket and pool settings stay on the division."
+                                }
+                                else -> {
+                                    "Division price, capacity, and payment plan mirror event-level values while single division is enabled."
+                                }
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(localImageScheme.current.onSurfaceVariant),
@@ -4141,6 +4312,17 @@ fun EventDetails(
                     if (!isSkillLevelValid) {
                         Text(
                             text = "Add at least one division.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    if (
+                        editEvent.eventType == EventType.TOURNAMENT &&
+                        editEvent.includePlayoffs &&
+                        !isLeaguePlayoffTeamsValid
+                    ) {
+                        Text(
+                            text = "Pool play requires pool count, bracket team count, and even pool sizing for each division.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                         )

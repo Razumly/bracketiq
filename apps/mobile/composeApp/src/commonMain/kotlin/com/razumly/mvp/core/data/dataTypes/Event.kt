@@ -261,6 +261,7 @@ fun Event.toEventDTO(): EventDTO =
             .takeIf { count -> count > 0 },
         gamesPerOpponent = gamesPerOpponent,
         includePlayoffs = includePlayoffs,
+        includePlayoffsOrPools = includePlayoffs,
         playoffTeamCount = playoffTeamCount,
         usesSets = usesSets,
         matchDurationMinutes = matchDurationMinutes,

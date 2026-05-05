@@ -22,6 +22,7 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.normalizeDivisionDetail
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.presentation.util.moneyFormat
+import com.razumly.mvp.eventDetail.derivePoolTeamCount
 
 @Composable
 internal fun DivisionDetailEditList(
@@ -64,15 +65,24 @@ private fun DivisionDetailEditCard(
     } else {
         (detail.maxParticipants ?: event.maxParticipants).coerceAtLeast(2)
     }
-    val playoffTeams = if (
-        event.eventType == EventType.LEAGUE &&
-        event.includePlayoffs
-    ) {
-        if (event.singleDivision) {
-            event.playoffTeamCount ?: detail.playoffTeamCount
-        } else {
-            detail.playoffTeamCount
+    val playoffTeams = when {
+        event.eventType == EventType.LEAGUE && event.includePlayoffs -> {
+            if (event.singleDivision) {
+                event.playoffTeamCount ?: detail.playoffTeamCount
+            } else {
+                detail.playoffTeamCount
+            }
         }
+        event.eventType == EventType.TOURNAMENT && event.includePlayoffs -> detail.playoffTeamCount
+        else -> null
+    }
+    val poolCount = if (event.eventType == EventType.TOURNAMENT && event.includePlayoffs) {
+        detail.poolCount
+    } else {
+        null
+    }
+    val poolTeamCount = if (event.eventType == EventType.TOURNAMENT && event.includePlayoffs) {
+        detail.poolTeamCount ?: derivePoolTeamCount(maxParticipants, poolCount)
     } else {
         null
     }
@@ -134,7 +144,18 @@ private fun DivisionDetailEditCard(
             }
             if (playoffTeams != null) {
                 Text(
-                    text = "Playoff teams: $playoffTeams",
+                    text = if (event.eventType == EventType.TOURNAMENT) {
+                        "Bracket teams: $playoffTeams"
+                    } else {
+                        "Playoff teams: $playoffTeams"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (poolCount != null) {
+                Text(
+                    text = "Pools: $poolCount - Pool teams: ${poolTeamCount ?: "Not set"}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

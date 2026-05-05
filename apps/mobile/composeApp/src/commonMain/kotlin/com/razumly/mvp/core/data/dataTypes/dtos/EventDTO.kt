@@ -69,6 +69,7 @@ data class EventDTO(
     val fieldCount: Int? = null,
     val gamesPerOpponent: Int? = null,
     val includePlayoffs: Boolean = false,
+    val includePlayoffsOrPools: Boolean? = null,
     val playoffTeamCount: Int? = null,
     val usesSets: Boolean = false,
     val matchDurationMinutes: Int? = null,
@@ -147,7 +148,7 @@ data class EventDTO(
                 .count { fieldId -> fieldId.isNotBlank() }
                 .takeIf { count -> count > 0 },
             gamesPerOpponent = gamesPerOpponent,
-            includePlayoffs = includePlayoffs,
+            includePlayoffs = includePlayoffsOrPools ?: includePlayoffs,
             playoffTeamCount = playoffTeamCount,
             usesSets = usesSets,
             matchDurationMinutes = matchDurationMinutes,

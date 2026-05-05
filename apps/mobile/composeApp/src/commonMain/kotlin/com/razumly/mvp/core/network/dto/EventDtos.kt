@@ -81,6 +81,7 @@ data class EventApiDto(
     val fieldCount: Int? = null,
     val gamesPerOpponent: Int? = null,
     val includePlayoffs: Boolean? = null,
+    val includePlayoffsOrPools: Boolean? = null,
     val playoffTeamCount: Int? = null,
 
     val doubleElimination: Boolean? = null,
@@ -156,6 +157,7 @@ data class EventApiDto(
         val resolvedFieldCount = resolvedFieldIds.size.takeIf { count -> count > 0 }
         val resolvedPriceCents = (price ?: 0).coerceAtLeast(0)
         val resolvedMaxParticipants = (maxParticipants ?: 0).coerceAtLeast(0)
+        val resolvedIncludePlayoffsOrPools = includePlayoffsOrPools ?: includePlayoffs ?: false
         val resolvedEventPlayoffTeamCount = playoffTeamCount
         val resolvedEventInstallmentAmounts = (installmentAmounts ?: emptyList())
             .map { amount -> amount.coerceAtLeast(0) }
@@ -186,7 +188,7 @@ data class EventApiDto(
                     (detail.maxParticipants ?: fallbackMaxParticipants).coerceAtLeast(2)
                 },
                 playoffTeamCount = when {
-                    includePlayoffs != true -> null
+                    !resolvedIncludePlayoffsOrPools -> null
                     singleDivision != false -> resolvedEventPlayoffTeamCount
                     else -> detail.playoffTeamCount
                 },
@@ -272,7 +274,7 @@ data class EventApiDto(
             eventType = resolvedEventType,
             fieldCount = resolvedFieldCount,
             gamesPerOpponent = gamesPerOpponent,
-            includePlayoffs = includePlayoffs ?: false,
+            includePlayoffs = resolvedIncludePlayoffsOrPools,
             playoffTeamCount = resolvedEventPlayoffTeamCount,
             doubleElimination = doubleElimination ?: false,
             winnerSetCount = winnerSetCount ?: 1,
@@ -615,6 +617,7 @@ data class EventUpdateDto(
     val coordinates: List<Double>? = null,
     val gamesPerOpponent: Int? = null,
     val includePlayoffs: Boolean? = null,
+    val includePlayoffsOrPools: Boolean? = null,
     val playoffTeamCount: Int? = null,
     val usesSets: Boolean? = null,
     val matchDurationMinutes: Int? = null,
@@ -686,6 +689,22 @@ fun Event.toUpdateDto(
     )
     val normalizedDivisionDetailsForPayload = normalizedDivisionDetails.map { detail ->
         val fallbackMaxParticipants = maxParticipants.coerceAtLeast(2)
+        val resolvedMaxParticipantsForDetail = if (singleDivision) {
+            fallbackMaxParticipants
+        } else {
+            (detail.maxParticipants ?: fallbackMaxParticipants).coerceAtLeast(2)
+        }
+        val isTournamentPoolPlay = eventType == EventType.TOURNAMENT && includePlayoffs
+        val normalizedPoolCount = detail.poolCount?.takeIf { count -> count >= 1 }
+        val normalizedPoolTeamCount = if (
+            isTournamentPoolPlay &&
+            normalizedPoolCount != null &&
+            resolvedMaxParticipantsForDetail % normalizedPoolCount == 0
+        ) {
+            resolvedMaxParticipantsForDetail / normalizedPoolCount
+        } else {
+            null
+        }
         val defaultInstallmentAmounts = installmentAmounts.map { amount -> amount.coerceAtLeast(0) }
         val defaultInstallmentDueDates = installmentDueDates
             .map { dueDate -> dueDate.trim() }
@@ -730,6 +749,8 @@ fun Event.toUpdateDto(
                 singleDivision -> playoffTeamCount
                 else -> detail.playoffTeamCount
             },
+            poolCount = if (isTournamentPoolPlay) normalizedPoolCount else null,
+            poolTeamCount = if (isTournamentPoolPlay) normalizedPoolTeamCount else null,
             allowPaymentPlans = if (singleDivision) {
                 defaultAllowPaymentPlans
             } else {
@@ -801,6 +822,7 @@ fun Event.toUpdateDto(
         coordinates = coordinates,
         gamesPerOpponent = gamesPerOpponent,
         includePlayoffs = includePlayoffs,
+        includePlayoffsOrPools = includePlayoffs,
         playoffTeamCount = if (includePlayoffs) {
             playoffTeamCount
         } else {
