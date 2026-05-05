@@ -55,6 +55,8 @@ import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.CreateBillRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
+import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
+import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckoutRequest
 import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
 import com.razumly.mvp.core.data.repositories.EventParticipantRefundMode
 import com.razumly.mvp.core.data.repositories.EventParticipantManagementEntry
@@ -252,6 +254,10 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
         teamId: String,
         request: EventTeamBillCreateRequest,
     ): Result<Unit>
+    suspend fun createParticipantPaymentCheckout(
+        teamId: String,
+        request: EventTeamPaymentCheckoutRequest,
+    ): Result<EventTeamPaymentCheckout>
     suspend fun refundParticipantPayment(
         teamId: String,
         billPaymentId: String,
@@ -4360,6 +4366,24 @@ class DefaultEventDetailComponent(
             refreshParticipantComplianceIfNeeded(selectedEvent.value)
         }
         return result
+    }
+
+    override suspend fun createParticipantPaymentCheckout(
+        teamId: String,
+        request: EventTeamPaymentCheckoutRequest,
+    ): Result<EventTeamPaymentCheckout> {
+        val normalizedEventId = selectedEvent.value.id.trim()
+        val normalizedTeamId = teamId.trim()
+        if (normalizedEventId.isEmpty() || normalizedTeamId.isEmpty()) {
+            return Result.failure(
+                IllegalArgumentException("Event and participant team ids are required."),
+            )
+        }
+        return billingRepository.createEventTeamPaymentCheckout(
+            eventId = normalizedEventId,
+            teamId = normalizedTeamId,
+            request = request,
+        )
     }
 
     override suspend fun refundParticipantPayment(

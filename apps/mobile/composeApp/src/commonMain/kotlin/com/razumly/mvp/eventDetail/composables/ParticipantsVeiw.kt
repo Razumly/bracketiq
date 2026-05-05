@@ -1,15 +1,18 @@
 package com.razumly.mvp.eventDetail.composables
 
+import coil3.compose.AsyncImage
 import com.razumly.mvp.core.network.userMessage
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -20,6 +23,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -36,6 +40,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -43,10 +50,13 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
 import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
 import com.razumly.mvp.core.data.dataTypes.isCaptainOrManager
+import com.razumly.mvp.core.data.dataTypes.resolvedDivisionPriceCents
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamBillingUserOption
+import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
+import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckoutRequest
 import com.razumly.mvp.core.data.repositories.EventComplianceDocumentCounts
 import com.razumly.mvp.core.data.repositories.EventCompliancePaymentSummary
 import com.razumly.mvp.core.data.repositories.EventComplianceRequiredDocument
@@ -122,6 +132,11 @@ private data class ParticipantManagementTarget(
     val billingContext: ParticipantBillingContext? = null,
     val teamCompliance: EventTeamComplianceSummary? = null,
     val userCompliance: EventComplianceUserSummary? = null,
+)
+
+private data class ParticipantPaymentQrState(
+    val title: String,
+    val checkout: EventTeamPaymentCheckout,
 )
 
 private fun EventCompliancePaymentSummary.paymentStatusText(cardType: ParticipantCardType): String {
@@ -277,6 +292,9 @@ fun ParticipantsView(
     var createBillTax by remember { mutableStateOf("0") }
     var createBillAllowSplit by remember { mutableStateOf(false) }
     var createBillLabel by remember { mutableStateOf("Event registration") }
+
+    var receivingPaymentTargetId by remember { mutableStateOf<String?>(null) }
+    var paymentQrState by remember { mutableStateOf<ParticipantPaymentQrState?>(null) }
 
     val playerInteractionComponent = remember {
         getKoin().get<PlayerInteractionComponent> { parametersOf(component) }
@@ -568,6 +586,70 @@ fun ParticipantsView(
         createBillLabel = "Event registration"
     }
 
+    fun resolvePaymentDivisionId(target: ParticipantManagementTarget): String? {
+        return when (target.cardType) {
+            ParticipantCardType.TEAM -> target.team?.resolveParticipantDivisionId(
+                divisionOptions = divisionOptions,
+                fallbackDivisionId = selectedDivisionId,
+            )
+            ParticipantCardType.USER -> divisionOptions.resolveSelectedEventDivisionId(selectedDivisionId)
+        }
+    }
+
+    fun startReceivePaymentNow(target: ParticipantManagementTarget) {
+        val context = target.billingContext ?: return
+        val divisionId = resolvePaymentDivisionId(target)
+        val amountCents = selectedEvent.event.resolvedDivisionPriceCents(divisionId)
+        if (amountCents <= 0) {
+            popUpHandler.showPopup("Set a price for this event or division before receiving payment.")
+            return
+        }
+
+        val ownerType = if (teamSignup) "TEAM" else "USER"
+        val ownerId = if (ownerType == "TEAM") {
+            context.billingTeamId
+        } else {
+            context.defaultOwnerId ?: context.userOptions.firstOrNull()?.id
+        }
+        if (ownerId.isNullOrBlank()) {
+            popUpHandler.showPopup("Unable to determine who should pay.")
+            return
+        }
+
+        val divisionLabel = divisionOptions
+            .firstOrNull { option -> option.matchesDivisionIdentifier(divisionId) }
+            ?.label
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+        val label = divisionLabel?.let { "Event registration • $it" } ?: "Event registration"
+
+        managementTarget = null
+        receivingPaymentTargetId = context.billingTeamId
+        coroutineScope.launch {
+            loadingHandler.showLoading("Preparing payment QR...")
+            component.createParticipantPaymentCheckout(
+                teamId = context.billingTeamId,
+                request = EventTeamPaymentCheckoutRequest(
+                    ownerType = ownerType,
+                    ownerId = ownerId,
+                    eventAmountCents = amountCents,
+                    taxAmountCents = 0,
+                    divisionId = divisionId,
+                    label = label,
+                ),
+            ).onSuccess { checkout ->
+                paymentQrState = ParticipantPaymentQrState(
+                    title = context.title,
+                    checkout = checkout,
+                )
+            }.onFailure { throwable ->
+                popUpHandler.showPopup(throwable.userMessage("Failed to prepare payment QR."))
+            }
+            receivingPaymentTargetId = null
+            loadingHandler.hideLoading()
+        }
+    }
+
     LazyColumn(
         Modifier
             .background(MaterialTheme.colorScheme.background)
@@ -775,6 +857,8 @@ fun ParticipantsView(
             complianceLoading = participantComplianceLoading,
             selectedDivisionId = selectedDivisionId,
             divisionOptions = divisionOptions,
+            showManagementActions = !(teamSignup && target.cardType == ParticipantCardType.USER),
+            paymentActionInProgress = receivingPaymentTargetId == target.billingContext?.billingTeamId,
             onTeamDivisionSelected = onTeamDivisionSelected,
             onDismiss = { managementTarget = null },
             onRefund = {
@@ -782,6 +866,9 @@ fun ParticipantsView(
                     managementTarget = null
                     loadRefundSnapshot(billingContext)
                 }
+            },
+            onReceivePaymentNow = {
+                startReceivePaymentNow(target)
             },
             onSendBill = {
                 target.billingContext?.let { billingContext ->
@@ -825,6 +912,13 @@ fun ParticipantsView(
                     Text("Cancel")
                 }
             },
+        )
+    }
+
+    paymentQrState?.let { qrState ->
+        ParticipantPaymentQrDialog(
+            state = qrState,
+            onDismiss = { paymentQrState = null },
         )
     }
 
@@ -1174,9 +1268,12 @@ private fun ParticipantManagementDialog(
     complianceLoading: Boolean,
     selectedDivisionId: String?,
     divisionOptions: List<EventDetailDivisionOption>,
+    showManagementActions: Boolean,
+    paymentActionInProgress: Boolean,
     onTeamDivisionSelected: (TeamWithPlayers, String) -> Unit,
     onDismiss: () -> Unit,
     onRefund: () -> Unit,
+    onReceivePaymentNow: () -> Unit,
     onSendBill: () -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -1303,42 +1400,149 @@ private fun ParticipantManagementDialog(
             }
         },
         confirmButton = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Row(
+            if (showManagementActions) {
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    OutlinedButton(
-                        onClick = onRefund,
-                        enabled = target.billingContext != null,
-                        modifier = Modifier.weight(1f),
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text("Refund")
+                        OutlinedButton(
+                            onClick = onRefund,
+                            enabled = target.billingContext != null,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("Refund")
+                        }
+                        ParticipantPaymentsMenuButton(
+                            enabled = target.billingContext != null && !paymentActionInProgress,
+                            paymentActionInProgress = paymentActionInProgress,
+                            onReceivePaymentNow = onReceivePaymentNow,
+                            onSendBill = onSendBill,
+                            modifier = Modifier.weight(1f),
+                        )
                     }
-                    OutlinedButton(
-                        onClick = onSendBill,
-                        enabled = target.billingContext != null,
-                        modifier = Modifier.weight(1f),
+                    Button(
+                        onClick = onRemove,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError,
+                        ),
                     ) {
-                        Text("Send Bill")
+                        Text("Remove")
                     }
                 }
-                Button(
-                    onClick = onRemove,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error,
-                        contentColor = MaterialTheme.colorScheme.onError,
-                    ),
-                ) {
-                    Text("Remove")
+            } else {
+                OutlinedButton(onClick = onDismiss) {
+                    Text("Close")
                 }
             }
         },
         dismissButton = {},
+    )
+}
+
+@Composable
+private fun ParticipantPaymentsMenuButton(
+    enabled: Boolean,
+    paymentActionInProgress: Boolean,
+    onReceivePaymentNow: () -> Unit,
+    onSendBill: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box(modifier = modifier) {
+        OutlinedButton(
+            onClick = { expanded = true },
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (paymentActionInProgress) "Preparing..." else "Payments")
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text("Receive payment now") },
+                onClick = {
+                    expanded = false
+                    onReceivePaymentNow()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Send bill") },
+                onClick = {
+                    expanded = false
+                    onSendBill()
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ParticipantPaymentQrDialog(
+    state: ParticipantPaymentQrState,
+    onDismiss: () -> Unit,
+) {
+    val uriHandler = LocalUriHandler.current
+    val checkout = state.checkout
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Payment QR • ${state.title}") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = "Amount ${formatCurrency(checkout.amountCents)}",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                    ),
+                ) {
+                    AsyncImage(
+                        model = checkout.qrCodeUrl,
+                        contentDescription = "Payment QR code",
+                        modifier = Modifier
+                            .padding(12.dp)
+                            .size(220.dp),
+                        contentScale = ContentScale.Fit,
+                    )
+                }
+                Text(
+                    text = checkout.checkoutUrl,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    runCatching { uriHandler.openUri(checkout.checkoutUrl) }
+                },
+            ) {
+                Text("Open link")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
     )
 }
 

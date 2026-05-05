@@ -200,6 +200,27 @@ data class EventTeamBillCreateRequest(
     val label: String? = null,
 )
 
+data class EventTeamPaymentCheckoutRequest(
+    val ownerType: String,
+    val ownerId: String? = null,
+    val eventAmountCents: Int,
+    val taxAmountCents: Int = 0,
+    val divisionId: String? = null,
+    val label: String? = null,
+)
+
+data class EventTeamPaymentCheckout(
+    val checkoutUrl: String,
+    val qrCodeUrl: String,
+    val amountCents: Int,
+    val eventAmountCents: Int,
+    val billOwnerType: String,
+    val billOwnerId: String,
+    val payerUserId: String? = null,
+    val feeBreakdown: FeeBreakdown? = null,
+    val checkoutSessionId: String? = null,
+)
+
 data class PurchaseIntentTimeSlotContext(
     val id: String? = null,
     val priceCents: Int? = null,
@@ -298,6 +319,11 @@ interface IBillingRepository : IMVPRepository {
         teamId: String,
         request: EventTeamBillCreateRequest,
     ): Result<Bill>
+    suspend fun createEventTeamPaymentCheckout(
+        eventId: String,
+        teamId: String,
+        request: EventTeamPaymentCheckoutRequest,
+    ): Result<EventTeamPaymentCheckout>
     suspend fun refundEventTeamBillPayment(
         eventId: String,
         teamId: String,
@@ -876,6 +902,50 @@ class BillingRepository(
 
         response.error?.takeIf(String::isNotBlank)?.let { throw Exception(it) }
         response.bill?.toBillOrNull() ?: error("Create team bill response missing bill")
+    }
+
+    override suspend fun createEventTeamPaymentCheckout(
+        eventId: String,
+        teamId: String,
+        request: EventTeamPaymentCheckoutRequest,
+    ): Result<EventTeamPaymentCheckout> = runCatching {
+        val normalizedEventId = eventId.trim()
+        val normalizedTeamId = teamId.trim()
+        require(normalizedEventId.isNotBlank()) { "Event id is required." }
+        require(normalizedTeamId.isNotBlank()) { "Team id is required." }
+
+        val ownerType = request.ownerType.trim().uppercase()
+        if (ownerType != "USER" && ownerType != "TEAM") {
+            throw IllegalArgumentException("Bill ownerType must be USER or TEAM.")
+        }
+
+        val ownerId = request.ownerId?.trim()?.takeIf(String::isNotBlank)
+        if (ownerType == "USER" && ownerId == null) {
+            throw IllegalArgumentException("ownerId is required for USER payments.")
+        }
+        if (request.eventAmountCents <= 0) {
+            throw IllegalArgumentException("eventAmountCents must be greater than 0.")
+        }
+        if (request.taxAmountCents < 0) {
+            throw IllegalArgumentException("taxAmountCents must be zero or greater.")
+        }
+
+        val encodedEventId = normalizedEventId.encodeURLQueryComponent()
+        val encodedTeamId = normalizedTeamId.encodeURLQueryComponent()
+        val response = api.post<EventTeamPaymentCheckoutRequestDto, EventTeamPaymentCheckoutResponseDto>(
+            path = "api/events/$encodedEventId/teams/$encodedTeamId/billing/checkout",
+            body = EventTeamPaymentCheckoutRequestDto(
+                ownerType = ownerType,
+                ownerId = ownerId,
+                eventAmountCents = request.eventAmountCents,
+                taxAmountCents = request.taxAmountCents,
+                divisionId = request.divisionId?.trim()?.takeIf(String::isNotBlank),
+                label = request.label?.trim()?.takeIf(String::isNotBlank),
+            ),
+        )
+
+        response.error?.takeIf(String::isNotBlank)?.let { throw Exception(it) }
+        response.toPaymentCheckoutOrNull() ?: error("Create payment checkout response missing checkout URL")
     }
 
     override suspend fun refundEventTeamBillPayment(
@@ -1501,6 +1571,30 @@ private data class EventTeamBillCreateRequestDto(
 )
 
 @Serializable
+private data class EventTeamPaymentCheckoutRequestDto(
+    val ownerType: String,
+    val ownerId: String? = null,
+    val eventAmountCents: Int,
+    val taxAmountCents: Int = 0,
+    val divisionId: String? = null,
+    val label: String? = null,
+)
+
+@Serializable
+private data class EventTeamPaymentCheckoutResponseDto(
+    val checkoutUrl: String? = null,
+    val qrCodeUrl: String? = null,
+    val amountCents: Int? = null,
+    val eventAmountCents: Int? = null,
+    val billOwnerType: String? = null,
+    val billOwnerId: String? = null,
+    val payerUserId: String? = null,
+    val feeBreakdown: FeeBreakdown? = null,
+    val checkoutSessionId: String? = null,
+    val error: String? = null,
+)
+
+@Serializable
 private data class CreateBillResponseDto(
     val bill: BillApiDto? = null,
     val error: String? = null,
@@ -1657,6 +1751,26 @@ private fun EventTeamBillingSnapshotResponseDto.toSnapshotOrNull(): EventTeamBil
         users = users.mapNotNull { user -> user.toUserOptionOrNull() },
         bills = bills,
         totals = totals,
+    )
+}
+
+private fun EventTeamPaymentCheckoutResponseDto.toPaymentCheckoutOrNull(): EventTeamPaymentCheckout? {
+    val resolvedCheckoutUrl = checkoutUrl?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedQrCodeUrl = qrCodeUrl?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedAmountCents = amountCents ?: return null
+    val resolvedEventAmountCents = eventAmountCents ?: resolvedAmountCents
+    val resolvedBillOwnerType = billOwnerType?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedBillOwnerId = billOwnerId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    return EventTeamPaymentCheckout(
+        checkoutUrl = resolvedCheckoutUrl,
+        qrCodeUrl = resolvedQrCodeUrl,
+        amountCents = resolvedAmountCents,
+        eventAmountCents = resolvedEventAmountCents,
+        billOwnerType = resolvedBillOwnerType,
+        billOwnerId = resolvedBillOwnerId,
+        payerUserId = payerUserId?.trim()?.takeIf(String::isNotBlank),
+        feeBreakdown = feeBreakdown,
+        checkoutSessionId = checkoutSessionId?.trim()?.takeIf(String::isNotBlank),
     )
 }
 

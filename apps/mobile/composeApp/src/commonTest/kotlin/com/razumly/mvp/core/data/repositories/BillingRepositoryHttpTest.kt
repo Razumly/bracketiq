@@ -740,6 +740,82 @@ class BillingRepositoryHttpTest {
     }
 
     @Test
+    fun createEventTeamPaymentCheckout_posts_and_parses_response() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/event_1/teams/team_1/billing/checkout", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "checkoutUrl": "https://checkout.stripe.com/c/pay/session_1",
+                      "qrCodeUrl": "https://example.test/api/billing/checkout-qr?url=session_1",
+                      "amountCents": 4715,
+                      "eventAmountCents": 4500,
+                      "billOwnerType": "TEAM",
+                      "billOwnerId": "team_1",
+                      "payerUserId": "manager_1",
+                      "checkoutSessionId": "cs_test_1",
+                      "feeBreakdown": {
+                        "eventPrice": 4500,
+                        "stripeFee": 170,
+                        "processingFee": 45,
+                        "totalCharge": 4715,
+                        "hostReceives": 4500,
+                        "feePercentage": 1,
+                        "purchaseType": "event_payment"
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val checkout = repo.createEventTeamPaymentCheckout(
+            eventId = "event_1",
+            teamId = "team_1",
+            request = EventTeamPaymentCheckoutRequest(
+                ownerType = "team",
+                ownerId = "team_1",
+                eventAmountCents = 4500,
+                divisionId = "open",
+                label = "Event registration • Open",
+            ),
+        ).getOrThrow()
+
+        assertTrue(capturedBody.contains("\"ownerType\":\"TEAM\""))
+        assertTrue(capturedBody.contains("\"ownerId\":\"team_1\""))
+        assertTrue(capturedBody.contains("\"eventAmountCents\":4500"))
+        assertTrue(capturedBody.contains("\"taxAmountCents\":0"))
+        assertTrue(capturedBody.contains("\"divisionId\":\"open\""))
+        assertEquals("https://checkout.stripe.com/c/pay/session_1", checkout.checkoutUrl)
+        assertEquals("https://example.test/api/billing/checkout-qr?url=session_1", checkout.qrCodeUrl)
+        assertEquals(4715, checkout.amountCents)
+        assertEquals("TEAM", checkout.billOwnerType)
+        assertEquals("team_1", checkout.billOwnerId)
+        assertEquals("manager_1", checkout.payerUserId)
+        assertEquals("event_payment", checkout.feeBreakdown?.purchaseType)
+    }
+
+    @Test
     fun createBill_posts_and_parses_response() = runTest {
         val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
         val userRepo = BillingRepositoryHttp_FakeUserRepository(

@@ -52,6 +52,8 @@ import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.CreateBillRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
+import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
+import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckoutRequest
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.EventParticipantRefundMode
 import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
@@ -787,6 +789,20 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
             totalAmountCents = request.eventAmountCents + request.taxAmountCents,
             allowSplit = request.allowSplit,
             id = "bill-event-team-test",
+        )
+    )
+    override suspend fun createEventTeamPaymentCheckout(
+        eventId: String,
+        teamId: String,
+        request: EventTeamPaymentCheckoutRequest,
+    ): Result<EventTeamPaymentCheckout> = Result.success(
+        EventTeamPaymentCheckout(
+            checkoutUrl = "https://checkout.stripe.com/c/pay/test",
+            qrCodeUrl = "https://example.test/api/billing/checkout-qr?url=test",
+            amountCents = request.eventAmountCents + request.taxAmountCents,
+            eventAmountCents = request.eventAmountCents,
+            billOwnerType = request.ownerType,
+            billOwnerId = request.ownerId ?: teamId,
         )
     )
     override suspend fun refundEventTeamBillPayment(
