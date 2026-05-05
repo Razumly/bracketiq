@@ -313,9 +313,11 @@ class UserRepositoryHttpTest {
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun acceptChatTermsConsent_updates_cached_current_user_profile() = runTest {
+        val tokenStore = UserRepositoryHttp_InMemoryAuthTokenStore("token-123")
         val engine = MockEngine { request ->
             assertEquals("/api/chat/terms-consent", request.url.encodedPath)
             assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer token-123", request.headers[HttpHeaders.Authorization])
             respond(
                 content = """
                     {
@@ -336,8 +338,8 @@ class UserRepositoryHttpTest {
         val prefsStore = UserRepositoryHttp_InMemoryPreferencesDataStore()
         val repository = UserRepository(
             databaseService = UserRepositoryHttp_FakeDatabaseService(),
-            api = MvpApiClient(client, "http://localhost", UserRepositoryHttp_InMemoryAuthTokenStore()),
-            tokenStore = UserRepositoryHttp_InMemoryAuthTokenStore(),
+            api = MvpApiClient(client, "http://localhost", tokenStore),
+            tokenStore = tokenStore,
             currentUserDataSource = CurrentUserDataSource(prefsStore),
         )
         val state = repository.acceptChatTermsConsent().getOrThrow()

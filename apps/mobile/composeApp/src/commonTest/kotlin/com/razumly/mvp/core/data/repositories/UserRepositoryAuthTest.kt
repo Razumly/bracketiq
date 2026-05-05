@@ -1221,6 +1221,94 @@ class UserRepositoryAuthTest {
     }
 
     @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun updatePassword_stores_refreshed_token_before_reloading_current_user() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("old-token")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+        var authMeCalls = 0
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> {
+                    authMeCalls += 1
+                    val expectedToken = if (authMeCalls == 1) "Bearer old-token" else "Bearer new-token"
+                    assertEquals(expectedToken, request.headers[HttpHeaders.Authorization])
+                    val token = if (authMeCalls == 1) "old-token" else "new-token"
+                    respond(
+                        content = """
+                            {
+                              "user": { "id":"u1", "email":"u1@example.com", "name":"U One" },
+                              "session": { "userId":"u1", "isAdmin":false, "sessionVersion":1 },
+                              "token":"$token",
+                              "profile": {
+                                "id":"u1",
+                                "firstName":"U",
+                                "lastName":"One",
+                                "userName":"u_one",
+                                "teamIds":[],
+                                "friendIds":[],
+                                "friendRequestIds":[],
+                                "friendRequestSentIds":[],
+                                "followingIds":[],
+                                "uploadedImages":[],
+                                "hasStripeAccount":false
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                "/api/auth/password" -> {
+                    assertEquals(HttpMethod.Post, request.method)
+                    assertEquals("Bearer old-token", request.headers[HttpHeaders.Authorization])
+                    respond(
+                        content = """
+                            {
+                              "ok": true,
+                              "token": "new-token",
+                              "session": { "userId":"u1", "isAdmin":false, "sessionVersion":1 }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                "/api/chat/terms-consent" -> respond(
+                    content = """{"accepted":false,"acceptedAt":null,"version":"2026-04-14","url":"/terms","summary":[]}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(
+            databaseService = db,
+            api = api,
+            tokenStore = tokenStore,
+            currentUserDataSource = currentUserDataSource,
+            startupDispatcher = UnconfinedTestDispatcher(testScheduler),
+        )
+
+        val result = repo.updatePassword("password123", "password456")
+
+        assertEquals(true, result.isSuccess)
+        assertEquals("new-token", tokenStore.get())
+        assertEquals(2, authMeCalls)
+    }
+
+    @Test
     fun linkChildToParent_without_email_or_id_fails_fast() = runTest {
         val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("t123")
         val userDao = FakeUserDataDao()

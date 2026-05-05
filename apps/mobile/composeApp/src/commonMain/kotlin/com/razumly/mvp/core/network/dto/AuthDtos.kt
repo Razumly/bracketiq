@@ -95,6 +95,7 @@ data class AuthUserDto(
 data class AuthSessionDto(
     val userId: String,
     val isAdmin: Boolean,
+    val sessionVersion: Int? = null,
 )
 
 @Serializable

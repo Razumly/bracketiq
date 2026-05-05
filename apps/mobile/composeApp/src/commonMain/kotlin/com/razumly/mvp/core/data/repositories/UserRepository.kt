@@ -1203,7 +1203,7 @@ class UserRepository(
     }
 
     override suspend fun updatePassword(currentPassword: String, newPassword: String): Result<Unit> = runCatching {
-        api.post<PasswordRequestDto, OkResponseDto>(
+        val response = api.post<PasswordRequestDto, AuthResponseDto>(
             path = "api/auth/password",
             body = PasswordRequestDto(
                 currentPassword = currentPassword,
@@ -1211,7 +1211,7 @@ class UserRepository(
             ),
         )
 
-        // /api/auth/password does not return a token; refresh via /api/auth/me.
+        response.token?.takeIf(String::isNotBlank)?.let { tokenStore.set(it) }
         loadCurrentUser()
     }
 
