@@ -48,7 +48,7 @@ import com.razumly.mvp.core.data.dataTypes.divisionPriceRangeLabel
 import com.razumly.mvp.core.data.dataTypes.isDraftLikeState
 import com.razumly.mvp.core.data.dataTypes.isPrivateState
 import com.razumly.mvp.core.data.dataTypes.lifecycleStateLabel
-import com.razumly.mvp.core.data.util.toDivisionDisplayLabels
+import com.razumly.mvp.core.data.util.divisionDisplayLabels
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.eventTypeWithSportLabel
 import com.razumly.mvp.core.presentation.util.getImageUrl
@@ -105,9 +105,9 @@ fun EventCard(
     val prizeText = remember(event.prize) {
         event.prize.trim().takeIf { it.isNotEmpty() }
     }
-    val divisionSummaryText = remember(event.divisions, event.divisionDetails) {
-        val divisionLabels = event.divisions
-            .toDivisionDisplayLabels(event.divisionDetails)
+    val divisionSummaryText = remember(event.divisions, event.divisionDetails, event.eventType, event.includePlayoffs) {
+        val divisionLabels = event
+            .divisionDisplayLabels()
             .map { label -> label.removeStandaloneSkillWord() }
             .filter { label -> label.isNotBlank() }
         when {
