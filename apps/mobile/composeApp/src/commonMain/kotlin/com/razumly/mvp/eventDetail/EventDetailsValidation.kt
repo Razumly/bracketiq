@@ -100,7 +100,7 @@ internal fun validatePaymentPlans(
         val detailName = detail.name.trim().ifBlank { detail.id }
         errors += validatePlan(
             label = "Division \"$detailName\" payment plan",
-            priceCents = (detail.price ?: event.priceCents).coerceAtLeast(0),
+            priceCents = detail.price?.coerceAtLeast(0) ?: 0,
             allowPaymentPlans = detail.allowPaymentPlans == true,
             installmentCount = detail.installmentCount,
             installmentAmounts = detail.installmentAmounts,

@@ -667,8 +667,12 @@ class DefaultEventDetailComponent(
             .toMutableSet()
 
         divisionDetails
-            .filter { detail -> detail.kind?.trim()?.equals("PLAYOFF", ignoreCase = true) == true }
-            .map { detail -> detail.id.normalizeDivisionIdentifier() }
+            .filter { detail -> detail.isTournamentPlayoffDivision() }
+            .map { detail -> detail.normalizedTournamentDivisionId() }
+            .filter(String::isNotBlank)
+            .forEach { divisionId -> mappedPlayoffIds += divisionId }
+
+        inferredTournamentBracketDivisionIds()
             .filter(String::isNotBlank)
             .forEach { divisionId -> mappedPlayoffIds += divisionId }
 
@@ -1465,7 +1469,9 @@ class DefaultEventDetailComponent(
                 val normalizedDivision = divisionValue
                     ?.normalizeDivisionIdentifier()
                     ?.takeIf(String::isNotBlank)
-                if (eventValue.eventType != EventType.LEAGUE || normalizedDivision == null) {
+                val supportsStandings = eventValue.eventType == EventType.LEAGUE ||
+                    eventValue.isTournamentPoolPlayEnabled()
+                if (!supportsStandings || normalizedDivision == null) {
                     null
                 } else if (eventValue.isPlayoffPlacementDivision(normalizedDivision)) {
                     null
@@ -1624,7 +1630,7 @@ class DefaultEventDetailComponent(
     }
 
     private suspend fun refreshLeagueStandingsAfterSchedule(event: Event) {
-        if (event.eventType != EventType.LEAGUE) return
+        if (event.eventType != EventType.LEAGUE && !event.isTournamentPoolPlayEnabled()) return
         val divisionId = resolveLeagueStandingsDivisionId() ?: return
         loadLeagueDivisionStandings(
             eventId = event.id,
@@ -1661,8 +1667,8 @@ class DefaultEventDetailComponent(
         val event = selectedEvent.value
         val divisionId = resolveLeagueStandingsDivisionId()
 
-        if (event.eventType != EventType.LEAGUE || divisionId == null) {
-            _errorState.value = ErrorMessage("Select a league division before confirming standings.")
+        if ((event.eventType != EventType.LEAGUE && !event.isTournamentPoolPlayEnabled()) || divisionId == null) {
+            _errorState.value = ErrorMessage("Select a standings division before confirming standings.")
             return
         }
 
@@ -2414,10 +2420,10 @@ class DefaultEventDetailComponent(
             preferredDivisionId = preferredDivisionId,
         )
         val shouldPreview = if (forTeamJoin) {
-            paymentPlan.allowPaymentPlans && paymentPlan.priceCents > 0 && !isEventFull.value
+            paymentPlan.allowPaymentPlans && paymentPlan.configuredPriceCents > 0 && !isEventFull.value
         } else {
             paymentPlan.allowPaymentPlans &&
-                paymentPlan.priceCents > 0 &&
+                paymentPlan.configuredPriceCents > 0 &&
                 !isEventFull.value &&
                 !event.teamSignup
         }
@@ -2434,7 +2440,7 @@ class DefaultEventDetailComponent(
 
         return PaymentPlanPreviewDialogState(
             ownerLabel = ownerLabel,
-            totalAmountCents = paymentPlan.priceCents,
+            totalAmountCents = paymentPlan.configuredPriceCents,
             installmentAmounts = paymentPlan.installmentAmounts,
             installmentDueDates = paymentPlan.installmentDueDates,
             installmentDueRelativeDays = paymentPlan.installmentDueRelativeDays,
@@ -2560,8 +2566,12 @@ class DefaultEventDetailComponent(
         if (normalizedOwnerId.isEmpty()) {
             return Result.failure(IllegalArgumentException("Unable to start payment plan: owner id is missing."))
         }
-        if (paymentPlan.priceCents <= 0) {
-            return Result.failure(IllegalArgumentException("This event does not have a price set for a payment plan."))
+        val priceCents = paymentPlan.priceCents
+        if (priceCents == null) {
+            return Result.failure(IllegalArgumentException("This division does not have a price set."))
+        }
+        if (priceCents <= 0) {
+            return Result.failure(IllegalArgumentException("This division does not have a paid price set for a payment plan."))
         }
 
         val useRelativeDueDates = isWeeklyParentEvent(event)
@@ -2596,7 +2606,7 @@ class DefaultEventDetailComponent(
             CreateBillRequest(
                 ownerType = ownerType,
                 ownerId = normalizedOwnerId,
-                totalAmountCents = paymentPlan.priceCents,
+                totalAmountCents = priceCents,
                 eventId = event.id,
                 slotId = selectedOccurrence?.slotId,
                 occurrenceDate = selectedOccurrence?.occurrenceDate,
@@ -2691,9 +2701,13 @@ class DefaultEventDetailComponent(
                 event = selectedEvent.value,
                 preferredDivisionId = selectedDivision.value,
             )
+            if (paymentPlan.priceCents == null) {
+                _errorState.value = ErrorMessage("Set a price for this division before joining.")
+                return
+            }
             if (
                 paymentPlan.allowPaymentPlans
-                && paymentPlan.priceCents > 0
+                && paymentPlan.configuredPriceCents > 0
                 && !isEventFull.value
                 && !selectedEvent.value.teamSignup
             ) {
@@ -2757,7 +2771,7 @@ class DefaultEventDetailComponent(
                 }
                 return
             }
-            if (paymentPlan.priceCents <= 0 || isEventFull.value || selectedEvent.value.teamSignup) {
+            if (paymentPlan.configuredPriceCents <= 0 || isEventFull.value || selectedEvent.value.teamSignup) {
                 loadingHandler.showLoading("Joining Event ...")
                 eventRepository.addCurrentUserToEvent(
                     event = selectedEvent.value,
@@ -2789,8 +2803,9 @@ class DefaultEventDetailComponent(
                 loadingHandler.showLoading("Creating Purchase Request ...")
                 billingRepository.createPurchaseIntent(
                     event = selectedEvent.value,
-                    priceCents = paymentPlan.priceCents,
+                    priceCents = paymentPlan.configuredPriceCents,
                     occurrence = weeklyOccurrence,
+                    divisionId = selectedDivision.value,
                 )
                     .onSuccess { purchaseIntent ->
                         pendingJoinConfirmationTarget = buildJoinConfirmationTarget(
@@ -2826,9 +2841,13 @@ class DefaultEventDetailComponent(
                 event = selectedEvent.value,
                 preferredDivisionId = selectedDivision.value,
             )
+            if (paymentPlan.priceCents == null) {
+                _errorState.value = ErrorMessage("Set a price for this division before joining.")
+                return
+            }
             if (
                 paymentPlan.allowPaymentPlans
-                && paymentPlan.priceCents > 0
+                && paymentPlan.configuredPriceCents > 0
                 && !isEventFull.value
             ) {
                 var joinedByThisFlow = false
@@ -2876,7 +2895,7 @@ class DefaultEventDetailComponent(
                 }
                 return
             }
-            if (paymentPlan.priceCents <= 0 || isEventFull.value) {
+            if (paymentPlan.configuredPriceCents <= 0 || isEventFull.value) {
                 loadingHandler.showLoading("Joining Event ...")
                 eventRepository.addTeamToEvent(
                     event = selectedEvent.value,
@@ -2900,8 +2919,9 @@ class DefaultEventDetailComponent(
                 billingRepository.createPurchaseIntent(
                     event = selectedEvent.value,
                     teamId = team.team.id,
-                    priceCents = paymentPlan.priceCents,
+                    priceCents = paymentPlan.configuredPriceCents,
                     occurrence = weeklyOccurrence,
+                    divisionId = selectedDivision.value,
                 )
                     .onSuccess { purchaseIntent ->
                         pendingJoinConfirmationTarget = buildJoinConfirmationTarget(
@@ -5532,12 +5552,14 @@ class DefaultEventDetailComponent(
     }
 
     private data class EffectivePaymentPlan(
-        val priceCents: Int,
+        val priceCents: Int?,
         val allowPaymentPlans: Boolean,
         val installmentAmounts: List<Int>,
         val installmentDueDates: List<String>,
         val installmentDueRelativeDays: List<Int>,
-    )
+    ) {
+        val configuredPriceCents: Int get() = priceCents ?: 0
+    }
 
     private fun resolveSelectedDivisionDetail(
         event: Event,
@@ -5572,10 +5594,7 @@ class DefaultEventDetailComponent(
         preferredDivisionId: String?,
     ): EffectivePaymentPlan {
         val selectedDivision = resolveSelectedDivisionDetail(event, preferredDivisionId)
-        val allowPaymentPlans = when (selectedDivision?.allowPaymentPlans) {
-            null -> event.allowPaymentPlans == true
-            else -> selectedDivision.allowPaymentPlans == true
-        }
+        val allowPaymentPlans = selectedDivision?.allowPaymentPlans == true
         val useRelativeDueDates = isWeeklyParentEvent(event)
 
         return EffectivePaymentPlan(
@@ -5584,7 +5603,7 @@ class DefaultEventDetailComponent(
             installmentAmounts = if (allowPaymentPlans) {
                 val configuredAmounts = selectedDivision?.installmentAmounts
                     ?.takeIf { amounts -> amounts.isNotEmpty() }
-                    ?: event.installmentAmounts
+                    ?: emptyList()
                 configuredAmounts.map { amount -> amount.coerceAtLeast(0) }
             } else {
                 emptyList()
@@ -5592,7 +5611,7 @@ class DefaultEventDetailComponent(
             installmentDueDates = if (allowPaymentPlans && !useRelativeDueDates) {
                 val configuredDueDates = selectedDivision?.installmentDueDates
                     ?.takeIf { dueDates -> dueDates.isNotEmpty() }
-                    ?: event.installmentDueDates
+                    ?: emptyList()
                 configuredDueDates
                     .map { dueDate -> dueDate.trim() }
                     .filter(String::isNotBlank)
@@ -5602,7 +5621,7 @@ class DefaultEventDetailComponent(
             installmentDueRelativeDays = if (allowPaymentPlans && useRelativeDueDates) {
                 val configuredRelativeDays = selectedDivision?.installmentDueRelativeDays
                     ?.takeIf { dueDays -> dueDays.isNotEmpty() }
-                    ?: event.installmentDueRelativeDays
+                    ?: emptyList()
                 configuredRelativeDays
             } else {
                 emptyList()
@@ -5616,13 +5635,13 @@ class DefaultEventDetailComponent(
         preferredDivisionId: String?,
     ): Boolean {
         val selectedDivision = resolveSelectedDivisionDetail(event, preferredDivisionId)
-        val maxParticipants = if (event.singleDivision) {
-            event.maxParticipants
+        val maxParticipants = if (event.divisions.isEmpty()) {
+            event.maxParticipants.takeIf { value -> value > 0 }
         } else {
-            selectedDivision?.maxParticipants ?: event.maxParticipants
+            selectedDivision?.maxParticipants
         }
 
-        if (maxParticipants <= 0) {
+        if (maxParticipants == null || maxParticipants <= 0) {
             return false
         }
 

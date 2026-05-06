@@ -9,6 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.resolvedDivisionPriceCents
 import com.razumly.mvp.core.util.jsonMVP
 import kotlinx.serialization.decodeFromString
 import kotlin.test.Test
@@ -250,7 +251,7 @@ class EventDtosTest {
     }
 
     @Test
-    fun to_update_dto_mirrors_event_price_and_capacity_for_single_division_events() {
+    fun to_update_dto_preserves_division_price_and_capacity_for_single_division_events() {
         val event = Event(
             id = "event-12",
             name = "Single Division Event",
@@ -280,8 +281,8 @@ class EventDtosTest {
         val dto = event.toUpdateDto()
         val detail = dto.divisionDetails.first()
 
-        assertEquals(4200, detail.price)
-        assertEquals(18, detail.maxParticipants)
+        assertEquals(1000, detail.price)
+        assertEquals(4, detail.maxParticipants)
     }
 
     @Test
@@ -460,6 +461,59 @@ class EventDtosTest {
         assertEquals(listOf("event-11__division__open"), event?.divisions)
         assertEquals("Open", event?.divisionDetails?.firstOrNull()?.name)
         assertEquals(true, event?.noFixedEndDateTime)
+    }
+
+    @Test
+    fun event_api_dto_merges_tournament_playoff_division_details_for_registration_pricing() {
+        val bracketId = "event-12__division__c_skill_open_age_18plus"
+        val poolId = "${bracketId}_pool_a"
+        val dto = EventApiDto(
+            id = "event-12",
+            name = "Pool Tournament",
+            hostId = "host-12",
+            eventType = EventType.TOURNAMENT.name,
+            includePlayoffs = true,
+            includePlayoffsOrPools = true,
+            singleDivision = false,
+            start = "2026-02-10T00:00:00Z",
+            end = "2026-02-10T01:00:00Z",
+            divisions = listOf(poolId),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = poolId,
+                    key = "c_skill_open_age_18plus_pool_a",
+                    name = "CoEd Open 18+ Pool A",
+                    divisionTypeId = "open",
+                    divisionTypeName = "Open",
+                    ratingType = "SKILL",
+                    gender = "C",
+                    maxParticipants = 4,
+                    playoffPlacementDivisionIds = listOf(bracketId),
+                ),
+            ),
+            playoffDivisionDetails = listOf(
+                DivisionDetail(
+                    id = bracketId,
+                    key = "c_skill_open_age_18plus",
+                    name = "CoEd Open 18+",
+                    kind = "",
+                    divisionTypeId = "open",
+                    divisionTypeName = "Open",
+                    ratingType = "SKILL",
+                    gender = "C",
+                    price = 4500,
+                    maxParticipants = 16,
+                ),
+            ),
+        )
+
+        val event = dto.toEventOrNull()
+        val bracketDetail = event?.divisionDetails?.firstOrNull { detail -> detail.id == bracketId }
+
+        assertEquals(listOf(poolId), event?.divisions)
+        assertEquals("PLAYOFF", bracketDetail?.kind)
+        assertEquals(4500, bracketDetail?.price)
+        assertEquals(4500, event?.resolvedDivisionPriceCents(bracketId))
     }
 
     @Test

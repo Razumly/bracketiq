@@ -18,6 +18,8 @@ interface PlatformFocusManager {
     fun setFocusChangeListener(onFocusChanged: (Boolean) -> Unit)
     fun setOnNextAction(onNext: () -> Unit)
     fun setOnDoneAction(onDone: () -> Unit)
+    fun handleNextAction()
+    fun handleDoneAction()
     fun clearCallbacks()
 }
 

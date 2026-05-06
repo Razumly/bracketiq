@@ -55,16 +55,14 @@ private fun DivisionDetailEditCard(
     onEditDivision: (String) -> Unit,
     onRemoveDivision: (String) -> Unit,
 ) {
-    val priceCents = if (event.singleDivision) {
-        event.priceCents.coerceAtLeast(0)
-    } else {
-        (detail.price ?: event.priceCents).coerceAtLeast(0)
-    }
-    val maxParticipants = if (event.singleDivision) {
-        event.maxParticipants.coerceAtLeast(2)
-    } else {
-        (detail.maxParticipants ?: event.maxParticipants).coerceAtLeast(2)
-    }
+    val priceLabel = detail.price
+        ?.coerceAtLeast(0)
+        ?.toDouble()
+        ?.div(100.0)
+        ?.moneyFormat()
+        ?: "Not set"
+    val maxParticipants = detail.maxParticipants?.takeIf { value -> value > 0 }
+    val maxParticipantsLabel = maxParticipants?.toString() ?: "Not set"
     val playoffTeams = when {
         event.eventType == EventType.LEAGUE && event.includePlayoffs -> {
             if (event.singleDivision) {
@@ -82,10 +80,10 @@ private fun DivisionDetailEditCard(
         null
     }
     val poolTeamCount = if (event.eventType == EventType.TOURNAMENT && event.includePlayoffs) {
-        detail.poolTeamCount ?: derivePoolTeamCount(maxParticipants, poolCount)
-    } else {
-        null
-    }
+                    maxParticipants?.let { value -> detail.poolTeamCount ?: derivePoolTeamCount(value, poolCount) }
+                } else {
+                    null
+                }
     val normalizedDetail = detail.normalizeDivisionDetail(event.id)
     val detailMeta = listOf(
         normalizedDetail.gender.ifBlank { "C" },
@@ -125,8 +123,8 @@ private fun DivisionDetailEditCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = "Price: ${priceCents.toDouble().div(100.0).moneyFormat()} - " +
-                    "${if (event.teamSignup) "Max teams" else "Max participants"}: $maxParticipants",
+                text = "Price: $priceLabel - " +
+                    "${if (event.teamSignup) "Max teams" else "Max participants"}: $maxParticipantsLabel",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

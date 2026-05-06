@@ -397,6 +397,8 @@ fun ParticipantsView(
 
     fun buildTeamBillingContext(team: TeamWithPlayers): ParticipantBillingContext {
         val teamName = team.team.name.trim().ifBlank { "Team" }
+        val billOwnerTeamId = team.team.parentTeamId?.trim()?.takeIf(String::isNotBlank)
+            ?: team.team.id
         val users = resolveTeamUsers(team)
         return ParticipantBillingContext(
             billingTeamId = team.team.id,
@@ -404,7 +406,7 @@ fun ParticipantsView(
             userOptions = users,
             allowTeamOwner = true,
             defaultOwnerType = "TEAM",
-            defaultOwnerId = team.team.id,
+            defaultOwnerId = billOwnerTeamId,
         )
     }
 
@@ -600,14 +602,14 @@ fun ParticipantsView(
         val context = target.billingContext ?: return
         val divisionId = resolvePaymentDivisionId(target)
         val amountCents = selectedEvent.event.resolvedDivisionPriceCents(divisionId)
-        if (amountCents <= 0) {
-            popUpHandler.showPopup("Set a price for this event or division before receiving payment.")
+        if (amountCents == null || amountCents <= 0) {
+            popUpHandler.showPopup("Set a price for this division before receiving payment.")
             return
         }
 
         val ownerType = if (teamSignup) "TEAM" else "USER"
         val ownerId = if (ownerType == "TEAM") {
-            context.billingTeamId
+            context.defaultOwnerId ?: context.billingTeamId
         } else {
             context.defaultOwnerId ?: context.userOptions.firstOrNull()?.id
         }
@@ -1101,7 +1103,7 @@ fun ParticipantsView(
                             OutlinedButton(
                                 onClick = {
                                     createBillOwnerType = "TEAM"
-                                    createBillOwnerId = context.billingTeamId
+                                    createBillOwnerId = context.defaultOwnerId ?: context.billingTeamId
                                 },
                                 modifier = Modifier.weight(1f),
                             ) {
@@ -1213,7 +1215,7 @@ fun ParticipantsView(
                         }
 
                         val ownerId = if (createBillOwnerType == "TEAM") {
-                            context.billingTeamId
+                            context.defaultOwnerId ?: context.billingTeamId
                         } else {
                             createBillOwnerId
                         }

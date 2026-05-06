@@ -262,6 +262,7 @@ interface IBillingRepository : IMVPRepository {
         priceCents: Int? = null,
         timeSlotContext: PurchaseIntentTimeSlotContext? = null,
         occurrence: EventOccurrenceSelection? = null,
+        divisionId: String? = null,
     ): Result<PurchaseIntent>
     suspend fun createTeamRegistrationPurchaseIntent(
         team: Team,
@@ -376,13 +377,17 @@ class BillingRepository(
         priceCents: Int?,
         timeSlotContext: PurchaseIntentTimeSlotContext?,
         occurrence: EventOccurrenceSelection?,
+        divisionId: String?,
     ): Result<PurchaseIntent> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
         val email = userRepository.currentAccount.value.getOrNull()?.email
-        val effectivePriceCents = priceCents
+        val effectivePriceCents = (priceCents ?: timeSlotContext?.priceCents)
             ?.takeIf { value -> value >= 0 }
-            ?: event.priceCents
+            ?: throw IllegalArgumentException("Set a price for this division before checkout.")
         val normalizedTeamId = teamId
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+        val normalizedDivisionId = divisionId
             ?.trim()
             ?.takeIf(String::isNotBlank)
 
@@ -398,6 +403,7 @@ class BillingRepository(
                     organizationId = event.organizationId,
                 ),
                 team = normalizedTeamId?.let { BillingTeamRefDto(id = it) },
+                divisionId = normalizedDivisionId,
                 timeSlot = timeSlotContext?.let { context ->
                     val normalizedScheduledFieldIds = context.scheduledFieldIds
                         .map(String::trim)

@@ -413,34 +413,10 @@ fun EventDetails(
         editEvent.eventType,
     ) {
         val useRelativeInstallmentDueDates = editEvent.eventType == EventType.WEEKLY_EVENT
-        val defaultInstallmentAmounts = editEvent.installmentAmounts.map { amount ->
-            amount.coerceAtLeast(0)
-        }
-        val defaultInstallmentDueDates = editEvent.installmentDueDates
-            .map { dueDate -> dueDate.trim() }
-            .filter(String::isNotBlank)
-        val defaultInstallmentDueRelativeDays = editEvent.installmentDueRelativeDays
-        val defaultInstallmentCount = maxOf(
-            editEvent.installmentCount ?: 0,
-            defaultInstallmentAmounts.size,
-            if (useRelativeInstallmentDueDates) {
-                defaultInstallmentDueRelativeDays.size
-            } else {
-                defaultInstallmentDueDates.size
-            },
-        ).takeIf { count -> count > 0 }
-        val defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true &&
-            defaultInstallmentCount != null &&
-            editEvent.priceCents.coerceAtLeast(0) > 0
-
         val tournamentPoolPlayEnabled = editEvent.isTournamentPoolPlayEnabled()
         normalizedDivisionDetails.map { detail ->
-            val fallbackMaxParticipants = editEvent.maxParticipants.coerceAtLeast(2)
-            val effectiveDivisionPrice = if (editEvent.singleDivision) {
-                editEvent.priceCents.coerceAtLeast(0)
-            } else {
-                (detail.price ?: editEvent.priceCents).coerceAtLeast(0)
-            }
+            val effectiveDivisionPrice = detail.price?.coerceAtLeast(0)
+            val effectiveMaxParticipants = detail.maxParticipants?.coerceAtLeast(2)
             val detailInstallmentAmounts = detail.installmentAmounts.map { amount ->
                 amount.coerceAtLeast(0)
             }
@@ -458,32 +434,23 @@ fun EventDetails(
                 },
             ).takeIf { count -> count > 0 }
             val detailAllowPaymentPlans = when {
-                editEvent.singleDivision -> defaultAllowPaymentPlans
                 detail.allowPaymentPlans == false -> false
-                detail.allowPaymentPlans == true -> detailInstallmentCount != null && effectiveDivisionPrice > 0
-                else -> defaultAllowPaymentPlans
+                detail.allowPaymentPlans == true -> detailInstallmentCount != null && (effectiveDivisionPrice ?: 0) > 0
+                else -> false
             }
 
             detail.copy(
                 price = effectiveDivisionPrice,
-                maxParticipants = if (editEvent.singleDivision) {
-                    fallbackMaxParticipants
-                } else {
-                    (detail.maxParticipants ?: fallbackMaxParticipants).coerceAtLeast(2)
-                },
+                maxParticipants = effectiveMaxParticipants,
                 playoffTeamCount = when {
                     !editEvent.includePlayoffs -> null
                     editEvent.singleDivision -> editEvent.playoffTeamCount ?: detail.playoffTeamCount
                     else -> detail.playoffTeamCount
                 },
                 poolCount = if (tournamentPoolPlayEnabled) detail.poolCount else null,
-                poolTeamCount = if (tournamentPoolPlayEnabled) {
+                poolTeamCount = if (tournamentPoolPlayEnabled && effectiveMaxParticipants != null) {
                     derivePoolTeamCount(
-                        maxTeams = if (editEvent.singleDivision) {
-                            fallbackMaxParticipants
-                        } else {
-                            (detail.maxParticipants ?: fallbackMaxParticipants).coerceAtLeast(2)
-                        },
+                        maxTeams = effectiveMaxParticipants,
                         poolCount = detail.poolCount,
                     )
                 } else {
@@ -491,37 +458,21 @@ fun EventDetails(
                 },
                 allowPaymentPlans = detailAllowPaymentPlans,
                 installmentCount = when {
-                    editEvent.singleDivision -> defaultInstallmentCount
-                    detailAllowPaymentPlans -> detailInstallmentCount ?: defaultInstallmentCount
+                    detailAllowPaymentPlans -> detailInstallmentCount
                     else -> null
                 },
                 installmentDueDates = when {
                     useRelativeInstallmentDueDates -> emptyList()
-                    editEvent.singleDivision -> defaultInstallmentDueDates
-                    detailAllowPaymentPlans -> if (detailInstallmentDueDates.isNotEmpty()) {
-                        detailInstallmentDueDates
-                    } else {
-                        defaultInstallmentDueDates
-                    }
+                    detailAllowPaymentPlans -> detailInstallmentDueDates
                     else -> emptyList()
                 },
                 installmentDueRelativeDays = when {
                     !useRelativeInstallmentDueDates -> emptyList()
-                    editEvent.singleDivision -> defaultInstallmentDueRelativeDays
-                    detailAllowPaymentPlans -> if (detailInstallmentDueRelativeDays.isNotEmpty()) {
-                        detailInstallmentDueRelativeDays
-                    } else {
-                        defaultInstallmentDueRelativeDays
-                    }
+                    detailAllowPaymentPlans -> detailInstallmentDueRelativeDays
                     else -> emptyList()
                 },
                 installmentAmounts = when {
-                    editEvent.singleDivision -> defaultInstallmentAmounts
-                    detailAllowPaymentPlans -> if (detailInstallmentAmounts.isNotEmpty()) {
-                        detailInstallmentAmounts
-                    } else {
-                        defaultInstallmentAmounts
-                    }
+                    detailAllowPaymentPlans -> detailInstallmentAmounts
                     else -> emptyList()
                 },
             )
@@ -2415,11 +2366,6 @@ fun EventDetails(
                         )
                     },
                     editContent = {
-                        val maxParticipantsLabel = if (!editEvent.teamSignup) {
-                            stringResource(Res.string.max_players)
-                        } else {
-                            stringResource(Res.string.max_teams)
-                        }
                         PlatformDropdown(
                             selectedValue = editEvent.eventType.name,
                             onSelectionChange = { selectedValue ->
@@ -2442,60 +2388,26 @@ fun EventDetails(
                         FormSectionDivider()
 
                         val teamCapacityInputs: @Composable () -> Unit = {
-                            Row(
+                            NumberInputField(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.Top,
-                            ) {
-                                NumberInputField(
-                                    modifier = Modifier.weight(1f),
-                                    value = editEvent.maxParticipants.toString(),
-                                    label = if (editEvent.singleDivision) {
-                                        maxParticipantsLabel
-                                    } else {
-                                        "Default $maxParticipantsLabel"
-                                    },
-                                    enabled = true,
-                                    onValueChange = { newValue ->
-                                        if (newValue.all { it.isDigit() }) {
-                                            if (newValue.isBlank()) {
-                                                onEditEvent { copy(maxParticipants = 0) }
-                                            } else {
-                                                onEditEvent { copy(maxParticipants = newValue.toInt()) }
-                                            }
+                                value = editEvent.teamSizeLimit.toString(),
+                                label = "Team Size Limit",
+                                onValueChange = { newValue ->
+                                    if (newValue.all { it.isDigit() }) {
+                                        if (newValue.isBlank()) {
+                                            onEditEvent { copy(teamSizeLimit = 0) }
+                                        } else {
+                                            onEditEvent { copy(teamSizeLimit = newValue.toInt()) }
                                         }
-                                    },
-                                    isError = !isMaxParticipantsValid,
-                                    errorMessage = if (isMaxParticipantsValid) "" else stringResource(
-                                        Res.string.value_too_low, 2
-                                    ),
-                                    supportingText = if (editEvent.singleDivision) {
-                                        null
-                                    } else {
-                                        "Used as the default capacity for new divisions."
-                                    },
-                                )
-                                NumberInputField(
-                                    modifier = Modifier.weight(1f),
-                                    value = editEvent.teamSizeLimit.toString(),
-                                    label = "Team Size Limit",
-                                    onValueChange = { newValue ->
-                                        if (newValue.all { it.isDigit() }) {
-                                            if (newValue.isBlank()) {
-                                                onEditEvent { copy(teamSizeLimit = 0) }
-                                            } else {
-                                                onEditEvent { copy(teamSizeLimit = newValue.toInt()) }
-                                            }
-                                        }
-                                    },
-                                    isError = !isTeamSizeValid,
-                                    supportingText = if (!isTeamSizeValid) {
-                                        "Team size must be at least 1."
-                                    } else {
-                                        ""
-                                    },
-                                )
-                            }
+                                    }
+                                },
+                                isError = !isTeamSizeValid,
+                                supportingText = if (!isTeamSizeValid) {
+                                    "Team size must be at least 1."
+                                } else {
+                                    ""
+                                },
+                            )
                         }
                         val playoffsOrPoolsInputs: @Composable () -> Unit = {
                             if (editEvent.eventType == EventType.LEAGUE) {
@@ -2636,35 +2548,6 @@ fun EventDetails(
                         }
                         FormSectionDivider()
 
-                        if (!hostHasAccount) {
-                            StripeButton(
-                                onClick = onHostCreateAccount,
-                                paymentProcessor = paymentProcessor,
-                                text = "Create Stripe Connect Account to Change Price",
-                                modifier = Modifier.align(Alignment.CenterHorizontally),
-                            )
-                        }
-                        MoneyInputField(
-                            value = editEvent.priceCents.toString(),
-                            label = if (editEvent.singleDivision) "Price" else "Default Price",
-                            enabled = hostHasAccount && !rentalTimeLocked,
-                            onValueChange = { newText ->
-                                if (newText.isBlank()) {
-                                    onEditEvent { copy(priceCents = 0) }
-                                    return@MoneyInputField
-                                }
-                                val newCleaned = newText.filter { it.isDigit() }
-                                onEditEvent { copy(priceCents = newCleaned.toInt()) }
-                            },
-                            isError = !isPriceValid,
-                            supportingText = if (!editEvent.singleDivision) {
-                                "Used as the default price for new divisions."
-                            } else if (isPriceValid) {
-                                stringResource(Res.string.free_entry_hint)
-                            } else {
-                                stringResource(Res.string.invalid_price)
-                            }
-                        )
                         RegistrationOptions(
                             selectedOption = editEvent.registrationCutoffHours,
                             onOptionSelected = {
@@ -2694,179 +2577,6 @@ fun EventDetails(
                             )
                         }
 
-                        FormSectionDivider()
-                        if (isNewEvent && editEvent.eventType != EventType.WEEKLY_EVENT) {
-                            Text(
-                                text = "Payment plans can be configured on the web version.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(localImageScheme.current.onSurfaceVariant),
-                            )
-                        } else {
-                            Text(
-                                text = if (editEvent.singleDivision) {
-                                    "Payment Plans"
-                                } else {
-                                    "Default Payment Plan"
-                                },
-                                style = MaterialTheme.typography.titleSmall,
-                                color = Color(localImageScheme.current.onSurface),
-                            )
-                            if (!editEvent.singleDivision) {
-                                Text(
-                                    text = "Used as the default payment plan when adding new divisions.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color(localImageScheme.current.onSurfaceVariant),
-                                )
-                            }
-                            LabeledCheckboxRow(
-                                checked = editEvent.allowPaymentPlans == true,
-                                label = if (editEvent.singleDivision) {
-                                    "Allow payment plans"
-                                } else {
-                                    "Allow default payment plan"
-                                },
-                                enabled = hostHasAccount && editEvent.priceCents > 0,
-                                onCheckedChange = onSetPaymentPlansEnabled,
-                            )
-                            if (editEvent.allowPaymentPlans == true) {
-                                val useRelativeDueDates = editEvent.eventType == EventType.WEEKLY_EVENT
-                                val installmentCount =
-                                    maxOf(
-                                        editEvent.installmentCount ?: 0,
-                                        editEvent.installmentAmounts.size,
-                                        if (useRelativeDueDates) {
-                                            editEvent.installmentDueRelativeDays.size
-                                        } else {
-                                            editEvent.installmentDueDates.size
-                                        },
-                                        1,
-                                    )
-
-                                NumberInputField(
-                                    value = installmentCount.toString(),
-                                    label = "Installment Count",
-                                    onValueChange = { newValue ->
-                                        if (!newValue.all { it.isDigit() }) return@NumberInputField
-                                        val parsed = newValue.toIntOrNull() ?: 1
-                                        onSetInstallmentCount(parsed.coerceAtLeast(1))
-                                    },
-                                    isError = installmentCount <= 0,
-                                    errorMessage = if (installmentCount <= 0) {
-                                        "Installment count must be at least 1."
-                                    } else {
-                                        ""
-                                    },
-                                )
-
-                                repeat(installmentCount) { index ->
-                                    val amountCents = editEvent.installmentAmounts.getOrNull(index) ?: 0
-                                    val dueDate = editEvent.installmentDueDates.getOrNull(index).orEmpty()
-                                    val dueOffset = editEvent.installmentDueRelativeDays.getOrNull(index) ?: 0
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalAlignment = Alignment.Top,
-                                    ) {
-                                        MoneyInputField(
-                                            value = amountCents.toString(),
-                                            label = "Installment ${index + 1} Amount",
-                                            onValueChange = { newValue ->
-                                                val parsed = newValue.filter { it.isDigit() }.toIntOrNull() ?: 0
-                                                onUpdateInstallmentAmount(index, parsed)
-                                            },
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                        if (useRelativeDueDates) {
-                                            StandardTextField(
-                                                value = dueOffset.toString(),
-                                                onValueChange = { newValue ->
-                                                    val parsed = newValue.toIntOrNull() ?: 0
-                                                    onEditEvent {
-                                                        val targetCount = maxOf(
-                                                            installmentCount,
-                                                            installmentAmounts.size,
-                                                            installmentDueRelativeDays.size,
-                                                        )
-                                                        val nextRelativeDueDays = MutableList(targetCount) { dueIndex ->
-                                                            installmentDueRelativeDays.getOrNull(dueIndex) ?: 0
-                                                        }
-                                                        if (index in nextRelativeDueDays.indices) {
-                                                            nextRelativeDueDays[index] = parsed
-                                                        }
-                                                        copy(
-                                                            installmentDueDates = emptyList(),
-                                                            installmentDueRelativeDays = nextRelativeDueDays,
-                                                        )
-                                                    }
-                                                },
-                                                label = "Due Offset",
-                                                placeholder = "0",
-                                                modifier = Modifier.weight(1f),
-                                            )
-                                        } else {
-                                            StandardTextField(
-                                                value = dueDate,
-                                                onValueChange = {},
-                                                label = "Due Date",
-                                                placeholder = "YYYY-MM-DD",
-                                                modifier = Modifier.weight(1f),
-                                                readOnly = true,
-                                                onTap = { installmentDueDatePickerIndex = index },
-                                            )
-                                        }
-                                    }
-                                    if (installmentCount > 1) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.End,
-                                        ) {
-                                            TextButton(
-                                                onClick = { onRemoveInstallmentRow(index) },
-                                            ) {
-                                                Text(
-                                                    text = "Remove installment",
-                                                    color = MaterialTheme.colorScheme.error,
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    TextButton(onClick = onAddInstallmentRow) {
-                                        Text("Add installment")
-                                    }
-                                    val installmentTotal = editEvent.installmentAmounts.sum()
-                                    val totalsMatch = installmentTotal == editEvent.priceCents
-                                    Text(
-                                        text = if (editEvent.singleDivision) {
-                                            "Total ${installmentTotal.toDouble().div(100).moneyFormat()} / ${editEvent.priceCents.toDouble().div(100).moneyFormat()}"
-                                        } else {
-                                            "Default total ${installmentTotal.toDouble().div(100).moneyFormat()} / ${editEvent.priceCents.toDouble().div(100).moneyFormat()}"
-                                        },
-                                        color = if (totalsMatch) {
-                                            Color(localImageScheme.current.onSurfaceVariant)
-                                        } else {
-                                            MaterialTheme.colorScheme.error
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                }
-                                if (!isPaymentPlansValid) {
-                                    paymentPlanValidationErrors.forEach { paymentError ->
-                                        Text(
-                                            text = paymentError,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.error,
-                                        )
-                                    }
-                                }
-                            }
-                        }
                     },
                 )
 
@@ -3682,6 +3392,252 @@ fun EventDetails(
                         )
                         },
                         editContent = {
+                    val divisionDefaultMaxParticipantsLabel = if (!editEvent.teamSignup) {
+                        stringResource(Res.string.max_players)
+                    } else {
+                        stringResource(Res.string.max_teams)
+                    }
+                    Text(
+                        text = "Division Defaults",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = Color(localImageScheme.current.onSurface),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        NumberInputField(
+                            modifier = Modifier.weight(1f),
+                            value = editEvent.maxParticipants.toString(),
+                            label = if (editEvent.singleDivision) {
+                                divisionDefaultMaxParticipantsLabel
+                            } else {
+                                "Default $divisionDefaultMaxParticipantsLabel"
+                            },
+                            enabled = true,
+                            onValueChange = { newValue ->
+                                if (newValue.all { it.isDigit() }) {
+                                    if (newValue.isBlank()) {
+                                        onEditEvent { copy(maxParticipants = 0) }
+                                    } else {
+                                        onEditEvent { copy(maxParticipants = newValue.toInt()) }
+                                    }
+                                }
+                            },
+                            isError = !isMaxParticipantsValid,
+                            errorMessage = if (isMaxParticipantsValid) "" else stringResource(
+                                Res.string.value_too_low, 2
+                            ),
+                            supportingText = if (editEvent.singleDivision) {
+                                null
+                            } else {
+                                "Used as the default capacity for new divisions."
+                            },
+                        )
+                        MoneyInputField(
+                            value = editEvent.priceCents.toString(),
+                            label = if (editEvent.singleDivision) "Price" else "Default Price",
+                            enabled = hostHasAccount && !rentalTimeLocked,
+                            onValueChange = { newText ->
+                                if (newText.isBlank()) {
+                                    onEditEvent { copy(priceCents = 0) }
+                                    return@MoneyInputField
+                                }
+                                val newCleaned = newText.filter { it.isDigit() }
+                                onEditEvent { copy(priceCents = newCleaned.toInt()) }
+                            },
+                            modifier = Modifier.weight(1f),
+                            isError = !isPriceValid,
+                            supportingText = if (!editEvent.singleDivision) {
+                                "Used as the default price for new divisions."
+                            } else if (isPriceValid) {
+                                stringResource(Res.string.free_entry_hint)
+                            } else {
+                                stringResource(Res.string.invalid_price)
+                            },
+                        )
+                    }
+                    if (!hostHasAccount) {
+                        StripeButton(
+                            onClick = onHostCreateAccount,
+                            paymentProcessor = paymentProcessor,
+                            text = "Create Stripe Connect Account to Change Price",
+                            modifier = Modifier.align(Alignment.CenterHorizontally),
+                        )
+                    }
+                    if (isNewEvent && editEvent.eventType != EventType.WEEKLY_EVENT) {
+                        Text(
+                            text = "Payment plans can be configured on the web version.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(localImageScheme.current.onSurfaceVariant),
+                        )
+                    } else {
+                        Text(
+                            text = if (editEvent.singleDivision) {
+                                "Payment Plans"
+                            } else {
+                                "Default Payment Plan"
+                            },
+                            style = MaterialTheme.typography.titleSmall,
+                            color = Color(localImageScheme.current.onSurface),
+                        )
+                        if (!editEvent.singleDivision) {
+                            Text(
+                                text = "Used as the default payment plan when adding new divisions.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(localImageScheme.current.onSurfaceVariant),
+                            )
+                        }
+                        LabeledCheckboxRow(
+                            checked = editEvent.allowPaymentPlans == true,
+                            label = if (editEvent.singleDivision) {
+                                "Allow payment plans"
+                            } else {
+                                "Allow default payment plan"
+                            },
+                            enabled = hostHasAccount && editEvent.priceCents > 0,
+                            onCheckedChange = onSetPaymentPlansEnabled,
+                        )
+                        if (editEvent.allowPaymentPlans == true) {
+                            val useRelativeDueDates = editEvent.eventType == EventType.WEEKLY_EVENT
+                            val installmentCount = maxOf(
+                                editEvent.installmentCount ?: 0,
+                                editEvent.installmentAmounts.size,
+                                if (useRelativeDueDates) {
+                                    editEvent.installmentDueRelativeDays.size
+                                } else {
+                                    editEvent.installmentDueDates.size
+                                },
+                                1,
+                            )
+
+                            NumberInputField(
+                                value = installmentCount.toString(),
+                                label = "Installment Count",
+                                onValueChange = { newValue ->
+                                    if (!newValue.all { it.isDigit() }) return@NumberInputField
+                                    val parsed = newValue.toIntOrNull() ?: 1
+                                    onSetInstallmentCount(parsed.coerceAtLeast(1))
+                                },
+                                isError = installmentCount <= 0,
+                                errorMessage = if (installmentCount <= 0) {
+                                    "Installment count must be at least 1."
+                                } else {
+                                    ""
+                                },
+                            )
+
+                            repeat(installmentCount) { index ->
+                                val amountCents = editEvent.installmentAmounts.getOrNull(index) ?: 0
+                                val dueDate = editEvent.installmentDueDates.getOrNull(index).orEmpty()
+                                val dueOffset = editEvent.installmentDueRelativeDays.getOrNull(index) ?: 0
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.Top,
+                                ) {
+                                    MoneyInputField(
+                                        value = amountCents.toString(),
+                                        label = "Installment ${index + 1} Amount",
+                                        onValueChange = { newValue ->
+                                            val parsed = newValue.filter { it.isDigit() }.toIntOrNull() ?: 0
+                                            onUpdateInstallmentAmount(index, parsed)
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    if (useRelativeDueDates) {
+                                        StandardTextField(
+                                            value = dueOffset.toString(),
+                                            onValueChange = { newValue ->
+                                                val parsed = newValue.toIntOrNull() ?: 0
+                                                onEditEvent {
+                                                    val targetCount = maxOf(
+                                                        installmentCount,
+                                                        installmentAmounts.size,
+                                                        installmentDueRelativeDays.size,
+                                                    )
+                                                    val nextRelativeDueDays = MutableList(targetCount) { dueIndex ->
+                                                        installmentDueRelativeDays.getOrNull(dueIndex) ?: 0
+                                                    }
+                                                    if (index in nextRelativeDueDays.indices) {
+                                                        nextRelativeDueDays[index] = parsed
+                                                    }
+                                                    copy(
+                                                        installmentDueDates = emptyList(),
+                                                        installmentDueRelativeDays = nextRelativeDueDays,
+                                                    )
+                                                }
+                                            },
+                                            label = "Due Offset",
+                                            placeholder = "0",
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    } else {
+                                        StandardTextField(
+                                            value = dueDate,
+                                            onValueChange = {},
+                                            label = "Due Date",
+                                            placeholder = "YYYY-MM-DD",
+                                            modifier = Modifier.weight(1f),
+                                            readOnly = true,
+                                            onTap = { installmentDueDatePickerIndex = index },
+                                        )
+                                    }
+                                }
+                                if (installmentCount > 1) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.End,
+                                    ) {
+                                        TextButton(
+                                            onClick = { onRemoveInstallmentRow(index) },
+                                        ) {
+                                            Text(
+                                                text = "Remove installment",
+                                                color = MaterialTheme.colorScheme.error,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                TextButton(onClick = onAddInstallmentRow) {
+                                    Text("Add installment")
+                                }
+                                val installmentTotal = editEvent.installmentAmounts.sum()
+                                val totalsMatch = installmentTotal == editEvent.priceCents
+                                Text(
+                                    text = if (editEvent.singleDivision) {
+                                        "Total ${installmentTotal.toDouble().div(100).moneyFormat()} / ${editEvent.priceCents.toDouble().div(100).moneyFormat()}"
+                                    } else {
+                                        "Default total ${installmentTotal.toDouble().div(100).moneyFormat()} / ${editEvent.priceCents.toDouble().div(100).moneyFormat()}"
+                                    },
+                                    color = if (totalsMatch) {
+                                        Color(localImageScheme.current.onSurfaceVariant)
+                                    } else {
+                                        MaterialTheme.colorScheme.error
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                            if (!isPaymentPlansValid) {
+                                paymentPlanValidationErrors.forEach { paymentError ->
+                                    Text(
+                                        text = paymentError,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    FormSectionDivider()
                     Text(
                         text = "Team settings",
                         style = MaterialTheme.typography.titleSmall,
@@ -4264,24 +4220,6 @@ fun EventDetails(
                                 )
                             }
                         }
-                    }
-
-                    if (editEvent.singleDivision) {
-                        Text(
-                            text = when (editEvent.eventType) {
-                                EventType.LEAGUE -> {
-                                    "Division price, capacity, payment plan, and playoff team count mirror event-level values while single division is enabled."
-                                }
-                                EventType.TOURNAMENT -> {
-                                    "Division price, capacity, and payment plan mirror event-level values while bracket and pool settings stay on the division."
-                                }
-                                else -> {
-                                    "Division price, capacity, and payment plan mirror event-level values while single division is enabled."
-                                }
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(localImageScheme.current.onSurfaceVariant),
-                        )
                     }
 
                     Row(

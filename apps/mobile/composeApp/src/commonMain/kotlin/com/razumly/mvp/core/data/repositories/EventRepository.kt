@@ -995,6 +995,7 @@ class EventRepository(
                         includeOrganizationId = true,
                         includeFieldObjects = false,
                         includeTimeSlotObjects = false,
+                        applyEventDefaultsToMissingDivisionDetails = true,
                     ),
                     newFields = fields,
                     timeSlots = timeSlots,
@@ -1774,14 +1775,23 @@ class EventRepository(
             return false
         }
 
-        val maxParticipants = participantSnapshot?.participantCapacity ?: if (event.singleDivision) {
-            event.maxParticipants
+        val selectedDivision = if (event.divisions.isEmpty()) {
+            null
         } else {
-            resolveSelectedDivisionDetail(event, preferredDivisionId)?.maxParticipants ?: event.maxParticipants
+            resolveSelectedDivisionDetail(event, preferredDivisionId)
         }
+        val maxParticipants = participantSnapshot?.participantCapacity ?: if (event.divisions.isEmpty()) {
+            event.maxParticipants.takeIf { value -> value > 0 }
+        } else {
+            selectedDivision?.maxParticipants
+        } ?: throw IllegalStateException(
+            "Set ${if (event.teamSignup) "max teams" else "max participants"} for this division before joining.",
+        )
 
         if (maxParticipants <= 0) {
-            return false
+            throw IllegalStateException(
+                "Set ${if (event.teamSignup) "max teams" else "max participants"} for this division before joining.",
+            )
         }
 
         val participantCount = participantSnapshot?.participantCount ?: if (event.teamSignup) {
@@ -1792,10 +1802,9 @@ class EventRepository(
                 0
             } else {
                 val teams = teamRepository.getTeamsWithPlayers(teamIds).getOrElse { emptyList() }
-                val selectedDivision = if (event.singleDivision) null else resolveSelectedDivisionDetail(event, preferredDivisionId)
                 val divisionId = selectedDivision?.id?.normalizeDivisionIdentifier()?.takeIf(String::isNotBlank)
                 val divisionKey = selectedDivision?.key?.normalizeDivisionIdentifier()?.takeIf(String::isNotBlank)
-                val shouldFilterDivision = !event.singleDivision && (divisionId != null || divisionKey != null)
+                val shouldFilterDivision = event.divisions.isNotEmpty() && (divisionId != null || divisionKey != null)
                 teams.count { teamWithPlayers ->
                     val team = teamWithPlayers.team
                     !team.isPlaceholderSlot(event.eventType) && (

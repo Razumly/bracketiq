@@ -65,13 +65,13 @@ class AndroidFocusManager : PlatformFocusManager {
         onFocusChangedCallback?.invoke(isFocused)
     }
 
-    internal fun handleNextAction() {
+    override fun handleNextAction() {
         onNextCallback?.invoke() ?: run {
             composeFocusManager?.moveFocus(FocusDirection.Next)
         }
     }
 
-    internal fun handleDoneAction() {
+    override fun handleDoneAction() {
         onDoneCallback?.invoke() ?: run {
             composeFocusManager?.clearFocus()
         }

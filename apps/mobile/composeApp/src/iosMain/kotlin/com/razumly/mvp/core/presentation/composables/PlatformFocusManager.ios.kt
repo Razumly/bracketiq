@@ -99,11 +99,11 @@ class IOSFocusManager : PlatformFocusManager {
         onFocusChangedCallback?.invoke(isFocused)
     }
 
-    internal fun handleNextAction() {
+    override fun handleNextAction() {
         onNextCallback?.invoke()
     }
 
-    internal fun handleDoneAction() {
+    override fun handleDoneAction() {
         onDoneCallback?.invoke()
     }
 }

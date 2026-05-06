@@ -20,6 +20,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
@@ -81,9 +86,48 @@ fun StandardTextField(
         else -> TextStyle.Default
     }
 
+    fun runNextAction() {
+        if (onImeAction != null) {
+            onImeAction()
+        } else {
+            externalFocusManager?.handleNextAction() ?: focusManager.moveFocus(FocusDirection.Down)
+        }
+    }
+
+    fun runDoneAction() {
+        if (onImeAction != null) {
+            onImeAction()
+        } else {
+            externalFocusManager?.handleDoneAction() ?: focusManager.clearFocus()
+        }
+    }
+
+    fun runImeAction(): Boolean {
+        when (imeAction) {
+            ImeAction.Next -> runNextAction()
+            ImeAction.Done,
+            ImeAction.Go,
+            ImeAction.Search,
+            ImeAction.Send -> runDoneAction()
+            else -> return false
+        }
+        return true
+    }
+
     val finalModifier = modifier
         .then(if (height != null) Modifier.height(height) else Modifier)
         .then(if (contentPadding != null) Modifier.padding(contentPadding) else Modifier)
+        .then(
+            if (enabled && !readOnly) {
+                Modifier.onPreviewKeyEvent { event ->
+                    event.key == Key.Enter &&
+                        event.type == KeyEventType.KeyDown &&
+                        runImeAction()
+                }
+            } else {
+                Modifier
+            }
+        )
         .then(
             if (externalFocusManager != null) {
                 Modifier.platformFocusable(externalFocusManager, enabled)
@@ -203,10 +247,11 @@ fun StandardTextField(
                 leadingIcon = leadingIcon,
                 keyboardOptions = keyboardOptionsValue,
                 keyboardActions = KeyboardActions(
-                    onNext = { focusManager.moveFocus(FocusDirection.Down) },
-                    onDone = { onImeAction?.invoke() ?: focusManager.clearFocus() },
-                    onGo = { onImeAction?.invoke() ?: focusManager.clearFocus() },
-                    onSend = { onImeAction?.invoke() ?: focusManager.clearFocus() },
+                    onNext = { runNextAction() },
+                    onDone = { runDoneAction() },
+                    onGo = { runDoneAction() },
+                    onSearch = { runDoneAction() },
+                    onSend = { runDoneAction() },
                 ),
                 singleLine = true,
                 shape = fieldShape,
@@ -231,10 +276,11 @@ fun StandardTextField(
         visualTransformation = visualTransformation,
         keyboardOptions = keyboardOptionsValue,
         keyboardActions = KeyboardActions(
-            onNext = { focusManager.moveFocus(FocusDirection.Down) },
-            onDone = { onImeAction?.invoke() ?: focusManager.clearFocus() },
-            onGo = { onImeAction?.invoke() ?: focusManager.clearFocus() },
-            onSend = { onImeAction?.invoke() ?: focusManager.clearFocus() },
+            onNext = { runNextAction() },
+            onDone = { runDoneAction() },
+            onGo = { runDoneAction() },
+            onSearch = { runDoneAction() },
+            onSend = { runDoneAction() },
         ),
         isError = isError,
         supportingText = if (supportingText.isNotEmpty()) ({ Text(supportingText) }) else null,

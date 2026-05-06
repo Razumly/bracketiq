@@ -37,6 +37,7 @@ data class EventApiDto(
 
     val divisions: List<String>? = null,
     val divisionDetails: List<DivisionDetail>? = null,
+    val playoffDivisionDetails: List<DivisionDetail>? = null,
     val location: String? = null,
     val address: String? = null,
 
@@ -141,15 +142,42 @@ data class EventApiDto(
             else -> null
         } ?: return null
         val normalizedDetails = (divisionDetails ?: emptyList()).normalizeDivisionDetails(resolvedId)
+        val normalizedPlayoffDetails = (playoffDivisionDetails ?: emptyList())
+            .map { detail ->
+                detail.copy(kind = detail.kind?.takeIf { kind -> kind.isNotBlank() } ?: "PLAYOFF")
+            }
+            .normalizeDivisionDetails(resolvedId)
+        val allNormalizedDetails = (normalizedDetails + normalizedPlayoffDetails)
+            .fold(mutableListOf<DivisionDetail>()) { acc, detail ->
+                val normalizedId = detail.id.ifBlank { detail.key }
+                val alreadyAdded = acc.any { existing ->
+                    existing.id == normalizedId ||
+                        existing.key == normalizedId ||
+                        existing.id == detail.id ||
+                        existing.key == detail.key
+                }
+                if (!alreadyAdded) {
+                    acc += detail
+                }
+                acc
+            }
         val normalizedDivisions = (
             (divisions ?: emptyList()).normalizeDivisionIdentifiers() +
                 normalizedDetails.map { detail -> detail.id }.normalizeDivisionIdentifiers()
             ).normalizeDivisionIdentifiers()
-        val mergedDetails = mergeDivisionDetailsForDivisions(
+        val mergedRegularDetails = mergeDivisionDetailsForDivisions(
             divisions = normalizedDivisions,
-            existingDetails = normalizedDetails,
+            existingDetails = allNormalizedDetails,
             eventId = resolvedId,
         )
+        val mergedDetailIds = mergedRegularDetails
+            .flatMap { detail -> listOf(detail.id, detail.key) }
+            .normalizeDivisionIdentifiers()
+            .toSet()
+        val mergedDetails = mergedRegularDetails + normalizedPlayoffDetails.filter { detail ->
+            val detailIds = listOf(detail.id, detail.key).normalizeDivisionIdentifiers()
+            detailIds.none { detailId -> detailId in mergedDetailIds }
+        }
         val resolvedFieldIds = (fieldIds ?: emptyList())
             .map { fieldId -> fieldId.trim() }
             .filter(String::isNotBlank)
@@ -175,18 +203,9 @@ data class EventApiDto(
             resolvedEventInstallmentCount != null &&
             resolvedPriceCents > 0
         val mergedDetailsWithCapacity = mergedDetails.map { detail ->
-            val fallbackMaxParticipants = resolvedMaxParticipants.coerceAtLeast(2)
             detail.copy(
-                price = if (singleDivision != false) {
-                    resolvedPriceCents
-                } else {
-                    (detail.price ?: resolvedPriceCents).coerceAtLeast(0)
-                },
-                maxParticipants = if (singleDivision != false) {
-                    fallbackMaxParticipants
-                } else {
-                    (detail.maxParticipants ?: fallbackMaxParticipants).coerceAtLeast(2)
-                },
+                price = detail.price?.coerceAtLeast(0),
+                maxParticipants = detail.maxParticipants?.coerceAtLeast(2),
                 playoffTeamCount = when {
                     !resolvedIncludePlayoffsOrPools -> null
                     singleDivision != false -> resolvedEventPlayoffTeamCount
@@ -675,6 +694,7 @@ fun Event.toUpdateDto(
     includeOrganizationId: Boolean = true,
     includeFieldObjects: Boolean = true,
     includeTimeSlotObjects: Boolean = true,
+    applyEventDefaultsToMissingDivisionDetails: Boolean = false,
 ): EventUpdateDto {
     val sourceRequiredTemplateIds = requiredTemplateIdsOverride ?: requiredTemplateIds
     val resolvedRequiredTemplateIds = sourceRequiredTemplateIds
@@ -688,11 +708,12 @@ fun Event.toUpdateDto(
         eventId = id,
     )
     val normalizedDivisionDetailsForPayload = normalizedDivisionDetails.map { detail ->
-        val fallbackMaxParticipants = maxParticipants.coerceAtLeast(2)
-        val resolvedMaxParticipantsForDetail = if (singleDivision) {
-            fallbackMaxParticipants
+        val defaultPriceForCreate = priceCents.coerceAtLeast(0)
+        val fallbackMaxParticipantsForCreate = maxParticipants.coerceAtLeast(2)
+        val resolvedMaxParticipantsForDetail = if (applyEventDefaultsToMissingDivisionDetails) {
+            (detail.maxParticipants ?: fallbackMaxParticipantsForCreate).coerceAtLeast(2)
         } else {
-            (detail.maxParticipants ?: fallbackMaxParticipants).coerceAtLeast(2)
+            detail.maxParticipants?.coerceAtLeast(2) ?: 0
         }
         val isTournamentPoolPlay = eventType == EventType.TOURNAMENT && includePlayoffs
         val normalizedPoolCount = detail.poolCount?.takeIf { count -> count >= 1 }
@@ -730,19 +751,20 @@ fun Event.toUpdateDto(
             detailInstallmentDueDates.size,
             detail.installmentDueRelativeDays.size,
         ).takeIf { count -> count > 0 }
+        val detailPrice = if (applyEventDefaultsToMissingDivisionDetails) {
+            (detail.price ?: defaultPriceForCreate).coerceAtLeast(0)
+        } else {
+            detail.price?.coerceAtLeast(0)
+        }
         val detailAllowPaymentPlans = detail.allowPaymentPlans == true &&
             detailInstallmentCount != null &&
-            (detail.price ?: priceCents).coerceAtLeast(0) > 0
+            (detailPrice ?: 0) > 0
         detail.copy(
-            price = if (singleDivision) {
-                priceCents.coerceAtLeast(0)
+            price = detailPrice,
+            maxParticipants = if (applyEventDefaultsToMissingDivisionDetails) {
+                (detail.maxParticipants ?: fallbackMaxParticipantsForCreate).coerceAtLeast(2)
             } else {
-                (detail.price ?: priceCents).coerceAtLeast(0)
-            },
-            maxParticipants = if (singleDivision) {
-                fallbackMaxParticipants
-            } else {
-                (detail.maxParticipants ?: fallbackMaxParticipants).coerceAtLeast(2)
+                detail.maxParticipants?.coerceAtLeast(2)
             },
             playoffTeamCount = when {
                 !includePlayoffs -> null
@@ -752,33 +774,57 @@ fun Event.toUpdateDto(
             poolCount = if (isTournamentPoolPlay) normalizedPoolCount else null,
             poolTeamCount = if (isTournamentPoolPlay) normalizedPoolTeamCount else null,
             allowPaymentPlans = if (singleDivision) {
-                defaultAllowPaymentPlans
+                if (applyEventDefaultsToMissingDivisionDetails) defaultAllowPaymentPlans else detailAllowPaymentPlans
             } else {
                 detailAllowPaymentPlans
             },
             installmentCount = if (singleDivision) {
-                defaultInstallmentCount
+                if (applyEventDefaultsToMissingDivisionDetails) {
+                    defaultInstallmentCount
+                } else if (detailAllowPaymentPlans) {
+                    detailInstallmentCount
+                } else {
+                    null
+                }
             } else if (detailAllowPaymentPlans) {
                 detailInstallmentCount
             } else {
                 null
             },
             installmentDueDates = if (singleDivision) {
-                defaultInstallmentDueDates
+                if (applyEventDefaultsToMissingDivisionDetails) {
+                    defaultInstallmentDueDates
+                } else if (detailAllowPaymentPlans) {
+                    detailInstallmentDueDates
+                } else {
+                    emptyList()
+                }
             } else if (detailAllowPaymentPlans) {
                 detailInstallmentDueDates
             } else {
                 emptyList()
             },
             installmentDueRelativeDays = if (singleDivision) {
-                defaultInstallmentDueRelativeDays
+                if (applyEventDefaultsToMissingDivisionDetails) {
+                    defaultInstallmentDueRelativeDays
+                } else if (detailAllowPaymentPlans) {
+                    detail.installmentDueRelativeDays
+                } else {
+                    emptyList()
+                }
             } else if (detailAllowPaymentPlans) {
                 detail.installmentDueRelativeDays
             } else {
                 emptyList()
             },
             installmentAmounts = if (singleDivision) {
-                defaultInstallmentAmounts
+                if (applyEventDefaultsToMissingDivisionDetails) {
+                    defaultInstallmentAmounts
+                } else if (detailAllowPaymentPlans) {
+                    detailInstallmentAmounts
+                } else {
+                    emptyList()
+                }
             } else if (detailAllowPaymentPlans) {
                 detailInstallmentAmounts
             } else {

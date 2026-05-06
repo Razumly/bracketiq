@@ -37,6 +37,68 @@ private fun resolveDivisionIdentifier(detail: DivisionDetail): String {
     return detail.key.normalizeDivisionIdentifier()
 }
 
+private data class DivisionCapacityTarget(
+    val detail: DivisionDetail,
+    val matchDetails: List<DivisionDetail>,
+)
+
+private fun Event.usesTournamentPoolCapacityTargets(divisionDetails: List<DivisionDetail>): Boolean =
+    isTournamentPoolPlayEnabled() &&
+        divisionDetails.any { detail -> detail.isGeneratedTournamentPoolDivision() }
+
+private fun List<DivisionDetail>.unionTeamIds(): List<String> =
+    flatMap { detail -> detail.teamIds }
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .distinct()
+
+private fun buildSyntheticBracketTarget(
+    bracketDivisionId: String,
+    poolDetails: List<DivisionDetail>,
+): DivisionCapacityTarget? {
+    if (bracketDivisionId.isBlank() || poolDetails.isEmpty()) return null
+
+    val firstPool = poolDetails.first()
+    val capacity = poolDetails.sumOf { detail -> detail.maxParticipants?.coerceAtLeast(0) ?: 0 }
+    val label = firstPool.name.stripTournamentPoolSuffix()
+        .ifBlank { firstPool.key.stripTournamentPoolSuffix() }
+        .ifBlank { bracketDivisionId }
+
+    return DivisionCapacityTarget(
+        detail = firstPool.copy(
+            id = bracketDivisionId,
+            key = bracketDivisionId,
+            kind = "PLAYOFF",
+            name = label,
+            maxParticipants = capacity,
+            teamIds = poolDetails.unionTeamIds(),
+            playoffPlacementDivisionIds = emptyList(),
+        ),
+        matchDetails = poolDetails,
+    )
+}
+
+private fun buildDivisionCapacityTargets(
+    event: Event,
+    divisionDetails: List<DivisionDetail>,
+): List<DivisionCapacityTarget> {
+    if (!event.usesTournamentPoolCapacityTargets(divisionDetails)) {
+        return divisionDetails.map { detail ->
+            DivisionCapacityTarget(detail = detail, matchDetails = listOf(detail))
+        }
+    }
+
+    return divisionDetails
+        .filter { detail -> detail.isGeneratedTournamentPoolDivision() }
+        .groupBy { detail ->
+            detail.tournamentBracketDivisionId()
+                .orEmpty()
+        }
+        .mapNotNull { (bracketDivisionId, poolDetails) ->
+            buildSyntheticBracketTarget(bracketDivisionId, poolDetails)
+        }
+}
+
 private fun Team.divisionCandidates(): List<String> = buildList {
     division.normalizeDivisionIdentifier().takeIf(String::isNotBlank)?.let(::add)
     divisionTypeId?.normalizeDivisionIdentifier()?.takeIf(String::isNotBlank)?.let(::add)
@@ -111,15 +173,19 @@ internal fun buildDivisionCapacitySummaries(
         .map { teamWithPlayers -> teamWithPlayers.team }
         .filter { team -> team.id.trim().isNotBlank() }
         .distinctBy { team -> team.id.trim() }
+    val capacityTargets = buildDivisionCapacityTargets(event, divisionDetails)
     val teamCountsByDivision = mutableMapOf<String, Int>()
     var unassignedTeamCount = 0
 
     loadedTeams.forEach { team ->
-        val matchingDivision = divisionDetails.firstOrNull { detail -> team.matchesEventDivision(detail) }
-        if (matchingDivision == null) {
+        val matchingTarget = capacityTargets.firstOrNull { target ->
+            target.matchDetails.any { detail -> team.matchesEventDivision(detail) } ||
+                team.matchesEventDivision(target.detail)
+        }
+        if (matchingTarget == null) {
             unassignedTeamCount += 1
         } else {
-            val divisionId = resolveDivisionIdentifier(matchingDivision)
+            val divisionId = resolveDivisionIdentifier(matchingTarget.detail)
             if (divisionId.isBlank()) {
                 unassignedTeamCount += 1
             } else {
@@ -128,7 +194,9 @@ internal fun buildDivisionCapacitySummaries(
         }
     }
 
-    val summaries = divisionDetails.mapNotNull { detail ->
+    val capacityDetails = capacityTargets.map { target -> target.detail }
+    val summaries = capacityTargets.mapNotNull { target ->
+        val detail = target.detail
         val divisionId = resolveDivisionIdentifier(detail)
         if (divisionId.isBlank()) return@mapNotNull null
 
@@ -138,7 +206,7 @@ internal fun buildDivisionCapacitySummaries(
 
         DivisionCapacitySummary(
             id = divisionId,
-            label = divisionId.toDivisionDisplayLabel(divisionDetails),
+            label = divisionId.toDivisionDisplayLabel(capacityDetails),
             filled = filled,
             capacity = capacity,
         )

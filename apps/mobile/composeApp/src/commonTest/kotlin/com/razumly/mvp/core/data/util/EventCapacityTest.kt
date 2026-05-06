@@ -8,10 +8,11 @@ import kotlin.test.assertEquals
 class EventCapacityTest {
 
     @Test
-    fun singleDivision_usesEventCapacity() {
+    fun singleDivision_usesDivisionCapacity() {
         val event = Event(
             singleDivision = true,
             maxParticipants = 16,
+            divisions = listOf("evt_1__division__open"),
             divisionDetails = listOf(
                 DivisionDetail(
                     id = "evt_1__division__open",
@@ -20,7 +21,7 @@ class EventCapacityTest {
             ),
         )
 
-        assertEquals(16, event.resolveParticipantCapacity())
+        assertEquals(8, event.resolveParticipantCapacity())
     }
 
     @Test
@@ -28,6 +29,7 @@ class EventCapacityTest {
         val event = Event(
             singleDivision = false,
             maxParticipants = 12,
+            divisions = listOf("evt_1__division__open", "evt_1__division__a"),
             divisionDetails = listOf(
                 DivisionDetail(id = "evt_1__division__open", maxParticipants = 8),
                 DivisionDetail(id = "evt_1__division__a", maxParticipants = 10),
@@ -38,16 +40,17 @@ class EventCapacityTest {
     }
 
     @Test
-    fun splitDivision_fallsBackWhenDivisionCapacitiesMissing() {
+    fun splitDivision_returnsZeroWhenDivisionCapacitiesMissing() {
         val event = Event(
             singleDivision = false,
             maxParticipants = 14,
+            divisions = listOf("evt_1__division__open", "evt_1__division__a"),
             divisionDetails = listOf(
                 DivisionDetail(id = "evt_1__division__open", maxParticipants = null),
                 DivisionDetail(id = "evt_1__division__a", maxParticipants = 0),
             ),
         )
 
-        assertEquals(14, event.resolveParticipantCapacity())
+        assertEquals(0, event.resolveParticipantCapacity())
     }
 }

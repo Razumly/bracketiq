@@ -161,23 +161,87 @@ class DivisionCapacitySummaryTest {
         assertEquals(1, summaries.single().filled)
     }
 
+    @Test
+    fun buildDivisionCapacitySummaries_tournamentPoolPlay_collapsesPoolsToBracketCapacity() {
+        val eventId = "event-4"
+        val bracketDivisionId = buildEventDivisionId(eventId, "c_skill_open_age_u17")
+        val poolADivisionId = "${bracketDivisionId}_pool_a"
+        val poolBDivisionId = "${bracketDivisionId}_pool_b"
+        val divisionDetails = listOf(
+            buildDivisionDetail(
+                id = poolADivisionId,
+                token = "c_skill_open_age_u17_pool_a",
+                ageDivisionTypeId = "u17",
+                name = "Coed Open U17 Pool A",
+                maxParticipants = 4,
+                playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId),
+            ),
+            buildDivisionDetail(
+                id = poolBDivisionId,
+                token = "c_skill_open_age_u17_pool_b",
+                ageDivisionTypeId = "u17",
+                name = "Coed Open U17 Pool B",
+                maxParticipants = 4,
+                playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId),
+            ),
+        )
+        val event = Event(
+            id = eventId,
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            teamSignup = true,
+            singleDivision = false,
+            teamIds = listOf("team-1", "team-2"),
+            divisions = listOf(poolADivisionId, poolBDivisionId),
+            divisionDetails = divisionDetails,
+        )
+        val teams = listOf(
+            buildTeamWithPlayers(
+                teamId = "team-1",
+                division = poolADivisionId,
+                ageDivisionTypeId = "u17",
+            ),
+            buildTeamWithPlayers(
+                teamId = "team-2",
+                division = poolBDivisionId,
+                ageDivisionTypeId = "u17",
+            ),
+        )
+
+        val summaries = buildDivisionCapacitySummaries(
+            event = event,
+            divisionDetails = divisionDetails,
+            teams = teams,
+        )
+
+        assertEquals(1, summaries.size)
+        assertEquals(bracketDivisionId, summaries.single().id)
+        assertEquals("Coed Open U17", summaries.single().label)
+        assertEquals(2, summaries.single().filled)
+        assertEquals(8, summaries.single().capacity)
+    }
+
     private fun buildDivisionDetail(
         id: String,
         token: String,
         ageDivisionTypeId: String,
         teamIds: List<String> = emptyList(),
+        name: String = token,
+        maxParticipants: Int? = 8,
+        playoffPlacementDivisionIds: List<String> = emptyList(),
     ): DivisionDetail = DivisionDetail(
         id = id,
         key = token,
-        name = token,
+        name = name,
         divisionTypeId = buildCombinedDivisionTypeId(
             skillDivisionTypeId = "open",
             ageDivisionTypeId = ageDivisionTypeId,
         ),
         skillDivisionTypeId = "open",
         ageDivisionTypeId = ageDivisionTypeId,
-        maxParticipants = 8,
+        maxParticipants = maxParticipants,
         teamIds = teamIds,
+        playoffPlacementDivisionIds = playoffPlacementDivisionIds,
     )
 
     private fun buildTeamWithPlayers(

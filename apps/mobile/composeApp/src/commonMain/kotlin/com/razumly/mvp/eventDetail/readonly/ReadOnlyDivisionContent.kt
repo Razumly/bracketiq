@@ -86,14 +86,6 @@ internal fun ReadOnlyDivisionsList(
         }
     }
 
-    if (event.singleDivision) {
-        Text(
-            text = "Single-division events mirror event-level capacity and pricing settings.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-
     AnimatedVisibility(visible = expanded) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -134,8 +126,16 @@ private fun ReadOnlyDivisionCard(
             normalizedDetail.ageDivisionTypeId.toDivisionDisplayLabel()
         },
     ).joinToString(" - ")
-    val priceCents = (detail.price ?: event.priceCents).coerceAtLeast(0)
-    val maxParticipants = (detail.maxParticipants ?: event.maxParticipants).coerceAtLeast(2)
+    val priceLabel = detail.price
+        ?.coerceAtLeast(0)
+        ?.toDouble()
+        ?.div(100.0)
+        ?.moneyFormat()
+        ?: "Not set"
+    val maxParticipantsLabel = detail.maxParticipants
+        ?.takeIf { value -> value > 0 }
+        ?.toString()
+        ?: "Not set"
     val paymentPlanInstallmentCount = maxOf(
         detail.installmentCount ?: 0,
         detail.installmentAmounts.size,
@@ -179,8 +179,8 @@ private fun ReadOnlyDivisionCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = "Price: ${priceCents.toDouble().div(100.0).moneyFormat()} - " +
-                    "${if (event.teamSignup) "Max teams" else "Max participants"}: $maxParticipants",
+                text = "Price: $priceLabel - " +
+                    "${if (event.teamSignup) "Max teams" else "Max participants"}: $maxParticipantsLabel",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

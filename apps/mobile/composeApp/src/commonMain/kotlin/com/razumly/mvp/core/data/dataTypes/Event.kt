@@ -117,6 +117,7 @@ data class Event(
 data class EventPriceRange(
     val minPriceCents: Int,
     val maxPriceCents: Int,
+    val hasMissingPrices: Boolean = false,
 )
 
 private fun Event.mergedDivisionDetailsForPricing(): List<DivisionDetail> =
@@ -127,14 +128,21 @@ private fun Event.mergedDivisionDetailsForPricing(): List<DivisionDetail> =
     )
 
 private fun Event.findDivisionDetailForPricing(preferredDivisionId: String?): DivisionDetail? {
+    val normalizedPreferredDivision = preferredDivisionId
+        ?.normalizeDivisionIdentifier()
+        ?.ifEmpty { null }
+
+    if (!normalizedPreferredDivision.isNullOrBlank()) {
+        divisionDetails.firstOrNull { detail ->
+            divisionsEquivalent(detail.id, normalizedPreferredDivision) ||
+                divisionsEquivalent(detail.key, normalizedPreferredDivision)
+        }?.let { detail -> return detail }
+    }
+
     val mergedDetails = mergedDivisionDetailsForPricing()
     if (mergedDetails.isEmpty()) {
         return null
     }
-
-    val normalizedPreferredDivision = preferredDivisionId
-        ?.normalizeDivisionIdentifier()
-        ?.ifEmpty { null }
 
     return if (!normalizedPreferredDivision.isNullOrBlank()) {
         mergedDetails.firstOrNull { detail ->
@@ -153,26 +161,35 @@ private fun formatPriceCentsLabel(priceCents: Int): String {
     return "$$wholeDollars.${cents.toString().padStart(2, '0')}"
 }
 
-fun Event.resolvedDivisionPriceCents(preferredDivisionId: String? = null): Int =
-    (findDivisionDetailForPricing(preferredDivisionId)?.price ?: priceCents).coerceAtLeast(0)
+fun Event.resolvedDivisionPriceCents(preferredDivisionId: String? = null): Int? =
+    findDivisionDetailForPricing(preferredDivisionId)?.price?.coerceAtLeast(0)
 
 fun Event.divisionPriceRange(): EventPriceRange {
     val mergedDetails = mergedDivisionDetailsForPricing()
     if (mergedDetails.isEmpty()) {
-        val defaultPriceCents = priceCents.coerceAtLeast(0)
         return EventPriceRange(
-            minPriceCents = defaultPriceCents,
-            maxPriceCents = defaultPriceCents,
+            minPriceCents = 0,
+            maxPriceCents = 0,
+            hasMissingPrices = true,
         )
     }
 
-    val divisionPrices = mergedDetails.map { detail ->
-        (detail.price ?: priceCents).coerceAtLeast(0)
+    val divisionPrices = mergedDetails.mapNotNull { detail ->
+        detail.price?.coerceAtLeast(0)
+    }
+    val hasMissingPrices = mergedDetails.any { detail -> detail.price == null }
+    if (divisionPrices.isEmpty()) {
+        return EventPriceRange(
+            minPriceCents = 0,
+            maxPriceCents = 0,
+            hasMissingPrices = true,
+        )
     }
 
     return EventPriceRange(
         minPriceCents = divisionPrices.minOrNull() ?: 0,
         maxPriceCents = divisionPrices.maxOrNull() ?: 0,
+        hasMissingPrices = hasMissingPrices,
     )
 }
 
@@ -180,6 +197,9 @@ fun Event.hasAnyPaidDivision(): Boolean = divisionPriceRange().maxPriceCents > 0
 
 fun Event.divisionPriceRangeLabel(): String {
     val priceRange = divisionPriceRange()
+    if (priceRange.hasMissingPrices && priceRange.minPriceCents == 0 && priceRange.maxPriceCents == 0) {
+        return "Price not set"
+    }
     return if (priceRange.minPriceCents == priceRange.maxPriceCents) {
         formatPriceCentsLabel(priceRange.minPriceCents)
     } else {

@@ -3,18 +3,11 @@ package com.razumly.mvp.core.data.util
 import com.razumly.mvp.core.data.dataTypes.Event
 
 fun Event.resolveParticipantCapacity(): Int {
-    val fallbackCapacity = maxParticipants.coerceAtLeast(0)
-    if (singleDivision) {
-        return fallbackCapacity
+    if (divisions.isEmpty()) {
+        return maxParticipants.coerceAtLeast(0)
     }
 
-    val splitDivisionCapacity = divisionDetails.sumOf { detail ->
+    return divisionDetails.sumOf { detail ->
         detail.maxParticipants?.coerceAtLeast(0) ?: 0
-    }
-
-    return if (splitDivisionCapacity > 0) {
-        splitDivisionCapacity
-    } else {
-        fallbackCapacity
     }
 }

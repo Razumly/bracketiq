@@ -1069,7 +1069,7 @@ class BillingRepositoryHttpTest {
         val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
 
         val event = Event(id = "e1", hostId = "h1", priceCents = 1000, eventType = EventType.EVENT)
-        val intent = repo.createPurchaseIntent(event).getOrThrow()
+        val intent = repo.createPurchaseIntent(event, priceCents = 1000).getOrThrow()
 
         assertEquals("pi_123_secret_abc", intent.paymentIntent)
         assertEquals("pk_test_123", intent.publishableKey)
@@ -1116,10 +1116,16 @@ class BillingRepositoryHttpTest {
         val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
 
         val event = Event(id = "e1", hostId = "h1", priceCents = 1000, eventType = EventType.EVENT)
-        repo.createPurchaseIntent(event = event, teamId = "team_123").getOrThrow()
+        repo.createPurchaseIntent(
+            event = event,
+            teamId = "team_123",
+            priceCents = 1000,
+            divisionId = "division_a",
+        ).getOrThrow()
 
         assertTrue(capturedBody.contains("\"team\""))
         assertTrue(capturedBody.contains("\"id\":\"team_123\""))
+        assertTrue(capturedBody.contains("\"divisionId\":\"division_a\""))
     }
 
     @Test

@@ -664,6 +664,7 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
         priceCents: Int?,
         timeSlotContext: PurchaseIntentTimeSlotContext?,
         occurrence: EventOccurrenceSelection?,
+        divisionId: String?,
     ): Result<PurchaseIntent> {
         purchaseIntentCalls += PurchaseIntentCall(
             event = event,
