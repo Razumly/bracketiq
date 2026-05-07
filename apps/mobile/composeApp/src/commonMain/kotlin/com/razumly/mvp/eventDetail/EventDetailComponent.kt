@@ -3640,6 +3640,7 @@ class DefaultEventDetailComponent(
                 .withSportRules(),
         )
         _editedEvent.value = updated
+        syncEditableFieldsForEvent(previous, updated)
         syncEditableLeagueSlotBoundaries(
             previousEvent = previous,
             updatedEvent = updated,
@@ -3655,6 +3656,7 @@ class DefaultEventDetailComponent(
                 .withSportRules(),
         )
         _editedEvent.value = updated
+        syncEditableFieldsForEvent(previous, updated)
         syncEditableLeagueSlotBoundaries(
             previousEvent = previous,
             updatedEvent = updated,
@@ -4610,6 +4612,7 @@ class DefaultEventDetailComponent(
                     divisions = field.divisions
                         .normalizeDivisionIdentifiers()
                         .ifEmpty { defaultFieldDivisions(currentEvent) },
+                    location = eventFieldLocationDefault(field, currentEvent),
                     organizationId = resolveFieldOrganizationId(
                         fieldOrganizationId = field.organizationId,
                         eventOrganizationId = currentEvent.organizationId,
@@ -4627,6 +4630,7 @@ class DefaultEventDetailComponent(
             ).copy(
                 name = "Field $fieldNumber",
                 divisions = defaultFieldDivisions(currentEvent),
+                location = defaultFieldLocation(currentEvent),
             )
         }
 
@@ -4725,6 +4729,7 @@ class DefaultEventDetailComponent(
                     divisions = field.divisions
                         .normalizeDivisionIdentifiers()
                         .ifEmpty { defaultFieldDivisions(templateEvent) },
+                    location = eventFieldLocationDefault(field, templateEvent),
                     organizationId = resolveFieldOrganizationId(
                         fieldOrganizationId = field.organizationId,
                         eventOrganizationId = templateEvent.organizationId,
@@ -4848,6 +4853,7 @@ class DefaultEventDetailComponent(
                 divisions = field.divisions
                     .normalizeDivisionIdentifiers()
                     .ifEmpty { defaultFieldDivisions(event) },
+                location = eventFieldLocationDefault(field, event),
                 organizationId = resolveFieldOrganizationId(
                     fieldOrganizationId = field.organizationId,
                     eventOrganizationId = event.organizationId,
@@ -4995,7 +5001,10 @@ class DefaultEventDetailComponent(
                     fieldNumber = index + 1,
                     organizationId = event.organizationId,
                     id = fieldId,
-                ).copy(name = "Field ${index + 1}")
+                ).copy(
+                    name = "Field ${index + 1}",
+                    location = defaultFieldLocation(event),
+                )
             }
         } else {
             sourceFields
@@ -5013,7 +5022,26 @@ class DefaultEventDetailComponent(
                 divisions = field.divisions
                     .normalizeDivisionIdentifiers()
                     .ifEmpty { defaultFieldDivisions(event) },
+                location = eventFieldLocationDefault(field, event),
                 organizationId = field.organizationId?.trim()?.takeIf(String::isNotBlank) ?: event.organizationId,
+            )
+        }
+    }
+
+    private fun syncEditableFieldsForEvent(previousEvent: Event, updatedEvent: Event) {
+        if (_editableFields.value.isEmpty()) return
+
+        _editableFields.value = _editableFields.value.mapIndexed { index, field ->
+            field.copy(
+                fieldNumber = index + 1,
+                divisions = field.divisions
+                    .normalizeDivisionIdentifiers()
+                    .ifEmpty { defaultFieldDivisions(updatedEvent) },
+                location = eventFieldLocationDefault(field, updatedEvent, previousEvent),
+                organizationId = resolveFieldOrganizationId(
+                    fieldOrganizationId = field.organizationId,
+                    eventOrganizationId = updatedEvent.organizationId,
+                ),
             )
         }
     }
@@ -5021,6 +5049,25 @@ class DefaultEventDetailComponent(
     private fun defaultFieldDivisions(event: Event): List<String> {
         val eventDivisions = event.divisions.normalizeDivisionIdentifiers()
         return eventDivisions.ifEmpty { listOf(DEFAULT_DIVISION) }
+    }
+
+    private fun defaultFieldLocation(event: Event): String? {
+        return event.location.trim().takeIf(String::isNotBlank)
+    }
+
+    private fun eventFieldLocationDefault(
+        field: Field,
+        event: Event,
+        previousEvent: Event? = null,
+    ): String? {
+        val currentLocation = field.location?.trim()?.takeIf(String::isNotBlank)
+        val previousDefault = previousEvent?.let(::defaultFieldLocation)
+        val eventDefault = defaultFieldLocation(event)
+        return when {
+            currentLocation == null -> eventDefault
+            previousDefault != null && currentLocation == previousDefault -> eventDefault
+            else -> currentLocation
+        }
     }
 
     private fun resolveFieldOrganizationId(

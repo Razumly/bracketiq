@@ -493,7 +493,7 @@ class DefaultCreateEventComponent(
             }
             syncLeagueSlotDefaultStartDates(previousEvent = previous, updatedEvent = normalized)
             syncLeagueSlotDefaultEndDates(previousEvent = previous, updatedEvent = normalized)
-            syncLocalFieldsForEvent(normalized)
+            syncLocalFieldsForEvent(previous, normalized)
         }
     }
 
@@ -515,7 +515,7 @@ class DefaultCreateEventComponent(
             }
             syncLeagueSlotDefaultStartDates(previousEvent = previous, updatedEvent = normalized)
             syncLeagueSlotDefaultEndDates(previousEvent = previous, updatedEvent = normalized)
-            syncLocalFieldsForEvent(normalized)
+            syncLocalFieldsForEvent(previous, normalized)
         }
     }
 
@@ -563,7 +563,7 @@ class DefaultCreateEventComponent(
             _newEventState.value = normalized
             syncLeagueSlotDefaultStartDates(previousEvent = previous, updatedEvent = normalized)
             syncLeagueSlotDefaultEndDates(previousEvent = previous, updatedEvent = normalized)
-            syncLocalFieldsForEvent(normalized)
+            syncLocalFieldsForEvent(previous, normalized)
         }
     }
 
@@ -1008,6 +1008,7 @@ class DefaultCreateEventComponent(
                     divisions = field.divisions
                         .normalizeDivisionIdentifiers()
                         .ifEmpty { defaultFieldDivisions(currentEvent) },
+                    location = eventFieldLocationDefault(field, currentEvent),
                     organizationId = currentEvent.organizationId,
                 )
             }
@@ -1022,6 +1023,7 @@ class DefaultCreateEventComponent(
             ).copy(
                 name = "Field $fieldNumber",
                 divisions = defaultFieldDivisions(currentEvent),
+                location = defaultFieldLocation(currentEvent),
             )
         }
         _localFields.value = resized
@@ -1671,6 +1673,7 @@ class DefaultCreateEventComponent(
                     divisions = field.divisions
                         .normalizeDivisionIdentifiers()
                         .ifEmpty { defaultFieldDivisions(event) },
+                    location = eventFieldLocationDefault(field, event),
                     organizationId = event.organizationId,
                 )
             }
@@ -1685,6 +1688,7 @@ class DefaultCreateEventComponent(
             ).copy(
                 name = "Field $number",
                 divisions = defaultFieldDivisions(event),
+                location = defaultFieldLocation(event),
             )
         }
 
@@ -1851,7 +1855,7 @@ class DefaultCreateEventComponent(
         }
     }
 
-    private fun syncLocalFieldsForEvent(event: Event) {
+    private fun syncLocalFieldsForEvent(previousEvent: Event, event: Event) {
         val currentFields = _localFields.value
         if (currentFields.isEmpty()) return
 
@@ -1861,6 +1865,7 @@ class DefaultCreateEventComponent(
                 divisions = field.divisions
                     .normalizeDivisionIdentifiers()
                     .ifEmpty { defaultFieldDivisions(event) },
+                location = eventFieldLocationDefault(field, event, previousEvent),
                 organizationId = event.organizationId,
             )
         }
@@ -2042,6 +2047,25 @@ class DefaultCreateEventComponent(
     private fun defaultFieldDivisions(event: Event): List<String> {
         val eventDivisions = event.divisions.normalizeDivisionIdentifiers()
         return eventDivisions.ifEmpty { listOf(DEFAULT_DIVISION) }
+    }
+
+    private fun defaultFieldLocation(event: Event): String? {
+        return event.location.trim().takeIf(String::isNotBlank)
+    }
+
+    private fun eventFieldLocationDefault(
+        field: Field,
+        event: Event,
+        previousEvent: Event? = null,
+    ): String? {
+        val currentLocation = field.location?.trim()?.takeIf(String::isNotBlank)
+        val previousDefault = previousEvent?.let(::defaultFieldLocation)
+        val eventDefault = defaultFieldLocation(event)
+        return when {
+            currentLocation == null -> eventDefault
+            previousDefault != null && currentLocation == previousDefault -> eventDefault
+            else -> currentLocation
+        }
     }
 
     private fun Event.defaultLeagueSlotEndDate(): Instant? {

@@ -818,6 +818,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.updateEventField {
             copy(
                 name = "League Create Test",
+                location = "Tournament Center",
                 organizationId = "org-123",
                 divisions = listOf("B", "Open"),
                 start = instant(1_700_000_000_000),
@@ -873,6 +874,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(payloadSlots.map { it.id }, createCall.event.timeSlotIds)
         assertEquals(listOf("a"), payloadFields[0].divisions)
         assertEquals(listOf("b", "open"), payloadFields[1].divisions)
+        assertEquals("Tournament Center", payloadFields[0].location)
+        assertEquals("Tournament Center", payloadFields[1].location)
         assertEquals(createdFieldIds.first(), payloadSlots[0].scheduledFieldId)
         assertEquals(listOf(createdFieldIds.first()), payloadSlots[0].scheduledFieldIds)
         assertEquals(1, payloadSlots[0].dayOfWeek)

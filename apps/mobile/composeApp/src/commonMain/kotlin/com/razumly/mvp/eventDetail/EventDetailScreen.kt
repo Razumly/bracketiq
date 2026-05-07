@@ -5933,9 +5933,9 @@ fun FeeBreakdownDialog(
             HorizontalDivider()
 
             FeeRow("Event Price", "$${feeBreakdown.eventPrice.centsToDollars()}")
-            FeeRow("Processing Fee", "$${feeBreakdown.processingFee.centsToDollars()}")
+            FeeRow("BracketIQ Fee", "$${feeBreakdown.processingFee.centsToDollars()}")
             FeeRow("Stripe Fee", "$${feeBreakdown.stripeFee.centsToDollars()}")
-            feeBreakdown.taxAmount?.takeIf { it > 0 }?.let { taxAmount ->
+            feeBreakdown.taxAmount?.let { taxAmount ->
                 FeeRow("Tax", "$${taxAmount.centsToDollars()}")
             }
 
