@@ -94,7 +94,7 @@ class EventDetailDivisionOptionsTest {
         val options = buildRegistrationDivisionOptions(event)
 
         assertEquals(listOf(bracketId), options.map { option -> option.id })
-        assertEquals("Open 18+", options.single().label)
+        assertEquals("CoEd Open 18+", options.single().label)
     }
 
     @Test

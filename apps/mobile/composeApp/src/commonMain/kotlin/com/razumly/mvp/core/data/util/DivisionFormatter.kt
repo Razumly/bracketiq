@@ -18,6 +18,10 @@ private val trailingUTokenRegex = Regex("^(\\d+)u$")
 private val leadingUTokenRegex = Regex("^u(\\d+)$")
 private val wordSkillRegex = Regex("\\bskill\\b")
 private val wordAgeRegex = Regex("\\bage\\b")
+private val ratingPrefixRegex = Regex(
+    pattern = "^(?:(?:coed|co-ed|mens|men's|womens|women's)\\s+)?(?:skill|age)\\b",
+    option = RegexOption.IGNORE_CASE,
+)
 private const val DIVISION_MARKER = "__division__"
 
 const val DEFAULT_DIVISION = "open"
@@ -86,7 +90,7 @@ private fun String.looksLikeLegacyDivisionMetadataLabel(): Boolean {
     val includesSkillAgeWords =
         wordSkillRegex.containsMatchIn(normalized) && wordAgeRegex.containsMatchIn(normalized)
     val includesSkillAgeTokenPattern = normalized.contains("skill_") && normalized.contains("_age_")
-    return includesSkillAgeWords || includesSkillAgeTokenPattern
+    return includesSkillAgeWords || ratingPrefixRegex.containsMatchIn(normalized) || includesSkillAgeTokenPattern
 }
 
 private fun String?.cleanDivisionDisplayName(fallback: String): String {
@@ -156,6 +160,28 @@ fun buildCombinedDivisionTypeName(
         .ifBlank { "${DEFAULT_DIVISION.toDivisionDisplayLabel()} ${DEFAULT_AGE_DIVISION.toDivisionDisplayLabel()}" }
 }
 
+private fun genderDisplayLabel(gender: String): String {
+    return when (gender.trim().uppercase()) {
+        "M" -> "Mens"
+        "F" -> "Womens"
+        else -> "CoEd"
+    }
+}
+
+fun buildGenderSkillAgeDivisionTypeName(
+    gender: String,
+    skillDivisionTypeName: String,
+    ageDivisionTypeName: String,
+): String {
+    return listOf(
+        genderDisplayLabel(gender),
+        skillDivisionTypeName.trim(),
+        ageDivisionTypeName.trim(),
+    )
+        .filter(String::isNotBlank)
+        .joinToString(" ")
+}
+
 fun buildGenderSkillAgeDivisionToken(
     gender: String,
     skillDivisionTypeId: String,
@@ -180,11 +206,7 @@ private fun buildDivisionName(
     val normalizedAgeName = ageDivisionTypeName.trim().ifBlank {
         DEFAULT_AGE_DIVISION.toDivisionDisplayLabel()
     }
-    return when (gender.trim().uppercase()) {
-        "M" -> "Men's $normalizedSkillName $normalizedAgeName"
-        "F" -> "Women's $normalizedSkillName $normalizedAgeName"
-        else -> "Coed $normalizedSkillName $normalizedAgeName"
-    }
+    return buildGenderSkillAgeDivisionTypeName(gender, normalizedSkillName, normalizedAgeName)
 }
 
 private fun inferDivisionMetadata(
@@ -204,7 +226,8 @@ private fun inferDivisionMetadata(
             skillDivisionTypeId = skillDivisionTypeId,
             ageDivisionTypeId = ageDivisionTypeId,
         )
-        val combinedDivisionTypeName = buildCombinedDivisionTypeName(
+        val combinedDivisionTypeName = buildGenderSkillAgeDivisionTypeName(
+            gender = gender,
             skillDivisionTypeName = skillDivisionTypeName,
             ageDivisionTypeName = ageDivisionTypeName,
         )
@@ -228,7 +251,6 @@ private fun inferDivisionMetadata(
         val gender = explicitPattern.groupValues[1].uppercase()
         val ratingType = explicitPattern.groupValues[2].uppercase()
         val divisionTypeId = normalizeDivisionToken(explicitPattern.groupValues[3])
-        val divisionTypeName = tokenToDisplayLabel(divisionTypeId)
         val skillDivisionTypeId = if (ratingType == "SKILL") {
             divisionTypeId
         } else {
@@ -241,13 +263,12 @@ private fun inferDivisionMetadata(
         }
         val skillDivisionTypeName = tokenToDisplayLabel(skillDivisionTypeId)
         val ageDivisionTypeName = tokenToDisplayLabel(ageDivisionTypeId)
-        val inferredName = fallbackName.cleanDivisionDisplayName(
-            when (gender) {
-                "M" -> "Men's $divisionTypeName"
-                "F" -> "Women's $divisionTypeName"
-                else -> "Coed $divisionTypeName"
-            },
+        val divisionTypeName = buildGenderSkillAgeDivisionTypeName(
+            gender = gender,
+            skillDivisionTypeName = skillDivisionTypeName,
+            ageDivisionTypeName = ageDivisionTypeName,
         )
+        val inferredName = fallbackName.cleanDivisionDisplayName(divisionTypeName)
         return DivisionInference(
             token = token,
             divisionTypeId = divisionTypeId,
@@ -263,7 +284,6 @@ private fun inferDivisionMetadata(
     }
 
     val divisionTypeId = normalizeDivisionToken(token)
-    val divisionTypeName = tokenToDisplayLabel(divisionTypeId)
     val inferredRatingType = if (ageTokenRegex.matches(divisionTypeId)) {
         "AGE"
     } else {
@@ -281,6 +301,11 @@ private fun inferDivisionMetadata(
     }
     val skillDivisionTypeName = tokenToDisplayLabel(skillDivisionTypeId)
     val ageDivisionTypeName = tokenToDisplayLabel(ageDivisionTypeId)
+    val divisionTypeName = buildGenderSkillAgeDivisionTypeName(
+        gender = "C",
+        skillDivisionTypeName = skillDivisionTypeName,
+        ageDivisionTypeName = ageDivisionTypeName,
+    )
     val inferredName = fallbackName.cleanDivisionDisplayName(divisionTypeName)
     return DivisionInference(
         token = divisionTypeId,
@@ -433,12 +458,6 @@ fun String.toDivisionDisplayLabel(
         if (!explicit.isNullOrEmpty() && !explicit.looksLikeLegacyDivisionMetadataLabel()) {
             return explicit
         }
-        val explicitTypeName = detail?.divisionTypeName?.trim()
-        if (!explicitTypeName.isNullOrEmpty() &&
-            !explicitTypeName.looksLikeLegacyDivisionMetadataLabel()
-        ) {
-            return explicitTypeName.cleanDivisionDisplayName(explicitTypeName)
-        }
     }
     normalized.toTournamentPoolDisplayLabel()?.let { poolLabel -> return poolLabel }
     val inference = inferDivisionMetadata(normalized)
@@ -542,7 +561,8 @@ fun DivisionDetail.normalizeDivisionDetail(eventId: String? = null): DivisionDet
         skillDivisionTypeId = normalizedSkillDivisionTypeId,
         ageDivisionTypeId = normalizedAgeDivisionTypeId,
     )
-    val normalizedCombinedDivisionTypeName = buildCombinedDivisionTypeName(
+    val normalizedCombinedDivisionTypeName = buildGenderSkillAgeDivisionTypeName(
+        gender = normalizedGender,
         skillDivisionTypeName = normalizedSkillDivisionTypeName,
         ageDivisionTypeName = normalizedAgeDivisionTypeName,
     )
@@ -570,13 +590,13 @@ fun DivisionDetail.normalizeDivisionDetail(eventId: String? = null): DivisionDet
     return copy(
         id = normalizedId,
         key = normalizedKey,
-        name = name.cleanDivisionDisplayName(inferred.defaultName),
+        name = name.cleanDivisionDisplayName(normalizedCombinedDivisionTypeName.ifBlank { inferred.defaultName }),
         divisionTypeId = if (normalizedDivisionTypeId.isBlank()) {
             normalizedCombinedDivisionTypeId
         } else {
             normalizedDivisionTypeId
         },
-        divisionTypeName = divisionTypeName.cleanDivisionDisplayName(normalizedCombinedDivisionTypeName),
+        divisionTypeName = normalizedCombinedDivisionTypeName,
         ratingType = normalizedRatingType,
         gender = normalizedGender,
         skillDivisionTypeId = normalizedSkillDivisionTypeId,

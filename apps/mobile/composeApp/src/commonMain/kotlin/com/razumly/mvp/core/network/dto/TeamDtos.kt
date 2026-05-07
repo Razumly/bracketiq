@@ -57,7 +57,6 @@ data class TeamApiDto(
     val profileImageId: String? = null,
     val sport: String? = null,
     val divisionTypeId: String? = null,
-    val divisionTypeName: String? = null,
     val skillDivisionTypeId: String? = null,
     val skillDivisionTypeName: String? = null,
     val ageDivisionTypeId: String? = null,
@@ -109,7 +108,6 @@ data class TeamApiDto(
             profileImageId = profileImageId,
             sport = sport,
             divisionTypeId = divisionTypeId,
-            divisionTypeName = divisionTypeName,
             skillDivisionTypeId = skillDivisionTypeId,
             skillDivisionTypeName = skillDivisionTypeName,
             ageDivisionTypeId = ageDivisionTypeId,
@@ -222,7 +220,6 @@ data class TeamUpdateDto(
     val profileImageId: String? = null,
     val sport: String? = null,
     val divisionTypeId: String? = null,
-    val divisionTypeName: String? = null,
     val openRegistration: Boolean? = null,
     val registrationPriceCents: Int? = null,
     val requiredTemplateIds: List<String>? = null,
@@ -275,7 +272,6 @@ fun Team.toUpdateDto(
         profileImageId = if (shouldIncludeTeamUpdateField("profileImageId", omitFields, includeFields)) synced.profileImageId else null,
         sport = if (shouldIncludeTeamUpdateField("sport", omitFields, includeFields)) synced.sport else null,
         divisionTypeId = if (shouldIncludeTeamUpdateField("divisionTypeId", omitFields, includeFields)) synced.divisionTypeId else null,
-        divisionTypeName = if (shouldIncludeTeamUpdateField("divisionTypeName", omitFields, includeFields)) synced.divisionTypeName else null,
         openRegistration = synced.openRegistration.takeIf {
             shouldIncludeTeamUpdateField("openRegistration", omitFields, includeFields)
         },

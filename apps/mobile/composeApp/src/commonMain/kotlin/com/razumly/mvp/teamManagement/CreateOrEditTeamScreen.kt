@@ -647,7 +647,6 @@ fun CreateOrEditTeamScreen(
             teamSize = resolvedSize,
             division = resolvedDivisionToken,
             divisionTypeId = resolvedDivisionTypeId,
-            divisionTypeName = resolvedDivisionTypeName,
             skillDivisionTypeId = normalizedSkillDivisionTypeId,
             skillDivisionTypeName = resolvedSkillDivisionTypeName,
             ageDivisionTypeId = normalizedAgeDivisionTypeId,

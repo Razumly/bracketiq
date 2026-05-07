@@ -19,6 +19,11 @@ The observable result is that generated tournament pools created by `mvp-site` a
 - [x] (2026-05-06 17:19-07:00) Patched `mvp-app` to derive matching composite labels and treat generated tournament pool rows as simple pool labels.
 - [x] (2026-05-06 17:19-07:00) Updated focused tests in both repositories.
 - [x] (2026-05-06 17:19-07:00) Ran targeted Jest validation; Gradle validation was attempted but blocked by the local Gradle test task hanging/timing out.
+- [x] (2026-05-06 20:42-07:00) Removed stored `divisionTypeName` columns from `mvp-site` Prisma models for `Divisions`, `EventTeams`, and canonical `Teams`, and added a migration to drop those columns.
+- [x] (2026-05-06 20:42-07:00) Removed team-level `divisionTypeName` from `mvp-site` Team contracts, team serializers/mappers, API fixtures, and event-service team mapping.
+- [x] (2026-05-06 20:42-07:00) Removed team-level `divisionTypeName` from `mvp-app` Team entity/DTO/update payloads, bumped the Room database version to 17, and updated Android/iOS migrations to rebuild Team without that column.
+- [x] (2026-05-06 20:42-07:00) Changed team create/edit label generation to derive the label from gender plus skill/age type ids instead of passing a prebuilt `divisionTypeName` parameter.
+- [x] (2026-05-06 20:42-07:00) Re-ran focused Jest, full `mvp-site` build, and focused Gradle validation successfully.
 
 ## Surprises & Discoveries
 
@@ -35,8 +40,8 @@ The observable result is that generated tournament pools created by `mvp-site` a
 
 ## Decision Log
 
-- Decision: Keep existing nullable `divisionTypeName` database fields for this pass, but derive clean values from division ids, skill ids, and age ids before returning or displaying them.
-  Rationale: Removing columns from `Divisions`, teams, mobile DTOs, Room migrations, and Prisma-generated clients is a larger contract migration. The user-visible bug is caused by using bad derived or stored display strings, and can be fixed safely by deriving the returned/displayed label while leaving compatibility fields in place.
+- Decision: Remove stored `divisionTypeName` fields instead of keeping nullable compatibility columns, and derive division labels from division parameters when a response or UI needs the value.
+  Rationale: The user explicitly clarified that the parameter should not be stored in the database and that teams must not carry `divisionTypeName`. Keeping the column would preserve the old contract and let stale labels leak back into API responses.
   Date/Author: 2026-05-06 / Codex
 - Decision: Generated tournament pool division `name` should be exactly `Pool A`, `Pool B`, etc.; generated `key` and `id` may still include the bracket token so backend routing can associate pools with bracket divisions.
   Rationale: Keys and ids are stable identifiers used for placement mapping, while `name` is user-facing. The user explicitly asked that pool division names not include the bracket division.
@@ -49,6 +54,8 @@ The observable result is that generated tournament pools created by `mvp-site` a
 
 Implemented the shared label rule in both repositories. `mvp-site` now derives composite division type labels as `Open 18+`, cleans old `Open / 18+` and `Open • 18+` separators, returns clean API labels, and stores generated tournament pools as `Pool A`, `Pool B`, etc. `mvp-app` now mirrors the composite label format, normalizes old slash/bullet separators, returns `Pool A/B/C` for generated pool rows, and avoids synthesizing tournament bracket labels from simple pool names.
 
+Revision update after the storage contract cleanup: `mvp-site` now derives full division labels as `CoEd Open 18+` when a gendered division label is needed. Stored `divisionTypeName` has been removed from Prisma `Divisions`, `EventTeams`, and canonical `Teams`, and team response/payload mapping no longer exposes it. `mvp-app` removes team-level `divisionTypeName` from Room, DTOs, and update payloads.
+
 Targeted Jest validation passed:
 
     npm test -- --runTestsByPath src/lib/__tests__/divisionTypes.test.ts src/lib/__tests__/divisionDisplay.test.ts src/lib/__tests__/eventDivisionDisplay.test.ts src/server/events/__tests__/tournamentPools.test.ts
@@ -58,6 +65,17 @@ Targeted Jest validation passed:
     Result: 2 suites passed, 53 tests passed.
 
 Targeted Gradle validation was attempted but did not produce a usable result in this Windows checkout. No Kotlin assertion failure was observed; the Gradle task timed out or stopped during build setup before producing fresh result XML.
+
+Follow-up validation after DB and team contract removal passed:
+
+    npm test -- --runTestsByPath src/lib/__tests__/divisionTypes.test.ts src/lib/__tests__/divisionDisplay.test.ts src/lib/__tests__/eventDivisionDisplay.test.ts src/server/events/__tests__/tournamentPools.test.ts src/server/repositories/__tests__/events.upsert.test.ts src/lib/__tests__/teamService.test.ts src/components/ui/__tests__/TeamCard.test.tsx src/server/teams/__tests__/teamMembership.test.ts src/app/api/teams/[id]/__tests__/teamByIdRoute.test.ts src/app/api/teams/[id]/__tests__/teamByIdCanonicalRoute.test.ts src/app/api/teams/[id]/invite-free-agents/__tests__/route.test.ts src/app/api/teams/[id]/member-invites/__tests__/route.test.ts
+    Result: 12 suites passed, 100 tests passed.
+
+    npm run build
+    Result: passed. Turbopack reported the existing NFT tracing warning for `next.config.mjs` through `src/lib/storage.ts`.
+
+    .\gradlew :composeApp:testDebugUnitTest --tests "com.razumly.mvp.core.data.util.DivisionFormatterDisplayLabelTest" --tests "com.razumly.mvp.core.data.util.EventDivisionDisplayTest" --tests "com.razumly.mvp.eventDetail.EventDetailDivisionOptionsTest" --tests "com.razumly.mvp.core.network.dto.TeamDtosTest"
+    Result: BUILD SUCCESSFUL. iOS native targets were skipped on Windows, as expected for this checkout.
 
 ## Context and Orientation
 
@@ -91,7 +109,7 @@ Run these commands from `C:\Users\samue\StudioProjects\mvp-app` for mobile valid
 
 Acceptance is met when tests prove these behaviors:
 
-For generated web division metadata, `inferDivisionDetails({ identifier: 'event_1__division__c_skill_open_age_18plus' })` returns `divisionTypeName` as `Open 18+` and the fallback display name no longer includes `Skill` or `AGE`.
+For generated web division metadata, `inferDivisionDetails({ identifier: 'event_1__division__c_skill_open_age_18plus' })` returns `divisionTypeName` as `CoEd Open 18+` and the fallback display name no longer includes `Skill` or `AGE`.
 
 For generated tournament pools, `buildGeneratedTournamentPools` returns pool names `Pool A`, `Pool B`, and `Pool C`.
 
@@ -119,4 +137,4 @@ Initial search evidence:
 
 `mvp-app/composeApp/src/commonMain/kotlin/com/razumly/mvp/core/data/util/DivisionFormatter.kt` should keep the same public functions. `buildCombinedDivisionTypeName(skillDivisionTypeName, ageDivisionTypeName)` should return a space-separated label like `Open 18+`.
 
-Revision note: Created this plan after locating the backend and mobile formatting paths. The plan records why the DB columns are left in place while display values are derived cleanly.
+Revision note: Created this plan after locating the backend and mobile formatting paths. Updated after the user clarified that `divisionTypeName` must be removed from storage and from teams entirely.

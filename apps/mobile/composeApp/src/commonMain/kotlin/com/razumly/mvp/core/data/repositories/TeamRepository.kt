@@ -258,7 +258,6 @@ class TeamRepository(
             "profileImageId",
             "sport",
             "divisionTypeId",
-            "divisionTypeName",
             "openRegistration",
             "registrationPriceCents",
             "requiredTemplateIds",
@@ -812,7 +811,6 @@ class TeamRepository(
             name,
             sport.orEmpty(),
             division,
-            divisionTypeName.orEmpty(),
             skillDivisionTypeName.orEmpty(),
             ageDivisionTypeName.orEmpty(),
         ).joinToString(" ").lowercase()
@@ -914,7 +912,6 @@ class TeamRepository(
         if (existingTeam.profileImageId != updatedTeam.profileImageId) add("profileImageId")
         if (existingTeam.sport != updatedTeam.sport) add("sport")
         if (existingTeam.divisionTypeId != updatedTeam.divisionTypeId) add("divisionTypeId")
-        if (existingTeam.divisionTypeName != updatedTeam.divisionTypeName) add("divisionTypeName")
         if (existingTeam.openRegistration != updatedTeam.openRegistration) add("openRegistration")
         if (existingTeam.registrationPriceCents != updatedTeam.registrationPriceCents) add("registrationPriceCents")
         if (existingTeam.requiredTemplateIds != updatedTeam.requiredTemplateIds) add("requiredTemplateIds")

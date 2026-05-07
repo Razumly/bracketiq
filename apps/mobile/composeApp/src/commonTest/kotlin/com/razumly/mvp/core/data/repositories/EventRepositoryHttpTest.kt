@@ -1809,7 +1809,6 @@ class EventRepositoryHttpTest {
             teamSize = 2,
             id = "t1",
             divisionTypeId = "a",
-            divisionTypeName = "A",
             skillDivisionTypeId = "a",
             skillDivisionTypeName = "A",
             ageDivisionTypeId = "open",
@@ -1878,7 +1877,7 @@ class EventRepositoryHttpTest {
                             "freeAgentIds": [],
                             "divisions": []
                           },
-                          "teams": [{"id":"t1","name":"Team One","captainId":"u1","managerId":"u1","playerIds":["u1"],"teamSize":2,"division":"open","divisionTypeId":"a","divisionTypeName":"A","skillDivisionTypeId":"a","skillDivisionTypeName":"A","ageDivisionTypeId":"open","ageDivisionTypeName":"Open","divisionGender":"F"}],
+                          "teams": [{"id":"t1","name":"Team One","captainId":"u1","managerId":"u1","playerIds":["u1"],"teamSize":2,"division":"open","divisionTypeId":"a","skillDivisionTypeId":"a","skillDivisionTypeName":"A","ageDivisionTypeId":"open","ageDivisionTypeName":"Open","divisionGender":"F"}],
                           "users": [],
                           "participantCount": 1
                         }

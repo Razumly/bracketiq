@@ -37,7 +37,7 @@ class DivisionFormatterDisplayLabelTest {
             ),
         )
 
-        assertEquals("Open U14", label)
+        assertEquals("CoEd Open U14", label)
     }
 
     @Test
@@ -54,7 +54,7 @@ class DivisionFormatterDisplayLabelTest {
             ),
         )
 
-        assertEquals("Open U14", label)
+        assertEquals("CoEd Open U14", label)
     }
 
     @Test
@@ -79,6 +79,6 @@ class DivisionFormatterDisplayLabelTest {
     fun to_division_display_label_derives_clean_composite_label_without_details() {
         val divisionId = buildEventDivisionId("event-1", "c_skill_open_age_18plus")
 
-        assertEquals("Open 18+", divisionId.toDivisionDisplayLabel())
+        assertEquals("CoEd Open 18+", divisionId.toDivisionDisplayLabel())
     }
 }

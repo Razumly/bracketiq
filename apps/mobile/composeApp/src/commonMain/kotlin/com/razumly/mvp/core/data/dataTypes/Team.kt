@@ -6,7 +6,6 @@ import com.razumly.mvp.core.data.dataTypes.dtos.TeamDTO
 import com.razumly.mvp.core.data.util.DEFAULT_AGE_DIVISION
 import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
-import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeName
 import com.razumly.mvp.core.data.util.normalizeDivisionLabel
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.util.newId
@@ -31,7 +30,6 @@ data class Team(
     val profileImageId: String? = null,
     val sport: String? = null,
     val divisionTypeId: String? = null,
-    val divisionTypeName: String? = null,
     val skillDivisionTypeId: String? = null,
     val skillDivisionTypeName: String? = null,
     val ageDivisionTypeId: String? = null,
@@ -74,10 +72,6 @@ data class Team(
                     skillDivisionTypeId = defaultSkillDivisionTypeId,
                     ageDivisionTypeId = defaultAgeDivisionTypeId,
                 ),
-                divisionTypeName = buildCombinedDivisionTypeName(
-                    skillDivisionTypeName = defaultSkillDivisionTypeName,
-                    ageDivisionTypeName = defaultAgeDivisionTypeName,
-                ),
                 skillDivisionTypeId = defaultSkillDivisionTypeId,
                 skillDivisionTypeName = defaultSkillDivisionTypeName,
                 ageDivisionTypeId = defaultAgeDivisionTypeId,
@@ -112,7 +106,6 @@ data class Team(
             profileImageId = synced.profileImageId,
             sport = synced.sport,
             divisionTypeId = synced.divisionTypeId,
-            divisionTypeName = synced.divisionTypeName,
             skillDivisionTypeId = synced.skillDivisionTypeId,
             skillDivisionTypeName = synced.skillDivisionTypeName,
             ageDivisionTypeId = synced.ageDivisionTypeId,

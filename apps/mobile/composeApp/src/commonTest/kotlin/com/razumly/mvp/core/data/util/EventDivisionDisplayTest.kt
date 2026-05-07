@@ -68,7 +68,7 @@ class EventDivisionDisplayTest {
             ),
         )
 
-        assertEquals(listOf("Open 18+"), event.divisionDisplayLabels())
+        assertEquals(listOf("CoEd Open 18+"), event.divisionDisplayLabels())
     }
 
     @Test

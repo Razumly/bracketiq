@@ -149,7 +149,6 @@ class TeamDtosTest {
             pending = emptyList(),
             teamSize = 6,
             divisionTypeId = "skill_open_age_u18",
-            divisionTypeName = "Open • U18",
             skillDivisionTypeId = "skill_open",
             skillDivisionTypeName = "Open",
             ageDivisionTypeId = "age_u18",
@@ -163,7 +162,7 @@ class TeamDtosTest {
         )
 
         assertTrue(serialized.contains("\"divisionTypeId\":\"skill_open_age_u18\""))
-        assertTrue(serialized.contains("\"divisionTypeName\":\"Open • U18\""))
+        assertFalse(serialized.contains("divisionTypeName"))
         assertFalse(serialized.contains("skillDivisionTypeId"))
         assertFalse(serialized.contains("skillDivisionTypeName"))
         assertFalse(serialized.contains("ageDivisionTypeId"))
