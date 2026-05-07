@@ -3,6 +3,7 @@ package com.razumly.mvp.eventDetail.composables
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -330,6 +331,381 @@ class MatchCardPlayoffPlaceholderTest {
     }
 
     @Test
+    fun build_playoff_placeholder_assignments_for_event_uses_tournament_pool_mappings() {
+        val bracketDivision = DivisionDetail(
+            id = "bracket_open",
+            kind = "PLAYOFF",
+            key = "bracket_open",
+            name = "Open Bracket",
+        )
+        val poolA = DivisionDetail(
+            id = "pool_a",
+            key = "pool_a",
+            name = "Open Pool A",
+            playoffTeamCount = 2,
+            playoffPlacementDivisionIds = listOf(bracketDivision.id, bracketDivision.id),
+        )
+        val poolB = DivisionDetail(
+            id = "pool_b",
+            key = "pool_b",
+            name = "Open Pool B",
+            playoffTeamCount = 2,
+            playoffPlacementDivisionIds = listOf(bracketDivision.id, bracketDivision.id),
+        )
+        val match1 = matchWithRelations(
+            id = "match_1",
+            division = bracketDivision.id,
+            team1Seed = 1,
+            team2Seed = 4,
+            previousLeftId = null,
+            previousRightId = null,
+        )
+        val match2 = matchWithRelations(
+            id = "match_2",
+            division = bracketDivision.id,
+            team1Seed = 2,
+            team2Seed = 3,
+            previousLeftId = null,
+            previousRightId = null,
+        )
+
+        val assignments = buildPlayoffPlaceholderAssignmentsForEvent(
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            singleDivision = false,
+            eventDivisions = listOf(poolA.id, poolB.id),
+            divisionDetails = listOf(poolA, poolB, bracketDivision),
+            eventPlayoffTeamCount = null,
+            matches = listOf(match1, match2).associateBy { it.match.id },
+        )
+
+        assertEquals(
+            "1st place (Open Pool A)",
+            assignments[BracketSlotKey("match_1", BracketTeamSlot.TEAM1)],
+        )
+        assertEquals(
+            "2nd place (Open Pool B)",
+            assignments[BracketSlotKey("match_1", BracketTeamSlot.TEAM2)],
+        )
+        assertEquals(
+            "1st place (Open Pool B)",
+            assignments[BracketSlotKey("match_2", BracketTeamSlot.TEAM1)],
+        )
+        assertEquals(
+            "2nd place (Open Pool A)",
+            assignments[BracketSlotKey("match_2", BracketTeamSlot.TEAM2)],
+        )
+    }
+
+    @Test
+    fun build_playoff_placeholder_assignments_for_tournament_infers_pool_play_from_mappings() {
+        val bracketDivision = DivisionDetail(
+            id = "bracket_open",
+            kind = "PLAYOFF",
+            key = "bracket_open",
+            name = "Open Bracket",
+        )
+        val poolA = tournamentPoolDetail("pool_a", "Open Pool A", bracketDivision.id)
+        val poolB = tournamentPoolDetail("pool_b", "Open Pool B", bracketDivision.id)
+        val match = matchWithRelations(
+            id = "match_1",
+            division = bracketDivision.id,
+            team1Seed = 1,
+            team2Seed = 4,
+            previousLeftId = null,
+            previousRightId = null,
+        )
+
+        val assignments = buildPlayoffPlaceholderAssignmentsForEvent(
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = false,
+            singleDivision = false,
+            eventDivisions = listOf(poolA.id, poolB.id),
+            divisionDetails = listOf(poolA, poolB, bracketDivision),
+            eventPlayoffTeamCount = null,
+            matches = listOf(match).associateBy { it.match.id },
+        )
+
+        assertEquals(
+            "1st place (Open Pool A)",
+            assignments[BracketSlotKey("match_1", BracketTeamSlot.TEAM1)],
+        )
+        assertEquals(
+            "2nd place (Open Pool B)",
+            assignments[BracketSlotKey("match_1", BracketTeamSlot.TEAM2)],
+        )
+    }
+
+    @Test
+    fun build_playoff_placeholder_assignments_for_tournament_uses_division_name_verbatim() {
+        val eventId = "event_1"
+        val bracketDivisionId = "${eventId}__division__c_skill_skill_open_age_18plus"
+        val poolA = DivisionDetail(
+            id = "${bracketDivisionId}_pool_a",
+            key = "c_skill_skill_open_age_18plus_pool_a",
+            name = "Open 18+",
+            playoffTeamCount = 2,
+            playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId),
+        )
+        val poolB = DivisionDetail(
+            id = "${bracketDivisionId}_pool_b",
+            key = "c_skill_skill_open_age_18plus_pool_b",
+            name = "Open 18+",
+            playoffTeamCount = 2,
+            playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId),
+        )
+        val match = matchWithRelations(
+            id = "match_1",
+            division = bracketDivisionId,
+            team1Seed = 1,
+            team2Seed = 4,
+            previousLeftId = null,
+            previousRightId = null,
+        )
+
+        val assignments = buildPlayoffPlaceholderAssignmentsForEvent(
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            singleDivision = false,
+            eventDivisions = listOf(poolA.id, poolB.id),
+            divisionDetails = listOf(poolA, poolB),
+            eventPlayoffTeamCount = null,
+            matches = listOf(match).associateBy { it.match.id },
+        )
+
+        assertEquals(
+            "1st place (Open 18+)",
+            assignments[BracketSlotKey("match_1", BracketTeamSlot.TEAM1)],
+        )
+        assertEquals(
+            "2nd place (Open 18+)",
+            assignments[BracketSlotKey("match_1", BracketTeamSlot.TEAM2)],
+        )
+    }
+
+    @Test
+    fun build_playoff_placeholder_assignments_for_tournament_uses_pool_division_detail_name() {
+        val eventId = "event_1"
+        val bracketDivisionId = "${eventId}__division__c_skill_skill_open_age_18plus"
+        val poolA = DivisionDetail(
+            id = "${bracketDivisionId}_pool_a",
+            key = "c_skill_skill_open_age_18plus_pool_a",
+            name = "Pool A",
+            gender = "C",
+            skillDivisionTypeName = "Open",
+            ageDivisionTypeName = "18+",
+            playoffTeamCount = 2,
+            playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId),
+        )
+        val poolB = DivisionDetail(
+            id = "${bracketDivisionId}_pool_b",
+            key = "c_skill_skill_open_age_18plus_pool_b",
+            name = "Pool B",
+            gender = "C",
+            skillDivisionTypeName = "Open",
+            ageDivisionTypeName = "18+",
+            playoffTeamCount = 2,
+            playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId),
+        )
+        val bracketDivision = DivisionDetail(
+            id = bracketDivisionId,
+            key = "c_skill_skill_open_age_18plus",
+            kind = "PLAYOFF",
+            name = "Open Bracket",
+        )
+        val match = matchWithRelations(
+            id = "match_1",
+            division = bracketDivisionId,
+            team1Seed = 1,
+            team2Seed = 4,
+            previousLeftId = null,
+            previousRightId = null,
+        )
+
+        val assignments = buildPlayoffPlaceholderAssignmentsForEvent(
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            singleDivision = false,
+            eventDivisions = listOf(poolA.id, poolB.id),
+            divisionDetails = listOf(poolA, poolB, bracketDivision),
+            eventPlayoffTeamCount = null,
+            matches = listOf(match).associateBy { it.match.id },
+        )
+
+        assertEquals(
+            "1st place (Pool A)",
+            assignments[BracketSlotKey("match_1", BracketTeamSlot.TEAM1)],
+        )
+        assertEquals(
+            "2nd place (Pool B)",
+            assignments[BracketSlotKey("match_1", BracketTeamSlot.TEAM2)],
+        )
+    }
+
+    @Test
+    fun build_playoff_placeholder_assignments_for_tournament_infers_missing_pool_mappings_from_ids() {
+        val eventId = "event_1"
+        val bracketDivisionId = "${eventId}__division__c_skill_skill_open_age_18plus"
+        val poolA = tournamentPoolDetailWithoutMappings(
+            id = "${bracketDivisionId}_pool_a",
+            name = "Pool A",
+            divisionTypeName = "Open Pool A",
+        )
+        val poolB = tournamentPoolDetailWithoutMappings(
+            id = "${bracketDivisionId}_pool_b",
+            name = "Pool B",
+            divisionTypeName = "Open Pool B",
+        )
+        val poolC = tournamentPoolDetailWithoutMappings(
+            id = "${bracketDivisionId}_pool_c",
+            name = "Pool C",
+            divisionTypeName = "Open Pool C",
+        )
+        val poolD = tournamentPoolDetailWithoutMappings(
+            id = "${bracketDivisionId}_pool_d",
+            name = "Pool D",
+            divisionTypeName = "Open Pool D",
+        )
+        val matches = listOf(
+            matchWithRelations(
+                id = "match_1",
+                division = bracketDivisionId,
+                team1Seed = 1,
+                team2Seed = 8,
+                previousLeftId = null,
+                previousRightId = null,
+            ),
+            matchWithRelations(
+                id = "match_2",
+                division = bracketDivisionId,
+                team1Seed = 4,
+                team2Seed = 5,
+                previousLeftId = null,
+                previousRightId = null,
+            ),
+        )
+
+        val assignments = buildPlayoffPlaceholderAssignmentsForEvent(
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            singleDivision = false,
+            eventDivisions = listOf(poolA.id, poolB.id, poolC.id, poolD.id),
+            divisionDetails = listOf(poolA, poolB, poolC, poolD),
+            eventPlayoffTeamCount = null,
+            matches = matches.associateBy { it.match.id },
+        )
+
+        assertEquals(
+            "1st place (Pool A)",
+            assignments[BracketSlotKey("match_1", BracketTeamSlot.TEAM1)],
+        )
+        assertEquals(
+            "2nd place (Pool D)",
+            assignments[BracketSlotKey("match_1", BracketTeamSlot.TEAM2)],
+        )
+        assertEquals(
+            "1st place (Pool D)",
+            assignments[BracketSlotKey("match_2", BracketTeamSlot.TEAM1)],
+        )
+        assertEquals(
+            "2nd place (Pool A)",
+            assignments[BracketSlotKey("match_2", BracketTeamSlot.TEAM2)],
+        )
+    }
+
+    @Test
+    fun build_playoff_placeholder_assignments_for_tournament_pool_play_maps_global_seeds_to_pool_advancers() {
+        val bracketDivision = DivisionDetail(
+            id = "bracket_open",
+            kind = "PLAYOFF",
+            key = "bracket_open",
+            name = "Open Bracket",
+        )
+        val poolA = tournamentPoolDetail("pool_a", "Open Pool A", bracketDivision.id)
+        val poolB = tournamentPoolDetail("pool_b", "Open Pool B", bracketDivision.id)
+        val poolC = tournamentPoolDetail("pool_c", "Open Pool C", bracketDivision.id)
+        val poolD = tournamentPoolDetail("pool_d", "Open Pool D", bracketDivision.id)
+
+        val matches = listOf(
+            matchWithRelations(
+                id = "match_1",
+                division = bracketDivision.id,
+                team1Seed = 1,
+                team2Seed = 8,
+                previousLeftId = null,
+                previousRightId = null,
+            ),
+            matchWithRelations(
+                id = "match_2",
+                division = bracketDivision.id,
+                team1Seed = 4,
+                team2Seed = 5,
+                previousLeftId = null,
+                previousRightId = null,
+            ),
+            matchWithRelations(
+                id = "match_3",
+                division = bracketDivision.id,
+                team1Seed = 2,
+                team2Seed = 7,
+                previousLeftId = null,
+                previousRightId = null,
+            ),
+            matchWithRelations(
+                id = "match_4",
+                division = bracketDivision.id,
+                team1Seed = 3,
+                team2Seed = 6,
+                previousLeftId = null,
+                previousRightId = null,
+            ),
+        )
+
+        val assignments = buildPlayoffPlaceholderAssignmentsForEvent(
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            singleDivision = false,
+            eventDivisions = listOf(poolA.id, poolB.id, poolC.id, poolD.id),
+            divisionDetails = listOf(poolA, poolB, poolC, poolD, bracketDivision),
+            eventPlayoffTeamCount = null,
+            matches = matches.associateBy { it.match.id },
+        )
+
+        assertEquals(
+            "1st place (Open Pool A)",
+            assignments[BracketSlotKey("match_1", BracketTeamSlot.TEAM1)],
+        )
+        assertEquals(
+            "2nd place (Open Pool D)",
+            assignments[BracketSlotKey("match_1", BracketTeamSlot.TEAM2)],
+        )
+        assertEquals(
+            "1st place (Open Pool D)",
+            assignments[BracketSlotKey("match_2", BracketTeamSlot.TEAM1)],
+        )
+        assertEquals(
+            "2nd place (Open Pool A)",
+            assignments[BracketSlotKey("match_2", BracketTeamSlot.TEAM2)],
+        )
+        assertEquals(
+            "1st place (Open Pool B)",
+            assignments[BracketSlotKey("match_3", BracketTeamSlot.TEAM1)],
+        )
+        assertEquals(
+            "2nd place (Open Pool C)",
+            assignments[BracketSlotKey("match_3", BracketTeamSlot.TEAM2)],
+        )
+        assertEquals(
+            "1st place (Open Pool C)",
+            assignments[BracketSlotKey("match_4", BracketTeamSlot.TEAM1)],
+        )
+        assertEquals(
+            "2nd place (Open Pool B)",
+            assignments[BracketSlotKey("match_4", BracketTeamSlot.TEAM2)],
+        )
+    }
+
+    @Test
     fun format_ordinal_placement_handles_suffix_exceptions() {
         assertEquals("1st", formatOrdinalPlacement(1))
         assertEquals("2nd", formatOrdinalPlacement(2))
@@ -341,6 +717,29 @@ class MatchCardPlayoffPlaceholderTest {
         assertEquals("21st", formatOrdinalPlacement(21))
     }
 }
+
+private fun tournamentPoolDetail(
+    id: String,
+    name: String,
+    bracketDivisionId: String,
+): DivisionDetail = DivisionDetail(
+    id = id,
+    key = id,
+    name = name,
+    playoffTeamCount = 2,
+    playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId),
+)
+
+private fun tournamentPoolDetailWithoutMappings(
+    id: String,
+    name: String,
+    divisionTypeName: String,
+): DivisionDetail = DivisionDetail(
+    id = id,
+    key = id.substringAfter("__division__", id),
+    name = name,
+    divisionTypeName = divisionTypeName,
+)
 
 private fun matchWithRelations(
     id: String,

@@ -54,7 +54,6 @@ import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
-import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
@@ -86,6 +85,10 @@ internal const val MATCH_CARD_BASE_HEIGHT_DP = 90
 private const val MATCH_CARD_MANAGE_SECTION_BASE_HEIGHT_DP = 12
 private const val MATCH_CARD_MANAGE_LINE_HEIGHT_DP = 17
 private const val MATCH_CARD_INFO_MAX_WIDTH_FRACTION = 0.5f
+private val tournamentPoolDivisionSuffixRegex = Regex(
+    pattern = "_pool_[a-z0-9]+$",
+    option = RegexOption.IGNORE_CASE,
+)
 
 @Composable
 fun MatchCard(
@@ -135,30 +138,15 @@ fun MatchCard(
                     selectedEvent.singleDivision,
                     selectedEvent.eventType,
                 ) {
-                    if (
-                        selectedEvent.eventType != EventType.LEAGUE ||
-                        !selectedEvent.includePlayoffs
-                    ) {
-                        emptyMap()
-                    } else {
-                        val slots = buildLeaguePlayoffEntrantSlots(matches)
-                        if (selectedEvent.singleDivision) {
-                            buildSingleDivisionPlayoffPlaceholderAssignments(
-                                slots = slots,
-                                playoffTeamCount = selectedEvent.playoffTeamCount
-                                    ?: selectedEvent.divisionDetails
-                                        .firstOrNull()
-                                        ?.playoffTeamCount,
-                            )
-                        } else {
-                            buildLeaguePlayoffPlaceholderAssignments(
-                                eventDivisions = selectedEvent.divisions,
-                                divisionDetails = selectedEvent.divisionDetails,
-                                eventPlayoffTeamCount = selectedEvent.playoffTeamCount,
-                                slots = slots,
-                            )
-                        }
-                    }
+                    buildPlayoffPlaceholderAssignmentsForEvent(
+                        eventType = selectedEvent.eventType,
+                        includePlayoffs = selectedEvent.includePlayoffs,
+                        singleDivision = selectedEvent.singleDivision,
+                        eventDivisions = selectedEvent.divisions,
+                        divisionDetails = selectedEvent.divisionDetails,
+                        eventPlayoffTeamCount = selectedEvent.playoffTeamCount,
+                        matches = matches,
+                    )
                 }
                 val matchDateTimeLabel = formatMatchDateTimeLabel(match.match.start)
                 val eventOfficialSummary = resolveEventOfficialSummary(
@@ -898,6 +886,62 @@ internal data class PlayoffBracketSlot(
     val slot: BracketTeamSlot,
 )
 
+internal fun buildPlayoffPlaceholderAssignmentsForEvent(
+    eventType: EventType,
+    includePlayoffs: Boolean,
+    singleDivision: Boolean,
+    eventDivisions: List<String>,
+    divisionDetails: List<DivisionDetail>,
+    eventPlayoffTeamCount: Int?,
+    matches: Map<String, MatchWithRelations>,
+): Map<BracketSlotKey, String> {
+    val supportsMappedPlayoffPlaceholders =
+        eventType == EventType.LEAGUE || eventType == EventType.TOURNAMENT
+    if (!supportsMappedPlayoffPlaceholders) {
+        return emptyMap()
+    }
+
+    val slots = buildLeaguePlayoffEntrantSlots(matches)
+    val hasPlacementMappings = divisionDetails.any { detail ->
+        detail.playoffPlacementDivisionIds.isNotEmpty()
+    }
+    if (eventType == EventType.LEAGUE && !includePlayoffs) {
+        return emptyMap()
+    }
+    if (eventType == EventType.TOURNAMENT && !includePlayoffs && !hasPlacementMappings) {
+        return emptyMap()
+    }
+    return when {
+        eventType == EventType.LEAGUE &&
+            singleDivision &&
+            !hasPlacementMappings -> {
+            buildSingleDivisionPlayoffPlaceholderAssignments(
+                slots = slots,
+                playoffTeamCount = eventPlayoffTeamCount
+                    ?: divisionDetails
+                        .firstOrNull()
+                        ?.playoffTeamCount,
+            )
+        }
+
+        eventType == EventType.TOURNAMENT -> {
+            buildTournamentPoolPlayPlaceholderAssignments(
+                eventDivisions = eventDivisions,
+                divisionDetails = divisionDetails,
+                eventPlayoffTeamCount = eventPlayoffTeamCount,
+                slots = slots,
+            )
+        }
+
+        else -> buildLeaguePlayoffPlaceholderAssignments(
+            eventDivisions = eventDivisions,
+            divisionDetails = divisionDetails,
+            eventPlayoffTeamCount = eventPlayoffTeamCount,
+            slots = slots,
+        )
+    }
+}
+
 internal fun buildLeaguePlayoffEntrantSlots(
     matches: Map<String, MatchWithRelations>,
 ): List<PlayoffBracketSlot> {
@@ -926,12 +970,17 @@ internal fun buildLeaguePlayoffEntrantSlots(
             return@flatMap emptySequence()
         }
 
+        val slotSeeds = resolveEntrantSlotSeeds(
+            match = candidate.match,
+            leftEntrantSlot = leftEntrantSlot,
+            rightEntrantSlot = rightEntrantSlot,
+        )
         val slots = mutableListOf<PlayoffBracketSlot>()
         if (leftEntrantSlot) {
             slots += PlayoffBracketSlot(
                 matchId = candidate.match.id,
                 divisionId = candidate.match.division,
-                seed = candidate.match.team1Seed,
+                seed = slotSeeds.team1Seed,
                 slot = BracketTeamSlot.TEAM1,
             )
         }
@@ -939,13 +988,45 @@ internal fun buildLeaguePlayoffEntrantSlots(
             slots += PlayoffBracketSlot(
                 matchId = candidate.match.id,
                 divisionId = candidate.match.division,
-                seed = candidate.match.team2Seed,
+                seed = slotSeeds.team2Seed,
                 slot = BracketTeamSlot.TEAM2,
             )
         }
         slots.asSequence()
     }.toList()
 }
+
+private data class EntrantSlotSeeds(
+    val team1Seed: Int?,
+    val team2Seed: Int?,
+)
+
+private fun resolveEntrantSlotSeeds(
+    match: MatchMVP,
+    leftEntrantSlot: Boolean,
+    rightEntrantSlot: Boolean,
+): EntrantSlotSeeds {
+    val team1Seed = normalizeBracketSeed(match.team1Seed)
+    val team2Seed = normalizeBracketSeed(match.team2Seed)
+    if (leftEntrantSlot == rightEntrantSlot) {
+        return EntrantSlotSeeds(team1Seed, team2Seed)
+    }
+
+    val seedCount = listOf(team1Seed, team2Seed).count { it != null }
+    if (seedCount != 1) {
+        return EntrantSlotSeeds(team1Seed, team2Seed)
+    }
+
+    val carriedSeed = team1Seed ?: team2Seed
+    return if (leftEntrantSlot) {
+        EntrantSlotSeeds(team1Seed = carriedSeed, team2Seed = null)
+    } else {
+        EntrantSlotSeeds(team1Seed = null, team2Seed = carriedSeed)
+    }
+}
+
+private fun normalizeBracketSeed(seed: Int?): Int? =
+    seed?.takeIf { value -> value >= 1 }
 
 private fun hasResolvablePreviousMatch(
     relationMatch: MatchMVP?,
@@ -1094,6 +1175,132 @@ internal fun buildLeaguePlayoffPlaceholderAssignments(
     return result
 }
 
+internal fun buildTournamentPoolPlayPlaceholderAssignments(
+    eventDivisions: List<String>,
+    divisionDetails: List<DivisionDetail>,
+    eventPlayoffTeamCount: Int?,
+    slots: List<PlayoffBracketSlot>,
+): Map<BracketSlotKey, String> {
+    if (divisionDetails.isEmpty() || slots.isEmpty()) {
+        return emptyMap()
+    }
+
+    val orderedDetails = orderDivisionDetailsForMappings(eventDivisions, divisionDetails)
+    if (orderedDetails.isEmpty()) {
+        return emptyMap()
+    }
+    val mappedDetails = orderedDetails.filter { detail -> detail.playoffPlacementDivisionIds.isNotEmpty() }
+
+    val slotsByPlayoffDivision = slots
+        .mapNotNull { slot ->
+            val normalizedDivisionId = slot.divisionId?.normalizeDivisionIdentifier().orEmpty()
+            if (normalizedDivisionId.isEmpty()) {
+                null
+            } else {
+                normalizedDivisionId to slot
+            }
+        }
+        .groupBy(keySelector = { it.first }, valueTransform = { it.second })
+    if (slotsByPlayoffDivision.isEmpty()) {
+        return emptyMap()
+    }
+
+    val result = mutableMapOf<BracketSlotKey, String>()
+    for ((playoffDivisionId, divisionSlots) in slotsByPlayoffDivision) {
+        val labels = if (mappedDetails.isNotEmpty()) {
+            buildMappedSeedLabelsForPlayoffDivision(
+                playoffDivisionId = playoffDivisionId,
+                mappingDivisionDetails = mappedDetails,
+                allDivisionDetails = divisionDetails,
+                eventPlayoffTeamCount = eventPlayoffTeamCount,
+            )
+        } else {
+            buildInferredTournamentPoolSeedLabelsForPlayoffDivision(
+                playoffDivisionId = playoffDivisionId,
+                poolDivisionDetails = orderedDetails,
+                allDivisionDetails = divisionDetails,
+                eventPlayoffTeamCount = eventPlayoffTeamCount,
+                slots = divisionSlots,
+            )
+        }
+        if (labels.isEmpty()) {
+            continue
+        }
+
+        divisionSlots.forEach { slot ->
+            val seed = slot.seed ?: return@forEach
+            val label = labels.getOrNull(seed - 1) ?: return@forEach
+            result[BracketSlotKey(slot.matchId, slot.slot)] = label
+        }
+    }
+
+    return result
+}
+
+private fun buildInferredTournamentPoolSeedLabelsForPlayoffDivision(
+    playoffDivisionId: String,
+    poolDivisionDetails: List<DivisionDetail>,
+    allDivisionDetails: List<DivisionDetail>,
+    eventPlayoffTeamCount: Int?,
+    slots: List<PlayoffBracketSlot>,
+): List<String> {
+    val pools = poolDivisionDetails.filter { detail ->
+        val inferredBracketDivisionId = inferTournamentPoolBracketDivisionId(detail)
+        !inferredBracketDivisionId.isNullOrBlank() &&
+            divisionsEquivalent(inferredBracketDivisionId, playoffDivisionId)
+    }
+    if (pools.isEmpty()) {
+        return emptyList()
+    }
+
+    val maxSeed = slots
+        .mapNotNull { slot -> normalizeBracketSeed(slot.seed) }
+        .maxOrNull()
+        ?: eventPlayoffTeamCount
+        ?: return emptyList()
+    if (maxSeed <= 0) {
+        return emptyList()
+    }
+
+    val placementCount = (maxSeed + pools.size - 1) / pools.size
+    return (1..placementCount).flatMap { placement ->
+        pools.map { pool ->
+            "${formatOrdinalPlacement(placement)} place (${resolveDivisionDisplayName(pool, allDivisionDetails)})"
+        }
+    }
+}
+
+private fun inferTournamentPoolBracketDivisionId(detail: DivisionDetail): String? {
+    val candidates = listOf(detail.id, detail.key)
+    for (candidate in candidates) {
+        val normalized = candidate.normalizeDivisionIdentifier()
+        if (normalized.isBlank()) {
+            continue
+        }
+        val bracketDivisionId = tournamentPoolDivisionSuffixRegex.replace(normalized, "")
+        if (bracketDivisionId != normalized && bracketDivisionId.isNotBlank()) {
+            return bracketDivisionId
+        }
+    }
+    return null
+}
+
+private fun buildMappedSeedLabelsForPlayoffDivision(
+    playoffDivisionId: String,
+    mappingDivisionDetails: List<DivisionDetail>,
+    allDivisionDetails: List<DivisionDetail>,
+    eventPlayoffTeamCount: Int?,
+): List<String> =
+    buildMappedPlacementLabelsForPlayoffDivision(
+        playoffDivisionId = playoffDivisionId,
+        mappingDivisionDetails = mappingDivisionDetails,
+        allDivisionDetails = allDivisionDetails,
+        eventPlayoffTeamCount = eventPlayoffTeamCount,
+    )
+        .entries
+        .sortedBy { entry -> entry.key }
+        .flatMap { entry -> entry.value }
+
 private fun buildMappedPlacementLabelsForPlayoffDivision(
     playoffDivisionId: String,
     mappingDivisionDetails: List<DivisionDetail>,
@@ -1168,8 +1375,22 @@ private fun resolveDivisionDisplayName(
     if (explicitName.isNotEmpty()) {
         return explicitName
     }
-    val fallbackId = detail.id.takeIf { it.isNotBlank() } ?: detail.key
-    return fallbackId.toDivisionDisplayLabel(allDivisionDetails)
+    val fallbackIdentifier = detail.id.trim()
+        .ifBlank { detail.key.trim() }
+    if (fallbackIdentifier.isNotEmpty()) {
+        val matchedName = allDivisionDetails
+            .firstOrNull { candidate ->
+                divisionsEquivalent(candidate.id, fallbackIdentifier) ||
+                    divisionsEquivalent(candidate.key, fallbackIdentifier)
+            }
+            ?.name
+            ?.trim()
+        if (!matchedName.isNullOrEmpty()) {
+            return matchedName
+        }
+        return fallbackIdentifier
+    }
+    return "TBD"
 }
 
 internal fun formatOrdinalPlacement(position: Int): String {

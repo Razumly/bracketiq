@@ -1014,26 +1014,29 @@ class EventRepository(
         eventId: String,
         participantCount: Int?,
         includePlaceholderTeams: Boolean?,
-    ): Result<Event> =
-        singleResponse(
-            networkCall = {
-                val normalizedId = eventId.trim()
-                if (normalizedId.isEmpty()) error("Schedule event requires an event id")
-                api.post<ScheduleEventRequestDto, ScheduleEventResponseDto>(
-                    path = "api/events/$normalizedId/schedule",
-                    body = ScheduleEventRequestDto(
-                        participantCount = participantCount,
-                        includePlaceholderTeams = includePlaceholderTeams,
-                    ),
-                ).event?.toEventOrNull() ?: error("Schedule event response missing event")
-            },
-            saveCall = { event ->
-                databaseService.getMatchDao.deleteMatchesOfTournament(event.id)
-                databaseService.getEventDao.upsertEvent(event)
-                persistEventRelations(event)
-            },
-            onReturn = { event -> event },
+    ): Result<Event> = runCatching {
+        val normalizedId = eventId.trim()
+        if (normalizedId.isEmpty()) error("Schedule event requires an event id")
+
+        val response = api.post<ScheduleEventRequestDto, ScheduleEventResponseDto>(
+            path = "api/events/$normalizedId/schedule",
+            body = ScheduleEventRequestDto(
+                participantCount = participantCount,
+                includePlaceholderTeams = includePlaceholderTeams,
+            ),
         )
+        val event = response.event?.toEventOrNull()
+            ?: error("Schedule event response missing event")
+        val matches = response.matches.mapNotNull { match -> match.toMatchOrNull() }
+
+        databaseService.getMatchDao.deleteMatchesOfTournament(event.id)
+        if (matches.isNotEmpty()) {
+            databaseService.getMatchDao.upsertMatches(matches)
+        }
+        databaseService.getEventDao.upsertEvent(event)
+        persistEventRelations(event)
+        event
+    }
 
     override suspend fun updateEvent(
         newEvent: Event,

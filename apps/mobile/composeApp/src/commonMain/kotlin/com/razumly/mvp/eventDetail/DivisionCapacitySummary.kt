@@ -61,8 +61,7 @@ private fun buildSyntheticBracketTarget(
     val firstPool = poolDetails.first()
     val capacity = poolDetails.sumOf { detail -> detail.maxParticipants?.coerceAtLeast(0) ?: 0 }
     val label = firstPool.name.stripTournamentPoolSuffix()
-        .ifBlank { firstPool.key.stripTournamentPoolSuffix() }
-        .ifBlank { bracketDivisionId }
+        .ifBlank { bracketDivisionId.toDivisionDisplayLabel(poolDetails) }
 
     return DivisionCapacityTarget(
         detail = firstPool.copy(

@@ -15,7 +15,7 @@ class DivisionFormatterDisplayLabelTest {
                     id = divisionId,
                     key = "c_skill_open_age_u14",
                     name = "Champions",
-                    divisionTypeName = "Open / U14",
+                    divisionTypeName = "Open U14",
                 ),
             ),
         )
@@ -37,7 +37,7 @@ class DivisionFormatterDisplayLabelTest {
             ),
         )
 
-        assertEquals("Open / U14", label)
+        assertEquals("Open U14", label)
     }
 
     @Test
@@ -54,6 +54,31 @@ class DivisionFormatterDisplayLabelTest {
             ),
         )
 
-        assertEquals("Coed Open U14", label)
+        assertEquals("Open U14", label)
+    }
+
+    @Test
+    fun to_division_display_label_uses_simple_pool_label_for_tournament_pool_details() {
+        val bracketId = buildEventDivisionId("event-1", "c_skill_open_age_18plus")
+        val poolId = "${bracketId}_pool_a"
+        val label = poolId.toDivisionDisplayLabel(
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = poolId,
+                    key = "c_skill_open_age_18plus_pool_a",
+                    name = "Open 18+ Pool A",
+                    playoffPlacementDivisionIds = listOf(bracketId),
+                ),
+            ),
+        )
+
+        assertEquals("Pool A", label)
+    }
+
+    @Test
+    fun to_division_display_label_derives_clean_composite_label_without_details() {
+        val divisionId = buildEventDivisionId("event-1", "c_skill_open_age_18plus")
+
+        assertEquals("Open 18+", divisionId.toDivisionDisplayLabel())
     }
 }

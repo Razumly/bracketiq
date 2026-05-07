@@ -34,6 +34,31 @@ class TournamentPoolPlayTest {
     }
 
     @Test
+    fun isTournamentPoolPlayEnabled_usesExplicitPlacementWhenPoolNameIsSimple() {
+        val eventId = "event-1"
+        val bracketDivisionId = buildEventDivisionId(eventId, "c_skill_open_age_18plus")
+        val poolDivisionId = "${bracketDivisionId}_pool_a"
+        val event = Event(
+            id = eventId,
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = false,
+            singleDivision = false,
+            divisions = listOf(poolDivisionId),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = poolDivisionId,
+                    key = "c_skill_open_age_18plus_pool_a",
+                    name = "Pool A",
+                    playoffPlacementDivisionIds = listOf(bracketDivisionId),
+                ),
+            ),
+        )
+
+        assertTrue(event.isTournamentPoolPlayEnabled())
+        assertEquals(setOf(bracketDivisionId), event.inferredTournamentBracketDivisionIds())
+    }
+
+    @Test
     fun tournamentBracketDivisionId_prefersExplicitPlacementMapping() {
         val detail = DivisionDetail(
             id = "event-1__division__open_pool_a",

@@ -6,12 +6,15 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 
 private val tournamentPoolSuffixRegex = Regex(
-    pattern = "[\\s_-]+pool[\\s_-]+[a-z0-9]+$",
+    pattern = "(?:^|[\\s_-]+)pool[\\s_-]*[a-z0-9]+$",
     option = RegexOption.IGNORE_CASE,
 )
 
-internal fun String.stripTournamentPoolSuffix(): String =
-    replace(tournamentPoolSuffixRegex, "").trim()
+internal fun String.stripTournamentPoolSuffix(): String {
+    val trimmed = trim()
+    val match = tournamentPoolSuffixRegex.find(trimmed) ?: return trimmed
+    return trimmed.substring(0, match.range.first).trim()
+}
 
 internal fun String.inferredTournamentBracketDivisionIdFromPool(): String? {
     val normalized = normalizeDivisionIdentifier()

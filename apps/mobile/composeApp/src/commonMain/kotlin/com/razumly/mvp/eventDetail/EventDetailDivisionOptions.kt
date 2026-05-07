@@ -141,7 +141,6 @@ private fun buildSyntheticTournamentBracketRegistrationDetails(event: Event): Li
         val sourceDetail = existingBracketDetail ?: pool
         val label = existingBracketDetail?.name?.trim().orEmpty()
             .ifBlank { pool.name.stripTournamentPoolSuffix() }
-            .ifBlank { pool.key.stripTournamentPoolSuffix() }
             .ifBlank { bracketDivisionId.toDivisionDisplayLabel(event.divisionDetails) }
         bracketDetails[bracketDivisionId] = sourceDetail.copy(
             id = bracketDivisionId,

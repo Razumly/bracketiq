@@ -4,13 +4,19 @@ import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 
-private val tournamentPoolSuffixRegex = Regex("[\\s_-]+pool[\\s_-]*[a-z0-9]+$", RegexOption.IGNORE_CASE)
+private val tournamentPoolSuffixRegex = Regex(
+    pattern = "(?:^|[\\s_-]+)pool[\\s_-]*[a-z0-9]+$",
+    option = RegexOption.IGNORE_CASE,
+)
 
 private fun DivisionDetail.isPlayoffDivision(): Boolean =
     kind?.trim()?.equals("PLAYOFF", ignoreCase = true) == true
 
-private fun String.stripTournamentPoolSuffix(): String =
-    trim().replace(tournamentPoolSuffixRegex, "").trim()
+private fun String.stripTournamentPoolSuffix(): String {
+    val trimmed = trim()
+    val match = tournamentPoolSuffixRegex.find(trimmed) ?: return trimmed
+    return trimmed.substring(0, match.range.first).trim()
+}
 
 private fun String.inferredBracketDivisionIdFromPool(): String? {
     val trimmed = trim()
@@ -89,7 +95,6 @@ private fun Event.tournamentBracketDisplayDetails(): List<DivisionDetail> {
         val sourceDetail = existingBracketDetail ?: pool
         val label = existingBracketDetail?.name?.trim().orEmpty()
             .ifBlank { pool.name.stripTournamentPoolSuffix() }
-            .ifBlank { pool.key.stripTournamentPoolSuffix() }
             .ifBlank { bracketDivisionId.toDivisionDisplayLabel(divisionDetails) }
         bracketDetails[bracketDivisionId] = sourceDetail.copy(
             id = bracketDivisionId,

@@ -73,6 +73,31 @@ class EventDetailDivisionOptionsTest {
     }
 
     @Test
+    fun buildRegistrationDivisionOptions_tournamentPoolPlay_synthesizesBracketFromSimplePoolNames() {
+        val bracketId = "event-1__division__c_skill_open_age_18plus"
+        val event = Event(
+            id = "event-1",
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            singleDivision = false,
+            divisions = listOf("${bracketId}_pool_a"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "${bracketId}_pool_a",
+                    key = "c_skill_open_age_18plus_pool_a",
+                    name = "Pool A",
+                    playoffPlacementDivisionIds = listOf(bracketId),
+                ),
+            ),
+        )
+
+        val options = buildRegistrationDivisionOptions(event)
+
+        assertEquals(listOf(bracketId), options.map { option -> option.id })
+        assertEquals("Open 18+", options.single().label)
+    }
+
+    @Test
     fun buildRegistrationDivisionOptions_leagueWithPlayoffs_keepsLeagueDivisions() {
         val event = Event(
             id = "event-2",

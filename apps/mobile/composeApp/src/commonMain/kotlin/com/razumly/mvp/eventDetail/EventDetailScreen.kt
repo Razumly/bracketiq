@@ -2,8 +2,12 @@ package com.razumly.mvp.eventDetail
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.BoundsTransform
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.animateBounds
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -17,6 +21,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
@@ -99,6 +104,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.LookaheadScope
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -106,6 +113,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.materialkolor.PaletteStyle
@@ -240,6 +249,10 @@ private data class EventDetailTabIconStyle(
     val xOffset: androidx.compose.ui.unit.Dp = 0.dp,
     val yOffset: androidx.compose.ui.unit.Dp = 0.dp,
 )
+
+private val FloatingDockShape = RoundedCornerShape(20.dp)
+private val FloatingDockMinHeight = 60.dp
+private val FloatingDockShadowPadding = 8.dp
 
 @Composable
 private fun eventDetailTabVisuals(selected: Boolean): EventDetailTabVisuals {
@@ -426,6 +439,14 @@ private fun List<BracketDivisionOption>.resolveSelectedDivisionId(preferredId: S
         ?: first().id
 }
 
+private fun List<EventDetailDivisionOption>.toJoinDivisionOptions(): List<BracketDivisionOption> =
+    map { option ->
+        BracketDivisionOption(
+            id = option.id,
+            label = option.label,
+        )
+    }
+
 private fun DivisionDetail.referencesBracketDivision(bracketDivisionId: String?): Boolean {
     val normalizedBracketId = bracketDivisionId
         ?.normalizeDivisionIdentifier()
@@ -491,7 +512,6 @@ private fun Event.tournamentBracketDivisionOptions(
                 divisionsEquivalent(detail.id, normalizedId) || divisionsEquivalent(detail.key, normalizedId)
             }?.name?.takeIf { it.isNotBlank() }
             ?: sourcePool?.name?.stripTournamentPoolSuffix()?.takeIf { it.isNotBlank() }
-            ?: sourcePool?.key?.stripTournamentPoolSuffix()?.takeIf { it.isNotBlank() }
             ?: normalizedId.toDivisionDisplayLabel(divisionDetails)
     }
 
@@ -1497,6 +1517,9 @@ private fun BracketFloatingBar(
     confirmResultsEnabled: Boolean = false,
     confirmResultsInProgress: Boolean = false,
     onConfirmResultsClick: () -> Unit = {},
+    useVerticalLayout: Boolean = false,
+    onCloseClick: (() -> Unit)? = null,
+    wrapInSurface: Boolean = true,
     selectedWeeklyOccurrenceLabel: String? = null,
     onClearSelectedWeeklyOccurrence: (() -> Unit)? = null,
     onShowDetailsClick: () -> Unit,
@@ -1504,15 +1527,16 @@ private fun BracketFloatingBar(
 ) {
     var isDivisionMenuExpanded by remember { mutableStateOf(false) }
     var isPoolMenuExpanded by remember { mutableStateOf(false) }
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        tonalElevation = 3.dp,
-        shadowElevation = 6.dp
-    ) {
-        ScrollableFloatingDockRow {
+    val content: @Composable () -> Unit = {
+        FloatingDockActionsLayout(
+            useVerticalLayout = useVerticalLayout,
+            onCloseClick = onCloseClick,
+        ) {
             if (!selectedWeeklyOccurrenceLabel.isNullOrBlank() && onClearSelectedWeeklyOccurrence != null) {
-                Button(onClick = onClearSelectedWeeklyOccurrence) {
+                Button(
+                    onClick = onClearSelectedWeeklyOccurrence,
+                    modifier = Modifier.floatingDockActionWidth(),
+                ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1534,6 +1558,7 @@ private fun BracketFloatingBar(
                     onClick = onPrimaryActionClick,
                     enabled = primaryActionEnabled,
                     colors = primaryActionColors ?: ButtonDefaults.buttonColors(),
+                    modifier = Modifier.floatingDockActionWidth(),
                 ) {
                     Text(
                         text = primaryActionLabel,
@@ -1543,10 +1568,10 @@ private fun BracketFloatingBar(
                 }
             }
             if (divisionOptions.isNotEmpty()) {
-                Box {
+                Box(modifier = Modifier.floatingDockActionWidth()) {
                     Button(
                         onClick = { isDivisionMenuExpanded = true },
-                        modifier = Modifier.widthIn(min = 120.dp),
+                        modifier = Modifier.floatingDockActionWidth(minWidth = 120.dp),
                     ) {
                         Text(text = "Division")
                     }
@@ -1575,10 +1600,10 @@ private fun BracketFloatingBar(
                 }
             }
             if (poolOptions.isNotEmpty() && onPoolSelected != null) {
-                Box {
+                Box(modifier = Modifier.floatingDockActionWidth()) {
                     Button(
                         onClick = { isPoolMenuExpanded = true },
-                        modifier = Modifier.widthIn(min = 96.dp),
+                        modifier = Modifier.floatingDockActionWidth(minWidth = 96.dp),
                     ) {
                         Text(text = "Pool")
                     }
@@ -1624,7 +1649,10 @@ private fun BracketFloatingBar(
                 }
             }
             if (showBracketToggle) {
-                Button(onClick = onBracketToggle) {
+                Button(
+                    onClick = onBracketToggle,
+                    modifier = Modifier.floatingDockActionWidth(),
+                ) {
                     Text(
                         text = if (isLosersBracket) "Losers Bracket" else "Winners Bracket",
                         maxLines = 1,
@@ -1634,14 +1662,23 @@ private fun BracketFloatingBar(
             }
             if (showMatchEditAction) {
                 if (isEditingMatches && onCommitMatchEdit != null && onCancelMatchEdit != null) {
-                    Button(onClick = onCommitMatchEdit) {
+                    Button(
+                        onClick = onCommitMatchEdit,
+                        modifier = Modifier.floatingDockActionWidth(),
+                    ) {
                         Text("Save")
                     }
-                    Button(onClick = onCancelMatchEdit) {
+                    Button(
+                        onClick = onCancelMatchEdit,
+                        modifier = Modifier.floatingDockActionWidth(),
+                    ) {
                         Text("Cancel")
                     }
                 } else if (!isEditingMatches && onStartMatchEdit != null) {
-                    Button(onClick = onStartMatchEdit) {
+                    Button(
+                        onClick = onStartMatchEdit,
+                        modifier = Modifier.floatingDockActionWidth(),
+                    ) {
                         Text("Manage")
                     }
                 }
@@ -1649,7 +1686,8 @@ private fun BracketFloatingBar(
             if (showConfirmResultsAction) {
                 Button(
                     onClick = onConfirmResultsClick,
-                    enabled = confirmResultsEnabled
+                    enabled = confirmResultsEnabled,
+                    modifier = Modifier.floatingDockActionWidth(),
                 ) {
                     Text(
                         text = if (confirmResultsInProgress) "Confirming..." else "Confirm Results",
@@ -1666,6 +1704,7 @@ private fun BracketFloatingBar(
                     onClick = onPrimaryActionClick,
                     enabled = primaryActionEnabled,
                     colors = primaryActionColors ?: ButtonDefaults.buttonColors(),
+                    modifier = Modifier.floatingDockActionWidth(),
                 ) {
                     Text(
                         text = primaryActionLabel,
@@ -1676,6 +1715,7 @@ private fun BracketFloatingBar(
             }
             Button(
                 onClick = onShowDetailsClick,
+                modifier = Modifier.floatingDockActionWidth(),
             ) {
                 Text(
                     text = "Back to details",
@@ -1685,13 +1725,284 @@ private fun BracketFloatingBar(
             }
         }
     }
+    if (wrapInSurface) {
+        Surface(
+            modifier = modifier.fillMaxWidth(),
+            shape = FloatingDockShape,
+            tonalElevation = 3.dp,
+            shadowElevation = 6.dp
+        ) {
+            content()
+        }
+    } else {
+        Box(modifier = modifier) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun ExpandableFloatingDock(
+    expanded: Boolean,
+    onExpandClick: () -> Unit,
+    onCollapseClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    expandedContent: @Composable (Modifier, () -> Unit) -> Unit,
+) {
+    val dockBoundsTransform = remember {
+        BoundsTransform { _, _ -> tween(durationMillis = 260) }
+    }
+    val expandedActionsAlpha by animateFloatAsState(
+        targetValue = if (expanded) 1f else 0f,
+        animationSpec = tween(durationMillis = 260, delayMillis = if (expanded) 80 else 0),
+        label = "floatingDockActionsAlpha",
+    )
+    LookaheadScope {
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(FloatingDockShadowPadding),
+            contentAlignment = Alignment.BottomEnd,
+        ) {
+            Surface(
+                modifier = Modifier.animateBounds(
+                    lookaheadScope = this@LookaheadScope,
+                    modifier = if (expanded) {
+                        Modifier
+                    } else {
+                        Modifier.size(FloatingDockMinHeight)
+                    },
+                    boundsTransform = dockBoundsTransform,
+                ),
+                shape = FloatingDockShape,
+                color = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                tonalElevation = 3.dp,
+                shadowElevation = 6.dp,
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (expanded) {
+                        Box(modifier = Modifier.alpha(expandedActionsAlpha)) {
+                            expandedContent(
+                                Modifier,
+                                onCollapseClick,
+                            )
+                        }
+                    } else {
+                        FloatingDockMenuFab(onClick = onExpandClick)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FloatingDockMenuFab(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .size(FloatingDockMinHeight)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = Icons.Default.MoreVert,
+            contentDescription = "Show actions",
+            modifier = Modifier.size(28.dp),
+        )
+    }
+}
+
+@Composable
+private fun FloatingDockActionsLayout(
+    useVerticalLayout: Boolean,
+    onCloseClick: (() -> Unit)?,
+    content: @Composable () -> Unit,
+) {
+    if (useVerticalLayout) {
+        FloatingDockColumn(
+            onCloseClick = onCloseClick,
+            content = content,
+        )
+    } else {
+        ScrollableFloatingDockRow(content = content)
+    }
+}
+
+@Composable
+private fun FloatingDockColumn(
+    onCloseClick: (() -> Unit)?,
+    content: @Composable () -> Unit,
+) {
+    FloatingDockWrappedActions(
+        modifier = Modifier
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        onCloseClick = onCloseClick,
+        content = content,
+    )
+}
+
+@Composable
+private fun FloatingDockWrappedActions(
+    onCloseClick: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val horizontalSpacing = with(LocalDensity.current) { 10.dp.roundToPx() }
+    val verticalSpacing = with(LocalDensity.current) { 8.dp.roundToPx() }
+    Layout(
+        modifier = modifier,
+        content = {
+            content()
+            if (onCloseClick != null) {
+                FloatingDockCloseButton(onClick = onCloseClick)
+            }
+        },
+    ) { measurables, constraints ->
+        val hasCloseButton = onCloseClick != null && measurables.isNotEmpty()
+        val closeMeasurable = if (hasCloseButton) measurables.last() else null
+        val actionMeasurables = if (hasCloseButton) {
+            measurables.dropLast(1)
+        } else {
+            measurables
+        }
+        val closePlaceable = closeMeasurable?.measure(constraints.copy(minWidth = 0, minHeight = 0))
+        val closeReserveWidth = closePlaceable?.let { it.width + horizontalSpacing } ?: 0
+        val maxWidth = constraints.maxWidth
+        val firstRowMaxWidth = (maxWidth - closeReserveWidth).coerceAtLeast(0)
+        val actionConstraints = constraints.copy(minWidth = 0, minHeight = 0)
+        val actionPlaceables = actionMeasurables.map { measurable ->
+            measurable.measure(actionConstraints)
+        }
+        data class DockActionRow(
+            val startIndex: Int,
+            val endIndex: Int,
+            val y: Int,
+            val width: Int,
+            val requiredWidth: Int,
+        )
+
+        val rows = mutableListOf<DockActionRow>()
+        var rowStartIndex = 0
+        var x = 0
+        var y = 0
+        var rowHeight = 0
+
+        actionPlaceables.forEachIndexed { index, placeable ->
+            val rowMaxWidth = if (y == 0 && closePlaceable != null) firstRowMaxWidth else maxWidth
+            val shouldWrap = x > 0 && x + placeable.width > rowMaxWidth
+            if (shouldWrap) {
+                rows += DockActionRow(
+                    startIndex = rowStartIndex,
+                    endIndex = index,
+                    y = y,
+                    width = x - horizontalSpacing,
+                    requiredWidth = if (y == 0 && closePlaceable != null) {
+                        x - horizontalSpacing + closeReserveWidth
+                    } else {
+                        x - horizontalSpacing
+                    },
+                )
+                y += rowHeight + verticalSpacing
+                x = 0
+                rowHeight = 0
+                rowStartIndex = index
+            }
+            x += placeable.width + horizontalSpacing
+            rowHeight = maxOf(rowHeight, placeable.height)
+        }
+        if (actionPlaceables.isNotEmpty()) {
+            val lastRowWidth = x - horizontalSpacing
+            rows += DockActionRow(
+                startIndex = rowStartIndex,
+                endIndex = actionPlaceables.size,
+                y = y,
+                width = lastRowWidth,
+                requiredWidth = if (y == 0 && closePlaceable != null) {
+                    lastRowWidth + closeReserveWidth
+                } else {
+                    lastRowWidth
+                },
+            )
+        }
+
+        val actionsHeight = if (actionPlaceables.isEmpty()) 0 else y + rowHeight
+        val closeHeight = closePlaceable?.height ?: 0
+        val contentWidth = maxOf(
+            rows.maxOfOrNull { row -> row.requiredWidth } ?: 0,
+            closePlaceable?.width ?: 0,
+        )
+        val layoutWidth = contentWidth
+            .coerceAtLeast(constraints.minWidth)
+            .coerceAtMost(maxWidth)
+        val layoutHeight = maxOf(actionsHeight, closeHeight, constraints.minHeight)
+
+        layout(width = layoutWidth, height = layoutHeight) {
+            rows.forEach { row ->
+                val rowMaxWidth = if (row.y == 0 && closePlaceable != null) {
+                    layoutWidth - closeReserveWidth
+                } else {
+                    layoutWidth
+                }.coerceAtLeast(0)
+                var rowX = (rowMaxWidth - row.width).coerceAtLeast(0)
+                for (index in row.startIndex until row.endIndex) {
+                    val placeable = actionPlaceables[index]
+                    placeable.placeRelative(rowX, row.y)
+                    rowX += placeable.width + horizontalSpacing
+                }
+            }
+            closePlaceable?.placeRelative(
+                x = layoutWidth - closePlaceable.width,
+                y = 0,
+            )
+        }
+    }
+}
+
+@Composable
+private fun FloatingDockCloseButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .size(32.dp)
+            .background(
+                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
+                shape = CircleShape,
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = Icons.Default.Close,
+            contentDescription = "Collapse actions",
+            modifier = Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+private fun Modifier.floatingDockActionWidth(
+    minWidth: Dp? = null,
+): Modifier {
+    var widthModifier = this
+    if (minWidth != null) {
+        widthModifier = widthModifier.widthIn(min = minWidth)
+    }
+    return widthModifier
 }
 
 @Composable
 @Suppress("DEPRECATION")
 private fun ScrollableFloatingDockRow(
     modifier: Modifier = Modifier,
-    content: @Composable RowScope.() -> Unit,
+    content: @Composable () -> Unit,
 ) {
     val scrollState = rememberScrollState()
     val coroutineScope = rememberCoroutineScope()
@@ -1710,8 +2021,9 @@ private fun ScrollableFloatingDockRow(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
-            content = content,
-        )
+        ) {
+            content()
+        }
         DockEdgeFade(
             visible = showLeftIndicator && rowSize.height > 0,
             isLeft = true,
@@ -1805,21 +2117,25 @@ private fun ParticipantsFloatingBar(
     onStopManagingParticipants: (() -> Unit)? = null,
     inviteActionLabel: String? = null,
     onInviteClick: (() -> Unit)? = null,
+    useVerticalLayout: Boolean = false,
+    onCloseClick: (() -> Unit)? = null,
+    wrapInSurface: Boolean = true,
     selectedWeeklyOccurrenceLabel: String? = null,
     onClearSelectedWeeklyOccurrence: (() -> Unit)? = null,
     onShowDetailsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var isSectionMenuExpanded by remember { mutableStateOf(false) }
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        tonalElevation = 3.dp,
-        shadowElevation = 6.dp
-    ) {
-        ScrollableFloatingDockRow {
+    val content: @Composable () -> Unit = {
+        FloatingDockActionsLayout(
+            useVerticalLayout = useVerticalLayout,
+            onCloseClick = onCloseClick,
+        ) {
             if (!selectedWeeklyOccurrenceLabel.isNullOrBlank() && onClearSelectedWeeklyOccurrence != null) {
-                Button(onClick = onClearSelectedWeeklyOccurrence) {
+                Button(
+                    onClick = onClearSelectedWeeklyOccurrence,
+                    modifier = Modifier.floatingDockActionWidth(),
+                ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1836,10 +2152,10 @@ private fun ParticipantsFloatingBar(
                     }
                 }
             }
-            Box {
+            Box(modifier = Modifier.floatingDockActionWidth()) {
                 Button(
                     onClick = { isSectionMenuExpanded = true },
-                    modifier = Modifier.widthIn(min = 120.dp)
+                    modifier = Modifier.floatingDockActionWidth(minWidth = 120.dp)
                 ) {
                     Text(
                         text = selectedSection.label,
@@ -1871,7 +2187,10 @@ private fun ParticipantsFloatingBar(
                 }
             }
             if (!inviteActionLabel.isNullOrBlank() && onInviteClick != null) {
-                Button(onClick = onInviteClick) {
+                Button(
+                    onClick = onInviteClick,
+                    modifier = Modifier.floatingDockActionWidth(),
+                ) {
                     Icon(
                         imageVector = if (inviteActionLabel.contains("Team", ignoreCase = true)) {
                             MVPIcons.Groups
@@ -1890,17 +2209,24 @@ private fun ParticipantsFloatingBar(
             }
             if (showManageAction) {
                 if (isManagingParticipants && onStopManagingParticipants != null) {
-                    Button(onClick = onStopManagingParticipants) {
+                    Button(
+                        onClick = onStopManagingParticipants,
+                        modifier = Modifier.floatingDockActionWidth(),
+                    ) {
                         Text("Done")
                     }
                 } else if (!isManagingParticipants && onStartManagingParticipants != null) {
-                    Button(onClick = onStartManagingParticipants) {
+                    Button(
+                        onClick = onStartManagingParticipants,
+                        modifier = Modifier.floatingDockActionWidth(),
+                    ) {
                         Text("Manage")
                     }
                 }
             }
             Button(
                 onClick = onShowDetailsClick,
+                modifier = Modifier.floatingDockActionWidth(),
             ) {
                 Text(
                     text = "Back to details",
@@ -1908,6 +2234,20 @@ private fun ParticipantsFloatingBar(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+    }
+    if (wrapInSurface) {
+        Surface(
+            modifier = modifier.fillMaxWidth(),
+            shape = FloatingDockShape,
+            tonalElevation = 3.dp,
+            shadowElevation = 6.dp
+        ) {
+            content()
+        }
+    } else {
+        Box(modifier = modifier) {
+            content()
         }
     }
 }
@@ -2991,6 +3331,9 @@ fun EventDetailScreen(
     ) {
         buildRegistrationDivisionOptions(selectedEvent.event)
     }
+    val registrationJoinDivisionOptions = remember(registrationDivisionOptions) {
+        registrationDivisionOptions.toJoinDivisionOptions()
+    }
     val splitRegistrationDivisionOptions = remember(
         selectedEvent.event.teamSignup,
         selectedEvent.event.singleDivision,
@@ -3286,8 +3629,13 @@ fun EventDetailScreen(
         selectedDivision,
         selectedJoinOptionDivisionId,
         hasAnyPaidDivision,
+        tournamentPoolPlayEnabled,
     ) {
-        val preferredDivisionId = selectedJoinOptionDivisionId ?: selectedDivision
+        val preferredDivisionId = selectedJoinOptionDivisionId ?: if (tournamentPoolPlayEnabled) {
+            selectedEvent.event.resolveBracketDivisionForPool(selectedDivision) ?: selectedDivision
+        } else {
+            selectedDivision
+        }
         when {
             !preferredDivisionId.isNullOrBlank() -> selectedEvent.event.resolvedDivisionPriceCents(preferredDivisionId) ?: 0
             selectedEvent.event.singleDivision -> selectedEvent.event.resolvedDivisionPriceCents() ?: 0
@@ -3305,7 +3653,7 @@ fun EventDetailScreen(
         isWeeklyParentEvent,
         selectedWeeklyOccurrence,
         selectedJoinOptionDivisionId,
-        joinDivisionOptions,
+        registrationJoinDivisionOptions,
     ) {
         val requiresWeeklySelection = isWeeklyParentEvent && selectedWeeklyOccurrence == null
         val shouldHideJoinOptions = when {
@@ -4012,21 +4360,37 @@ fun EventDetailScreen(
                         }
                         var selectedTab by rememberSaveable { mutableStateOf(DetailTab.PARTICIPANTS) }
                         val bracketTabDivisionOptions = remember(
+                            tournamentPoolPlayEnabled,
+                            tournamentBracketDivisionOptions,
                             joinDivisionOptions,
                             playoffDivisionOptions,
                             isLeaguePlayoffSplit,
                         ) {
-                            if (isLeaguePlayoffSplit) {
+                            if (tournamentPoolPlayEnabled && tournamentBracketDivisionOptions.isNotEmpty()) {
+                                tournamentBracketDivisionOptions
+                            } else if (isLeaguePlayoffSplit) {
                                 playoffDivisionOptions
                             } else {
                                 joinDivisionOptions
                             }
                         }
-                        val selectedBracketDivisionId = remember(
+                        val preferredBracketDivisionId = remember(
+                            tournamentPoolPlayEnabled,
+                            selectedEvent.event.divisionDetails,
                             selectedJoinDivisionId,
+                        ) {
+                            if (tournamentPoolPlayEnabled) {
+                                selectedEvent.event.resolveBracketDivisionForPool(selectedJoinDivisionId)
+                                    ?: selectedJoinDivisionId
+                            } else {
+                                selectedJoinDivisionId
+                            }
+                        }
+                        val selectedBracketDivisionId = remember(
+                            preferredBracketDivisionId,
                             bracketTabDivisionOptions,
                         ) {
-                            bracketTabDivisionOptions.resolveSelectedDivisionId(selectedJoinDivisionId)
+                            bracketTabDivisionOptions.resolveSelectedDivisionId(preferredBracketDivisionId)
                         }
                         val participantSections = remember(selectedEvent.event.teamSignup) {
                             if (selectedEvent.event.teamSignup) {
@@ -4048,9 +4412,18 @@ fun EventDetailScreen(
                                 }
                             )
                         }
+                        var isDetailDockExpanded by rememberSaveable { mutableStateOf(false) }
                         LaunchedEffect(availableTabs) {
                             if (selectedTab !in availableTabs) {
                                 selectedTab = availableTabs.first()
+                            }
+                        }
+                        LaunchedEffect(selectedTab) {
+                            isDetailDockExpanded = false
+                        }
+                        LaunchedEffect(showFab) {
+                            if (!showFab) {
+                                isDetailDockExpanded = false
                             }
                         }
                         LaunchedEffect(
@@ -4290,11 +4663,16 @@ fun EventDetailScreen(
                                     }
                                 }
                                 DetailTab.LEAGUES -> {
+                                    val selectedLeagueDivisionStandings = leagueDivisionStandings?.takeIf { standings ->
+                                        !selectedStandingsDataDivisionId.isNullOrBlank() &&
+                                            divisionsEquivalent(standings.divisionId, selectedStandingsDataDivisionId)
+                                    }
                                     LeagueStandingsTab(
                                         standings = leagueStandings,
                                         showDrawColumn = showStandingsDrawColumn,
                                         showFab = { showFab = it },
-                                        validationMessages = leagueDivisionStandings?.validationMessages.orEmpty(),
+                                        standingsConfirmedAt = selectedLeagueDivisionStandings?.standingsConfirmedAt,
+                                        validationMessages = selectedLeagueDivisionStandings?.validationMessages.orEmpty(),
                                         isLoading = leagueDivisionStandingsLoading,
                                         isConfirming = leagueStandingsConfirming,
                                         canConfirmStandings = canManageLeagueStandings,
@@ -4348,194 +4726,234 @@ fun EventDetailScreen(
                                 exit = slideOutVertically() + fadeOut()
                             ) {
                                 when (selectedTab) {
-                                    DetailTab.BRACKET -> BracketFloatingBar(
-                                        selectedDivisionId = selectedBracketDivisionId,
-                                        divisionOptions = bracketTabDivisionOptions,
-                                        onDivisionSelected = component::selectDivision,
-                                        showBracketToggle = selectedEvent.event.doubleElimination,
-                                        isLosersBracket = losersBracket,
-                                        onBracketToggle = component::toggleLosersBracket,
-                                        showMatchEditAction = canManageMatchEditingFromDock,
-                                        isEditingMatches = canEditMatches,
-                                        onStartMatchEdit = component::startEditingMatches,
-                                        onCancelMatchEdit = component::cancelEditingMatches,
-                                        onCommitMatchEdit = component::commitMatchChanges,
-                                        primaryActionLabel = if (canEditMatches) {
-                                            "Add Match"
-                                        } else {
-                                            null
-                                        },
-                                        onPrimaryActionClick = if (canEditMatches) {
-                                            component::addBracketMatch
-                                        } else {
-                                            null
-                                        },
-                                        primaryActionEnabled = canEditMatches,
-                                        primaryActionColors = if (canEditMatches) {
-                                            ButtonDefaults.buttonColors(
-                                                containerColor = Color(0xFF2E7D32),
-                                                contentColor = Color.White,
-                                            )
-                                        } else {
-                                            null
-                                        },
-                                        showPrimaryActionFirst = true,
-                                        selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
-                                        onClearSelectedWeeklyOccurrence = if (isWeeklyParentEvent) {
-                                            component::clearSelectedWeeklySession
-                                        } else {
-                                            null
-                                        },
-                                        onShowDetailsClick = component::toggleDetails,
-                                    )
+                                    DetailTab.BRACKET -> ExpandableFloatingDock(
+                                        expanded = isDetailDockExpanded,
+                                        onExpandClick = { isDetailDockExpanded = true },
+                                        onCollapseClick = { isDetailDockExpanded = false },
+                                    ) { dockModifier, onCloseClick ->
+                                        BracketFloatingBar(
+                                            selectedDivisionId = selectedBracketDivisionId,
+                                            divisionOptions = bracketTabDivisionOptions,
+                                            onDivisionSelected = component::selectDivision,
+                                            showBracketToggle = selectedEvent.event.doubleElimination,
+                                            isLosersBracket = losersBracket,
+                                            onBracketToggle = component::toggleLosersBracket,
+                                            showMatchEditAction = canManageMatchEditingFromDock,
+                                            isEditingMatches = canEditMatches,
+                                            onStartMatchEdit = component::startEditingMatches,
+                                            onCancelMatchEdit = component::cancelEditingMatches,
+                                            onCommitMatchEdit = component::commitMatchChanges,
+                                            primaryActionLabel = if (canEditMatches) {
+                                                "Add Match"
+                                            } else {
+                                                null
+                                            },
+                                            onPrimaryActionClick = if (canEditMatches) {
+                                                component::addBracketMatch
+                                            } else {
+                                                null
+                                            },
+                                            primaryActionEnabled = canEditMatches,
+                                            primaryActionColors = if (canEditMatches) {
+                                                ButtonDefaults.buttonColors(
+                                                    containerColor = Color(0xFF2E7D32),
+                                                    contentColor = Color.White,
+                                                )
+                                            } else {
+                                                null
+                                            },
+                                            showPrimaryActionFirst = true,
+                                            useVerticalLayout = true,
+                                            onCloseClick = onCloseClick,
+                                            wrapInSurface = false,
+                                            selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
+                                            onClearSelectedWeeklyOccurrence = if (isWeeklyParentEvent) {
+                                                component::clearSelectedWeeklySession
+                                            } else {
+                                                null
+                                            },
+                                            onShowDetailsClick = component::toggleDetails,
+                                            modifier = dockModifier,
+                                        )
+                                    }
 
-                                    DetailTab.SCHEDULE -> BracketFloatingBar(
-                                        selectedDivisionId = if (tournamentPoolPlayEnabled) {
-                                            selectedScheduleDivisionId
-                                        } else {
-                                            selectedJoinDivisionId
-                                        },
-                                        divisionOptions = if (isWeeklyParentEvent) {
-                                            emptyList()
-                                        } else if (tournamentPoolPlayEnabled && tournamentBracketDivisionOptions.isNotEmpty()) {
-                                            tournamentBracketDivisionOptions
-                                        } else {
-                                            joinDivisionOptions
-                                        },
-                                        onDivisionSelected = { divisionId ->
-                                            selectedSchedulePoolDivisionId = null
-                                            component.selectDivision(divisionId)
-                                        },
-                                        selectedPoolDivisionId = selectedSchedulePoolDivisionId,
-                                        poolOptions = if (tournamentPoolPlayEnabled) {
-                                            schedulePoolDivisionOptions
-                                        } else {
-                                            emptyList()
-                                        },
-                                        onPoolSelected = if (tournamentPoolPlayEnabled) {
-                                            { poolDivisionId -> selectedSchedulePoolDivisionId = poolDivisionId }
-                                        } else {
-                                            null
-                                        },
-                                        showMatchEditAction = showScheduleMatchManagement,
-                                        isEditingMatches = showScheduleMatchManagement && canEditMatches,
-                                        onStartMatchEdit = component::startEditingMatches,
-                                        onCancelMatchEdit = component::cancelEditingMatches,
-                                        onCommitMatchEdit = component::commitMatchChanges,
-                                        primaryActionLabel = if (showScheduleMatchManagement && canEditMatches) {
-                                            "Add Match"
-                                        } else {
-                                            null
-                                        },
-                                        onPrimaryActionClick = if (showScheduleMatchManagement && canEditMatches) {
-                                            component::addScheduleMatch
-                                        } else {
-                                            null
-                                        },
-                                        primaryActionEnabled = showScheduleMatchManagement && canEditMatches,
-                                        primaryActionColors = if (showScheduleMatchManagement && canEditMatches) {
-                                            ButtonDefaults.buttonColors(
-                                                containerColor = Color(0xFF2E7D32),
-                                                contentColor = Color.White,
-                                            )
-                                        } else {
-                                            null
-                                        },
-                                        showPrimaryActionFirst = true,
-                                        selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
-                                        onClearSelectedWeeklyOccurrence = if (isWeeklyParentEvent) {
-                                            component::clearSelectedWeeklySession
-                                        } else {
-                                            null
-                                        },
-                                        onShowDetailsClick = component::toggleDetails,
-                                    )
+                                    DetailTab.SCHEDULE -> ExpandableFloatingDock(
+                                        expanded = isDetailDockExpanded,
+                                        onExpandClick = { isDetailDockExpanded = true },
+                                        onCollapseClick = { isDetailDockExpanded = false },
+                                    ) { dockModifier, onCloseClick ->
+                                        BracketFloatingBar(
+                                            selectedDivisionId = if (tournamentPoolPlayEnabled) {
+                                                selectedScheduleDivisionId
+                                            } else {
+                                                selectedJoinDivisionId
+                                            },
+                                            divisionOptions = if (isWeeklyParentEvent) {
+                                                emptyList()
+                                            } else if (tournamentPoolPlayEnabled && tournamentBracketDivisionOptions.isNotEmpty()) {
+                                                tournamentBracketDivisionOptions
+                                            } else {
+                                                joinDivisionOptions
+                                            },
+                                            onDivisionSelected = { divisionId ->
+                                                selectedSchedulePoolDivisionId = null
+                                                component.selectDivision(divisionId)
+                                            },
+                                            selectedPoolDivisionId = selectedSchedulePoolDivisionId,
+                                            poolOptions = if (tournamentPoolPlayEnabled) {
+                                                schedulePoolDivisionOptions
+                                            } else {
+                                                emptyList()
+                                            },
+                                            onPoolSelected = if (tournamentPoolPlayEnabled) {
+                                                { poolDivisionId -> selectedSchedulePoolDivisionId = poolDivisionId }
+                                            } else {
+                                                null
+                                            },
+                                            showMatchEditAction = showScheduleMatchManagement,
+                                            isEditingMatches = showScheduleMatchManagement && canEditMatches,
+                                            onStartMatchEdit = component::startEditingMatches,
+                                            onCancelMatchEdit = component::cancelEditingMatches,
+                                            onCommitMatchEdit = component::commitMatchChanges,
+                                            primaryActionLabel = if (showScheduleMatchManagement && canEditMatches) {
+                                                "Add Match"
+                                            } else {
+                                                null
+                                            },
+                                            onPrimaryActionClick = if (showScheduleMatchManagement && canEditMatches) {
+                                                component::addScheduleMatch
+                                            } else {
+                                                null
+                                            },
+                                            primaryActionEnabled = showScheduleMatchManagement && canEditMatches,
+                                            primaryActionColors = if (showScheduleMatchManagement && canEditMatches) {
+                                                ButtonDefaults.buttonColors(
+                                                    containerColor = Color(0xFF2E7D32),
+                                                    contentColor = Color.White,
+                                                )
+                                            } else {
+                                                null
+                                            },
+                                            showPrimaryActionFirst = true,
+                                            useVerticalLayout = true,
+                                            onCloseClick = onCloseClick,
+                                            wrapInSurface = false,
+                                            selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
+                                            onClearSelectedWeeklyOccurrence = if (isWeeklyParentEvent) {
+                                                component::clearSelectedWeeklySession
+                                            } else {
+                                                null
+                                            },
+                                            onShowDetailsClick = component::toggleDetails,
+                                            modifier = dockModifier,
+                                        )
+                                    }
 
-                                    DetailTab.LEAGUES -> BracketFloatingBar(
-                                        selectedDivisionId = selectedStandingsDivisionId,
-                                        divisionOptions = standingsTabDivisionOptions,
-                                        onDivisionSelected = { divisionId ->
-                                            selectedStandingsPoolDivisionId = null
-                                            component.selectDivision(divisionId)
-                                        },
-                                        selectedPoolDivisionId = selectedStandingsDataDivisionId,
-                                        poolOptions = if (tournamentPoolPlayEnabled) {
-                                            standingsPoolDivisionOptions
-                                        } else {
-                                            emptyList()
-                                        },
-                                        onPoolSelected = if (tournamentPoolPlayEnabled) {
-                                            { poolDivisionId ->
-                                                selectedStandingsPoolDivisionId = poolDivisionId
-                                                if (!poolDivisionId.isNullOrBlank()) {
-                                                    component.selectDivision(poolDivisionId)
+                                    DetailTab.LEAGUES -> ExpandableFloatingDock(
+                                        expanded = isDetailDockExpanded,
+                                        onExpandClick = { isDetailDockExpanded = true },
+                                        onCollapseClick = { isDetailDockExpanded = false },
+                                    ) { dockModifier, onCloseClick ->
+                                        BracketFloatingBar(
+                                            selectedDivisionId = selectedStandingsDivisionId,
+                                            divisionOptions = standingsTabDivisionOptions,
+                                            onDivisionSelected = { divisionId ->
+                                                selectedStandingsPoolDivisionId = null
+                                                component.selectDivision(divisionId)
+                                            },
+                                            selectedPoolDivisionId = selectedStandingsDataDivisionId,
+                                            poolOptions = if (tournamentPoolPlayEnabled) {
+                                                standingsPoolDivisionOptions
+                                            } else {
+                                                emptyList()
+                                            },
+                                            onPoolSelected = if (tournamentPoolPlayEnabled) {
+                                                { poolDivisionId ->
+                                                    selectedStandingsPoolDivisionId = poolDivisionId
+                                                    if (!poolDivisionId.isNullOrBlank()) {
+                                                        component.selectDivision(poolDivisionId)
+                                                    }
                                                 }
-                                            }
-                                        } else {
-                                            null
-                                        },
-                                        includeAllPoolsOption = false,
-                                        showMatchEditAction = canManageMatchEditingFromDock,
-                                        isEditingMatches = canEditMatches,
-                                        onStartMatchEdit = component::startEditingMatches,
-                                        onCancelMatchEdit = component::cancelEditingMatches,
-                                        onCommitMatchEdit = component::commitMatchChanges,
-                                        showConfirmResultsAction = canConfirmLeagueResultsFromDock,
-                                        confirmResultsEnabled = canConfirmLeagueResultsFromDock &&
-                                            !leagueDivisionStandingsLoading &&
-                                            !leagueStandingsConfirming &&
-                                            leagueStandings.isNotEmpty(),
-                                        confirmResultsInProgress = leagueStandingsConfirming,
-                                        onConfirmResultsClick = { showStandingsConfirmDialog = true },
-                                        selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
-                                        onClearSelectedWeeklyOccurrence = if (isWeeklyParentEvent) {
-                                            component::clearSelectedWeeklySession
-                                        } else {
-                                            null
-                                        },
-                                        onShowDetailsClick = component::toggleDetails,
-                                    )
+                                            } else {
+                                                null
+                                            },
+                                            includeAllPoolsOption = false,
+                                            showMatchEditAction = canManageMatchEditingFromDock,
+                                            isEditingMatches = canEditMatches,
+                                            onStartMatchEdit = component::startEditingMatches,
+                                            onCancelMatchEdit = component::cancelEditingMatches,
+                                            onCommitMatchEdit = component::commitMatchChanges,
+                                            showConfirmResultsAction = canConfirmLeagueResultsFromDock,
+                                            confirmResultsEnabled = canConfirmLeagueResultsFromDock &&
+                                                !leagueDivisionStandingsLoading &&
+                                                !leagueStandingsConfirming &&
+                                                leagueStandings.isNotEmpty(),
+                                            confirmResultsInProgress = leagueStandingsConfirming,
+                                            onConfirmResultsClick = { showStandingsConfirmDialog = true },
+                                            useVerticalLayout = true,
+                                            onCloseClick = onCloseClick,
+                                            wrapInSurface = false,
+                                            selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
+                                            onClearSelectedWeeklyOccurrence = if (isWeeklyParentEvent) {
+                                                component::clearSelectedWeeklySession
+                                            } else {
+                                                null
+                                            },
+                                            onShowDetailsClick = component::toggleDetails,
+                                            modifier = dockModifier,
+                                        )
+                                    }
 
-                                    DetailTab.PARTICIPANTS -> ParticipantsFloatingBar(
-                                        selectedSection = selectedParticipantsSection,
-                                        availableSections = participantSections,
-                                        onSectionSelected = { selectedParticipantsSection = it },
-                                        showManageAction = canManageParticipantsFromDock,
-                                        isManagingParticipants = isManagingParticipants,
-                                        onStartManagingParticipants = {
-                                            isManagingParticipants = true
-                                            component.startManagingParticipants()
-                                        },
-                                        onStopManagingParticipants = {
-                                            isManagingParticipants = false
-                                            component.stopManagingParticipants()
-                                        },
-                                        inviteActionLabel = if (canManageParticipantsFromDock && isManagingParticipants) {
-                                            if (selectedEvent.event.teamSignup) "Invite Team" else "Invite Player"
-                                        } else {
-                                            null
-                                        },
-                                        onInviteClick = if (canManageParticipantsFromDock && isManagingParticipants) {
-                                            {
-                                                if (selectedEvent.event.teamSignup) {
-                                                    component.searchInviteTeams("")
-                                                    showInviteTeamDialog = true
-                                                } else {
-                                                    component.searchUsers("")
-                                                    showInvitePlayerDialog = true
+                                    DetailTab.PARTICIPANTS -> ExpandableFloatingDock(
+                                        expanded = isDetailDockExpanded,
+                                        onExpandClick = { isDetailDockExpanded = true },
+                                        onCollapseClick = { isDetailDockExpanded = false },
+                                    ) { dockModifier, onCloseClick ->
+                                        ParticipantsFloatingBar(
+                                            selectedSection = selectedParticipantsSection,
+                                            availableSections = participantSections,
+                                            onSectionSelected = { selectedParticipantsSection = it },
+                                            showManageAction = canManageParticipantsFromDock,
+                                            isManagingParticipants = isManagingParticipants,
+                                            onStartManagingParticipants = {
+                                                isManagingParticipants = true
+                                                component.startManagingParticipants()
+                                            },
+                                            onStopManagingParticipants = {
+                                                isManagingParticipants = false
+                                                component.stopManagingParticipants()
+                                            },
+                                            inviteActionLabel = if (canManageParticipantsFromDock && isManagingParticipants) {
+                                                if (selectedEvent.event.teamSignup) "Invite Team" else "Invite Player"
+                                            } else {
+                                                null
+                                            },
+                                            onInviteClick = if (canManageParticipantsFromDock && isManagingParticipants) {
+                                                {
+                                                    if (selectedEvent.event.teamSignup) {
+                                                        component.searchInviteTeams("")
+                                                        showInviteTeamDialog = true
+                                                    } else {
+                                                        component.searchUsers("")
+                                                        showInvitePlayerDialog = true
+                                                    }
                                                 }
-                                            }
-                                        } else {
-                                            null
-                                        },
-                                        selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
-                                        onClearSelectedWeeklyOccurrence = if (isWeeklyParentEvent) {
-                                            component::clearSelectedWeeklySession
-                                        } else {
-                                            null
-                                        },
-                                        onShowDetailsClick = component::toggleDetails,
-                                    )
+                                            } else {
+                                                null
+                                            },
+                                            useVerticalLayout = true,
+                                            onCloseClick = onCloseClick,
+                                            wrapInSurface = false,
+                                            selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
+                                            onClearSelectedWeeklyOccurrence = if (isWeeklyParentEvent) {
+                                                component::clearSelectedWeeklySession
+                                            } else {
+                                                null
+                                            },
+                                            onShowDetailsClick = component::toggleDetails,
+                                            modifier = dockModifier,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -4619,7 +5037,7 @@ fun EventDetailScreen(
                         selectedWeeklyOccurrenceStarted = joinBlockedByStart && isWeeklyParentEvent,
                         selectedDivisionId = selectedJoinOptionDivisionId,
                         divisionOptions = if (teamSignup) {
-                            joinDivisionOptions
+                            registrationJoinDivisionOptions
                         } else {
                             emptyList()
                         },
@@ -5192,6 +5610,7 @@ private fun WithdrawTargetDialog(
 private fun LeagueStandingsTab(
     standings: List<TeamStanding>,
     showDrawColumn: Boolean,
+    standingsConfirmedAt: Instant?,
     validationMessages: List<String>,
     isLoading: Boolean,
     isConfirming: Boolean,
@@ -5204,21 +5623,26 @@ private fun LeagueStandingsTab(
     }
     val isScrollingUp by standingsListState.isScrollingUp()
     showFab(if (standings.isEmpty()) true else isScrollingUp)
+    val visibleValidationMessages = if (canConfirmStandings) validationMessages else emptyList()
+    val confirmedLabel = standingsConfirmedAt?.let(::formatStandingsConfirmedAt)
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        if (canConfirmStandings && (validationMessages.isNotEmpty() || isLoading || isConfirming)) {
+        if (confirmedLabel != null || visibleValidationMessages.isNotEmpty() || isLoading || isConfirming) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (validationMessages.isNotEmpty()) {
-                    validationMessages.forEach { validationMessage ->
+                if (confirmedLabel != null) {
+                    StandingsConfirmedMessage(confirmedLabel)
+                }
+                if (visibleValidationMessages.isNotEmpty()) {
+                    visibleValidationMessages.forEach { validationMessage ->
                         Text(
                             text = validationMessage,
                             style = MaterialTheme.typography.bodySmall,
@@ -5230,12 +5654,6 @@ private fun LeagueStandingsTab(
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
             }
-        } else if (isLoading) {
-            LinearProgressIndicator(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-            )
         }
 
         if (standings.isEmpty()) {
@@ -5266,6 +5684,50 @@ private fun LeagueStandingsTab(
             }
         }
     }
+}
+
+@Composable
+private fun StandingsConfirmedMessage(
+    confirmedLabel: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                color = MaterialTheme.colorScheme.primaryContainer,
+                shape = RoundedCornerShape(8.dp),
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Default.Check,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+            modifier = Modifier.size(18.dp),
+        )
+        Text(
+            text = "Results confirmed on $confirmedLabel.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+        )
+    }
+}
+
+private fun formatStandingsConfirmedAt(
+    confirmedAt: Instant,
+    timeZone: TimeZone = TimeZone.currentSystemDefault(),
+): String {
+    val localDateTime = confirmedAt.toLocalDateTime(timeZone)
+    val month = localDateTime.date.month.name.take(3).lowercase().replaceFirstChar { char ->
+        if (char.isLowerCase()) char.titlecase() else char.toString()
+    }
+    val hour = localDateTime.time.hour
+    val displayHour = ((hour + 11) % 12) + 1
+    val minute = localDateTime.time.minute.toString().padStart(2, '0')
+    val period = if (hour < 12) "AM" else "PM"
+    return "$month ${localDateTime.date.day}, ${localDateTime.date.year} at $displayHour:$minute $period"
 }
 
 @Composable
