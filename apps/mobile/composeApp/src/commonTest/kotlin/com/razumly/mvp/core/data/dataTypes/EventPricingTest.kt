@@ -14,7 +14,7 @@ class EventPricingTest {
         )
 
         assertEquals(null, event.resolvedDivisionPriceCents())
-        assertEquals("Price not set", event.divisionPriceRangeLabel())
+        assertEquals("Free", event.divisionPriceRangeLabel())
     }
 
     @Test
@@ -71,7 +71,7 @@ class EventPricingTest {
             EventPriceRange(minPriceCents = 0, maxPriceCents = 0, hasMissingPrices = true),
             event.divisionPriceRange(),
         )
-        assertEquals("Price not set", event.divisionPriceRangeLabel())
+        assertEquals("Free", event.divisionPriceRangeLabel())
         assertFalse(event.hasAnyPaidDivision())
     }
 
@@ -88,6 +88,6 @@ class EventPricingTest {
         )
 
         assertFalse(event.hasAnyPaidDivision())
-        assertEquals("$0.00", event.divisionPriceRangeLabel())
+        assertEquals("Free", event.divisionPriceRangeLabel())
     }
 }

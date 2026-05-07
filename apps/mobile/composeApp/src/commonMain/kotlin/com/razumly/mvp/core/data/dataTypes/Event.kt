@@ -156,6 +156,9 @@ private fun Event.findDivisionDetailForPricing(preferredDivisionId: String?): Di
 
 private fun formatPriceCentsLabel(priceCents: Int): String {
     val normalizedPriceCents = priceCents.coerceAtLeast(0)
+    if (normalizedPriceCents == 0) {
+        return "Free"
+    }
     val wholeDollars = normalizedPriceCents / 100
     val cents = normalizedPriceCents % 100
     return "$$wholeDollars.${cents.toString().padStart(2, '0')}"
@@ -197,9 +200,6 @@ fun Event.hasAnyPaidDivision(): Boolean = divisionPriceRange().maxPriceCents > 0
 
 fun Event.divisionPriceRangeLabel(): String {
     val priceRange = divisionPriceRange()
-    if (priceRange.hasMissingPrices && priceRange.minPriceCents == 0 && priceRange.maxPriceCents == 0) {
-        return "Price not set"
-    }
     return if (priceRange.minPriceCents == priceRange.maxPriceCents) {
         formatPriceCentsLabel(priceRange.minPriceCents)
     } else {
