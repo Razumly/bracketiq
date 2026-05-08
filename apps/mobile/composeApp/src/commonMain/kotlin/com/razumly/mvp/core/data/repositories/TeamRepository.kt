@@ -354,7 +354,9 @@ class TeamRepository(
             }
         }
         fetchRemoteTeamsForSearch(safeLimit).forEach { team ->
-            teamsById.putIfAbsent(team.id, team)
+            if (!teamsById.containsKey(team.id)) {
+                teamsById[team.id] = team
+            }
         }
 
         val filteredTeams = teamsById.values

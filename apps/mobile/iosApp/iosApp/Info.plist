@@ -19,7 +19,7 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.4.0</string>
+	<string>1.5.0</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -44,11 +44,13 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>45</string>
+	<string>46</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>CLIENT_ID</key>
 	<string>49655448987-5mt89kqe079js16hbb4476epf06mhjgp.apps.googleusercontent.com</string>
+	<key>GOOGLE_MAPS_MAP_ID</key>
+	<string>$(GOOGLE_MAPS_MAP_ID)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
