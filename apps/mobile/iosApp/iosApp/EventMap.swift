@@ -312,6 +312,11 @@ struct GoogleMapView: UIViewRepresentable {
         let options = GMSMapViewOptions()
         options.camera = camera
         options.frame = .zero
+        if let mapID = Bundle.main.object(forInfoDictionaryKey: "GOOGLE_MAPS_MAP_ID") as? String,
+           !mapID.isEmpty,
+           !mapID.hasPrefix("$(") {
+            options.mapID = GMSMapID(identifier: mapID)
+        }
         
         let mapView = GMSMapView.init(options: options)
         mapView.isMyLocationEnabled = true

@@ -296,6 +296,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         val harness = CreateEventHarness()
         advance()
 
+        harness.component.updateEventField { copy(divisions = listOf("Open")) }
+        advance()
         harness.component.updateAssistantHostIds(listOf("assistant-1"))
         harness.component.addOfficialId("official-1")
         advance()
@@ -1213,7 +1215,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_league_creation_with_no_event_divisions_when_field_divisions_empty_then_open_is_used() = runTest(testDispatcher) {
+    fun given_league_creation_with_no_event_divisions_when_submitted_then_creation_is_blocked() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         harness.component.setLoadingHandler(harness.loadingHandler)
         advance()
@@ -1249,9 +1251,11 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        val payloadFields = harness.eventRepository.createEventCalls.single().fields.orEmpty()
-        assertEquals(1, payloadFields.size)
-        assertEquals(listOf("open"), payloadFields.first().divisions)
+        assertEquals(0, harness.eventRepository.createEventCalls.size)
+        assertEquals(
+            "Add at least one division before creating this event.",
+            harness.component.errorState.value?.message,
+        )
     }
 
     @Test
@@ -1317,6 +1321,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
             copy(
                 name = "Tournament Create Test",
                 organizationId = "org-456",
+                divisions = listOf("Open"),
                 start = instant(1_700_000_000_000),
                 end = instant(1_700_086_400_000),
                 noFixedEndDateTime = false,

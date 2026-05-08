@@ -42,6 +42,7 @@ import com.google.maps.android.compose.MapUiSettings
 import com.google.maps.android.compose.MarkerInfoWindow
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
+import com.razumly.mvp.BuildConfig
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
@@ -401,6 +402,10 @@ actual fun EventMap(
     ) {
         GoogleMap(
             modifier = Modifier.fillMaxSize(),
+            googleMapOptionsFactory = {
+                com.google.android.gms.maps.GoogleMapOptions()
+                    .mapId(BuildConfig.MAPS_MAP_ID)
+            },
             contentPadding = PaddingValues(
                 top = 160.dp,
                 end = MAP_ACTION_BUTTON_SCAFFOLD_BOTTOM_SPACING,

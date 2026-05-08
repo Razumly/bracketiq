@@ -31,7 +31,6 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
-import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.ChatTermsConsentState
@@ -390,6 +389,11 @@ class DefaultCreateEventComponent(
             val eventDraft = applyRentalConstraints(
                 hostSyncedDraft.applyCreateSelectionRules(_isRentalFlow.value)
             )
+            val validationError = validateCreateEventDraft(eventDraft)
+            if (validationError != null) {
+                _errorState.value = ErrorMessage(validationError)
+                return@launch
+            }
             if (_isRentalFlow.value) {
                 if (!ensureRentalSignaturesBeforeCreate(eventDraft)) {
                     return@launch
@@ -1661,6 +1665,17 @@ class DefaultCreateEventComponent(
         )
     }
 
+    private fun validateCreateEventDraft(event: Event): String? {
+        if (_isRentalFlow.value) {
+            return null
+        }
+        val selectedDivisionIds = event.divisions.normalizeDivisionIdentifiers()
+        if (selectedDivisionIds.isEmpty()) {
+            return "Add at least one division before creating this event."
+        }
+        return null
+    }
+
     private fun buildFieldDrafts(event: Event, targetCount: Int): List<Field> {
         val normalizedCount = targetCount.coerceAtLeast(0)
         val drafts = _localFields.value
@@ -1700,7 +1715,6 @@ class DefaultCreateEventComponent(
         fieldIdReplacements: Map<String, String>,
     ): List<TimeSlot> {
         val selectedDivisionIds = event.divisions.normalizeDivisionIdentifiers()
-            .ifEmpty { listOf(DEFAULT_DIVISION) }
         return _leagueSlots.value.mapNotNull { slot ->
             val mappedFieldIds = slot.normalizedScheduledFieldIds()
                 .mapNotNull { fieldId ->
@@ -2046,7 +2060,7 @@ class DefaultCreateEventComponent(
 
     private fun defaultFieldDivisions(event: Event): List<String> {
         val eventDivisions = event.divisions.normalizeDivisionIdentifiers()
-        return eventDivisions.ifEmpty { listOf(DEFAULT_DIVISION) }
+        return eventDivisions
     }
 
     private fun defaultFieldLocation(event: Event): String? {
