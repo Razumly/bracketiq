@@ -2,6 +2,7 @@ package com.razumly.mvp.teamManagement
 
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamStaffAssignment
@@ -42,6 +43,7 @@ interface TeamManagementComponent {
     val selectedFreeAgentId: String?
     val selectedFreeAgent: StateFlow<UserData?>
     val sports: StateFlow<List<Sport>>
+    val divisionTypeParameters: StateFlow<DivisionTypeParameters>
     val friends: StateFlow<List<UserData>>
     val currentTeams: StateFlow<List<TeamWithPlayers>>
     val isCurrentTeamsLoading: StateFlow<Boolean>
@@ -90,6 +92,8 @@ class DefaultTeamManagementComponent(
 
     override val onBack = navigationHandler::navigateBack
     private val _errorState = MutableStateFlow<String?>(null)
+    private val _divisionTypeParameters = MutableStateFlow(DivisionTypeParameters())
+    override val divisionTypeParameters = _divisionTypeParameters.asStateFlow()
 
     private val currentUserState = userRepository.currentUser
         .map { result -> result.getOrNull() ?: UserData() }
@@ -223,6 +227,13 @@ class DefaultTeamManagementComponent(
                 _errorState.value = it.userMessage()
                 emptyList()
             }
+            sportsRepository.getDivisionTypeParameters()
+                .onSuccess { parameters ->
+                    _divisionTypeParameters.value = parameters
+                }
+                .onFailure {
+                    _errorState.value = it.userMessage("Failed to load division options")
+                }
         }
         scope.launch {
             currentTeams.collect { teams ->

@@ -11,6 +11,7 @@ import com.razumly.mvp.core.data.dataTypes.BillPayment
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.BillingAddressProfile
 import com.razumly.mvp.core.data.dataTypes.Bounds
+import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.Field
@@ -532,8 +533,11 @@ internal class CreateEvent_FakeFieldRepository : IFieldRepository {
 
 internal class CreateEvent_FakeSportsRepository(
     private val sports: List<Sport>,
+    private val divisionTypeParameters: DivisionTypeParameters = DivisionTypeParameters(),
 ) : ISportsRepository {
     override suspend fun getSports(): Result<List<Sport>> = Result.success(sports)
+    override suspend fun getDivisionTypeParameters(): Result<DivisionTypeParameters> =
+        Result.success(divisionTypeParameters)
 }
 
 internal class CreateEvent_FakeImagesRepository : IImagesRepository {

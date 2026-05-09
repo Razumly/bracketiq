@@ -494,7 +494,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(EventType.WEEKLY_EVENT, harness.component.newEventState.value.eventType)
         assertFalse(harness.component.newEventState.value.teamSignup)
         assertTrue(harness.component.newEventState.value.noFixedEndDateTime)
-        assertTrue(harness.component.newEventState.value.singleDivision)
+        assertFalse(harness.component.newEventState.value.singleDivision)
     }
 
     @Test

@@ -12,6 +12,7 @@ import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.value.Value
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
+import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
@@ -95,6 +96,7 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val eventImageUrls: StateFlow<List<String>>
     val isRentalFlow: StateFlow<Boolean>
     val sports: StateFlow<List<Sport>>
+    val divisionTypeParameters: StateFlow<DivisionTypeParameters>
     val organizationTemplates: StateFlow<List<OrganizationTemplateDocument>>
     val organizationTemplatesLoading: StateFlow<Boolean>
     val organizationTemplatesError: StateFlow<String?>
@@ -236,6 +238,8 @@ class DefaultCreateEventComponent(
     override val isRentalFlow = _isRentalFlow.asStateFlow()
     private val _sports = MutableStateFlow<List<Sport>>(emptyList())
     override val sports = _sports.asStateFlow()
+    private val _divisionTypeParameters = MutableStateFlow(DivisionTypeParameters())
+    override val divisionTypeParameters = _divisionTypeParameters.asStateFlow()
     private val _organizationTemplates = MutableStateFlow<List<OrganizationTemplateDocument>>(emptyList())
     override val organizationTemplates = _organizationTemplates.asStateFlow()
     private val _organizationTemplatesLoading = MutableStateFlow(false)
@@ -885,13 +889,11 @@ class DefaultCreateEventComponent(
                 EventType.LEAGUE, EventType.TOURNAMENT -> copy(
                     eventType = type,
                     teamSignup = true,
-                    singleDivision = true,
                     noFixedEndDateTime = true,
                 )
 
                 EventType.WEEKLY_EVENT -> copy(
                     eventType = type,
-                    singleDivision = true,
                     noFixedEndDateTime = true,
                 )
 
@@ -1898,6 +1900,13 @@ class DefaultCreateEventComponent(
                 .onFailure { error ->
                     _errorState.value = ErrorMessage(error.userMessage("Failed to load sports."))
                 }
+            sportsRepository.getDivisionTypeParameters()
+                .onSuccess { parameters ->
+                    _divisionTypeParameters.value = parameters
+                }
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage(error.userMessage("Failed to load division options."))
+                }
         }
     }
 
@@ -2353,6 +2362,7 @@ class DefaultCreateEventComponent(
             start = start,
             end = defaultEventEnd(start),
             hostId = initialHostId.trim(),
+            singleDivision = false,
         )
     }
 

@@ -9,6 +9,7 @@ import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
@@ -169,6 +170,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val editableMatches: StateFlow<List<MatchWithRelations>>
     val editableRounds: StateFlow<List<List<MatchWithRelations?>>>
     val sports: StateFlow<List<Sport>>
+    val divisionTypeParameters: StateFlow<DivisionTypeParameters>
     val showTeamSelectionDialog: StateFlow<TeamSelectionDialogState?>
     val showMatchEditDialog: StateFlow<MatchEditDialogState?>
     val joinChoiceDialog: StateFlow<JoinChoiceDialogState?>
@@ -799,6 +801,8 @@ class DefaultEventDetailComponent(
 
     private val _sports = MutableStateFlow<List<Sport>>(emptyList())
     override val sports = _sports.asStateFlow()
+    private val _divisionTypeParameters = MutableStateFlow(DivisionTypeParameters())
+    override val divisionTypeParameters = _divisionTypeParameters.asStateFlow()
 
     override val selectedEvent: StateFlow<Event> =
         eventRelations.map { it.event }.stateIn(scope, SharingStarted.Eagerly, event)
@@ -1532,6 +1536,13 @@ class DefaultEventDetailComponent(
                 }
                 .onFailure {
                     _errorState.value = ErrorMessage("Failed to load sports: ${it.userMessage()}")
+                }
+            sportsRepository.getDivisionTypeParameters()
+                .onSuccess {
+                    _divisionTypeParameters.value = it
+                }
+                .onFailure {
+                    _errorState.value = ErrorMessage("Failed to load division options: ${it.userMessage()}")
                 }
         }
     }

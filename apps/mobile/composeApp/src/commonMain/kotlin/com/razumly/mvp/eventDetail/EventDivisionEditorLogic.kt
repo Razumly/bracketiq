@@ -1,16 +1,13 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
-import com.razumly.mvp.core.data.util.DEFAULT_AGE_DIVISION
-import com.razumly.mvp.core.data.util.DEFAULT_AGE_DIVISION_OPTIONS
-import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
-import com.razumly.mvp.core.data.util.DEFAULT_DIVISION_OPTIONS
+import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameterOption
+import com.razumly.mvp.core.data.dataTypes.toDropdownOptions
 import com.razumly.mvp.core.data.util.buildEventDivisionId
 import com.razumly.mvp.core.data.util.buildGenderSkillAgeDivisionToken
 import com.razumly.mvp.core.data.util.extractDivisionTokenFromId
 import com.razumly.mvp.core.data.util.normalizeDivisionDetail
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
-import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 internal data class DivisionEditorState(
     val editingId: String? = null,
@@ -21,7 +18,7 @@ internal data class DivisionEditorState(
     val ageDivisionTypeName: String = "",
     val name: String = "",
     val priceCents: Int = 0,
-    val maxParticipants: Int = 2,
+    val maxParticipants: Int? = 2,
     val playoffTeamCount: Int? = null,
     val poolCount: Int? = null,
     val allowPaymentPlans: Boolean = false,
@@ -42,12 +39,9 @@ internal data class ParsedDivisionToken(
 internal val DIVISION_TOKEN_PATTERN = Regex("^([mfc])_(age|skill)_(.+)$")
 internal val COMBINED_DIVISION_TOKEN_PATTERN = Regex("^([mfc])_skill_(.+)_age_(.+)$")
 internal val DIVISION_NAME_WHITESPACE_PATTERN = Regex("\\s+")
-
-internal val DIVISION_GENDER_OPTIONS = listOf(
-    DropdownOption(value = "M", label = "Men"),
-    DropdownOption(value = "F", label = "Women"),
-    DropdownOption(value = "C", label = "Coed"),
-)
+private val DIVISION_COMPONENT_PLUS_TOKEN_PATTERN = Regex("^(\\d+)plus$")
+private val DIVISION_COMPONENT_LEADING_U_TOKEN_PATTERN = Regex("^u(\\d+)$")
+private val DIVISION_COMPONENT_TRAILING_U_TOKEN_PATTERN = Regex("^(\\d+)u$")
 
 internal fun defaultDivisionEditorState(
     defaultPriceCents: Int,
@@ -104,17 +98,23 @@ internal fun defaultDivisionEditorState(
 
 internal fun buildSkillDivisionTypeOptions(
     existingDetails: List<DivisionDetail>,
+    skillDivisionTypes: List<DivisionTypeParameterOption> = emptyList(),
 ): List<DropdownOption> {
     val options = linkedMapOf<String, String>()
     fun addOption(divisionTypeId: String, label: String? = null) {
         val normalizedId = divisionTypeId.normalizeDivisionIdentifier()
         if (normalizedId.isBlank()) return
-        options[normalizedId] = label?.trim().takeIf { !it.isNullOrBlank() }
-            ?: normalizedId.toDivisionDisplayLabel()
+        options[normalizedId] = sanitizeDivisionComponentLabel(
+            divisionTypeId = normalizedId,
+            label = label,
+        )
     }
 
-    DEFAULT_DIVISION_OPTIONS.forEach { divisionTypeId ->
-        addOption(divisionTypeId)
+    skillDivisionTypes.toDropdownOptions().forEach { option ->
+        addOption(
+            divisionTypeId = option.value,
+            label = option.label,
+        )
     }
     existingDetails.forEach { detail ->
         val normalizedDetail = detail.normalizeDivisionDetail()
@@ -130,17 +130,23 @@ internal fun buildSkillDivisionTypeOptions(
 
 internal fun buildAgeDivisionTypeOptions(
     existingDetails: List<DivisionDetail>,
+    ageDivisionTypes: List<DivisionTypeParameterOption> = emptyList(),
 ): List<DropdownOption> {
     val options = linkedMapOf<String, String>()
     fun addOption(divisionTypeId: String, label: String? = null) {
         val normalizedId = divisionTypeId.normalizeDivisionIdentifier()
         if (normalizedId.isBlank()) return
-        options[normalizedId] = label?.trim().takeIf { !it.isNullOrBlank() }
-            ?: normalizedId.toDivisionDisplayLabel()
+        options[normalizedId] = sanitizeDivisionComponentLabel(
+            divisionTypeId = normalizedId,
+            label = label,
+        )
     }
 
-    DEFAULT_AGE_DIVISION_OPTIONS.forEach { divisionTypeId ->
-        addOption(divisionTypeId)
+    ageDivisionTypes.toDropdownOptions().forEach { option ->
+        addOption(
+            divisionTypeId = option.value,
+            label = option.label,
+        )
     }
     existingDetails.forEach { detail ->
         val normalizedDetail = detail.normalizeDivisionDetail()
@@ -148,6 +154,29 @@ internal fun buildAgeDivisionTypeOptions(
             divisionTypeId = normalizedDetail.ageDivisionTypeId,
             label = normalizedDetail.ageDivisionTypeName,
         )
+    }
+    return options.map { (value, label) ->
+        DropdownOption(value = value, label = label)
+    }
+}
+
+internal fun buildGenderOptions(
+    existingDetails: List<DivisionDetail>,
+    genderTypes: List<DivisionTypeParameterOption> = emptyList(),
+): List<DropdownOption> {
+    val options = linkedMapOf<String, String>()
+    fun addOption(gender: String?, label: String? = null) {
+        val normalizedGender = gender?.trim()?.uppercase().orEmpty()
+        if (normalizedGender.isBlank()) return
+        options[normalizedGender] = label?.trim()?.takeIf(String::isNotBlank)
+            ?: normalizedGender.toGenderDisplayLabel()
+    }
+
+    genderTypes.toDropdownOptions().forEach { option ->
+        addOption(option.value, option.label)
+    }
+    existingDetails.forEach { detail ->
+        addOption(detail.gender)
     }
     return options.map { (value, label) ->
         DropdownOption(value = value, label = label)
@@ -177,8 +206,12 @@ internal fun resolveDivisionTypeName(
             }
             else -> normalizedDetail.divisionTypeName
         }.trim()
-        if (resolvedName.isNotBlank()) {
-            return resolvedName
+        val sanitizedName = sanitizeDivisionComponentLabel(
+            divisionTypeId = normalizedDivisionTypeId,
+            label = resolvedName,
+        )
+        if (sanitizedName.isNotBlank()) {
+            return sanitizedName
         }
     }
 
@@ -186,7 +219,70 @@ internal fun resolveDivisionTypeName(
         option.value.normalizeDivisionIdentifier() == normalizedDivisionTypeId
     }?.label?.takeIf { it.isNotBlank() }?.let { return it }
 
-    return normalizedDivisionTypeId.toDivisionDisplayLabel(existingDetails)
+    return normalizedDivisionTypeId.toDivisionComponentDisplayLabel()
+}
+
+private fun sanitizeDivisionComponentLabel(
+    divisionTypeId: String,
+    label: String?,
+): String {
+    val normalizedId = divisionTypeId.normalizeDivisionIdentifier()
+    val fallbackLabel = normalizedId.toDivisionComponentDisplayLabel()
+    val trimmedLabel = label?.trim().orEmpty()
+    if (trimmedLabel.isBlank()) return fallbackLabel
+    val normalizedLabel = trimmedLabel
+        .replace(DIVISION_NAME_WHITESPACE_PATTERN, " ")
+        .lowercase()
+    val hasGenderPrefix = listOf(
+        "coed ",
+        "co-ed ",
+        "men ",
+        "mens ",
+        "men's ",
+        "women ",
+        "womens ",
+        "women's ",
+    ).any(normalizedLabel::startsWith)
+    val hasEmbeddedFallbackInLongLabel =
+        normalizedLabel.contains(" ") && normalizedLabel.contains(fallbackLabel.lowercase())
+    if (hasGenderPrefix || hasEmbeddedFallbackInLongLabel) {
+        return fallbackLabel
+    }
+    return trimmedLabel
+}
+
+private fun String.toGenderDisplayLabel(): String = when (uppercase()) {
+    "M" -> "Men"
+    "F" -> "Women"
+    "C" -> "Coed"
+    else -> this
+}
+
+private fun String.toDivisionComponentDisplayLabel(): String {
+    val normalized = normalizeDivisionIdentifier()
+    if (normalized.isBlank()) return ""
+    return when (normalized) {
+        "a", "aa", "b", "bb", "c" -> normalized.uppercase()
+        "open" -> "Open"
+        "beginner" -> "Beginner"
+        "intermediate" -> "Intermediate"
+        "advanced" -> "Advanced"
+        "expert" -> "Expert"
+        else -> {
+            DIVISION_COMPONENT_PLUS_TOKEN_PATTERN.matchEntire(normalized)?.let { match ->
+                return "${match.groupValues[1]}+"
+            }
+            DIVISION_COMPONENT_LEADING_U_TOKEN_PATTERN.matchEntire(normalized)?.let { match ->
+                return "U${match.groupValues[1]}"
+            }
+            DIVISION_COMPONENT_TRAILING_U_TOKEN_PATTERN.matchEntire(normalized)?.let { match ->
+                return "U${match.groupValues[1]}"
+            }
+            normalized.replaceFirstChar { char ->
+                if (char.isLowerCase()) char.uppercaseChar() else char
+            }
+        }
+    }
 }
 
 internal fun parseDivisionToken(detail: DivisionDetail): ParsedDivisionToken {
@@ -197,40 +293,34 @@ internal fun parseDivisionToken(detail: DivisionDetail): ParsedDivisionToken {
     if (combinedMatch != null) {
         return ParsedDivisionToken(
             gender = combinedMatch.groupValues[1].uppercase(),
-            skillDivisionTypeId = combinedMatch.groupValues[2].normalizeDivisionIdentifier()
-                .ifBlank { DEFAULT_DIVISION },
-            ageDivisionTypeId = combinedMatch.groupValues[3].normalizeDivisionIdentifier()
-                .ifBlank { DEFAULT_AGE_DIVISION },
+            skillDivisionTypeId = combinedMatch.groupValues[2].normalizeDivisionIdentifier(),
+            ageDivisionTypeId = combinedMatch.groupValues[3].normalizeDivisionIdentifier(),
         )
     }
     val legacyMatch = DIVISION_TOKEN_PATTERN.matchEntire(tokenFromDetail)
     if (legacyMatch != null) {
         val normalizedLegacyDivisionTypeId = legacyMatch.groupValues[3]
             .normalizeDivisionIdentifier()
-            .ifBlank { DEFAULT_DIVISION }
         val legacyRatingType = legacyMatch.groupValues[2].uppercase()
         return ParsedDivisionToken(
             gender = legacyMatch.groupValues[1].uppercase(),
             skillDivisionTypeId = if (legacyRatingType == "SKILL") {
                 normalizedLegacyDivisionTypeId
             } else {
-                DEFAULT_DIVISION
+                ""
             },
             ageDivisionTypeId = if (legacyRatingType == "AGE") {
                 normalizedLegacyDivisionTypeId
             } else {
-                DEFAULT_AGE_DIVISION
+                ""
             },
         )
     }
     val normalizedDetail = detail.normalizeDivisionDetail()
-    val fallbackGender = normalizedDetail.gender.trim().uppercase().ifBlank { "C" }
     return ParsedDivisionToken(
-        gender = fallbackGender,
-        skillDivisionTypeId = normalizedDetail.skillDivisionTypeId.normalizeDivisionIdentifier()
-            .ifBlank { DEFAULT_DIVISION },
-        ageDivisionTypeId = normalizedDetail.ageDivisionTypeId.normalizeDivisionIdentifier()
-            .ifBlank { DEFAULT_AGE_DIVISION },
+        gender = normalizedDetail.gender.trim().uppercase(),
+        skillDivisionTypeId = normalizedDetail.skillDivisionTypeId.normalizeDivisionIdentifier(),
+        ageDivisionTypeId = normalizedDetail.ageDivisionTypeId.normalizeDivisionIdentifier(),
     )
 }
 
@@ -279,12 +369,8 @@ internal fun buildDivisionName(
     skillDivisionTypeName: String,
     ageDivisionTypeName: String,
 ): String {
-    val normalizedSkillDivisionTypeName = skillDivisionTypeName.trim().ifBlank {
-        DEFAULT_DIVISION.toDivisionDisplayLabel()
-    }
-    val normalizedAgeDivisionTypeName = ageDivisionTypeName.trim().ifBlank {
-        DEFAULT_AGE_DIVISION.toDivisionDisplayLabel()
-    }
+    val normalizedSkillDivisionTypeName = skillDivisionTypeName.trim()
+    val normalizedAgeDivisionTypeName = ageDivisionTypeName.trim()
     return when (gender.trim().uppercase()) {
         "M" -> "Men's $normalizedSkillDivisionTypeName $normalizedAgeDivisionTypeName"
         "F" -> "Women's $normalizedSkillDivisionTypeName $normalizedAgeDivisionTypeName"

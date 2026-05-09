@@ -2,6 +2,7 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.util.buildEventDivisionId
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameterOption
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -55,7 +56,7 @@ class EventDetailsDivisionEditorHelpersTest {
     }
 
     @Test
-    fun build_division_type_options_include_defaults_and_existing_values() {
+    fun build_division_type_options_use_sport_catalog_and_existing_values() {
         val existingDetails = listOf(
             DivisionDetail(
                 id = "event-1__division__c_skill_b_age_u14",
@@ -67,9 +68,21 @@ class EventDetailsDivisionEditorHelpersTest {
                 gender = "C",
             ),
         )
+        val skillDivisionTypes = listOf(
+            DivisionTypeParameterOption(
+                id = "open",
+                name = "Open",
+            ),
+        )
+        val ageDivisionTypes = listOf(
+            DivisionTypeParameterOption(
+                id = "u18",
+                name = "U18",
+            ),
+        )
 
-        val skillOptions = buildSkillDivisionTypeOptions(existingDetails)
-        val ageOptions = buildAgeDivisionTypeOptions(existingDetails)
+        val skillOptions = buildSkillDivisionTypeOptions(existingDetails, skillDivisionTypes)
+        val ageOptions = buildAgeDivisionTypeOptions(existingDetails, ageDivisionTypes)
 
         val skillValues = skillOptions.map { option -> option.value }.toSet()
         val ageValues = ageOptions.map { option -> option.value }.toSet()
@@ -77,9 +90,39 @@ class EventDetailsDivisionEditorHelpersTest {
         assertTrue(skillValues.contains("open"))
         assertTrue(skillValues.contains("b"))
         assertTrue(ageValues.contains("u18"))
-        assertTrue(ageValues.contains("u19"))
-        assertTrue(ageValues.contains("18plus"))
         assertTrue(ageValues.contains("u14"))
+    }
+
+    @Test
+    fun build_division_type_options_do_not_emit_hardcoded_fallback_values() {
+        val skillOptions = buildSkillDivisionTypeOptions(existingDetails = emptyList())
+        val ageOptions = buildAgeDivisionTypeOptions(existingDetails = emptyList())
+        val genderOptions = buildGenderOptions(existingDetails = emptyList())
+
+        assertEquals(emptyList(), skillOptions)
+        assertEquals(emptyList(), ageOptions)
+        assertEquals(emptyList(), genderOptions)
+    }
+
+    @Test
+    fun build_division_type_options_do_not_use_full_division_names_as_component_labels() {
+        val existingDetails = listOf(
+            DivisionDetail(
+                id = "event-1__division__c_skill_bb_age_18plus",
+                key = "c_skill_bb_age_18plus",
+                skillDivisionTypeId = "bb",
+                skillDivisionTypeName = "CoEd BB 18+",
+                ageDivisionTypeId = "18plus",
+                ageDivisionTypeName = "CoEd BB 18+",
+                gender = "C",
+            ),
+        )
+
+        val skillOption = buildSkillDivisionTypeOptions(existingDetails).first { option -> option.value == "bb" }
+        val ageOption = buildAgeDivisionTypeOptions(existingDetails).first { option -> option.value == "18plus" }
+
+        assertEquals("BB", skillOption.label)
+        assertEquals("18+", ageOption.label)
     }
 
     @Test
@@ -114,6 +157,35 @@ class EventDetailsDivisionEditorHelpersTest {
     }
 
     @Test
+    fun resolve_division_type_name_ignores_full_division_name_component_values() {
+        val existingDetails = listOf(
+            DivisionDetail(
+                id = "event-1__division__c_skill_bb_age_18plus",
+                key = "c_skill_bb_age_18plus",
+                skillDivisionTypeId = "bb",
+                skillDivisionTypeName = "CoEd BB 18+",
+                ageDivisionTypeId = "18plus",
+                ageDivisionTypeName = "CoEd BB 18+",
+                gender = "C",
+            ),
+        )
+
+        val skillName = resolveDivisionTypeName(
+            divisionTypeId = "bb",
+            existingDetails = existingDetails,
+            fallbackOptions = emptyList(),
+        )
+        val ageName = resolveDivisionTypeName(
+            divisionTypeId = "18plus",
+            existingDetails = existingDetails,
+            fallbackOptions = emptyList(),
+        )
+
+        assertEquals("BB", skillName)
+        assertEquals("18+", ageName)
+    }
+
+    @Test
     fun default_division_editor_state_applies_minimum_values() {
         val state = defaultDivisionEditorState(
             defaultPriceCents = -1,
@@ -128,6 +200,10 @@ class EventDetailsDivisionEditorHelpersTest {
         assertEquals(0, state.priceCents)
         assertEquals(2, state.maxParticipants)
         assertEquals(2, state.playoffTeamCount)
+        assertEquals("", state.gender)
+        assertEquals("", state.skillDivisionTypeId)
+        assertEquals("", state.ageDivisionTypeId)
+        assertEquals("", state.name)
         assertEquals(false, state.allowPaymentPlans)
         assertEquals(0, state.installmentCount)
     }

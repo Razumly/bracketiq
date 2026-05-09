@@ -55,6 +55,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val lazyListState = rememberLazyListState()
     val friends by component.friends.collectAsState()
     val sports by component.sports.collectAsState()
+    val divisionTypeParameters by component.divisionTypeParameters.collectAsState()
     val suggestions by component.suggestedPlayers.collectAsState()
     val inviteFreeAgentContext by component.inviteFreeAgentContext.collectAsState()
     val freeAgents by component.freeAgentsFiltered.collectAsState()
@@ -85,6 +86,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
         CreateOrEditTeamScreen(
             team = team,
             sports = sports,
+            divisionTypeParameters = divisionTypeParameters,
             friends = friends,
             freeAgents = freeAgents,
             inviteFreeAgentContext = inviteFreeAgentContext,

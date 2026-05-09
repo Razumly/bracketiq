@@ -50,6 +50,8 @@ internal fun LazyListScope.animatedCardSection(
     requiredMissingCount: Int = 0,
     viewSummary: String? = null,
     editSummary: String? = null,
+    enabled: Boolean = true,
+    onDisabledClick: (() -> Unit)? = null,
     isEditMode: Boolean,
     lazyListState: LazyListState? = null,
     stickyHeaderTopInset: Dp = 0.dp,
@@ -83,7 +85,11 @@ internal fun LazyListScope.animatedCardSection(
                 topInset = stickyHeaderTopInset,
                 isPinned = isPinned,
                 onToggleExpanded = {
-                    sectionExpansionStates[sectionStateKey] = !expanded
+                    if (enabled) {
+                        sectionExpansionStates[sectionStateKey] = !expanded
+                    } else {
+                        onDisabledClick?.invoke()
+                    }
                 },
             )
         }

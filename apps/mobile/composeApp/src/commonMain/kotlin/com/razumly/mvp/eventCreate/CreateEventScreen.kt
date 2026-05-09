@@ -91,6 +91,7 @@ fun CreateEventScreen(
     val eventImageUrls by component.eventImageUrls.collectAsState()
     val isRentalFlow by component.isRentalFlow.collectAsState()
     val sports by component.sports.collectAsState()
+    val divisionTypeParameters by component.divisionTypeParameters.collectAsState()
     val organizationTemplates by component.organizationTemplates.collectAsState()
     val organizationTemplatesLoading by component.organizationTemplatesLoading.collectAsState()
     val organizationTemplatesError by component.organizationTemplatesError.collectAsState()
@@ -197,7 +198,7 @@ fun CreateEventScreen(
             component.onTypeSelected(normalizedType)
             if (normalizedType == EventType.LEAGUE || normalizedType == EventType.TOURNAMENT) {
                 component.updateEventField {
-                    copy(teamSignup = true, singleDivision = true, noFixedEndDateTime = true)
+                    copy(teamSignup = true, noFixedEndDateTime = true)
                 }
             }
         }
@@ -418,6 +419,7 @@ fun CreateEventScreen(
                             imageScheme = imageScheme,
                             imageIds = eventImageUrls,
                             sports = sports,
+                            divisionTypeParameters = divisionTypeParameters,
                             organizationTemplates = organizationTemplates,
                             organizationTemplatesLoading = organizationTemplatesLoading,
                             organizationTemplatesError = organizationTemplatesError,

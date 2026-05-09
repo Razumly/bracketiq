@@ -22,7 +22,6 @@ internal fun Event.applyCreateSelectionRules(isRentalFlow: Boolean): Event {
         )
     }
     return typeNormalizedEvent.copy(
-        singleDivision = true,
         allowPaymentPlans = false,
         installmentCount = null,
         installmentDueDates = emptyList(),

@@ -96,6 +96,7 @@ import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.Sport
@@ -112,11 +113,8 @@ import com.razumly.mvp.core.data.dataTypes.withTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
+import com.razumly.mvp.core.data.dataTypes.skillsForSport
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.util.DEFAULT_AGE_DIVISION
-import com.razumly.mvp.core.data.util.DEFAULT_AGE_DIVISION_OPTIONS
-import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
-import com.razumly.mvp.core.data.util.DEFAULT_DIVISION_OPTIONS
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeName
 import com.razumly.mvp.core.data.util.buildEventDivisionId
@@ -151,6 +149,7 @@ import com.razumly.mvp.core.presentation.util.teamSizeFormat
 import com.razumly.mvp.core.presentation.util.timeFormat
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.presentation.util.transitionSpec
+import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventDetail.composables.CancellationRefundOptions
 import com.razumly.mvp.eventDetail.composables.LeagueConfigurationFields
 import com.razumly.mvp.eventDetail.composables.LeaguePlayoffConfigurationFields
@@ -206,14 +205,10 @@ import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
 import mvp.composeapp.generated.resources.Res
 import mvp.composeapp.generated.resources.enter_value
-import mvp.composeapp.generated.resources.free_entry_hint
-import mvp.composeapp.generated.resources.invalid_price
-import mvp.composeapp.generated.resources.max_players
-import mvp.composeapp.generated.resources.max_teams
-import mvp.composeapp.generated.resources.value_too_low
 import org.jetbrains.compose.resources.stringResource
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
+import kotlin.math.roundToInt
 
 private val SectionExpansionStatesSaver = mapSaver(
     save = { stateMap: SnapshotStateMap<String, Boolean> ->
@@ -231,6 +226,11 @@ private const val MOBILE_EVENT_DETAILS_BREAKPOINT_DP = 600
 private const val MAX_READ_ONLY_NAME_LIST_ITEMS = 5
 private const val STAFF_LAZY_LIST_THRESHOLD = 4
 private const val STAFF_LAZY_LIST_VISIBLE_COUNT = 4
+private const val DEFAULT_MVP_FEE_PERCENTAGE = 0.01
+private const val LEAGUE_OR_TOURNAMENT_MVP_FEE_PERCENTAGE = 0.03
+private const val STRIPE_FIXED_FEE_CENTS = 30
+private const val STRIPE_PERCENT_FEE = 0.029
+private const val DEFAULT_STRIPE_TAX_SERVICE_FEE_CENTS = 50
 private val readOnlyNameListItemHeight = 28.dp
 private val readOnlyNameListSpacing = 4.dp
 private val editableOfficialStaffListHeight = 160.dp * STAFF_LAZY_LIST_VISIBLE_COUNT
@@ -261,6 +261,7 @@ fun EventDetails(
     onAddCurrentUser: (Boolean) -> Unit,
     onEventTypeSelected: (EventType) -> Unit,
     sports: List<Sport> = emptyList(),
+    divisionTypeParameters: DivisionTypeParameters = DivisionTypeParameters(),
     editableFields: List<Field> = emptyList(),
     leagueTimeSlots: List<TimeSlot> = emptyList(),
     leagueScoringConfig: LeagueScoringConfigDTO = LeagueScoringConfigDTO(),
@@ -326,6 +327,7 @@ fun EventDetails(
     onValidationChange: (Boolean, List<String>) -> Unit = { _, _ -> },
     joinButton: @Composable (isValid: Boolean) -> Unit
 ) {
+    val popupHandler = LocalPopupHandler.current
     val event = eventWithRelations.event
     val host = eventWithRelations.host
     val isMobileEventDetailsLayout = getScreenWidth() < MOBILE_EVENT_DETAILS_BREAKPOINT_DP
@@ -369,6 +371,7 @@ fun EventDetails(
     var draftInviteOfficial by rememberSaveable { mutableStateOf(false) }
     var draftInviteAssistantHost by rememberSaveable { mutableStateOf(false) }
     var staffEditorError by remember { mutableStateOf<String?>(null) }
+    var pricePreviewBreakdown by remember { mutableStateOf<PricePreviewBreakdown?>(null) }
     var officialPositionsExpanded by rememberSaveable(editEvent.id, editView) { mutableStateOf(false) }
     var assignedStaffExpanded by rememberSaveable(editEvent.id, editView) { mutableStateOf(false) }
     val sectionExpansionStates = rememberSaveable(
@@ -495,6 +498,10 @@ fun EventDetails(
             DropdownOption(value = option.value, label = option.label)
         }
     }
+    val selectedSportForDivisionOptions = remember(sports, editEvent.sportId) {
+        val normalizedSportId = editEvent.sportId?.trim().orEmpty()
+        sports.firstOrNull { sport -> sport.id == normalizedSportId }
+    }
     var divisionEditor by remember(editEvent.id) {
         mutableStateOf(
             defaultDivisionEditorState(
@@ -509,14 +516,46 @@ fun EventDetails(
             ),
         )
     }
-    val skillDivisionTypeSelectOptions = remember(divisionDetailsForSettings) {
-        buildSkillDivisionTypeOptions(
-            existingDetails = divisionDetailsForSettings,
+    var divisionEditorDefaults by remember(editEvent.id) {
+        mutableStateOf(
+            defaultDivisionEditorState(
+                defaultPriceCents = editEvent.priceCents,
+                defaultMaxParticipants = editEvent.maxParticipants,
+                defaultPlayoffTeamCount = editEvent.playoffTeamCount,
+                defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true,
+                defaultInstallmentCount = editEvent.installmentCount,
+                defaultInstallmentDueDates = editEvent.installmentDueDates,
+                defaultInstallmentDueRelativeDays = editEvent.installmentDueRelativeDays,
+                defaultInstallmentAmounts = editEvent.installmentAmounts,
+            ),
         )
     }
-    val ageDivisionTypeSelectOptions = remember(divisionDetailsForSettings) {
+    val skillDivisionTypeSelectOptions = remember(
+        divisionDetailsForSettings,
+        divisionTypeParameters,
+        editEvent.sportId,
+    ) {
+        buildSkillDivisionTypeOptions(
+            existingDetails = divisionDetailsForSettings,
+            skillDivisionTypes = divisionTypeParameters.skillsForSport(editEvent.sportId),
+        )
+    }
+    val ageDivisionTypeSelectOptions = remember(
+        divisionDetailsForSettings,
+        divisionTypeParameters.ages,
+    ) {
         buildAgeDivisionTypeOptions(
             existingDetails = divisionDetailsForSettings,
+            ageDivisionTypes = divisionTypeParameters.ages,
+        )
+    }
+    val genderSelectOptions = remember(
+        divisionDetailsForSettings,
+        divisionTypeParameters.genders,
+    ) {
+        buildGenderOptions(
+            existingDetails = divisionDetailsForSettings,
+            genderTypes = divisionTypeParameters.genders,
         )
     }
     val divisionEditorReady = remember(
@@ -528,18 +567,17 @@ fun EventDetails(
             divisionEditor.skillDivisionTypeId.isNotBlank() &&
             divisionEditor.ageDivisionTypeId.isNotBlank()
     }
+    fun divisionDefaultsFromEditor(editor: DivisionEditorState): DivisionEditorState {
+        return editor.copy(
+            editingId = null,
+            name = "",
+            nameTouched = false,
+            error = null,
+        )
+    }
     fun resetDivisionEditor() {
         divisionInstallmentDueDatePickerIndex = null
-        divisionEditor = defaultDivisionEditorState(
-            defaultPriceCents = editEvent.priceCents,
-            defaultMaxParticipants = editEvent.maxParticipants,
-            defaultPlayoffTeamCount = editEvent.playoffTeamCount,
-            defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true,
-            defaultInstallmentCount = editEvent.installmentCount,
-            defaultInstallmentDueDates = editEvent.installmentDueDates,
-            defaultInstallmentDueRelativeDays = editEvent.installmentDueRelativeDays,
-            defaultInstallmentAmounts = editEvent.installmentAmounts,
-        )
+        divisionEditor = divisionEditorDefaults
     }
     fun syncLeagueSlotsForSelectedDivisions(normalizedSelection: List<String>) {
         if (
@@ -867,7 +905,14 @@ fun EventDetails(
         val normalizedMaxParticipants = if (editEvent.singleDivision) {
             fallbackMaxParticipants
         } else {
-            divisionEditor.maxParticipants.coerceAtLeast(2)
+            val maxParticipants = divisionEditor.maxParticipants
+            if (maxParticipants == null || maxParticipants < 2) {
+                divisionEditor = divisionEditor.copy(
+                    error = "Division max teams must be at least 2.",
+                )
+                return
+            }
+            maxParticipants
         }
         val divisionPlayoffTeamCount = divisionEditor.playoffTeamCount
         val tournamentPoolPlayEnabled = editEvent.isTournamentPoolPlayEnabled()
@@ -1082,7 +1127,10 @@ fun EventDetails(
             )
         }
         syncLeagueSlotsForSelectedDivisions(nextDivisionIds)
-        resetDivisionEditor()
+        val nextDefaults = divisionDefaultsFromEditor(divisionEditor)
+        divisionEditorDefaults = nextDefaults
+        divisionInstallmentDueDatePickerIndex = null
+        divisionEditor = nextDefaults
     }
     fun handleEditDivisionDetail(divisionId: String) {
         val detail = divisionDetailsForSettings.firstOrNull { existing ->
@@ -1271,33 +1319,6 @@ fun EventDetails(
         }
     }
 
-    LaunchedEffect(
-        isNewEvent,
-        editView,
-        editEvent.divisions,
-        editEvent.divisionDetails,
-        editEvent.id,
-    ) {
-        if (!isNewEvent || !editView) {
-            return@LaunchedEffect
-        }
-        if (editEvent.divisions.normalizeDivisionIdentifiers().isNotEmpty()) {
-            return@LaunchedEffect
-        }
-        val seededDivisions = listOf(DEFAULT_DIVISION)
-        val seededDivisionDetails = mergeDivisionDetailsForDivisions(
-            divisions = seededDivisions,
-            existingDetails = editEvent.divisionDetails,
-            eventId = editEvent.id,
-        )
-        onEditEvent {
-            copy(
-                divisions = seededDivisions,
-                divisionDetails = seededDivisionDetails,
-            )
-        }
-    }
-
     LaunchedEffect(editEvent.fieldIds, editableFields.size) {
         val normalized = resolveReadOnlyFieldCount(event = editEvent, editableFields = editableFields)
         if (normalized != fieldCount) {
@@ -1411,6 +1432,10 @@ fun EventDetails(
         normalizedSportId?.let { sportId ->
             sports.firstOrNull { sport -> sport.id == sportId }
         }
+    }
+    val sportRequiredSectionEnabled = !isNewEvent || editEvent.sportId?.isNotBlank() == true
+    fun showSelectSportMessage() {
+        popupHandler.showPopup("Please select a sport.")
     }
     val baseMatchRules = remember(editEvent.eventType, editEvent.usesSets, editEvent.setsPerMatch, editEvent.winnerSetCount, editEvent.officialPositions, selectedSportForOfficialDefaults) {
         resolveEventMatchRules(
@@ -1749,10 +1774,7 @@ fun EventDetails(
     }
     val eventDetailsMissingRequiredCount = if (showSectionMissingBadges) {
         listOf(
-            !isMaxParticipantsValid,
             !isTeamSizeValid,
-            !isPriceValid,
-            !isPaymentPlansValid,
             editEvent.eventType == EventType.LEAGUE && editEvent.singleDivision && !isLeaguePlayoffTeamsValid,
             editEvent.eventType == EventType.TOURNAMENT && editEvent.includePlayoffs && editEvent.singleDivision && !isLeaguePlayoffTeamsValid,
         ).count { it }
@@ -2347,6 +2369,8 @@ fun EventDetails(
                     collapsibleInViewMode = true,
                     viewSummary = readOnlyUiModel.registration.summary,
                     requiredMissingCount = editUiModel.registration.requiredMissingCount,
+                    enabled = sportRequiredSectionEnabled,
+                    onDisabledClick = ::showSelectSportMessage,
                     isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
                     lazyListState = lazyListState,
                     stickyHeaderTopInset = stickyHeaderTopInset,
@@ -2588,6 +2612,8 @@ fun EventDetails(
                         collapsibleInEditMode = true,
                         collapsibleInViewMode = true,
                         viewSummary = readOnlyUiModel.matchRules.summary,
+                        enabled = sportRequiredSectionEnabled,
+                        onDisabledClick = ::showSelectSportMessage,
                         isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
                         lazyListState = lazyListState,
                         stickyHeaderTopInset = stickyHeaderTopInset,
@@ -2854,6 +2880,8 @@ fun EventDetails(
                         collapsibleInEditMode = true,
                         collapsibleInViewMode = true,
                         viewSummary = readOnlyUiModel.staff.summary,
+                        enabled = sportRequiredSectionEnabled,
+                        onDisabledClick = ::showSelectSportMessage,
                         isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
                         lazyListState = lazyListState,
                         stickyHeaderTopInset = stickyHeaderTopInset,
@@ -3274,6 +3302,8 @@ fun EventDetails(
                         collapsibleInEditMode = true,
                         collapsibleInViewMode = true,
                         viewSummary = readOnlyUiModel.divisions.summary,
+                        enabled = sportRequiredSectionEnabled,
+                        onDisabledClick = ::showSelectSportMessage,
                         isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
                         lazyListState = lazyListState,
                         stickyHeaderTopInset = stickyHeaderTopInset,
@@ -3392,252 +3422,6 @@ fun EventDetails(
                         )
                         },
                         editContent = {
-                    val divisionDefaultMaxParticipantsLabel = if (!editEvent.teamSignup) {
-                        stringResource(Res.string.max_players)
-                    } else {
-                        stringResource(Res.string.max_teams)
-                    }
-                    Text(
-                        text = "Division Defaults",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = Color(localImageScheme.current.onSurface),
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        NumberInputField(
-                            modifier = Modifier.weight(1f),
-                            value = editEvent.maxParticipants.toString(),
-                            label = if (editEvent.singleDivision) {
-                                divisionDefaultMaxParticipantsLabel
-                            } else {
-                                "Default $divisionDefaultMaxParticipantsLabel"
-                            },
-                            enabled = true,
-                            onValueChange = { newValue ->
-                                if (newValue.all { it.isDigit() }) {
-                                    if (newValue.isBlank()) {
-                                        onEditEvent { copy(maxParticipants = 0) }
-                                    } else {
-                                        onEditEvent { copy(maxParticipants = newValue.toInt()) }
-                                    }
-                                }
-                            },
-                            isError = !isMaxParticipantsValid,
-                            errorMessage = if (isMaxParticipantsValid) "" else stringResource(
-                                Res.string.value_too_low, 2
-                            ),
-                            supportingText = if (editEvent.singleDivision) {
-                                null
-                            } else {
-                                "Used as the default capacity for new divisions."
-                            },
-                        )
-                        MoneyInputField(
-                            value = editEvent.priceCents.toString(),
-                            label = if (editEvent.singleDivision) "Price" else "Default Price",
-                            enabled = hostHasAccount && !rentalTimeLocked,
-                            onValueChange = { newText ->
-                                if (newText.isBlank()) {
-                                    onEditEvent { copy(priceCents = 0) }
-                                    return@MoneyInputField
-                                }
-                                val newCleaned = newText.filter { it.isDigit() }
-                                onEditEvent { copy(priceCents = newCleaned.toInt()) }
-                            },
-                            modifier = Modifier.weight(1f),
-                            isError = !isPriceValid,
-                            supportingText = if (!editEvent.singleDivision) {
-                                "Used as the default price for new divisions."
-                            } else if (isPriceValid) {
-                                stringResource(Res.string.free_entry_hint)
-                            } else {
-                                stringResource(Res.string.invalid_price)
-                            },
-                        )
-                    }
-                    if (!hostHasAccount) {
-                        StripeButton(
-                            onClick = onHostCreateAccount,
-                            paymentProcessor = paymentProcessor,
-                            text = "Create Stripe Connect Account to Change Price",
-                            modifier = Modifier.align(Alignment.CenterHorizontally),
-                        )
-                    }
-                    if (isNewEvent && editEvent.eventType != EventType.WEEKLY_EVENT) {
-                        Text(
-                            text = "Payment plans can be configured on the web version.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(localImageScheme.current.onSurfaceVariant),
-                        )
-                    } else {
-                        Text(
-                            text = if (editEvent.singleDivision) {
-                                "Payment Plans"
-                            } else {
-                                "Default Payment Plan"
-                            },
-                            style = MaterialTheme.typography.titleSmall,
-                            color = Color(localImageScheme.current.onSurface),
-                        )
-                        if (!editEvent.singleDivision) {
-                            Text(
-                                text = "Used as the default payment plan when adding new divisions.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(localImageScheme.current.onSurfaceVariant),
-                            )
-                        }
-                        LabeledCheckboxRow(
-                            checked = editEvent.allowPaymentPlans == true,
-                            label = if (editEvent.singleDivision) {
-                                "Allow payment plans"
-                            } else {
-                                "Allow default payment plan"
-                            },
-                            enabled = hostHasAccount && editEvent.priceCents > 0,
-                            onCheckedChange = onSetPaymentPlansEnabled,
-                        )
-                        if (editEvent.allowPaymentPlans == true) {
-                            val useRelativeDueDates = editEvent.eventType == EventType.WEEKLY_EVENT
-                            val installmentCount = maxOf(
-                                editEvent.installmentCount ?: 0,
-                                editEvent.installmentAmounts.size,
-                                if (useRelativeDueDates) {
-                                    editEvent.installmentDueRelativeDays.size
-                                } else {
-                                    editEvent.installmentDueDates.size
-                                },
-                                1,
-                            )
-
-                            NumberInputField(
-                                value = installmentCount.toString(),
-                                label = "Installment Count",
-                                onValueChange = { newValue ->
-                                    if (!newValue.all { it.isDigit() }) return@NumberInputField
-                                    val parsed = newValue.toIntOrNull() ?: 1
-                                    onSetInstallmentCount(parsed.coerceAtLeast(1))
-                                },
-                                isError = installmentCount <= 0,
-                                errorMessage = if (installmentCount <= 0) {
-                                    "Installment count must be at least 1."
-                                } else {
-                                    ""
-                                },
-                            )
-
-                            repeat(installmentCount) { index ->
-                                val amountCents = editEvent.installmentAmounts.getOrNull(index) ?: 0
-                                val dueDate = editEvent.installmentDueDates.getOrNull(index).orEmpty()
-                                val dueOffset = editEvent.installmentDueRelativeDays.getOrNull(index) ?: 0
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.Top,
-                                ) {
-                                    MoneyInputField(
-                                        value = amountCents.toString(),
-                                        label = "Installment ${index + 1} Amount",
-                                        onValueChange = { newValue ->
-                                            val parsed = newValue.filter { it.isDigit() }.toIntOrNull() ?: 0
-                                            onUpdateInstallmentAmount(index, parsed)
-                                        },
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    if (useRelativeDueDates) {
-                                        StandardTextField(
-                                            value = dueOffset.toString(),
-                                            onValueChange = { newValue ->
-                                                val parsed = newValue.toIntOrNull() ?: 0
-                                                onEditEvent {
-                                                    val targetCount = maxOf(
-                                                        installmentCount,
-                                                        installmentAmounts.size,
-                                                        installmentDueRelativeDays.size,
-                                                    )
-                                                    val nextRelativeDueDays = MutableList(targetCount) { dueIndex ->
-                                                        installmentDueRelativeDays.getOrNull(dueIndex) ?: 0
-                                                    }
-                                                    if (index in nextRelativeDueDays.indices) {
-                                                        nextRelativeDueDays[index] = parsed
-                                                    }
-                                                    copy(
-                                                        installmentDueDates = emptyList(),
-                                                        installmentDueRelativeDays = nextRelativeDueDays,
-                                                    )
-                                                }
-                                            },
-                                            label = "Due Offset",
-                                            placeholder = "0",
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                    } else {
-                                        StandardTextField(
-                                            value = dueDate,
-                                            onValueChange = {},
-                                            label = "Due Date",
-                                            placeholder = "YYYY-MM-DD",
-                                            modifier = Modifier.weight(1f),
-                                            readOnly = true,
-                                            onTap = { installmentDueDatePickerIndex = index },
-                                        )
-                                    }
-                                }
-                                if (installmentCount > 1) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.End,
-                                    ) {
-                                        TextButton(
-                                            onClick = { onRemoveInstallmentRow(index) },
-                                        ) {
-                                            Text(
-                                                text = "Remove installment",
-                                                color = MaterialTheme.colorScheme.error,
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                TextButton(onClick = onAddInstallmentRow) {
-                                    Text("Add installment")
-                                }
-                                val installmentTotal = editEvent.installmentAmounts.sum()
-                                val totalsMatch = installmentTotal == editEvent.priceCents
-                                Text(
-                                    text = if (editEvent.singleDivision) {
-                                        "Total ${installmentTotal.toDouble().div(100).moneyFormat()} / ${editEvent.priceCents.toDouble().div(100).moneyFormat()}"
-                                    } else {
-                                        "Default total ${installmentTotal.toDouble().div(100).moneyFormat()} / ${editEvent.priceCents.toDouble().div(100).moneyFormat()}"
-                                    },
-                                    color = if (totalsMatch) {
-                                        Color(localImageScheme.current.onSurfaceVariant)
-                                    } else {
-                                        MaterialTheme.colorScheme.error
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                            if (!isPaymentPlansValid) {
-                                paymentPlanValidationErrors.forEach { paymentError ->
-                                    Text(
-                                        text = paymentError,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.error,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    FormSectionDivider()
                     Text(
                         text = "Team settings",
                         style = MaterialTheme.typography.titleSmall,
@@ -3872,10 +3656,16 @@ fun EventDetails(
                             onSelectionChange = { value ->
                                 updateDivisionEditorSelection(gender = value)
                             },
-                            options = DIVISION_GENDER_OPTIONS,
+                            options = genderSelectOptions,
                             modifier = Modifier.weight(1f),
                             label = "Gender",
                             placeholder = "Select gender",
+                            isError = divisionEditor.gender.isBlank(),
+                            supportingText = if (divisionEditor.gender.isBlank()) {
+                                "Select a gender."
+                            } else {
+                                ""
+                            },
                         )
                         PlatformDropdown(
                             selectedValue = divisionEditor.skillDivisionTypeId,
@@ -3886,6 +3676,12 @@ fun EventDetails(
                             modifier = Modifier.weight(1f),
                             label = "Skill Division",
                             placeholder = "Select skill division",
+                            isError = divisionEditor.skillDivisionTypeId.isBlank(),
+                            supportingText = if (divisionEditor.skillDivisionTypeId.isBlank()) {
+                                "Select a skill division."
+                            } else {
+                                ""
+                            },
                         )
                     }
 
@@ -3903,6 +3699,12 @@ fun EventDetails(
                             modifier = Modifier.weight(1f),
                             label = "Age Division",
                             placeholder = "Select age division",
+                            isError = divisionEditor.ageDivisionTypeId.isBlank(),
+                            supportingText = if (divisionEditor.ageDivisionTypeId.isBlank()) {
+                                "Select an age division."
+                            } else {
+                                ""
+                            },
                         )
                         StandardTextField(
                             value = divisionEditor.name,
@@ -3949,7 +3751,7 @@ fun EventDetails(
                             value = if (editEvent.singleDivision) {
                                 editEvent.maxParticipants.coerceAtLeast(2).toString()
                             } else {
-                                divisionEditor.maxParticipants.coerceAtLeast(2).toString()
+                                divisionEditor.maxParticipants?.toString().orEmpty()
                             },
                             label = if (editEvent.teamSignup) {
                                 "Division Max Teams"
@@ -3961,17 +3763,30 @@ fun EventDetails(
                                 if (!divisionEditorReady || editEvent.singleDivision) {
                                     return@NumberInputField
                                 }
-                                if (value.all { it.isDigit() }) {
-                                    val parsed = value.toIntOrNull()?.coerceAtLeast(2) ?: 2
+                                if (value.isEmpty() || value.all { it.isDigit() }) {
                                     divisionEditor = divisionEditor.copy(
-                                        maxParticipants = parsed,
+                                        maxParticipants = value.toIntOrNull(),
                                         error = null,
                                     )
                                 }
                             },
-                            isError = false,
+                            isError = !editEvent.singleDivision &&
+                                divisionEditor.maxParticipants.let { maxParticipants ->
+                                    maxParticipants == null || maxParticipants < 2
+                                },
+                            errorMessage = "Required and must be at least 2.",
                         )
                     }
+                    PriceWithFeesPreviewButton(
+                        amountCents = if (editEvent.singleDivision) {
+                            editEvent.priceCents
+                        } else {
+                            divisionEditor.priceCents
+                        },
+                        eventType = editEvent.eventType,
+                        baseLabel = "Division price",
+                        onShowBreakdown = { pricePreviewBreakdown = it },
+                    )
 
                     if (editEvent.eventType == EventType.LEAGUE) {
                         NumberInputField(
@@ -4011,7 +3826,7 @@ fun EventDetails(
                         val divisionMaxTeams = if (editEvent.singleDivision) {
                             editEvent.maxParticipants.coerceAtLeast(2)
                         } else {
-                            divisionEditor.maxParticipants.coerceAtLeast(2)
+                            divisionEditor.maxParticipants ?: 0
                         }
                         val derivedPoolTeamCount = derivePoolTeamCount(
                             maxTeams = divisionMaxTeams,
@@ -4289,6 +4104,8 @@ fun EventDetails(
                         collapsibleInEditMode = true,
                         collapsibleInViewMode = true,
                         viewSummary = readOnlyUiModel.leagueScoring.summary,
+                        enabled = sportRequiredSectionEnabled,
+                        onDisabledClick = ::showSelectSportMessage,
                         isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
                         lazyListState = lazyListState,
                         stickyHeaderTopInset = stickyHeaderTopInset,
@@ -4326,6 +4143,8 @@ fun EventDetails(
                         collapsibleInEditMode = true,
                         collapsibleInViewMode = true,
                         viewSummary = readOnlyUiModel.schedule.summary,
+                        enabled = sportRequiredSectionEnabled,
+                        onDisabledClick = ::showSelectSportMessage,
                         requiredMissingCount = editUiModel.schedule.requiredMissingCount,
                         isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
                         lazyListState = lazyListState,
@@ -4855,6 +4674,13 @@ fun EventDetails(
         initialDate = divisionInstallmentInitialDate,
     )
 
+    pricePreviewBreakdown?.let { breakdown ->
+        PriceWithFeesPreviewDialog(
+            breakdown = breakdown,
+            onDismiss = { pricePreviewBreakdown = null },
+        )
+    }
+
     // ImagePickerKMP Integration
     if (showUploadImagePicker) {
         GalleryPickerLauncher(
@@ -4945,4 +4771,192 @@ fun EventDetails(
             }
         }
     }
+}
+
+private data class PricePreviewBreakdown(
+    val baseLabel: String,
+    val amountCents: Int,
+    val mvpFeeCents: Int,
+    val stripeFeeCents: Int,
+    val stripeTaxServiceFeeCents: Int,
+    val totalChargeCents: Int,
+    val mvpFeePercentage: Double,
+    val taxable: Boolean,
+) {
+    val totalDisplayValue: String
+        get() = if (taxable) {
+            "${totalChargeCents.formatCents()} + Taxes"
+        } else {
+            totalChargeCents.formatCents()
+        }
+}
+
+@Composable
+private fun PriceWithFeesPreviewButton(
+    amountCents: Int,
+    eventType: EventType,
+    baseLabel: String,
+    taxable: Boolean = false,
+    onShowBreakdown: (PricePreviewBreakdown) -> Unit,
+) {
+    val breakdown = remember(amountCents, eventType, baseLabel, taxable) {
+        calculatePricePreviewBreakdown(
+            amountCents = amountCents,
+            eventType = eventType,
+            baseLabel = baseLabel,
+            taxable = taxable,
+        )
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Total: ${breakdown.totalDisplayValue}",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(localImageScheme.current.onSurfaceVariant),
+        )
+        TextButton(
+            onClick = { onShowBreakdown(breakdown) },
+            contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp),
+        ) {
+            Text("Breakdown")
+        }
+    }
+}
+
+@Composable
+private fun PriceWithFeesPreviewDialog(
+    breakdown: PricePreviewBreakdown,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Payment Breakdown") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Review the expected charges before saving this price.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                HorizontalDivider()
+                FeePreviewRow(breakdown.baseLabel, breakdown.amountCents.formatCents())
+                FeePreviewRow(
+                    "BracketIQ fee (${breakdown.mvpFeePercentage.formatFeePercentage()})",
+                    breakdown.mvpFeeCents.formatCents(),
+                )
+                FeePreviewRow(
+                    "Stripe fee",
+                    (breakdown.stripeFeeCents + breakdown.stripeTaxServiceFeeCents).formatCents(),
+                )
+                if (breakdown.taxable) {
+                    FeePreviewRow("Taxes", "Calculated at checkout")
+                }
+                HorizontalDivider()
+                FeePreviewRow("Total charged", breakdown.totalDisplayValue, isTotal = true)
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) {
+                Text("Done")
+            }
+        },
+    )
+}
+
+@Composable
+private fun FeePreviewRow(
+    label: String,
+    value: String,
+    isTotal: Boolean = false,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = if (isTotal) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall,
+            fontWeight = if (isTotal) FontWeight.SemiBold else FontWeight.Normal,
+        )
+        Text(
+            text = value,
+            style = if (isTotal) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall,
+            fontWeight = if (isTotal) FontWeight.SemiBold else FontWeight.Medium,
+        )
+    }
+}
+
+private fun calculatePricePreviewBreakdown(
+    amountCents: Int,
+    eventType: EventType,
+    baseLabel: String,
+    taxable: Boolean,
+): PricePreviewBreakdown {
+    val normalizedAmountCents = amountCents.coerceAtLeast(0)
+    val mvpFeePercentage = resolveMvpFeePercentage(eventType)
+    val stripeTaxServiceFeeCents = if (taxable && normalizedAmountCents > 0) {
+        DEFAULT_STRIPE_TAX_SERVICE_FEE_CENTS
+    } else {
+        0
+    }
+
+    if (normalizedAmountCents == 0) {
+        return PricePreviewBreakdown(
+            baseLabel = baseLabel,
+            amountCents = 0,
+            mvpFeeCents = 0,
+            stripeFeeCents = 0,
+            stripeTaxServiceFeeCents = stripeTaxServiceFeeCents,
+            totalChargeCents = stripeTaxServiceFeeCents,
+            mvpFeePercentage = mvpFeePercentage,
+            taxable = taxable,
+        )
+    }
+
+    val mvpFeeCents = (normalizedAmountCents * mvpFeePercentage).roundToInt()
+    val goalAmountCents = normalizedAmountCents + mvpFeeCents + stripeTaxServiceFeeCents
+    val totalChargeCents = calculateChargeAmount(goalAmountCents)
+    val stripeFeeCents = (totalChargeCents - goalAmountCents).coerceAtLeast(0)
+
+    return PricePreviewBreakdown(
+        baseLabel = baseLabel,
+        amountCents = normalizedAmountCents,
+        mvpFeeCents = mvpFeeCents,
+        stripeFeeCents = stripeFeeCents,
+        stripeTaxServiceFeeCents = stripeTaxServiceFeeCents,
+        totalChargeCents = totalChargeCents,
+        mvpFeePercentage = mvpFeePercentage,
+        taxable = taxable,
+    )
+}
+
+private fun calculateChargeAmount(goalAmountCents: Int): Int {
+    return ((goalAmountCents + STRIPE_FIXED_FEE_CENTS) / (1 - STRIPE_PERCENT_FEE)).roundToInt()
+}
+
+private fun resolveMvpFeePercentage(eventType: EventType): Double {
+    return if (eventType == EventType.LEAGUE || eventType == EventType.TOURNAMENT) {
+        LEAGUE_OR_TOURNAMENT_MVP_FEE_PERCENTAGE
+    } else {
+        DEFAULT_MVP_FEE_PERCENTAGE
+    }
+}
+
+private fun Int.formatCents(): String = (this / 100.0).moneyFormat()
+
+private fun Double.formatFeePercentage(): String {
+    val percentageValue = this * 100
+    return if (percentageValue % 1.0 == 0.0) {
+        "${percentageValue.toInt()}%"
+    } else {
+        "${percentageValue.formatOneDecimal()}%"
+    }
+}
+
+private fun Double.formatOneDecimal(): String {
+    return ((this * 10).roundToInt() / 10.0).toString()
 }

@@ -6,6 +6,7 @@ import kotlinx.serialization.Serializable
 data class Sport(
     val id: String,
     val name: String,
+    val skillDivisionTypes: List<DivisionTypeParameterOption> = emptyList(),
     val matchRulesTemplate: MatchRulesConfigMVP? = null,
     val usePointsForWin: Boolean,
     val usePointsForDraw: Boolean,
@@ -54,8 +55,47 @@ data class Sport(
 )
 
 @Serializable
+data class DivisionTypeParameterOption(
+    val id: String = "",
+    val name: String = "",
+)
+
+@Serializable
+data class SportSkillDivisionTypes(
+    val sportId: String = "",
+    val skills: List<DivisionTypeParameterOption> = emptyList(),
+)
+
+@Serializable
+data class DivisionTypeParameters(
+    val genders: List<DivisionTypeParameterOption> = emptyList(),
+    val ages: List<DivisionTypeParameterOption> = emptyList(),
+    val sportSkills: List<SportSkillDivisionTypes> = emptyList(),
+)
+
+fun DivisionTypeParameters.skillsForSport(sportId: String?): List<DivisionTypeParameterOption> {
+    val normalizedSportId = sportId?.trim().orEmpty()
+    if (normalizedSportId.isBlank()) return emptyList()
+    return sportSkills.firstOrNull { sportSkill ->
+        sportSkill.sportId == normalizedSportId
+    }?.skills.orEmpty()
+}
+
+fun List<DivisionTypeParameterOption>.toDropdownOptions(): List<com.razumly.mvp.core.presentation.composables.DropdownOption> =
+    mapNotNull { option ->
+        val value = option.id.trim()
+        val label = option.name.trim()
+        if (value.isBlank() || label.isBlank()) {
+            null
+        } else {
+            com.razumly.mvp.core.presentation.composables.DropdownOption(value = value, label = label)
+        }
+    }
+
+@Serializable
 data class SportDTO(
     val name: String,
+    val skillDivisionTypes: List<DivisionTypeParameterOption> = emptyList(),
     val matchRulesTemplate: MatchRulesConfigMVP? = null,
     val usePointsForWin: Boolean = false,
     val usePointsForDraw: Boolean = false,
@@ -106,6 +146,7 @@ data class SportDTO(
         Sport(
             id = id,
             name = name,
+            skillDivisionTypes = skillDivisionTypes,
             matchRulesTemplate = matchRulesTemplate,
             usePointsForWin = usePointsForWin,
             usePointsForDraw = usePointsForDraw,

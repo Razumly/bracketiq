@@ -32,7 +32,7 @@ class CreateEventSelectionRulesTest {
 
         assertEquals(EventType.LEAGUE, updated.eventType)
         assertTrue(updated.teamSignup)
-        assertTrue(updated.singleDivision)
+        assertFalse(updated.singleDivision)
         assertTrue(updated.noFixedEndDateTime)
         assertFalse(updated.allowPaymentPlans == true)
         assertEquals(null, updated.installmentCount)
@@ -58,7 +58,7 @@ class CreateEventSelectionRulesTest {
 
         assertEquals(EventType.TOURNAMENT, updated.eventType)
         assertTrue(updated.teamSignup)
-        assertTrue(updated.singleDivision)
+        assertFalse(updated.singleDivision)
         assertTrue(updated.noFixedEndDateTime)
         assertFalse(updated.allowPaymentPlans == true)
         assertEquals(end, updated.end)
@@ -80,7 +80,7 @@ class CreateEventSelectionRulesTest {
 
         assertEquals(EventType.EVENT, updated.eventType)
         assertFalse(updated.teamSignup)
-        assertTrue(updated.singleDivision)
+        assertFalse(updated.singleDivision)
         assertFalse(updated.noFixedEndDateTime)
         assertFalse(updated.allowPaymentPlans == true)
         assertEquals(end, updated.end)
@@ -103,7 +103,7 @@ class CreateEventSelectionRulesTest {
 
         assertEquals(EventType.WEEKLY_EVENT, updated.eventType)
         assertFalse(updated.teamSignup)
-        assertTrue(updated.singleDivision)
+        assertFalse(updated.singleDivision)
         assertFalse(updated.allowPaymentPlans == true)
         assertEquals(end, updated.end)
     }
@@ -112,6 +112,7 @@ class CreateEventSelectionRulesTest {
     fun rental_flow_preserves_league_type_and_fixed_end_choice() {
         val draft = Event(
             eventType = EventType.LEAGUE,
+            singleDivision = false,
             noFixedEndDateTime = false,
         )
 
@@ -119,7 +120,7 @@ class CreateEventSelectionRulesTest {
 
         assertEquals(EventType.LEAGUE, updated.eventType)
         assertTrue(updated.teamSignup)
-        assertTrue(updated.singleDivision)
+        assertFalse(updated.singleDivision)
         assertFalse(updated.noFixedEndDateTime)
     }
 
@@ -140,7 +141,7 @@ class CreateEventSelectionRulesTest {
 
         assertEquals(EventType.TOURNAMENT, updated.eventType)
         assertTrue(updated.teamSignup)
-        assertTrue(updated.singleDivision)
+        assertFalse(updated.singleDivision)
         assertFalse(updated.noFixedEndDateTime)
         assertFalse(updated.allowPaymentPlans == true)
         assertEquals(end, updated.end)
@@ -177,7 +178,7 @@ class CreateEventSelectionRulesTest {
 
         val updated = draft.applyCreateSelectionRules(isRentalFlow = false)
 
-        assertTrue(updated.singleDivision)
+        assertFalse(updated.singleDivision)
         assertEquals(1, updated.divisionDetails.size)
         val detail = updated.divisionDetails.first()
         assertFalse(detail.allowPaymentPlans == true)

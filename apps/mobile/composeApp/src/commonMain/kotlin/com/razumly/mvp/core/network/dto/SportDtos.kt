@@ -1,8 +1,11 @@
 package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.Sport
+import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
+import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameterOption
 import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.SportOfficialPositionTemplate
+import com.razumly.mvp.core.data.dataTypes.SportSkillDivisionTypes
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -12,10 +15,25 @@ data class SportsResponseDto(
 )
 
 @Serializable
+data class DivisionTypeParametersResponseDto(
+    val genders: List<DivisionTypeParameterOption> = emptyList(),
+    val ages: List<DivisionTypeParameterOption> = emptyList(),
+    val sportSkills: List<SportSkillDivisionTypes> = emptyList(),
+) {
+    fun toDivisionTypeParameters(): DivisionTypeParameters =
+        DivisionTypeParameters(
+            genders = genders,
+            ages = ages,
+            sportSkills = sportSkills,
+        )
+}
+
+@Serializable
 data class SportApiDto(
     val id: String? = null,
     @SerialName("\$id") val legacyId: String? = null,
     val name: String? = null,
+    val skillDivisionTypes: List<DivisionTypeParameterOption> = emptyList(),
     val matchRulesTemplate: MatchRulesConfigMVP? = null,
     val usePointsForWin: Boolean? = null,
     val usePointsForDraw: Boolean? = null,
@@ -83,6 +101,7 @@ data class SportApiDto(
         return Sport(
             id = resolvedId,
             name = resolvedName,
+            skillDivisionTypes = skillDivisionTypes,
             matchRulesTemplate = matchRulesTemplate,
             usePointsForWin = resolvedUsePointsForWin,
             usePointsForDraw = resolvedUsePointsForDraw,

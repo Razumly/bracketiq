@@ -2815,6 +2815,7 @@ fun EventDetailScreen(
     val loadingHandler = LocalLoadingHandler.current
     val selectedEvent by component.eventWithRelations.collectAsState()
     val sports by component.sports.collectAsState()
+    val divisionTypeParameters by component.divisionTypeParameters.collectAsState()
     val currentUser by component.currentUser.collectAsState()
     val playerInteractionComponent = remember {
         getKoin().get<PlayerInteractionComponent> { parametersOf(component) }
@@ -3882,6 +3883,7 @@ fun EventDetailScreen(
                                 }
                             },
                             sports = sports,
+                            divisionTypeParameters = divisionTypeParameters,
                             onUpdateDoTeamsOfficiate = { doTeamsOfficiate ->
                                 component.editEventField {
                                     copy(

@@ -47,6 +47,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
@@ -56,18 +57,14 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
 import com.razumly.mvp.core.data.dataTypes.isStarted
 import com.razumly.mvp.core.data.dataTypes.normalizedRole
+import com.razumly.mvp.core.data.dataTypes.skillsForSport
+import com.razumly.mvp.core.data.dataTypes.toDropdownOptions
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.repositories.TeamInviteEventTeamOption
 import com.razumly.mvp.core.data.repositories.TeamInviteFreeAgentContext
-import com.razumly.mvp.core.data.util.DEFAULT_AGE_DIVISION
-import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
-import com.razumly.mvp.core.data.util.DivisionRatingType
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeName
 import com.razumly.mvp.core.data.util.buildGenderSkillAgeDivisionToken
-import com.razumly.mvp.core.data.util.getDefaultDivisionTypeSelectionsForSport
-import com.razumly.mvp.core.data.util.getDivisionTypeById
-import com.razumly.mvp.core.data.util.getDivisionTypeOptionsForSport
 import com.razumly.mvp.core.data.util.inferDivisionDetail
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionDetail
@@ -92,12 +89,6 @@ internal enum class TeamInviteTarget(val label: String, val inviteType: String?)
     HEAD_COACH("Head Coach", "team_head_coach"),
     ASSISTANT_COACH("Assistant Coach", "team_assistant_coach"),
 }
-
-private val TEAM_DIVISION_GENDER_OPTIONS = listOf(
-    DropdownOption(value = "M", label = "Men"),
-    DropdownOption(value = "F", label = "Women"),
-    DropdownOption(value = "C", label = "Coed"),
-)
 
 private const val JerseyNumberMaxDigits = 3
 
@@ -161,6 +152,7 @@ private fun String.isProbablyEmail(): Boolean {
 fun CreateOrEditTeamScreen(
     team: TeamWithPlayers,
     sports: List<Sport>,
+    divisionTypeParameters: DivisionTypeParameters = DivisionTypeParameters(),
     friends: List<UserData>,
     freeAgents: List<UserData>,
     inviteFreeAgentContext: TeamInviteFreeAgentContext = TeamInviteFreeAgentContext(),
@@ -284,18 +276,17 @@ fun CreateOrEditTeamScreen(
             ?.normalizeDivisionIdentifier()
             ?.takeIf(String::isNotBlank)
             ?: parsedCombinedDivisionTypeId?.skillDivisionTypeId
-            ?: inferredFromDivision.skillDivisionTypeId.normalizeDivisionIdentifier().ifBlank { DEFAULT_DIVISION }
+            ?: inferredFromDivision.skillDivisionTypeId.normalizeDivisionIdentifier()
         val resolvedAgeDivisionTypeId = team.team.ageDivisionTypeId
             ?.normalizeDivisionIdentifier()
             ?.takeIf(String::isNotBlank)
             ?: parsedCombinedDivisionTypeId?.ageDivisionTypeId
             ?: inferredFromDivision.ageDivisionTypeId.normalizeDivisionIdentifier()
-                .ifBlank { DEFAULT_AGE_DIVISION }
         val resolvedGender = team.team.divisionGender
             ?.trim()
             ?.uppercase()
-            ?.takeIf { it == "M" || it == "F" || it == "C" }
-            ?: inferredFromDivision.gender.trim().uppercase().ifBlank { "C" }
+            ?.takeIf(String::isNotBlank)
+            ?: inferredFromDivision.gender.trim().uppercase()
         inferredFromDivision.copy(
             skillDivisionTypeId = resolvedSkillDivisionTypeId,
             ageDivisionTypeId = resolvedAgeDivisionTypeId,
@@ -313,8 +304,26 @@ fun CreateOrEditTeamScreen(
     val divisionSportInput = remember(sportInput, resolvedEventSportName) {
         sportInput.trim().ifBlank { resolvedEventSportName.trim() }
     }
-    val sportDivisionTypeOptions = remember(divisionSportInput) {
-        getDivisionTypeOptionsForSport(divisionSportInput)
+    val selectedSportIdForDivisionTypes = remember(
+        divisionSportInput,
+        resolvedEventSportName,
+        selectedEvent?.sportId,
+        sports,
+    ) {
+        val normalizedDivisionSport = divisionSportInput.trim()
+        val matchingSportId = sports.firstOrNull { sport ->
+            sport.name.trim().equals(normalizedDivisionSport, ignoreCase = true) ||
+                sport.id.trim().equals(normalizedDivisionSport, ignoreCase = true)
+        }?.id?.trim().orEmpty()
+        matchingSportId.ifBlank {
+            selectedEvent?.sportId
+                ?.trim()
+                ?.takeIf { eventSportId ->
+                    normalizedDivisionSport.equals(resolvedEventSportName.trim(), ignoreCase = true) ||
+                        normalizedDivisionSport.equals(eventSportId, ignoreCase = true)
+                }
+                .orEmpty()
+        }
     }
     val selectedSportMatchesEventSport = remember(
         divisionSportInput,
@@ -343,8 +352,27 @@ fun CreateOrEditTeamScreen(
             emptyList()
         }
     }
+    val genderOptions = remember(divisionTypeParameters, eventDivisionOptions, inferredTeamDivisionDetail.gender) {
+        val options = linkedMapOf<String, String>()
+        fun addOption(id: String?, label: String? = null) {
+            val normalizedId = id?.trim()?.uppercase().orEmpty()
+            if (normalizedId.isBlank()) return
+            options[normalizedId] = label?.trim()?.takeIf(String::isNotBlank)
+                ?: normalizedId.toDivisionDisplayLabel()
+        }
+
+        divisionTypeParameters.genders.toDropdownOptions().forEach { option ->
+            addOption(option.value, option.label)
+        }
+        eventDivisionOptions.forEach { detail ->
+            addOption(detail.gender)
+        }
+        addOption(inferredTeamDivisionDetail.gender)
+        options.map { (value, label) -> DropdownOption(value = value, label = label) }
+    }
     val skillDivisionOptions = remember(
-        sportDivisionTypeOptions,
+        divisionTypeParameters,
+        selectedSportIdForDivisionTypes,
         eventDivisionOptions,
         inferredTeamDivisionDetail.skillDivisionTypeId,
         inferredTeamDivisionDetail.skillDivisionTypeName,
@@ -357,11 +385,9 @@ fun CreateOrEditTeamScreen(
                 ?: normalizedId.toDivisionDisplayLabel()
         }
 
-        sportDivisionTypeOptions
-            .filter { option -> option.ratingType == DivisionRatingType.SKILL }
-            .forEach { option ->
-                addOption(option.id, option.name)
-            }
+        divisionTypeParameters.skillsForSport(selectedSportIdForDivisionTypes)
+            .toDropdownOptions()
+            .forEach { option -> addOption(option.value, option.label) }
         eventDivisionOptions.forEach { detail ->
             addOption(
                 id = detail.skillDivisionTypeId,
@@ -375,7 +401,7 @@ fun CreateOrEditTeamScreen(
         options.map { (value, label) -> DropdownOption(value = value, label = label) }
     }
     val ageDivisionOptions = remember(
-        sportDivisionTypeOptions,
+        divisionTypeParameters,
         eventDivisionOptions,
         inferredTeamDivisionDetail.ageDivisionTypeId,
         inferredTeamDivisionDetail.ageDivisionTypeName,
@@ -388,11 +414,9 @@ fun CreateOrEditTeamScreen(
                 ?: normalizedId.toDivisionDisplayLabel()
         }
 
-        sportDivisionTypeOptions
-            .filter { option -> option.ratingType == DivisionRatingType.AGE }
-            .forEach { option ->
-                addOption(option.id, option.name)
-            }
+        divisionTypeParameters.ages.toDropdownOptions().forEach { option ->
+            addOption(option.value, option.label)
+        }
         eventDivisionOptions.forEach { detail ->
             addOption(
                 id = detail.ageDivisionTypeId,
@@ -418,45 +442,29 @@ fun CreateOrEditTeamScreen(
         )
     }
     var divisionGenderInput by remember(team.team.id) {
-        mutableStateOf(inferredTeamDivisionDetail.gender.ifBlank { "C" })
+        mutableStateOf(inferredTeamDivisionDetail.gender)
     }
     var skillDivisionTypeInput by remember(team.team.id) {
-        mutableStateOf(
-            inferredTeamDivisionDetail.skillDivisionTypeId.normalizeDivisionIdentifier()
-                .ifBlank { DEFAULT_DIVISION },
-        )
+        mutableStateOf(inferredTeamDivisionDetail.skillDivisionTypeId.normalizeDivisionIdentifier())
     }
     var ageDivisionTypeInput by remember(team.team.id) {
-        mutableStateOf(
-            inferredTeamDivisionDetail.ageDivisionTypeId.normalizeDivisionIdentifier()
-                .ifBlank { DEFAULT_AGE_DIVISION },
-        )
+        mutableStateOf(inferredTeamDivisionDetail.ageDivisionTypeId.normalizeDivisionIdentifier())
     }
     val normalizedDivisionGender = divisionGenderInput.trim().uppercase()
     val normalizedTeamName = teamName.trim()
     val normalizedSportName = sportInput.trim()
     val normalizedSkillDivisionTypeId = skillDivisionTypeInput.normalizeDivisionIdentifier()
     val normalizedAgeDivisionTypeId = ageDivisionTypeInput.normalizeDivisionIdentifier()
-    val defaultDivisionTypeSelections = remember(divisionSportInput) {
-        getDefaultDivisionTypeSelectionsForSport(divisionSportInput)
+    val genderOptionValues = remember(genderOptions) {
+        genderOptions.map { option -> option.value.trim().uppercase() }.toSet()
     }
-    val isTeamDivisionValid = normalizedDivisionGender in setOf("M", "F", "C") &&
+    val isTeamDivisionValid = normalizedDivisionGender in genderOptionValues &&
         normalizedSkillDivisionTypeId.isNotBlank() &&
         normalizedAgeDivisionTypeId.isNotBlank()
     val resolvedSkillDivisionTypeName = skillDivisionOptionById[normalizedSkillDivisionTypeId]
-        ?: getDivisionTypeById(
-            sportInput = divisionSportInput,
-            divisionTypeId = normalizedSkillDivisionTypeId,
-            ratingType = DivisionRatingType.SKILL,
-        )?.name
         ?: inferredTeamDivisionDetail.skillDivisionTypeName.takeIf(String::isNotBlank)
         ?: normalizedSkillDivisionTypeId.toDivisionDisplayLabel()
     val resolvedAgeDivisionTypeName = ageDivisionOptionById[normalizedAgeDivisionTypeId]
-        ?: getDivisionTypeById(
-            sportInput = divisionSportInput,
-            divisionTypeId = normalizedAgeDivisionTypeId,
-            ratingType = DivisionRatingType.AGE,
-        )?.name
         ?: inferredTeamDivisionDetail.ageDivisionTypeName.takeIf(String::isNotBlank)
         ?: normalizedAgeDivisionTypeId.toDivisionDisplayLabel()
     val resolvedDivisionTypeId = buildCombinedDivisionTypeId(
@@ -498,21 +506,27 @@ fun CreateOrEditTeamScreen(
     }
     LaunchedEffect(
         divisionSportInput,
+        genderOptions,
         skillDivisionOptions,
         ageDivisionOptions,
-        defaultDivisionTypeSelections,
     ) {
+        val hasSelectedGenderOption = genderOptions.any { option ->
+            option.value.trim().uppercase() == divisionGenderInput.trim().uppercase()
+        }
         val hasSelectedSkillOption = skillDivisionOptions.any { option ->
             option.value.normalizeDivisionIdentifier() == skillDivisionTypeInput.normalizeDivisionIdentifier()
         }
         val hasSelectedAgeOption = ageDivisionOptions.any { option ->
             option.value.normalizeDivisionIdentifier() == ageDivisionTypeInput.normalizeDivisionIdentifier()
         }
-        if (!hasSelectedSkillOption) {
-            skillDivisionTypeInput = defaultDivisionTypeSelections.skillDivisionTypeId
+        if (divisionGenderInput.isNotBlank() && !hasSelectedGenderOption) {
+            divisionGenderInput = ""
         }
-        if (!hasSelectedAgeOption) {
-            ageDivisionTypeInput = defaultDivisionTypeSelections.ageDivisionTypeId
+        if (skillDivisionTypeInput.isNotBlank() && !hasSelectedSkillOption) {
+            skillDivisionTypeInput = ""
+        }
+        if (ageDivisionTypeInput.isNotBlank() && !hasSelectedAgeOption) {
+            ageDivisionTypeInput = ""
         }
     }
     LaunchedEffect(team.team.openRegistration, team.team.registrationPriceCents, registrationSettingsEdited) {
@@ -763,7 +777,7 @@ fun CreateOrEditTeamScreen(
                     onSelectionChange = { value ->
                         divisionGenderInput = value
                     },
-                    options = TEAM_DIVISION_GENDER_OPTIONS,
+                    options = genderOptions,
                     modifier = Modifier.weight(1f),
                     label = "Gender",
                     placeholder = "Select gender",
