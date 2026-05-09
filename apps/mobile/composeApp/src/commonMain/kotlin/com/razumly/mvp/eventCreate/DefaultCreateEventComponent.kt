@@ -32,6 +32,7 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
+import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.ChatTermsConsentState
@@ -1717,6 +1718,8 @@ class DefaultCreateEventComponent(
         fieldIdReplacements: Map<String, String>,
     ): List<TimeSlot> {
         val selectedDivisionIds = event.divisions.normalizeDivisionIdentifiers()
+        val splitByDivision = !event.singleDivision && event.allowTeamSplitDefault == true
+        val selectedDivisionSet = selectedDivisionIds.toSet()
         return _leagueSlots.value.mapNotNull { slot ->
             val mappedFieldIds = slot.normalizedScheduledFieldIds()
                 .mapNotNull { fieldId ->
@@ -1725,13 +1728,16 @@ class DefaultCreateEventComponent(
                 .distinct()
             val mappedDivisionIds = slot.normalizedDivisionIds()
                 .mapNotNull { divisionId ->
-                    divisionId.takeIf { it.isNotBlank() }
+                    divisionId
+                        .takeIf { it.isNotBlank() }
+                        ?.normalizeDivisionIdentifier()
                 }
+                .filter(selectedDivisionSet::contains)
                 .distinct()
-            val effectiveDivisionIds = if (event.singleDivision) {
-                selectedDivisionIds
-            } else {
+            val effectiveDivisionIds = if (splitByDivision) {
                 mappedDivisionIds.ifEmpty { selectedDivisionIds }
+            } else {
+                selectedDivisionIds
             }
             val normalizedDays = slot.normalizedDaysOfWeek()
             val startMinutes = slot.startTimeMinutes

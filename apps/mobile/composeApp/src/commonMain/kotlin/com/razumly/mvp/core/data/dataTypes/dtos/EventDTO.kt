@@ -56,7 +56,7 @@ data class EventDTO(
     val freeAgentIds: List<String> = emptyList(),
     val userIds: List<String> = emptyList(),
     val teamIds: List<String> = emptyList(),
-    val cancellationRefundHours: Int = 0,
+    val cancellationRefundHours: Int? = null,
     val registrationCutoffHours: Int = 0,
     val seedColor: Int = 0,
     val sportId: String? = null,

@@ -112,6 +112,7 @@ fun LeagueScheduleFields(
     useManualTimeSlots: Boolean = true,
     onUseManualTimeSlotsChange: (Boolean) -> Unit = {},
     slotDivisionOptions: List<DropdownOption> = emptyList(),
+    showSlotDivisions: Boolean = true,
     lockSlotDivisions: Boolean = false,
     lockedDivisionIds: List<String> = emptyList(),
     fieldCountError: String? = null,
@@ -311,6 +312,7 @@ fun LeagueScheduleFields(
                         eventEnd = eventEnd,
                         fieldOptions = fieldOptions,
                         slotDivisionOptions = slotDivisionOptions,
+                        showSlotDivisions = showSlotDivisions,
                         lockSlotDivisions = lockSlotDivisions,
                         lockedDivisionIds = lockedDivisionIds,
                         slotErrors = slotErrors,
@@ -336,6 +338,7 @@ fun LeagueScheduleFields(
                         eventEnd = eventEnd,
                         fieldOptions = fieldOptions,
                         slotDivisionOptions = slotDivisionOptions,
+                        showSlotDivisions = showSlotDivisions,
                         lockSlotDivisions = lockSlotDivisions,
                         lockedDivisionIds = lockedDivisionIds,
                         slotErrors = slotErrors,
@@ -358,6 +361,7 @@ private fun TimeslotCard(
     eventEnd: Instant?,
     fieldOptions: List<DropdownOption>,
     slotDivisionOptions: List<DropdownOption>,
+    showSlotDivisions: Boolean,
     lockSlotDivisions: Boolean,
     lockedDivisionIds: List<String>,
     slotErrors: Map<Int, String>,
@@ -427,30 +431,32 @@ private fun TimeslotCard(
                 enabled = !readOnly,
             )
 
-            PlatformDropdown(
-                selectedValue = "",
-                onSelectionChange = {},
-                options = divisionOptionsForSlot,
-                label = "Divisions",
-                placeholder = "Select one or more divisions",
-                multiSelect = true,
-                selectedValues = effectiveDivisionIds,
-                onMultiSelectionChange = { selected ->
-                    if (readOnly || lockSlotDivisions) {
-                        return@PlatformDropdown
-                    }
-                    onUpdateSlot(
-                        index,
-                        slot.copy(divisions = selected.normalizeDivisionIdentifiers())
-                    )
-                },
-                supportingText = if (lockSlotDivisions) {
-                    "Single division is enabled, so every timeslot uses all selected event divisions."
-                } else {
-                    ""
-                },
-                enabled = !readOnly && !lockSlotDivisions,
-            )
+            if (showSlotDivisions) {
+                PlatformDropdown(
+                    selectedValue = "",
+                    onSelectionChange = {},
+                    options = divisionOptionsForSlot,
+                    label = "Divisions",
+                    placeholder = "Select one or more divisions",
+                    multiSelect = true,
+                    selectedValues = effectiveDivisionIds,
+                    onMultiSelectionChange = { selected ->
+                        if (readOnly || lockSlotDivisions) {
+                            return@PlatformDropdown
+                        }
+                        onUpdateSlot(
+                            index,
+                            slot.copy(divisions = selected.normalizeDivisionIdentifiers())
+                        )
+                    },
+                    supportingText = if (lockSlotDivisions) {
+                        "Single division is enabled, so every timeslot uses all selected event divisions."
+                    } else {
+                        ""
+                    },
+                    enabled = !readOnly && !lockSlotDivisions,
+                )
+            }
 
             if (repeating) {
                 val repeatingStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: eventStart

@@ -186,7 +186,7 @@ class EventDetailsDivisionEditorHelpersTest {
     }
 
     @Test
-    fun default_division_editor_state_applies_minimum_values() {
+    fun default_division_editor_state_keeps_missing_default_max_empty() {
         val state = defaultDivisionEditorState(
             defaultPriceCents = -1,
             defaultMaxParticipants = 0,
@@ -198,7 +198,7 @@ class EventDetailsDivisionEditorHelpersTest {
         )
 
         assertEquals(0, state.priceCents)
-        assertEquals(2, state.maxParticipants)
+        assertEquals(null, state.maxParticipants)
         assertEquals(2, state.playoffTeamCount)
         assertEquals("", state.gender)
         assertEquals("", state.skillDivisionTypeId)
@@ -206,6 +206,29 @@ class EventDetailsDivisionEditorHelpersTest {
         assertEquals("", state.name)
         assertEquals(false, state.allowPaymentPlans)
         assertEquals(0, state.installmentCount)
+    }
+
+    @Test
+    fun build_division_dropdown_options_deduplicates_detail_id_and_key() {
+        val detail = DivisionDetail(
+            id = "event-1__division__f_skill_bb_age_u11",
+            key = "f_skill_bb_age_u11",
+            name = "Women's BB U11",
+            skillDivisionTypeId = "bb",
+            skillDivisionTypeName = "BB",
+            ageDivisionTypeId = "u11",
+            ageDivisionTypeName = "U11",
+            gender = "F",
+        )
+
+        val options = buildDivisionDropdownOptions(
+            existingDetails = listOf(detail),
+            selectedDivisionIds = listOf(detail.id, detail.key),
+        )
+
+        assertEquals(1, options.size)
+        assertEquals(detail.id, options.single().value)
+        assertEquals("Women's BB U11", options.single().label)
     }
 
     @Test

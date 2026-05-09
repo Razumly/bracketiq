@@ -1,79 +1,60 @@
 package com.razumly.mvp.eventDetail.composables
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.presentation.composables.StandardTextField
+import com.razumly.mvp.eventDetail.shared.LabeledCheckboxRow
 
 @Composable
 fun CancellationRefundOptions(
-    selectedOption: Int,
-    onOptionSelected: (Int) -> Unit,
-    modifier: Modifier = Modifier
+    refundHours: Int?,
+    onRefundHoursChange: (Int?) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    disabledMessage: String? = null,
 ) {
-    val refundOptions = buildCancellationRefundOptions(selectedOption)
+    val checked = refundHours != null
+    val fieldEnabled = enabled && checked
 
-    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            text = "Automatic Refund Policy",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(bottom = 8.dp)
+    Column(modifier = modifier) {
+        StandardTextField(
+            value = refundHours
+                ?.coerceAtLeast(0)
+                ?.takeIf { hours -> hours > 0 }
+                ?.toString()
+                .orEmpty(),
+            onValueChange = { newValue ->
+                if (!newValue.all(Char::isDigit)) return@StandardTextField
+                onRefundHoursChange(newValue.toIntOrNull() ?: 0)
+            },
+            modifier = Modifier.fillMaxWidth(),
+            label = "Refund Cutoff (Hours)",
+            keyboardType = "number",
+            enabled = fieldEnabled,
         )
-
-        refundOptions.forEach { option ->
-            Row(
+        LabeledCheckboxRow(
+            checked = checked,
+            label = "Automatic Refunds",
+            enabled = enabled,
+            onCheckedChange = { nextChecked ->
+                onRefundHoursChange(if (nextChecked) refundHours ?: 0 else null)
+            },
+        )
+        if (!enabled && !disabledMessage.isNullOrBlank()) {
+            Text(
+                text = disabledMessage,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onOptionSelected(option.value) }
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                RadioButton(
-                    selected = selectedOption == option.value,
-                    onClick = { onOptionSelected(option.value) }
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = option.label,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.weight(1f)
-                )
-            }
+                    .padding(top = 4.dp),
+            )
         }
     }
-}
-
-data class RefundOption(
-    val value: Int,
-    val label: String
-)
-
-internal fun buildCancellationRefundOptions(selectedOption: Int): List<RefundOption> {
-    val options = mutableListOf<RefundOption>()
-    val normalizedSelected = selectedOption.coerceAtLeast(0)
-
-    if (normalizedSelected > 0 && normalizedSelected != 24 && normalizedSelected != 48) {
-        options.add(RefundOption(normalizedSelected, "$normalizedSelected hours before event"))
-    }
-
-    options.addAll(
-        listOf(
-            RefundOption(24, "24 hours before event"),
-            RefundOption(48, "48 hours before event"),
-            RefundOption(0, "Automatic refunds disabled"),
-        ),
-    )
-
-    return options.distinctBy(RefundOption::value)
 }

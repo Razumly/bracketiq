@@ -103,6 +103,67 @@ class LeagueSlotValidationTest {
         assertEquals("Select an end time.", errors[0])
     }
 
+    @Test
+    fun non_split_slots_must_include_all_selected_divisions() {
+        val slot = buildSlot(
+            id = "slot-1",
+            repeating = true,
+            divisions = listOf("division-a"),
+        )
+
+        val errors = computeLeagueSlotErrors(
+            slots = listOf(slot),
+            singleDivision = false,
+            selectedDivisionIds = listOf("division-a", "division-b"),
+            splitByDivision = false,
+        )
+
+        assertEquals("Every timeslot must include all selected divisions when split divisions is off.", errors[0])
+    }
+
+    @Test
+    fun split_slots_require_each_timeslot_to_have_at_least_one_division() {
+        val slot = buildSlot(
+            id = "slot-1",
+            repeating = true,
+            divisions = emptyList(),
+        )
+
+        val errors = computeLeagueSlotErrors(
+            slots = listOf(slot),
+            singleDivision = false,
+            selectedDivisionIds = listOf("division-a"),
+            splitByDivision = true,
+        )
+
+        assertEquals("Each timeslot needs at least one division.", errors[0])
+    }
+
+    @Test
+    fun split_slots_require_every_division_on_at_least_one_timeslot() {
+        val first = buildSlot(
+            id = "slot-1",
+            repeating = true,
+            divisions = listOf("division-a"),
+        )
+        val second = buildSlot(
+            id = "slot-2",
+            repeating = true,
+            dayOfWeek = 2,
+            daysOfWeek = listOf(2),
+            divisions = listOf("division-a"),
+        )
+
+        val errors = computeLeagueSlotErrors(
+            slots = listOf(first, second),
+            singleDivision = false,
+            selectedDivisionIds = listOf("division-a", "division-b"),
+            splitByDivision = true,
+        )
+
+        assertEquals("Each division must be assigned to at least one timeslot.", errors[0])
+    }
+
     private fun buildSlot(
         id: String,
         repeating: Boolean,
@@ -113,12 +174,13 @@ class LeagueSlotValidationTest {
         startDate: Instant = instant(1_700_000_000_000),
         endDate: Instant? = instant(1_700_086_400_000),
         scheduledFieldId: String? = "field-1",
+        divisions: List<String> = listOf("open"),
     ): TimeSlot {
         return TimeSlot(
             id = id,
             dayOfWeek = dayOfWeek,
             daysOfWeek = daysOfWeek,
-            divisions = listOf("open"),
+            divisions = divisions,
             startTimeMinutes = startTimeMinutes,
             endTimeMinutes = endTimeMinutes,
             startDate = startDate,

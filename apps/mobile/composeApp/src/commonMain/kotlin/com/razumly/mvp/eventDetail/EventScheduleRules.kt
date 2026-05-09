@@ -98,12 +98,14 @@ internal fun computeLeagueSlotErrors(
     slots: List<TimeSlot>,
     singleDivision: Boolean,
     selectedDivisionIds: List<String>,
+    splitByDivision: Boolean = false,
 ): Map<Int, String> {
     if (slots.isEmpty()) return emptyMap()
 
     val errors = mutableMapOf<Int, String>()
     val normalizedSelectedDivisions = selectedDivisionIds.normalizeDivisionIdentifiers()
     val selectedDivisionSet = normalizedSelectedDivisions.toSet()
+    val assignedDivisionIds = mutableSetOf<String>()
     slots.forEachIndexed { index, slot ->
         val fieldIds = slot.normalizedScheduledFieldIds()
         val fieldIdSet = fieldIds.toSet()
@@ -128,9 +130,22 @@ internal fun computeLeagueSlotErrors(
                 return@forEachIndexed
             }
 
-            if (singleDivision && selectedDivisionSet.isNotEmpty() && slotDivisionSet != selectedDivisionSet) {
-                errors[index] = "Single division requires every timeslot to include all selected divisions."
-                return@forEachIndexed
+            if (selectedDivisionSet.isNotEmpty()) {
+                if (splitByDivision) {
+                    val validSlotDivisions = slotDivisionIds.filter(selectedDivisionSet::contains)
+                    if (validSlotDivisions.isEmpty()) {
+                        errors[index] = "Each timeslot needs at least one division."
+                        return@forEachIndexed
+                    }
+                    assignedDivisionIds += validSlotDivisions
+                } else if (slotDivisionSet != selectedDivisionSet) {
+                    errors[index] = if (singleDivision) {
+                        "Single division requires every timeslot to include all selected divisions."
+                    } else {
+                        "Every timeslot must include all selected divisions when split divisions is off."
+                    }
+                    return@forEachIndexed
+                }
             }
             val nonRepeatingEnd = slotEnd ?: return@forEachIndexed
 
@@ -164,9 +179,22 @@ internal fun computeLeagueSlotErrors(
             return@forEachIndexed
         }
 
-        if (singleDivision && selectedDivisionSet.isNotEmpty() && slotDivisionSet != selectedDivisionSet) {
-            errors[index] = "Single division requires every timeslot to include all selected divisions."
-            return@forEachIndexed
+        if (selectedDivisionSet.isNotEmpty()) {
+            if (splitByDivision) {
+                val validSlotDivisions = slotDivisionIds.filter(selectedDivisionSet::contains)
+                if (validSlotDivisions.isEmpty()) {
+                    errors[index] = "Each timeslot needs at least one division."
+                    return@forEachIndexed
+                }
+                assignedDivisionIds += validSlotDivisions
+            } else if (slotDivisionSet != selectedDivisionSet) {
+                errors[index] = if (singleDivision) {
+                    "Single division requires every timeslot to include all selected divisions."
+                } else {
+                    "Every timeslot must include all selected divisions when split divisions is off."
+                }
+                return@forEachIndexed
+            }
         }
 
         val hasOverlap = slots.withIndex().any { (otherIndex, other) ->
@@ -186,6 +214,15 @@ internal fun computeLeagueSlotErrors(
 
         if (hasOverlap) {
             errors[index] = "Overlaps with another timeslot for one or more selected fields."
+        }
+    }
+    if (splitByDivision && selectedDivisionSet.isNotEmpty()) {
+        val missingDivisionIds = selectedDivisionSet - assignedDivisionIds
+        if (missingDivisionIds.isNotEmpty()) {
+            val targetIndex = slots.indices.firstOrNull { index -> !errors.containsKey(index) }
+            if (targetIndex != null) {
+                errors[targetIndex] = "Each division must be assigned to at least one timeslot."
+            }
         }
     }
     return errors

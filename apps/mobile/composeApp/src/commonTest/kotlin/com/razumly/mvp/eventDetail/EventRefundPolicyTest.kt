@@ -1,7 +1,6 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.eventDetail.composables.buildCancellationRefundOptions
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -33,7 +32,7 @@ class EventRefundPolicyTest {
         val event = Event(
             start = Instant.parse("2026-07-01T12:00:00Z"),
             end = Instant.parse("2026-07-01T13:00:00Z"),
-            cancellationRefundHours = 0,
+            cancellationRefundHours = null,
         )
 
         val policy = getRefundPolicy(
@@ -47,14 +46,27 @@ class EventRefundPolicyTest {
     }
 
     @Test
-    fun givenRefundSummaryAndOptions_whenUsingHourCounts_thenLabelsReflectRealHours() {
+    fun givenZeroHourAutomaticRefunds_whenGettingRefundPolicy_thenWindowClosesAtEventStart() {
+        val event = Event(
+            start = Instant.parse("2026-07-01T12:00:00Z"),
+            end = Instant.parse("2026-07-01T13:00:00Z"),
+            cancellationRefundHours = 0,
+        )
+
+        val policy = getRefundPolicy(
+            event = event,
+            now = Instant.parse("2026-07-01T11:59:00Z"),
+        )
+
+        assertFalse(policy.eventHasStarted)
+        assertTrue(policy.canAutoRefund)
+        assertEquals(Instant.parse("2026-07-01T12:00:00Z"), policy.refundDeadline)
+    }
+
+    @Test
+    fun givenRefundSummary_whenUsingHourCounts_thenLabelsReflectRealHours() {
         assertEquals("36h before start", formatRefundSummary(36))
-        assertEquals("Automatic refunds disabled", formatRefundSummary(0))
-
-        val options = buildCancellationRefundOptions(36)
-
-        assertEquals(listOf(36, 24, 48, 0), options.map { it.value })
-        assertEquals("36 hours before event", options.first().label)
-        assertEquals("Automatic refunds disabled", options.last().label)
+        assertEquals("Until event start", formatRefundSummary(0))
+        assertEquals("Automatic refunds disabled", formatRefundSummary(null))
     }
 }

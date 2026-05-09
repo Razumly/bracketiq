@@ -5,9 +5,11 @@ import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameterOption
 import com.razumly.mvp.core.data.dataTypes.toDropdownOptions
 import com.razumly.mvp.core.data.util.buildEventDivisionId
 import com.razumly.mvp.core.data.util.buildGenderSkillAgeDivisionToken
+import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.extractDivisionTokenFromId
 import com.razumly.mvp.core.data.util.normalizeDivisionDetail
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
+import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 internal data class DivisionEditorState(
     val editingId: String? = null,
@@ -53,7 +55,7 @@ internal fun defaultDivisionEditorState(
     defaultInstallmentDueRelativeDays: List<Int> = emptyList(),
     defaultInstallmentAmounts: List<Int>,
 ): DivisionEditorState {
-    val fallbackMax = defaultMaxParticipants.coerceAtLeast(2)
+    val fallbackMax = defaultMaxParticipants.takeIf { value -> value >= 2 }
     val fallbackPlayoff = defaultPlayoffTeamCount?.coerceAtLeast(2)
     val normalizedInstallmentAmounts = defaultInstallmentAmounts.map { amount ->
         amount.coerceAtLeast(0)
@@ -94,6 +96,51 @@ internal fun defaultDivisionEditorState(
         nameTouched = false,
         error = null,
     )
+}
+
+internal fun buildDivisionDropdownOptions(
+    existingDetails: List<DivisionDetail>,
+    selectedDivisionIds: List<String>,
+): List<DropdownOption> {
+    val options = linkedMapOf<String, DropdownOption>()
+    val seenLabels = mutableSetOf<String>()
+
+    fun canonicalDivisionId(rawDivisionId: String): String {
+        val normalized = rawDivisionId.normalizeDivisionIdentifier()
+        if (normalized.isBlank()) return ""
+        val matchingDetail = existingDetails.firstOrNull { detail ->
+            divisionsEquivalent(detail.id, normalized) || divisionsEquivalent(detail.key, normalized)
+        }
+        return matchingDetail
+            ?.id
+            ?.normalizeDivisionIdentifier()
+            ?.takeIf(String::isNotBlank)
+            ?: normalized
+    }
+
+    fun addOption(rawDivisionId: String, rawLabel: String? = null) {
+        val normalizedId = canonicalDivisionId(rawDivisionId)
+        if (normalizedId.isBlank() || options.containsKey(normalizedId)) return
+        val label = rawLabel
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: normalizedId.toDivisionDisplayLabel(existingDetails)
+        val labelKey = label.normalizeDivisionNameKey()
+        if (!seenLabels.add(labelKey)) return
+        options[normalizedId] = DropdownOption(value = normalizedId, label = label)
+    }
+
+    existingDetails.forEach { detail ->
+        addOption(
+            rawDivisionId = detail.id.ifBlank { detail.key },
+            rawLabel = detail.name,
+        )
+    }
+    selectedDivisionIds.forEach { divisionId ->
+        addOption(rawDivisionId = divisionId)
+    }
+
+    return options.values.toList()
 }
 
 internal fun buildSkillDivisionTypeOptions(

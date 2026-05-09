@@ -59,7 +59,7 @@ data class Event(
     val waitListIds: List<String> = emptyList(),
     val userIds: List<String> = emptyList(),
     val teamIds: List<String> = emptyList(),
-    val cancellationRefundHours: Int = 0,
+    val cancellationRefundHours: Int? = null,
     val registrationCutoffHours: Int = 0,
     val seedColor: Int = Primary.toArgb(),
     val sportId: String? = null,

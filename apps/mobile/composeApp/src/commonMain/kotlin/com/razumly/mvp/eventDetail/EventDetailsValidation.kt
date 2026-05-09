@@ -151,7 +151,7 @@ internal fun computeEventValidationResult(
 ): EventValidationResult {
     val isNameValid = editEvent.name.isNotBlank()
     val isPriceValid = editEvent.priceCents >= 0
-    val isMaxParticipantsValid = editEvent.maxParticipants > 1
+    val isMaxParticipantsValid = true
     val isTeamSizeValid = editEvent.teamSizeLimit >= 1
     val isLocationValid = editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0
     val isSkillLevelValid = editEvent.eventType == EventType.LEAGUE || editEvent.divisions.isNotEmpty()
@@ -220,17 +220,15 @@ internal fun computeEventValidationResult(
         isLeagueGamesValid = (editEvent.gamesPerOpponent ?: 1) >= 1
         isLeaguePlayoffTeamsValid = if (!editEvent.includePlayoffs) {
             true
+        } else if (editEvent.singleDivision) {
+            (editEvent.playoffTeamCount ?: 0) >= 2
         } else {
-            val hasEventPlayoffCount = (editEvent.playoffTeamCount ?: 0) >= 2
             val details = mergeDivisionDetailsForDivisions(
                 divisions = editEvent.divisions,
                 existingDetails = editEvent.divisionDetails,
                 eventId = editEvent.id,
             )
-            hasEventPlayoffCount && (
-                editEvent.singleDivision ||
-                    (details.isNotEmpty() && details.all { detail -> (detail.playoffTeamCount ?: 0) >= 2 })
-                )
+            details.isNotEmpty() && details.all { detail -> (detail.playoffTeamCount ?: 0) >= 2 }
         }
         if (editEvent.usesSets) {
             isLeagueDurationValid = setCount != null && (editEvent.setDurationMinutes ?: 0) >= 5
@@ -273,7 +271,6 @@ internal fun computeEventValidationResult(
     val isPaymentPlansValid = paymentPlanValidationErrors.isEmpty()
 
     val isValid = isPriceValid &&
-        isMaxParticipantsValid &&
         isTeamSizeValid &&
         isWinnerSetCountValid &&
         isWinnerPointsValid &&
@@ -304,15 +301,6 @@ internal fun computeEventValidationResult(
         }
         if (!isPriceValid) {
             add("Price must be 0 or higher.")
-        }
-        if (!isMaxParticipantsValid) {
-            add(
-                if (editEvent.teamSignup) {
-                    "Max teams must be at least 2."
-                } else {
-                    "Max participants must be at least 2."
-                },
-            )
         }
         if (!isTeamSizeValid) {
             add("Team size must be at least 1.")

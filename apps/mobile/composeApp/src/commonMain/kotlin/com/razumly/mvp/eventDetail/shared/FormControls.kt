@@ -87,7 +87,11 @@ internal fun LabeledCheckboxRow(
         Text(
             text = label,
             style = MaterialTheme.typography.bodyMedium,
-            color = Color(localImageScheme.current.onSurface),
+            color = if (enabled) {
+                Color(localImageScheme.current.onSurface)
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
         )
     }
 }

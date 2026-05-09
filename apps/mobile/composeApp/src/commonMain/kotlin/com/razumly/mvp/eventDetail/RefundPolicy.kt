@@ -15,26 +15,26 @@ internal fun getRefundPolicy(
     event: Event,
     now: Instant = Clock.System.now(),
 ): EventRefundPolicy {
-    val refundBufferHours = event.cancellationRefundHours.coerceAtLeast(0)
-    val refundDeadline = if (refundBufferHours > 0) {
-        event.start.minus(refundBufferHours.hours)
-    } else {
-        null
+    val refundBufferHours = event.cancellationRefundHours?.coerceAtLeast(0)
+    val refundDeadline = when (refundBufferHours) {
+        null -> null
+        0 -> event.start
+        else -> event.start.minus(refundBufferHours.hours)
     }
     val eventHasStarted = now >= event.start
 
     return EventRefundPolicy(
         eventHasStarted = eventHasStarted,
         refundDeadline = refundDeadline,
-        canAutoRefund = refundDeadline != null && !eventHasStarted && now < refundDeadline,
+        canAutoRefund = refundBufferHours != null && !eventHasStarted && refundDeadline != null && now < refundDeadline,
     )
 }
 
-internal fun formatRefundSummary(cancellationRefundHours: Int): String {
-    val normalizedHours = cancellationRefundHours.coerceAtLeast(0)
-    return if (normalizedHours > 0) {
-        "${normalizedHours}h before start"
-    } else {
-        "Automatic refunds disabled"
+internal fun formatRefundSummary(cancellationRefundHours: Int?): String {
+    val normalizedHours = cancellationRefundHours?.coerceAtLeast(0)
+    return when {
+        normalizedHours == null -> "Automatic refunds disabled"
+        normalizedHours == 0 -> "Until event start"
+        else -> "${normalizedHours}h before start"
     }
 }

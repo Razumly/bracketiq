@@ -13,9 +13,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -50,6 +52,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -141,7 +144,6 @@ import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.presentation.util.getScreenHeight
-import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.presentation.util.moneyFormat
 import com.razumly.mvp.core.presentation.util.toEnumTitleCase
 import com.razumly.mvp.core.presentation.util.toNameCase
@@ -155,7 +157,6 @@ import com.razumly.mvp.eventDetail.composables.LeagueConfigurationFields
 import com.razumly.mvp.eventDetail.composables.LeaguePlayoffConfigurationFields
 import com.razumly.mvp.eventDetail.composables.LeagueScoringConfigFields
 import com.razumly.mvp.eventDetail.composables.LeagueScheduleFields
-import com.razumly.mvp.eventDetail.composables.DivisionOption
 import com.razumly.mvp.eventDetail.composables.NumberInputField
 import com.razumly.mvp.eventDetail.composables.PointsTextField
 import com.razumly.mvp.eventDetail.composables.RegistrationOptions
@@ -222,7 +223,6 @@ private val SectionExpansionStatesSaver = mapSaver(
         }
     },
 )
-private const val MOBILE_EVENT_DETAILS_BREAKPOINT_DP = 600
 private const val MAX_READ_ONLY_NAME_LIST_ITEMS = 5
 private const val STAFF_LAZY_LIST_THRESHOLD = 4
 private const val STAFF_LAZY_LIST_VISIBLE_COUNT = 4
@@ -330,7 +330,6 @@ fun EventDetails(
     val popupHandler = LocalPopupHandler.current
     val event = eventWithRelations.event
     val host = eventWithRelations.host
-    val isMobileEventDetailsLayout = getScreenWidth() < MOBILE_EVENT_DETAILS_BREAKPOINT_DP
     var isValid by remember { mutableStateOf(false) }
     var showStartPicker by remember { mutableStateOf(false) }
     var showEndPicker by remember { mutableStateOf(false) }
@@ -341,7 +340,7 @@ fun EventDetails(
     var editLocationButtonCenter by remember { mutableStateOf(Offset.Zero) }
     // Validation states
     var isPriceValid by remember { mutableStateOf(editEvent.priceCents >= 0) }
-    var isMaxParticipantsValid by remember { mutableStateOf(editEvent.maxParticipants > 1) }
+    var isMaxParticipantsValid by remember { mutableStateOf(true) }
     var isTeamSizeValid by remember { mutableStateOf(editEvent.teamSizeLimit >= 1) }
     var isWinnerSetCountValid by remember { mutableStateOf(true) }
     var isLoserSetCountValid by remember { mutableStateOf(true) }
@@ -390,6 +389,9 @@ fun EventDetails(
     val selectedDivisions = remember(editEvent.divisions) {
         editEvent.divisions.normalizeDivisionIdentifiers()
     }
+    val splitByDivisionScheduling = remember(editEvent.singleDivision, editEvent.allowTeamSplitDefault) {
+        !editEvent.singleDivision && editEvent.allowTeamSplitDefault == true
+    }
     val normalizedDivisionDetails = remember(
         editEvent.divisions,
         editEvent.divisionDetails,
@@ -418,8 +420,16 @@ fun EventDetails(
         val useRelativeInstallmentDueDates = editEvent.eventType == EventType.WEEKLY_EVENT
         val tournamentPoolPlayEnabled = editEvent.isTournamentPoolPlayEnabled()
         normalizedDivisionDetails.map { detail ->
-            val effectiveDivisionPrice = detail.price?.coerceAtLeast(0)
-            val effectiveMaxParticipants = detail.maxParticipants?.coerceAtLeast(2)
+            val effectiveDivisionPrice = if (editEvent.singleDivision) {
+                editEvent.priceCents.coerceAtLeast(0)
+            } else {
+                detail.price?.coerceAtLeast(0)
+            }
+            val effectiveMaxParticipants = if (editEvent.singleDivision) {
+                editEvent.maxParticipants.takeIf { value -> value >= 2 }
+            } else {
+                detail.maxParticipants?.coerceAtLeast(2)
+            }
             val detailInstallmentAmounts = detail.installmentAmounts.map { amount ->
                 amount.coerceAtLeast(0)
             }
@@ -482,22 +492,12 @@ fun EventDetails(
         }
     }
     val divisionOptions = remember(divisionDetailsForSettings, selectedDivisions) {
-        (
-            selectedDivisions +
-                divisionDetailsForSettings.map { detail -> detail.id } +
-                divisionDetailsForSettings.map { detail -> detail.key }
-            ).normalizeDivisionIdentifiers().map { divisionId ->
-            DivisionOption(
-                value = divisionId,
-                label = divisionId.toDivisionDisplayLabel(divisionDetailsForSettings),
-            )
-        }
+        buildDivisionDropdownOptions(
+            existingDetails = divisionDetailsForSettings,
+            selectedDivisionIds = selectedDivisions,
+        )
     }
-    val slotDivisionOptions = remember(divisionOptions) {
-        divisionOptions.map { option ->
-            DropdownOption(value = option.value, label = option.label)
-        }
-    }
+    val slotDivisionOptions = divisionOptions
     val selectedSportForDivisionOptions = remember(sports, editEvent.sportId) {
         val normalizedSportId = editEvent.sportId?.trim().orEmpty()
         sports.firstOrNull { sport -> sport.id == normalizedSportId }
@@ -579,22 +579,43 @@ fun EventDetails(
         divisionInstallmentDueDatePickerIndex = null
         divisionEditor = divisionEditorDefaults
     }
-    fun syncLeagueSlotsForSelectedDivisions(normalizedSelection: List<String>) {
+    fun applySingleDivisionDefaultsToDetails(
+        details: List<DivisionDetail>,
+        defaultPriceCents: Int,
+        defaultMaxParticipants: Int,
+        defaultPlayoffTeamCount: Int?,
+    ): List<DivisionDetail> {
+        val normalizedPriceCents = defaultPriceCents.coerceAtLeast(0)
+        val normalizedMaxParticipants = defaultMaxParticipants.takeIf { value -> value >= 2 }
+        return details.map { detail ->
+            detail.copy(
+                price = normalizedPriceCents,
+                maxParticipants = normalizedMaxParticipants,
+                playoffTeamCount = defaultPlayoffTeamCount,
+            )
+        }
+    }
+    fun syncLeagueSlotsForSelectedDivisions(
+        normalizedSelection: List<String>,
+        splitByDivisionOverride: Boolean? = null,
+    ) {
         if (
-            !isNewEvent ||
-            (editEvent.eventType != EventType.LEAGUE && editEvent.eventType != EventType.TOURNAMENT) ||
+            (editEvent.eventType != EventType.LEAGUE &&
+                editEvent.eventType != EventType.TOURNAMENT &&
+                editEvent.eventType != EventType.WEEKLY_EVENT) ||
             leagueTimeSlots.isEmpty()
         ) {
             return
         }
+        val splitSlotsByDivision = splitByDivisionOverride ?: splitByDivisionScheduling
         val selectedDivisionSet = normalizedSelection.toSet()
         leagueTimeSlots.forEachIndexed { index, slot ->
             val currentDivisions = slot.normalizedDivisionIds()
             val filteredDivisions = currentDivisions.filter(selectedDivisionSet::contains)
-            val nextSlotDivisions = if (editEvent.singleDivision) {
-                normalizedSelection
-            } else {
+            val nextSlotDivisions = if (splitSlotsByDivision) {
                 filteredDivisions.ifEmpty { normalizedSelection }
+            } else {
+                normalizedSelection
             }
             if (nextSlotDivisions != currentDivisions) {
                 onUpdateLeagueTimeSlot(index, slot.copy(divisions = nextSlotDivisions))
@@ -896,14 +917,13 @@ fun EventDetails(
             divisionToken = normalizedToken,
             existingDivisionIds = divisionDetailsForSettings.map { detail -> detail.id },
         )
-        val fallbackMaxParticipants = editEvent.maxParticipants.coerceAtLeast(2)
         val normalizedPrice = if (editEvent.singleDivision) {
             editEvent.priceCents.coerceAtLeast(0)
         } else {
             divisionEditor.priceCents.coerceAtLeast(0)
         }
         val normalizedMaxParticipants = if (editEvent.singleDivision) {
-            fallbackMaxParticipants
+            editEvent.maxParticipants.takeIf { value -> value >= 2 }
         } else {
             val maxParticipants = divisionEditor.maxParticipants
             if (maxParticipants == null || maxParticipants < 2) {
@@ -929,6 +949,12 @@ fun EventDetails(
             return
         }
         if (tournamentPoolPlayEnabled) {
+            if (normalizedMaxParticipants == null) {
+                divisionEditor = divisionEditor.copy(
+                    error = "Division max teams must be at least 2.",
+                )
+                return
+            }
             if (divisionPoolCount == null || divisionPoolCount < 1) {
                 divisionEditor = divisionEditor.copy(
                     error = "Pool count is required when pool play is enabled.",
@@ -956,9 +982,7 @@ fun EventDetails(
         }
         val normalizedPlayoffTeamCount = when {
             !editEvent.includePlayoffs -> null
-            editEvent.eventType == EventType.LEAGUE && editEvent.singleDivision -> {
-                editEvent.playoffTeamCount ?: divisionPlayoffTeamCount
-            }
+            editEvent.singleDivision -> editEvent.playoffTeamCount ?: divisionPlayoffTeamCount
             editEvent.eventType == EventType.LEAGUE -> divisionPlayoffTeamCount
             editEvent.eventType == EventType.TOURNAMENT -> divisionPlayoffTeamCount
             else -> divisionPlayoffTeamCount
@@ -1082,7 +1106,7 @@ fun EventDetails(
             maxParticipants = normalizedMaxParticipants,
             playoffTeamCount = normalizedPlayoffTeamCount,
             poolCount = if (tournamentPoolPlayEnabled) divisionPoolCount else null,
-            poolTeamCount = if (tournamentPoolPlayEnabled) {
+            poolTeamCount = if (tournamentPoolPlayEnabled && normalizedMaxParticipants != null) {
                 derivePoolTeamCount(
                     maxTeams = normalizedMaxParticipants,
                     poolCount = divisionPoolCount,
@@ -1113,10 +1137,12 @@ fun EventDetails(
         )
         onEditEvent {
             copy(
+                priceCents = normalizedPrice,
+                maxParticipants = normalizedMaxParticipants ?: 0,
                 divisions = nextDivisionIds,
                 divisionDetails = mergedDivisionDetails,
                 playoffTeamCount = if (
-                    eventType == EventType.LEAGUE &&
+                    (eventType == EventType.LEAGUE || eventType == EventType.TOURNAMENT) &&
                     includePlayoffs &&
                     singleDivision
                 ) {
@@ -1127,7 +1153,13 @@ fun EventDetails(
             )
         }
         syncLeagueSlotsForSelectedDivisions(nextDivisionIds)
-        val nextDefaults = divisionDefaultsFromEditor(divisionEditor)
+        val nextDefaults = divisionDefaultsFromEditor(
+            divisionEditor.copy(
+                priceCents = normalizedPrice,
+                maxParticipants = normalizedMaxParticipants,
+                playoffTeamCount = normalizedPlayoffTeamCount,
+            ),
+        )
         divisionEditorDefaults = nextDefaults
         divisionInstallmentDueDatePickerIndex = null
         divisionEditor = nextDefaults
@@ -1150,10 +1182,8 @@ fun EventDetails(
             },
             name = detail.name,
             priceCents = (detail.price ?: editEvent.priceCents).coerceAtLeast(0),
-            maxParticipants = (
-                detail.maxParticipants
-                    ?: editEvent.maxParticipants
-                ).coerceAtLeast(2),
+            maxParticipants = detail.maxParticipants
+                ?: editEvent.maxParticipants.takeIf { value -> value >= 2 },
             playoffTeamCount = if (editEvent.singleDivision) {
                 editEvent.playoffTeamCount ?: detail.playoffTeamCount
             } else {
@@ -1189,7 +1219,7 @@ fun EventDetails(
                 divisions = nextDivisionIds,
                 divisionDetails = mergedDivisionDetails,
                 playoffTeamCount = if (
-                    eventType == EventType.LEAGUE &&
+                    (eventType == EventType.LEAGUE || eventType == EventType.TOURNAMENT) &&
                     includePlayoffs &&
                     singleDivision
                 ) {
@@ -1280,6 +1310,7 @@ fun EventDetails(
         leagueTimeSlots,
         editEvent.eventType,
         editEvent.singleDivision,
+        editEvent.allowTeamSplitDefault,
         editEvent.divisions,
         isNewEvent,
     ) {
@@ -1295,6 +1326,7 @@ fun EventDetails(
                 slots = leagueTimeSlots,
                 singleDivision = editEvent.singleDivision,
                 selectedDivisionIds = editEvent.divisions.normalizeDivisionIdentifiers(),
+                splitByDivision = splitByDivisionScheduling,
             )
         } else {
             emptyMap()
@@ -2390,30 +2422,32 @@ fun EventDetails(
                         )
                     },
                     editContent = {
-                        PlatformDropdown(
-                            selectedValue = editEvent.eventType.name,
-                            onSelectionChange = { selectedValue ->
-                                val selectedEventType = EventType.entries.find { it.name == selectedValue }
-                                selectedEventType?.let { onEventTypeSelected(it) }
-                            },
-                            options = EventType.entries
-                                .filterNot { eventType ->
-                                    isNewEvent && rentalTimeLocked && eventType == EventType.WEEKLY_EVENT
-                                }
-                                .map { eventType ->
-                                    DropdownOption(
-                                        value = eventType.name,
-                                        label = eventType.name.toEnumTitleCase(),
-                                    )
-                                },
-                            label = "Event Type",
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                        )
-                        FormSectionDivider()
-
-                        val teamCapacityInputs: @Composable () -> Unit = {
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            PlatformDropdown(
+                                selectedValue = editEvent.eventType.name,
+                                onSelectionChange = { selectedValue ->
+                                    val selectedEventType = EventType.entries.find { it.name == selectedValue }
+                                    selectedEventType?.let { onEventTypeSelected(it) }
+                                },
+                                options = EventType.entries
+                                    .filterNot { eventType ->
+                                        isNewEvent && rentalTimeLocked && eventType == EventType.WEEKLY_EVENT
+                                    }
+                                    .map { eventType ->
+                                        DropdownOption(
+                                            value = eventType.name,
+                                            label = eventType.name.toEnumTitleCase(),
+                                        )
+                                    },
+                                label = "Event Type",
+                                modifier = Modifier.weight(1f),
+                            )
                             NumberInputField(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier.weight(1f),
                                 value = editEvent.teamSizeLimit.toString(),
                                 label = "Team Size Limit",
                                 onValueChange = { newValue ->
@@ -2433,6 +2467,7 @@ fun EventDetails(
                                 },
                             )
                         }
+                        FormSectionDivider()
                         val playoffsOrPoolsInputs: @Composable () -> Unit = {
                             if (editEvent.eventType == EventType.LEAGUE) {
                                 Row(
@@ -2440,65 +2475,41 @@ fun EventDetails(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.Top,
                                 ) {
-                                        Box(modifier = Modifier.weight(1f)) {
-                                            LabeledCheckboxRow(
-                                                checked = editEvent.includePlayoffs,
-                                                label = "Include Playoffs",
-                                                onCheckedChange = { checked ->
-                                                    onEditEvent {
-                                                        val nextDivisionDetails = mergeDivisionDetailsForDivisions(
-                                                            divisions = divisions,
-                                                            existingDetails = divisionDetails,
-                                                            eventId = id,
-                                                        ).map { detail ->
-                                                            when {
-                                                                !checked -> detail.copy(playoffTeamCount = null)
-                                                                singleDivision -> detail.copy(
-                                                                    playoffTeamCount = playoffTeamCount
-                                                                        ?: detail.playoffTeamCount,
-                                                                )
-                                                                else -> detail
-                                                            }
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        LabeledCheckboxRow(
+                                            checked = editEvent.includePlayoffs,
+                                            label = "Include Playoffs",
+                                            onCheckedChange = { checked ->
+                                                onEditEvent {
+                                                    val nextDivisionDetails = mergeDivisionDetailsForDivisions(
+                                                        divisions = divisions,
+                                                        existingDetails = divisionDetails,
+                                                        eventId = id,
+                                                    ).map { detail ->
+                                                        when {
+                                                            !checked -> detail.copy(playoffTeamCount = null)
+                                                            singleDivision -> detail.copy(
+                                                                playoffTeamCount = playoffTeamCount
+                                                                    ?: detail.playoffTeamCount,
+                                                            )
+                                                            else -> detail
                                                         }
-                                                        copy(
-                                                            includePlayoffs = checked,
-                                                            playoffTeamCount = when {
-                                                                !checked -> null
-                                                                singleDivision -> playoffTeamCount
-                                                                    ?: nextDivisionDetails.firstOrNull()?.playoffTeamCount
-                                                                else -> playoffTeamCount
-                                                            },
-                                                            divisionDetails = nextDivisionDetails,
-                                                        )
                                                     }
-                                                },
-                                            )
-                                        }
-                                    NumberInputField(
-                                        modifier = Modifier.weight(1f),
-                                        value = editEvent.playoffTeamCount?.toString().orEmpty(),
-                                        label = if (editEvent.singleDivision) {
-                                            "Playoff Team Count"
-                                        } else {
-                                            "Default Playoff Team Count"
-                                        },
-                                        enabled = editEvent.includePlayoffs,
-                                        onValueChange = { newValue ->
-                                            if (!editEvent.includePlayoffs) return@NumberInputField
-                                            if (newValue.isNotEmpty() && !newValue.all { it.isDigit() }) return@NumberInputField
-                                            onEditEvent {
-                                                copy(playoffTeamCount = if (newValue.isBlank()) null else newValue.toIntOrNull())
-                                            }
-                                        },
-                                        isError = editEvent.includePlayoffs &&
-                                            (editEvent.playoffTeamCount ?: 0) < 2,
-                                        errorMessage = "Required when playoffs are enabled",
-                                        supportingText = if (editEvent.singleDivision) {
-                                            null
-                                        } else {
-                                            "Used as the default playoff team count for new divisions."
-                                        },
-                                    )
+                                                    copy(
+                                                        includePlayoffs = checked,
+                                                        playoffTeamCount = when {
+                                                            !checked -> null
+                                                            singleDivision -> playoffTeamCount
+                                                                ?: nextDivisionDetails.firstOrNull()?.playoffTeamCount
+                                                            else -> playoffTeamCount
+                                                        },
+                                                        divisionDetails = nextDivisionDetails,
+                                                    )
+                                                }
+                                            },
+                                        )
+                                    }
+                                    Box(modifier = Modifier.weight(1f))
                                 }
                             } else if (editEvent.eventType == EventType.TOURNAMENT) {
                                 LabeledCheckboxRow(
@@ -2531,13 +2542,7 @@ fun EventDetails(
                                 )
                             }
                         }
-                        if (isMobileEventDetailsLayout) {
-                            teamCapacityInputs()
-                            playoffsOrPoolsInputs()
-                        } else {
-                            teamCapacityInputs()
-                            playoffsOrPoolsInputs()
-                        }
+                        playoffsOrPoolsInputs()
                         FormSectionDivider()
 
                         Row(
@@ -2572,13 +2577,33 @@ fun EventDetails(
                         }
                         FormSectionDivider()
 
-                        RegistrationOptions(
-                            selectedOption = editEvent.registrationCutoffHours,
-                            onOptionSelected = {
-                                onEditEvent { copy(registrationCutoffHours = it) }
-                            },
+                        val automaticRefundsEnabled = if (editEvent.singleDivision) {
+                            editEvent.priceCents > 0
+                        } else {
+                            divisionDetailsForSettings.any { detail -> (detail.price ?: 0) > 0 }
+                        }
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                        )
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            RegistrationOptions(
+                                cutoffHours = editEvent.registrationCutoffHours,
+                                onCutoffHoursChange = {
+                                    onEditEvent { copy(registrationCutoffHours = it) }
+                                },
+                                modifier = Modifier.weight(1f),
+                            )
+                            CancellationRefundOptions(
+                                refundHours = editEvent.cancellationRefundHours,
+                                onRefundHoursChange = {
+                                    onEditEvent { copy(cancellationRefundHours = it) }
+                                },
+                                modifier = Modifier.weight(1f),
+                                enabled = automaticRefundsEnabled,
+                                disabledMessage = "Add a paid division to enable automatic refunds.",
+                            )
+                        }
                         RequiredDocumentsSection(
                             isOrganizationEvent = isOrganizationEvent,
                             rentalTimeLocked = rentalTimeLocked,
@@ -2591,15 +2616,6 @@ fun EventDetails(
                                 onEditEvent { copy(requiredTemplateIds = normalizedTemplateIds) }
                             },
                         )
-                        if (editEvent.priceCents > 0) {
-                            CancellationRefundOptions(
-                                selectedOption = editEvent.cancellationRefundHours,
-                                onOptionSelected = {
-                                    onEditEvent { copy(cancellationRefundHours = it) }
-                                },
-                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                            )
-                        }
 
                     },
                 )
@@ -3458,13 +3474,10 @@ fun EventDetails(
                 }
                         Box(modifier = Modifier.weight(1f)) {
                             LabeledCheckboxRow(
-                                checked = if (isNewEvent) true else editEvent.singleDivision,
+                                checked = editEvent.singleDivision,
                                 label = "Single Division",
-                                enabled = false,
+                                enabled = true,
                                 onCheckedChange = { checked ->
-                                    if (isNewEvent) {
-                                        return@LabeledCheckboxRow
-                                    }
                                     val explicitPlayoffCount =
                                         editEvent.playoffTeamCount
                                             ?: divisionDetailsForSettings.firstOrNull()?.playoffTeamCount
@@ -3504,6 +3517,9 @@ fun EventDetails(
                                             }
                                             if (checked) {
                                                 existing.copy(
+                                                    price = editEvent.priceCents.coerceAtLeast(0),
+                                                    maxParticipants = editEvent.maxParticipants
+                                                        .takeIf { value -> value >= 2 },
                                                     playoffTeamCount = nextPlayoffCount,
                                                     allowPaymentPlans = defaultAllowPaymentPlans,
                                                     installmentCount = defaultInstallmentCount,
@@ -3585,6 +3601,7 @@ fun EventDetails(
                                         }
                                         copy(
                                             singleDivision = checked,
+                                            allowTeamSplitDefault = if (checked) false else allowTeamSplitDefault,
                                             playoffTeamCount = if (includePlayoffs) {
                                                 if (checked) {
                                                     explicitPlayoffCount
@@ -3597,17 +3614,171 @@ fun EventDetails(
                                             divisionDetails = nextDivisionDetails,
                                         )
                                     }
+                                    syncLeagueSlotsForSelectedDivisions(
+                                        normalizedSelection = selectedDivisions,
+                                        splitByDivisionOverride = if (checked) false else splitByDivisionScheduling,
+                                    )
                                 },
                             )
                         }
                     }
 
-                    if (isNewEvent) {
-                        Text(
-                            text = "Split-by-division setup is available on the web version.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(localImageScheme.current.onSurfaceVariant),
-                        )
+                    AnimatedVisibility(editEvent.singleDivision) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                MoneyInputField(
+                                    value = editEvent.priceCents.coerceAtLeast(0).toString(),
+                                    onValueChange = { value ->
+                                        if (!hostHasAccount) {
+                                            return@MoneyInputField
+                                        }
+                                        val parsedPrice = value
+                                            .filter(Char::isDigit)
+                                            .toIntOrNull()
+                                            ?.coerceAtLeast(0)
+                                            ?: 0
+                                        divisionEditorDefaults = divisionEditorDefaults.copy(
+                                            priceCents = parsedPrice,
+                                        )
+                                        if (divisionEditor.editingId.isNullOrBlank()) {
+                                            divisionEditor = divisionEditor.copy(
+                                                priceCents = parsedPrice,
+                                                error = null,
+                                            )
+                                        }
+                                        onEditEvent {
+                                            val nextDetails = applySingleDivisionDefaultsToDetails(
+                                                details = divisionDetails,
+                                                defaultPriceCents = parsedPrice,
+                                                defaultMaxParticipants = maxParticipants,
+                                                defaultPlayoffTeamCount = if (includePlayoffs) playoffTeamCount else null,
+                                            )
+                                            copy(
+                                                priceCents = parsedPrice,
+                                                divisionDetails = nextDetails,
+                                            )
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(0.48f),
+                                    label = "Price",
+                                    enabled = hostHasAccount,
+                                )
+                                NumberInputField(
+                                    modifier = Modifier.fillMaxWidth(0.48f),
+                                    value = editEvent.maxParticipants
+                                        .takeIf { value -> value > 0 }
+                                        ?.toString()
+                                        .orEmpty(),
+                                    label = if (editEvent.teamSignup) "Max Teams" else "Max Participants",
+                                    onValueChange = { value ->
+                                        if (value.isEmpty() || value.all { it.isDigit() }) {
+                                            val parsedMaxParticipants = value.toIntOrNull() ?: 0
+                                            val nextDefaultMaxParticipants = parsedMaxParticipants
+                                                .takeIf { parsed -> parsed >= 2 }
+                                            divisionEditorDefaults = divisionEditorDefaults.copy(
+                                                maxParticipants = nextDefaultMaxParticipants,
+                                            )
+                                            if (divisionEditor.editingId.isNullOrBlank()) {
+                                                divisionEditor = divisionEditor.copy(
+                                                    maxParticipants = nextDefaultMaxParticipants,
+                                                    error = null,
+                                                )
+                                            }
+                                            onEditEvent {
+                                                val nextDetails = applySingleDivisionDefaultsToDetails(
+                                                    details = divisionDetails,
+                                                    defaultPriceCents = priceCents,
+                                                    defaultMaxParticipants = parsedMaxParticipants,
+                                                    defaultPlayoffTeamCount = if (includePlayoffs) playoffTeamCount else null,
+                                                )
+                                                copy(
+                                                    maxParticipants = parsedMaxParticipants,
+                                                    divisionDetails = nextDetails,
+                                                )
+                                            }
+                                        }
+                                    },
+                                    isError = false,
+                                )
+                                if (
+                                    editEvent.includePlayoffs &&
+                                    (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT)
+                                ) {
+                                    NumberInputField(
+                                        modifier = Modifier.fillMaxWidth(0.48f),
+                                        value = editEvent.playoffTeamCount?.toString().orEmpty(),
+                                        label = "Playoff Team Count",
+                                        onValueChange = { value ->
+                                            if (value.isNotEmpty() && !value.all { it.isDigit() }) {
+                                                return@NumberInputField
+                                            }
+                                            val parsedPlayoffCount = value.toIntOrNull()
+                                            divisionEditorDefaults = divisionEditorDefaults.copy(
+                                                playoffTeamCount = parsedPlayoffCount?.takeIf { count -> count >= 2 },
+                                            )
+                                            if (divisionEditor.editingId.isNullOrBlank()) {
+                                                divisionEditor = divisionEditor.copy(
+                                                    playoffTeamCount = parsedPlayoffCount,
+                                                    error = null,
+                                                )
+                                            }
+                                            onEditEvent {
+                                                val nextDetails = applySingleDivisionDefaultsToDetails(
+                                                    details = divisionDetails,
+                                                    defaultPriceCents = priceCents,
+                                                    defaultMaxParticipants = maxParticipants,
+                                                    defaultPlayoffTeamCount = parsedPlayoffCount,
+                                                )
+                                                copy(
+                                                    playoffTeamCount = parsedPlayoffCount,
+                                                    divisionDetails = nextDetails,
+                                                )
+                                            }
+                                        },
+                                        isError = (editEvent.playoffTeamCount ?: 0) < 2,
+                                        errorMessage = "Required and must be at least 2.",
+                                    )
+                                }
+                            }
+                            PriceWithFeesPreviewButton(
+                                amountCents = editEvent.priceCents,
+                                eventType = editEvent.eventType,
+                                baseLabel = "Price",
+                                onShowBreakdown = { pricePreviewBreakdown = it },
+                            )
+                        }
+                    }
+
+                    val supportsSplitDivisionSlots = editEvent.eventType == EventType.LEAGUE ||
+                        editEvent.eventType == EventType.TOURNAMENT ||
+                        editEvent.eventType == EventType.WEEKLY_EVENT
+                    AnimatedVisibility(!editEvent.singleDivision && supportsSplitDivisionSlots) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Box(modifier = Modifier.weight(1f)) {
+                                LabeledCheckboxRow(
+                                    checked = editEvent.allowTeamSplitDefault == true,
+                                    label = "Split divisions by timeslot",
+                                    onCheckedChange = { checked ->
+                                        onEditEvent {
+                                            copy(allowTeamSplitDefault = checked)
+                                        }
+                                        syncLeagueSlotsForSelectedDivisions(
+                                            normalizedSelection = selectedDivisions,
+                                            splitByDivisionOverride = checked,
+                                        )
+                                    },
+                                )
+                            }
+                            Box(modifier = Modifier.weight(1f))
+                        }
                     }
 
                     if (editEvent.eventType != EventType.EVENT) {
@@ -3722,116 +3893,70 @@ fun EventDetails(
                     }
                     FormSectionDivider()
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        MoneyInputField(
-                            value = if (editEvent.singleDivision) {
-                                editEvent.priceCents.coerceAtLeast(0).toString()
-                            } else {
-                                divisionEditor.priceCents.coerceAtLeast(0).toString()
-                            },
-                            onValueChange = { value ->
-                                if (!divisionEditorReady || editEvent.singleDivision || !hostHasAccount) {
-                                    return@MoneyInputField
-                                }
-                                divisionEditor = divisionEditor.copy(
-                                    priceCents = value.filter(Char::isDigit).toIntOrNull()?.coerceAtLeast(0) ?: 0,
-                                    error = null,
+                    AnimatedVisibility(!editEvent.singleDivision) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.Top,
+                            ) {
+                                MoneyInputField(
+                                    value = divisionEditor.priceCents.coerceAtLeast(0).toString(),
+                                    onValueChange = { value ->
+                                        if (!divisionEditorReady || !hostHasAccount) {
+                                            return@MoneyInputField
+                                        }
+                                        divisionEditor = divisionEditor.copy(
+                                            priceCents = value.filter(Char::isDigit).toIntOrNull()?.coerceAtLeast(0) ?: 0,
+                                            error = null,
+                                        )
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    label = "Division Price",
+                                    enabled = hostHasAccount && divisionEditorReady,
                                 )
-                            },
-                            modifier = Modifier.weight(1f),
-                            label = "Division Price",
-                            enabled = !editEvent.singleDivision && hostHasAccount && divisionEditorReady,
-                        )
-                        NumberInputField(
-                            modifier = Modifier.weight(1f),
-                            value = if (editEvent.singleDivision) {
-                                editEvent.maxParticipants.coerceAtLeast(2).toString()
-                            } else {
-                                divisionEditor.maxParticipants?.toString().orEmpty()
-                            },
-                            label = if (editEvent.teamSignup) {
-                                "Division Max Teams"
-                            } else {
-                                "Division Max Participants"
-                            },
-                            enabled = !editEvent.singleDivision && divisionEditorReady,
-                            onValueChange = { value ->
-                                if (!divisionEditorReady || editEvent.singleDivision) {
-                                    return@NumberInputField
-                                }
-                                if (value.isEmpty() || value.all { it.isDigit() }) {
-                                    divisionEditor = divisionEditor.copy(
-                                        maxParticipants = value.toIntOrNull(),
-                                        error = null,
-                                    )
-                                }
-                            },
-                            isError = !editEvent.singleDivision &&
-                                divisionEditor.maxParticipants.let { maxParticipants ->
-                                    maxParticipants == null || maxParticipants < 2
-                                },
-                            errorMessage = "Required and must be at least 2.",
-                        )
+                                NumberInputField(
+                                    modifier = Modifier.weight(1f),
+                                    value = divisionEditor.maxParticipants?.toString().orEmpty(),
+                                    label = if (editEvent.teamSignup) {
+                                        "Division Max Teams"
+                                    } else {
+                                        "Division Max Participants"
+                                    },
+                                    enabled = divisionEditorReady,
+                                    onValueChange = { value ->
+                                        if (!divisionEditorReady) {
+                                            return@NumberInputField
+                                        }
+                                        if (value.isEmpty() || value.all { it.isDigit() }) {
+                                            divisionEditor = divisionEditor.copy(
+                                                maxParticipants = value.toIntOrNull(),
+                                                error = null,
+                                            )
+                                        }
+                                    },
+                                    isError = divisionEditor.maxParticipants.let { maxParticipants ->
+                                        maxParticipants == null || maxParticipants < 2
+                                    },
+                                    errorMessage = "Required and must be at least 2.",
+                                )
+                            }
+                            PriceWithFeesPreviewButton(
+                                amountCents = divisionEditor.priceCents,
+                                eventType = editEvent.eventType,
+                                baseLabel = "Division price",
+                                onShowBreakdown = { pricePreviewBreakdown = it },
+                            )
+                        }
                     }
-                    PriceWithFeesPreviewButton(
-                        amountCents = if (editEvent.singleDivision) {
-                            editEvent.priceCents
-                        } else {
-                            divisionEditor.priceCents
-                        },
-                        eventType = editEvent.eventType,
-                        baseLabel = "Division price",
-                        onShowBreakdown = { pricePreviewBreakdown = it },
-                    )
 
-                    if (editEvent.eventType == EventType.LEAGUE) {
-                        NumberInputField(
-                            modifier = Modifier.fillMaxWidth(),
-                            value = if (editEvent.singleDivision) {
-                                editEvent.playoffTeamCount?.toString().orEmpty()
-                            } else {
-                                divisionEditor.playoffTeamCount?.toString().orEmpty()
-                            },
-                            label = "Division Playoff Team Count",
-                            enabled = !editEvent.singleDivision && editEvent.includePlayoffs && divisionEditorReady,
-                            onValueChange = { value ->
-                                if (
-                                    !divisionEditorReady ||
-                                    editEvent.singleDivision ||
-                                    !editEvent.includePlayoffs
-                                ) {
-                                    return@NumberInputField
-                                }
-                                if (value.isEmpty() || value.all { it.isDigit() }) {
-                                    val parsed = if (value.isBlank()) null else value.toIntOrNull()
-                                    divisionEditor = divisionEditor.copy(
-                                        playoffTeamCount = parsed,
-                                        error = null,
-                                    )
-                                }
-                            },
-                            isError = false,
-                            supportingText = if (!editEvent.includePlayoffs) {
-                                "Enable playoffs to set playoff team count per division."
-                            } else {
-                                null
-                            },
-                        )
-                    } else if (editEvent.eventType == EventType.TOURNAMENT) {
+                    if (editEvent.eventType == EventType.TOURNAMENT) {
                         val tournamentPoolPlayEnabled = editEvent.isTournamentPoolPlayEnabled()
                         val divisionMaxTeams = if (editEvent.singleDivision) {
-                            editEvent.maxParticipants.coerceAtLeast(2)
+                            editEvent.maxParticipants.takeIf { value -> value >= 2 } ?: 0
                         } else {
                             divisionEditor.maxParticipants ?: 0
                         }
-                        val derivedPoolTeamCount = derivePoolTeamCount(
-                            maxTeams = divisionMaxTeams,
-                            poolCount = divisionEditor.poolCount,
-                        )
                         val divisionPoolCount = divisionEditor.poolCount
                         val divisionBracketTeamCount = divisionEditor.playoffTeamCount
                         Row(
@@ -3839,31 +3964,35 @@ fun EventDetails(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.Top,
                         ) {
-                            NumberInputField(
-                                modifier = Modifier.weight(1f),
-                                value = divisionBracketTeamCount?.toString().orEmpty(),
-                                label = "Bracket Teams",
-                                enabled = tournamentPoolPlayEnabled && divisionEditorReady,
-                                onValueChange = { value ->
-                                    if (!divisionEditorReady || !tournamentPoolPlayEnabled) {
-                                        return@NumberInputField
-                                    }
-                                    if (value.isEmpty() || value.all { it.isDigit() }) {
-                                        divisionEditor = divisionEditor.copy(
-                                            playoffTeamCount = if (value.isBlank()) null else value.toIntOrNull(),
-                                            error = null,
-                                        )
-                                    }
-                                },
-                                isError = tournamentPoolPlayEnabled &&
-                                    ((divisionBracketTeamCount ?: 0) < 2 ||
-                                        (
-                                            divisionPoolCount != null &&
-                                                divisionBracketTeamCount != null &&
-                                                divisionBracketTeamCount % divisionPoolCount != 0
-                                            )),
-                                errorMessage = "Must be at least 2 and divide evenly by pools.",
-                            )
+                            if (editEvent.singleDivision) {
+                                Box(modifier = Modifier.weight(1f))
+                            } else {
+                                NumberInputField(
+                                    modifier = Modifier.weight(1f),
+                                    value = divisionBracketTeamCount?.toString().orEmpty(),
+                                    label = "Bracket Teams",
+                                    enabled = tournamentPoolPlayEnabled && divisionEditorReady,
+                                    onValueChange = { value ->
+                                        if (!divisionEditorReady || !tournamentPoolPlayEnabled) {
+                                            return@NumberInputField
+                                        }
+                                        if (value.isEmpty() || value.all { it.isDigit() }) {
+                                            divisionEditor = divisionEditor.copy(
+                                                playoffTeamCount = if (value.isBlank()) null else value.toIntOrNull(),
+                                                error = null,
+                                            )
+                                        }
+                                    },
+                                    isError = tournamentPoolPlayEnabled &&
+                                        ((divisionBracketTeamCount ?: 0) < 2 ||
+                                            (
+                                                divisionPoolCount != null &&
+                                                    divisionBracketTeamCount != null &&
+                                                    divisionBracketTeamCount % divisionPoolCount != 0
+                                                )),
+                                    errorMessage = "Must be at least 2 and divide evenly by pools.",
+                                )
+                            }
                             NumberInputField(
                                 modifier = Modifier.weight(1f),
                                 value = divisionPoolCount?.toString().orEmpty(),
@@ -3889,16 +4018,6 @@ fun EventDetails(
                                 errorMessage = "Max teams must divide evenly by pools.",
                             )
                         }
-                        NumberInputField(
-                            modifier = Modifier.fillMaxWidth(),
-                            value = derivedPoolTeamCount?.toString().orEmpty(),
-                            label = "Pool Team Count",
-                            enabled = false,
-                            onValueChange = {},
-                            isError = tournamentPoolPlayEnabled && derivedPoolTeamCount == null,
-                            errorMessage = "Set an even pool count to calculate pool team count.",
-                            supportingText = "Calculated from division max teams divided by pool count.",
-                        )
                     }
 
                     if (!isNewEvent && !editEvent.singleDivision) {
@@ -4037,20 +4156,106 @@ fun EventDetails(
                         }
                     }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Button(
-                            onClick = { handleSaveDivisionDetail() },
-                            enabled = true,
-                        ) {
-                            Text(if (divisionEditor.editingId.isNullOrBlank()) "Add Division" else "Update Division")
+                    val showDivisionPlayoffTeamCount =
+                        editEvent.eventType == EventType.LEAGUE &&
+                            editEvent.includePlayoffs &&
+                            !editEvent.singleDivision
+                    val showPoolTeamCount =
+                        editEvent.eventType == EventType.TOURNAMENT &&
+                            editEvent.isTournamentPoolPlayEnabled()
+                    val actionRowPoolTeamCount = if (showPoolTeamCount) {
+                        derivePoolTeamCount(
+                            maxTeams = if (editEvent.singleDivision) {
+                                editEvent.maxParticipants.takeIf { value -> value >= 2 } ?: 0
+                            } else {
+                                divisionEditor.maxParticipants ?: 0
+                            },
+                            poolCount = divisionEditor.poolCount,
+                        )
+                    } else {
+                        null
+                    }
+                    val isEditingDivision = !divisionEditor.editingId.isNullOrBlank()
+                    @Composable
+                    fun DivisionActionLeadingField(modifier: Modifier) {
+                        when {
+                            showDivisionPlayoffTeamCount -> {
+                                NumberInputField(
+                                    modifier = modifier,
+                                    value = divisionEditor.playoffTeamCount?.toString().orEmpty(),
+                                    label = "Division Playoff Team Count",
+                                    enabled = divisionEditorReady,
+                                    onValueChange = { value ->
+                                        if (!divisionEditorReady) {
+                                            return@NumberInputField
+                                        }
+                                        if (value.isEmpty() || value.all { it.isDigit() }) {
+                                            val parsed = if (value.isBlank()) null else value.toIntOrNull()
+                                            divisionEditor = divisionEditor.copy(
+                                                playoffTeamCount = parsed,
+                                                error = null,
+                                            )
+                                        }
+                                    },
+                                    isError = (divisionEditor.playoffTeamCount ?: 0) < 2,
+                                    errorMessage = "Required and must be at least 2.",
+                                )
+                            }
+                            showPoolTeamCount -> {
+                                NumberInputField(
+                                    modifier = modifier,
+                                    value = actionRowPoolTeamCount?.toString().orEmpty(),
+                                    label = "Pool Team Count",
+                                    enabled = false,
+                                    onValueChange = {},
+                                    isError = actionRowPoolTeamCount == null,
+                                    errorMessage = "Derived from Pool Count and Max Teams",
+                                    supportingText = "Derived from Pool Count and Max Teams",
+                                )
+                            }
+                            else -> Spacer(modifier = modifier)
                         }
-                        if (!divisionEditor.editingId.isNullOrBlank()) {
-                            TextButton(onClick = { resetDivisionEditor() }) {
-                                Text("Cancel Edit")
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (isEditingDivision) {
+                            if (showDivisionPlayoffTeamCount || showPoolTeamCount) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.Top,
+                                ) {
+                                    DivisionActionLeadingField(Modifier.weight(1f))
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Button(
+                                    onClick = { handleSaveDivisionDetail() },
+                                    enabled = true,
+                                ) {
+                                    Text("Update Division")
+                                }
+                                TextButton(onClick = { resetDivisionEditor() }) {
+                                    Text("Cancel Edit")
+                                }
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                DivisionActionLeadingField(Modifier.weight(1f))
+                                Button(
+                                    onClick = { handleSaveDivisionDetail() },
+                                    enabled = true,
+                                ) {
+                                    Text("Add Division")
+                                }
                             }
                         }
                     }
@@ -4256,22 +4461,22 @@ fun EventDetails(
                                     Box(modifier = Modifier.weight(1f))
                                 }
 
-                                StandardTextField(
-                                    value = editEvent.prize,
-                                    onValueChange = {
-                                        if (it.length <= 50) onEditTournament {
-                                            copy(prize = it)
-                                        }
-                                    },
-                                    label = "Prize",
-                                    supportingText = "If there is a prize, enter it here"
-                                )
-
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.Top,
                                 ) {
+                                    StandardTextField(
+                                        modifier = Modifier.weight(1f),
+                                        value = editEvent.prize,
+                                        onValueChange = {
+                                            if (it.length <= 50) onEditTournament {
+                                                copy(prize = it)
+                                            }
+                                        },
+                                        label = "Prize",
+                                        supportingText = "If there is a prize, enter it here",
+                                    )
                                     NumberInputField(
                                         modifier = Modifier.weight(1f),
                                         value = if (editEvent.usesSets) {
@@ -4306,67 +4511,74 @@ fun EventDetails(
                                             ""
                                         },
                                     )
-                                    Box(modifier = Modifier.weight(1f))
                                 }
 
                                 if (editEvent.usesSets) {
+                                    val normalizedWinnerSetCount = remember(editEvent.winnerSetCount) {
+                                        when (editEvent.winnerSetCount) {
+                                            1, 3, 5 -> editEvent.winnerSetCount
+                                            else -> 1
+                                        }
+                                    }
+                                    val constrainedWinnerSetCount = remember(editEvent.winnerSetCount) {
+                                        when (editEvent.winnerSetCount) {
+                                            1, 3, 5 -> editEvent.winnerSetCount
+                                            else -> 1
+                                        }
+                                    }
+                                    val winnerFocusRequesters = remember(constrainedWinnerSetCount) {
+                                        List(constrainedWinnerSetCount) { FocusRequester() }
+                                    }
+                                    val normalizedLoserSetCount = remember(editEvent.loserSetCount) {
+                                        when (editEvent.loserSetCount) {
+                                            1, 3, 5 -> editEvent.loserSetCount
+                                            else -> 1
+                                        }
+                                    }
+                                    val constrainedLoserSetCount = remember(editEvent.loserSetCount) {
+                                        when (editEvent.loserSetCount) {
+                                            1, 3, 5 -> editEvent.loserSetCount
+                                            else -> 1
+                                        }
+                                    }
+                                    val loserFocusRequesters = remember(constrainedLoserSetCount) {
+                                        List(constrainedLoserSetCount) { FocusRequester() }
+                                    }
                                     Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(IntrinsicSize.Min),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                                         verticalAlignment = Alignment.Top,
                                     ) {
-                                        val normalizedWinnerSetCount = remember(editEvent.winnerSetCount) {
-                                            when (editEvent.winnerSetCount) {
-                                                1, 3, 5 -> editEvent.winnerSetCount
-                                                else -> 1
-                                            }
-                                        }
-
-                                        PlatformDropdown(
-                                            selectedValue = normalizedWinnerSetCount.toString(),
-                                            onSelectionChange = { selected ->
-                                                val newValue = selected.toInt()
-                                                onEditTournament {
-                                                    copy(
-                                                        winnerSetCount = newValue,
-                                                        winnerBracketPointsToVictory = List(newValue) { 21 }
-                                                    )
-                                                }
-                                            },
-                                            options = setCountOptions,
-                                            label = "Winner Set Count",
+                                        Column(
                                             modifier = Modifier.weight(1f),
-                                            isError = !isWinnerSetCountValid,
-                                            supportingText = if (!isWinnerSetCountValid) {
-                                                "Winner set count must be 1, 3, or 5."
-                                            } else {
-                                                ""
-                                            },
-                                        )
-
-                                        Box(modifier = Modifier.weight(1f))
-                                    }
-
-                                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                                        val constrainedWinnerSetCount = remember(editEvent.winnerSetCount) {
-                                            when (editEvent.winnerSetCount) {
-                                                1, 3, 5 -> editEvent.winnerSetCount
-                                                else -> 1
-                                            }
-                                        }
-
-                                        val focusRequesters = remember(constrainedWinnerSetCount) {
-                                            List(constrainedWinnerSetCount) { FocusRequester() }
-                                        }
-
-                                        FlowRow(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                            verticalArrangement = Arrangement.spacedBy(8.dp),
                                         ) {
+                                            PlatformDropdown(
+                                                selectedValue = normalizedWinnerSetCount.toString(),
+                                                onSelectionChange = { selected ->
+                                                    val newValue = selected.toInt()
+                                                    onEditTournament {
+                                                        copy(
+                                                            winnerSetCount = newValue,
+                                                            winnerBracketPointsToVictory = List(newValue) { 21 }
+                                                        )
+                                                    }
+                                                },
+                                                options = setCountOptions,
+                                                label = "Winner Set Count",
+                                                modifier = Modifier.fillMaxWidth(),
+                                                isError = !isWinnerSetCountValid,
+                                                supportingText = if (!isWinnerSetCountValid) {
+                                                    "Winner set count must be 1, 3, or 5."
+                                                } else {
+                                                    ""
+                                                },
+                                            )
                                             repeat(constrainedWinnerSetCount) { index ->
                                                 PointsTextField(
-                                                    modifier = Modifier.fillMaxWidth(0.48f),
+                                                    modifier = Modifier.fillMaxWidth(),
                                                     value = editEvent.winnerBracketPointsToVictory.getOrNull(
                                                         index
                                                     )?.toString() ?: "",
@@ -4400,34 +4612,30 @@ fun EventDetails(
                                                         index
                                                     )?.let { it <= 0 } ?: true,
                                                     errorMessage = "Points must be greater than 0",
-                                                    focusRequester = focusRequesters[index],
+                                                    focusRequester = winnerFocusRequesters[index],
                                                     nextFocus = {
                                                         if (index < constrainedWinnerSetCount - 1) {
-                                                            focusRequesters[index + 1].requestFocus()
+                                                            winnerFocusRequesters[index + 1].requestFocus()
                                                         }
                                                     })
                                             }
-                                        }
-                                        if (!isWinnerPointsValid) {
-                                            Text(
-                                                text = "Winner points must be greater than 0 for every set.",
-                                                color = MaterialTheme.colorScheme.error,
-                                            )
-                                        }
-                                    }
-
-                                    if (editEvent.doubleElimination) {
-                                        val normalizedLoserSetCount = remember(editEvent.loserSetCount) {
-                                            when (editEvent.loserSetCount) {
-                                                1, 3, 5 -> editEvent.loserSetCount
-                                                else -> 1
+                                            if (!isWinnerPointsValid) {
+                                                Text(
+                                                    text = "Winner points must be greater than 0 for every set.",
+                                                    color = MaterialTheme.colorScheme.error,
+                                                )
                                             }
                                         }
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            verticalAlignment = Alignment.Top,
-                                        ) {
+
+                                        if (editEvent.doubleElimination) {
+                                            VerticalDivider(
+                                                modifier = Modifier.fillMaxHeight(),
+                                                color = MaterialTheme.colorScheme.outlineVariant,
+                                            )
+                                            Column(
+                                                modifier = Modifier.weight(1f),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                            ) {
                                             PlatformDropdown(
                                                 selectedValue = normalizedLoserSetCount.toString(),
                                                 onSelectionChange = { selected ->
@@ -4441,7 +4649,7 @@ fun EventDetails(
                                                 },
                                                 options = setCountOptions,
                                                 label = "Loser Set Count",
-                                                modifier = Modifier.weight(1f),
+                                                modifier = Modifier.fillMaxWidth(),
                                                 isError = !isLoserSetCountValid,
                                                 supportingText = if (!isLoserSetCountValid) {
                                                     "Loser set count must be 1, 3, or 5."
@@ -4449,28 +4657,9 @@ fun EventDetails(
                                                     ""
                                                 },
                                             )
-                                            Box(modifier = Modifier.weight(1f))
-                                        }
-
-                                        val constrainedLoserSetCount = remember(editEvent.loserSetCount) {
-                                            when (editEvent.loserSetCount) {
-                                                1, 3, 5 -> editEvent.loserSetCount
-                                                else -> 1
-                                            }
-                                        }
-
-                                        val loserFocusRequesters = remember(constrainedLoserSetCount) {
-                                            List(constrainedLoserSetCount) { FocusRequester() }
-                                        }
-
-                                        FlowRow(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
                                             repeat(constrainedLoserSetCount) { index ->
                                                 PointsTextField(
-                                                    modifier = Modifier.fillMaxWidth(0.48f),
+                                                    modifier = Modifier.fillMaxWidth(),
                                                     value = editEvent.loserBracketPointsToVictory.getOrNull(
                                                         index
                                                     )?.toString() ?: "",
@@ -4503,14 +4692,16 @@ fun EventDetails(
                                                         }
                                                     })
                                             }
+                                            if (!isLoserPointsValid) {
+                                                Text(
+                                                    text = "Loser points must be greater than 0 for every set.",
+                                                    color = MaterialTheme.colorScheme.error,
+                                                )
+                                            }
                                         }
-                                        if (!isLoserPointsValid) {
-                                            Text(
-                                                text = "Loser points must be greater than 0 for every set.",
-                                                color = MaterialTheme.colorScheme.error,
-                                            )
+                                        } else {
+                                            Box(modifier = Modifier.weight(1f))
                                         }
-                                        Spacer(Modifier.height(12.dp))
                                     }
                                 } else {
                                     Spacer(Modifier.height(12.dp))
@@ -4547,7 +4738,8 @@ fun EventDetails(
                                 useManualTimeSlots = useManualTimeSlots,
                                 onUseManualTimeSlotsChange = onUseManualTimeSlotsChange,
                                 slotDivisionOptions = slotDivisionOptions,
-                                lockSlotDivisions = editEvent.singleDivision,
+                                showSlotDivisions = splitByDivisionScheduling,
+                                lockSlotDivisions = false,
                                 lockedDivisionIds = editEvent.divisions.normalizeDivisionIdentifiers(),
                                 fieldCountError = if (!isFieldCountValid) {
                                     "Field count must be at least 1."
@@ -4810,7 +5002,7 @@ private fun PriceWithFeesPreviewButton(
 
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(

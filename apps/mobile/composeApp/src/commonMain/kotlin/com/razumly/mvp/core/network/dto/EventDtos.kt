@@ -276,7 +276,7 @@ data class EventApiDto(
             waitListIds = waitListIds ?: emptyList(),
             userIds = userIds ?: emptyList(),
             teamIds = teamIds ?: emptyList(),
-            cancellationRefundHours = cancellationRefundHours ?: 0,
+            cancellationRefundHours = cancellationRefundHours,
             registrationCutoffHours = registrationCutoffHours ?: 0,
             seedColor = seedColor ?: Primary.toArgb(),
             sportId = sportId,

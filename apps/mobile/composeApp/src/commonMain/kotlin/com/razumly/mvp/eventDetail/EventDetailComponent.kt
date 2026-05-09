@@ -4882,6 +4882,8 @@ class DefaultEventDetailComponent(
         val selectedDivisionIds = event.divisions
             .normalizeDivisionIdentifiers()
             .ifEmpty { listOf(DEFAULT_DIVISION) }
+        val splitByDivision = !event.singleDivision && event.allowTeamSplitDefault == true
+        val selectedDivisionSet = selectedDivisionIds.toSet()
         val validFieldIds = event.fieldIds
             .map(String::trim)
             .filter(String::isNotBlank)
@@ -4901,11 +4903,12 @@ class DefaultEventDetailComponent(
             val mappedDivisionIds = slot.normalizedDivisionIds()
                 .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
                 .filter(String::isNotBlank)
+                .filter(selectedDivisionSet::contains)
                 .distinct()
-            val effectiveDivisionIds = if (event.singleDivision) {
-                selectedDivisionIds
-            } else {
+            val effectiveDivisionIds = if (splitByDivision) {
                 mappedDivisionIds.ifEmpty { selectedDivisionIds }
+            } else {
+                selectedDivisionIds
             }
 
             if (!slot.repeating) {
