@@ -3,6 +3,7 @@ package com.razumly.mvp.eventCreate
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
+import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.SportOfficialPositionTemplate
 import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
@@ -346,6 +347,27 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         val updatedEvent = harness.component.newEventState.value
         assertEquals(false, updatedEvent.doTeamsOfficiate)
         assertEquals(false, updatedEvent.teamOfficialsMaySwap)
+    }
+
+    @Test
+    fun disabling_team_officials_moves_team_staffing_back_to_schedule_mode() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+
+        harness.component.updateEventField {
+            copy(
+                doTeamsOfficiate = true,
+                officialSchedulingMode = OfficialSchedulingMode.TEAM_STAFFING,
+            )
+        }
+        advance()
+
+        harness.component.updateDoTeamsOfficiate(false)
+        advance()
+
+        val updatedEvent = harness.component.newEventState.value
+        assertEquals(false, updatedEvent.doTeamsOfficiate)
+        assertEquals(OfficialSchedulingMode.SCHEDULE, updatedEvent.officialSchedulingMode)
     }
 
     @Test

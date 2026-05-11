@@ -111,6 +111,7 @@ import com.razumly.mvp.core.data.dataTypes.officialPositionSummary
 import com.razumly.mvp.core.data.dataTypes.positionSummary
 import com.razumly.mvp.core.data.dataTypes.toLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
+import com.razumly.mvp.core.data.dataTypes.usesTeamOfficialScheduling
 import com.razumly.mvp.core.data.dataTypes.withLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.withTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
@@ -508,6 +509,7 @@ fun EventDetails(
                 defaultPriceCents = editEvent.priceCents,
                 defaultMaxParticipants = editEvent.maxParticipants,
                 defaultPlayoffTeamCount = editEvent.playoffTeamCount,
+                defaultPoolCount = normalizedDivisionDetails.firstOrNull()?.poolCount,
                 defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true,
                 defaultInstallmentCount = editEvent.installmentCount,
                 defaultInstallmentDueDates = editEvent.installmentDueDates,
@@ -522,6 +524,7 @@ fun EventDetails(
                 defaultPriceCents = editEvent.priceCents,
                 defaultMaxParticipants = editEvent.maxParticipants,
                 defaultPlayoffTeamCount = editEvent.playoffTeamCount,
+                defaultPoolCount = normalizedDivisionDetails.firstOrNull()?.poolCount,
                 defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true,
                 defaultInstallmentCount = editEvent.installmentCount,
                 defaultInstallmentDueDates = editEvent.installmentDueDates,
@@ -584,14 +587,25 @@ fun EventDetails(
         defaultPriceCents: Int,
         defaultMaxParticipants: Int,
         defaultPlayoffTeamCount: Int?,
+        defaultPoolCount: Int? = null,
     ): List<DivisionDetail> {
         val normalizedPriceCents = defaultPriceCents.coerceAtLeast(0)
         val normalizedMaxParticipants = defaultMaxParticipants.takeIf { value -> value >= 2 }
+        val normalizedPoolCount = defaultPoolCount?.takeIf { value -> value >= 1 }
         return details.map { detail ->
             detail.copy(
                 price = normalizedPriceCents,
                 maxParticipants = normalizedMaxParticipants,
                 playoffTeamCount = defaultPlayoffTeamCount,
+                poolCount = normalizedPoolCount ?: detail.poolCount,
+                poolTeamCount = if (normalizedPoolCount != null && normalizedMaxParticipants != null) {
+                    derivePoolTeamCount(
+                        maxTeams = normalizedMaxParticipants,
+                        poolCount = normalizedPoolCount,
+                    )
+                } else {
+                    detail.poolTeamCount
+                },
             )
         }
     }
@@ -1158,6 +1172,7 @@ fun EventDetails(
                 priceCents = normalizedPrice,
                 maxParticipants = normalizedMaxParticipants,
                 playoffTeamCount = normalizedPlayoffTeamCount,
+                poolCount = if (tournamentPoolPlayEnabled) divisionPoolCount else null,
             ),
         )
         divisionEditorDefaults = nextDefaults
@@ -2908,10 +2923,10 @@ fun EventDetails(
                                     add(
                                         DetailRowSpec(
                                             "Teams provide officials",
-                                            if (event.doTeamsOfficiate == true) "Yes" else "No",
+                                            if (event.usesTeamOfficialScheduling()) "Yes" else "No",
                                         ),
                                     )
-                                    if (event.doTeamsOfficiate == true) {
+                                    if (event.usesTeamOfficialScheduling()) {
                                         add(
                                             DetailRowSpec(
                                                 "Team officials may swap",
@@ -2934,11 +2949,11 @@ fun EventDetails(
                         },
                         editContent = {
                             LabeledCheckboxRow(
-                                checked = editEvent.doTeamsOfficiate == true,
+                                checked = editEvent.usesTeamOfficialScheduling(),
                                 label = "Teams provide officials",
                                 onCheckedChange = onUpdateDoTeamsOfficiate,
                             )
-                            if (editEvent.doTeamsOfficiate == true) {
+                            if (editEvent.usesTeamOfficialScheduling()) {
                                 LabeledCheckboxRow(
                                     checked = editEvent.teamOfficialsMaySwap == true,
                                     label = "Team officials may swap",
@@ -3481,6 +3496,9 @@ fun EventDetails(
                                     val explicitPlayoffCount =
                                         editEvent.playoffTeamCount
                                             ?: divisionDetailsForSettings.firstOrNull()?.playoffTeamCount
+                                    val explicitPoolCount =
+                                        divisionDetailsForSettings.firstOrNull()?.poolCount
+                                            ?: divisionEditor.poolCount
                                     val defaultInstallmentAmounts = editEvent.installmentAmounts.map { amount ->
                                         amount.coerceAtLeast(0)
                                     }
@@ -3521,6 +3539,11 @@ fun EventDetails(
                                                     maxParticipants = editEvent.maxParticipants
                                                         .takeIf { value -> value >= 2 },
                                                     playoffTeamCount = nextPlayoffCount,
+                                                    poolCount = explicitPoolCount,
+                                                    poolTeamCount = derivePoolTeamCount(
+                                                        maxTeams = editEvent.maxParticipants,
+                                                        poolCount = explicitPoolCount,
+                                                    ),
                                                     allowPaymentPlans = defaultAllowPaymentPlans,
                                                     installmentCount = defaultInstallmentCount,
                                                     installmentDueDates = if (defaultAllowPaymentPlans) {
@@ -3625,6 +3648,15 @@ fun EventDetails(
 
                     AnimatedVisibility(editEvent.singleDivision) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            val singleDivisionTournamentPoolPlayEnabled = editEvent.isTournamentPoolPlayEnabled()
+                            val singleDivisionPoolCount =
+                                divisionEditorDefaults.poolCount
+                                    ?: divisionDetailsForSettings.firstOrNull()?.poolCount
+                                    ?: divisionEditor.poolCount
+                            val singleDivisionPoolTeamCount = derivePoolTeamCount(
+                                maxTeams = editEvent.maxParticipants,
+                                poolCount = singleDivisionPoolCount,
+                            )
                             FlowRow(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -3656,6 +3688,11 @@ fun EventDetails(
                                                 defaultPriceCents = parsedPrice,
                                                 defaultMaxParticipants = maxParticipants,
                                                 defaultPlayoffTeamCount = if (includePlayoffs) playoffTeamCount else null,
+                                                defaultPoolCount = if (singleDivisionTournamentPoolPlayEnabled) {
+                                                    singleDivisionPoolCount
+                                                } else {
+                                                    null
+                                                },
                                             )
                                             copy(
                                                 priceCents = parsedPrice,
@@ -3666,6 +3703,14 @@ fun EventDetails(
                                     modifier = Modifier.fillMaxWidth(0.48f),
                                     label = "Price",
                                     enabled = hostHasAccount,
+                                    supportingContent = {
+                                        PriceWithFeesPreviewSupportingText(
+                                            amountCents = editEvent.priceCents,
+                                            eventType = editEvent.eventType,
+                                            baseLabel = "Price",
+                                            onShowBreakdown = { pricePreviewBreakdown = it },
+                                        )
+                                    },
                                 )
                                 NumberInputField(
                                     modifier = Modifier.fillMaxWidth(0.48f),
@@ -3694,6 +3739,11 @@ fun EventDetails(
                                                     defaultPriceCents = priceCents,
                                                     defaultMaxParticipants = parsedMaxParticipants,
                                                     defaultPlayoffTeamCount = if (includePlayoffs) playoffTeamCount else null,
+                                                    defaultPoolCount = if (singleDivisionTournamentPoolPlayEnabled) {
+                                                        singleDivisionPoolCount
+                                                    } else {
+                                                        null
+                                                    },
                                                 )
                                                 copy(
                                                     maxParticipants = parsedMaxParticipants,
@@ -3702,12 +3752,14 @@ fun EventDetails(
                                             }
                                         }
                                     },
-                                    isError = false,
+                                    isError = editEvent.maxParticipants < 2,
+                                    errorMessage = "Required and must be at least 2.",
                                 )
                                 if (
                                     editEvent.includePlayoffs &&
-                                    (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT)
+                                    editEvent.eventType == EventType.LEAGUE
                                 ) {
+                                    Spacer(modifier = Modifier.fillMaxWidth(0.48f))
                                     NumberInputField(
                                         modifier = Modifier.fillMaxWidth(0.48f),
                                         value = editEvent.playoffTeamCount?.toString().orEmpty(),
@@ -3732,6 +3784,7 @@ fun EventDetails(
                                                     defaultPriceCents = priceCents,
                                                     defaultMaxParticipants = maxParticipants,
                                                     defaultPlayoffTeamCount = parsedPlayoffCount,
+                                                    defaultPoolCount = null,
                                                 )
                                                 copy(
                                                     playoffTeamCount = parsedPlayoffCount,
@@ -3743,13 +3796,95 @@ fun EventDetails(
                                         errorMessage = "Required and must be at least 2.",
                                     )
                                 }
+                                if (singleDivisionTournamentPoolPlayEnabled) {
+                                    NumberInputField(
+                                        modifier = Modifier.fillMaxWidth(0.48f),
+                                        value = editEvent.playoffTeamCount?.toString().orEmpty(),
+                                        label = "Bracket Teams",
+                                        onValueChange = { value ->
+                                            if (value.isNotEmpty() && !value.all { it.isDigit() }) {
+                                                return@NumberInputField
+                                            }
+                                            val parsedBracketTeams = value.toIntOrNull()
+                                            divisionEditorDefaults = divisionEditorDefaults.copy(
+                                                playoffTeamCount = parsedBracketTeams?.takeIf { count -> count >= 2 },
+                                            )
+                                            if (divisionEditor.editingId.isNullOrBlank()) {
+                                                divisionEditor = divisionEditor.copy(
+                                                    playoffTeamCount = parsedBracketTeams,
+                                                    error = null,
+                                                )
+                                            }
+                                            onEditEvent {
+                                                val nextDetails = applySingleDivisionDefaultsToDetails(
+                                                    details = divisionDetails,
+                                                    defaultPriceCents = priceCents,
+                                                    defaultMaxParticipants = maxParticipants,
+                                                    defaultPlayoffTeamCount = parsedBracketTeams,
+                                                    defaultPoolCount = singleDivisionPoolCount,
+                                                )
+                                                copy(
+                                                    playoffTeamCount = parsedBracketTeams,
+                                                    divisionDetails = nextDetails,
+                                                )
+                                            }
+                                        },
+                                        isError = (editEvent.playoffTeamCount ?: 0) < 2 ||
+                                            (
+                                                singleDivisionPoolCount != null &&
+                                                    editEvent.playoffTeamCount != null &&
+                                                    editEvent.playoffTeamCount % singleDivisionPoolCount != 0
+                                                ),
+                                        errorMessage = "Must be at least 2 and divide evenly by pools.",
+                                    )
+                                    NumberInputField(
+                                        modifier = Modifier.fillMaxWidth(0.48f),
+                                        value = singleDivisionPoolCount?.toString().orEmpty(),
+                                        label = "Pool Count",
+                                        onValueChange = { value ->
+                                            if (value.isNotEmpty() && !value.all { it.isDigit() }) {
+                                                return@NumberInputField
+                                            }
+                                            val parsedPoolCount = value.toIntOrNull()
+                                            divisionEditorDefaults = divisionEditorDefaults.copy(
+                                                poolCount = parsedPoolCount?.takeIf { count -> count >= 1 },
+                                            )
+                                            if (divisionEditor.editingId.isNullOrBlank()) {
+                                                divisionEditor = divisionEditor.copy(
+                                                    poolCount = parsedPoolCount,
+                                                    error = null,
+                                                )
+                                            }
+                                            onEditEvent {
+                                                val nextDetails = applySingleDivisionDefaultsToDetails(
+                                                    details = divisionDetails,
+                                                    defaultPriceCents = priceCents,
+                                                    defaultMaxParticipants = maxParticipants,
+                                                    defaultPlayoffTeamCount = playoffTeamCount,
+                                                    defaultPoolCount = parsedPoolCount,
+                                                )
+                                                copy(divisionDetails = nextDetails)
+                                            }
+                                        },
+                                        isError = (singleDivisionPoolCount ?: 0) < 1 ||
+                                            (
+                                                singleDivisionPoolCount != null &&
+                                                    editEvent.maxParticipants % singleDivisionPoolCount != 0
+                                                ),
+                                        errorMessage = "Max teams must divide evenly by pools.",
+                                    )
+                                    NumberInputField(
+                                        modifier = Modifier.fillMaxWidth(0.48f),
+                                        value = singleDivisionPoolTeamCount?.toString().orEmpty(),
+                                        label = "Pool Team Count",
+                                        enabled = false,
+                                        onValueChange = {},
+                                        isError = singleDivisionPoolTeamCount == null,
+                                        errorMessage = "Derived from Pool Count and Max Teams",
+                                        supportingText = "Derived from Pool Count and Max Teams",
+                                    )
+                                }
                             }
-                            PriceWithFeesPreviewButton(
-                                amountCents = editEvent.priceCents,
-                                eventType = editEvent.eventType,
-                                baseLabel = "Price",
-                                onShowBreakdown = { pricePreviewBreakdown = it },
-                            )
                         }
                     }
 
@@ -3914,6 +4049,14 @@ fun EventDetails(
                                     modifier = Modifier.weight(1f),
                                     label = "Division Price",
                                     enabled = hostHasAccount && divisionEditorReady,
+                                    supportingContent = {
+                                        PriceWithFeesPreviewSupportingText(
+                                            amountCents = divisionEditor.priceCents,
+                                            eventType = editEvent.eventType,
+                                            baseLabel = "Division price",
+                                            onShowBreakdown = { pricePreviewBreakdown = it },
+                                        )
+                                    },
                                 )
                                 NumberInputField(
                                     modifier = Modifier.weight(1f),
@@ -3941,16 +4084,10 @@ fun EventDetails(
                                     errorMessage = "Required and must be at least 2.",
                                 )
                             }
-                            PriceWithFeesPreviewButton(
-                                amountCents = divisionEditor.priceCents,
-                                eventType = editEvent.eventType,
-                                baseLabel = "Division price",
-                                onShowBreakdown = { pricePreviewBreakdown = it },
-                            )
                         }
                     }
 
-                    if (editEvent.eventType == EventType.TOURNAMENT) {
+                    if (editEvent.eventType == EventType.TOURNAMENT && !editEvent.singleDivision) {
                         val tournamentPoolPlayEnabled = editEvent.isTournamentPoolPlayEnabled()
                         val divisionMaxTeams = if (editEvent.singleDivision) {
                             editEvent.maxParticipants.takeIf { value -> value >= 2 } ?: 0
@@ -4162,6 +4299,7 @@ fun EventDetails(
                             !editEvent.singleDivision
                     val showPoolTeamCount =
                         editEvent.eventType == EventType.TOURNAMENT &&
+                            !editEvent.singleDivision &&
                             editEvent.isTournamentPoolPlayEnabled()
                     val actionRowPoolTeamCount = if (showPoolTeamCount) {
                         derivePoolTeamCount(
@@ -4984,7 +5122,7 @@ private data class PricePreviewBreakdown(
 }
 
 @Composable
-private fun PriceWithFeesPreviewButton(
+private fun PriceWithFeesPreviewSupportingText(
     amountCents: Int,
     eventType: EventType,
     baseLabel: String,
@@ -5002,7 +5140,7 @@ private fun PriceWithFeesPreviewButton(
 
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -5010,12 +5148,12 @@ private fun PriceWithFeesPreviewButton(
             style = MaterialTheme.typography.bodySmall,
             color = Color(localImageScheme.current.onSurfaceVariant),
         )
-        TextButton(
-            onClick = { onShowBreakdown(breakdown) },
-            contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp),
-        ) {
-            Text("Breakdown")
-        }
+        Text(
+            text = "Breakdown",
+            modifier = Modifier.clickable { onShowBreakdown(breakdown) },
+            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+            color = Color(localImageScheme.current.primary),
+        )
     }
 }
 

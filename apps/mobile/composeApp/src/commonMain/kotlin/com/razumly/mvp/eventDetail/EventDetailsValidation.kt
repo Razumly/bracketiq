@@ -151,7 +151,12 @@ internal fun computeEventValidationResult(
 ): EventValidationResult {
     val isNameValid = editEvent.name.isNotBlank()
     val isPriceValid = editEvent.priceCents >= 0
-    val isMaxParticipantsValid = true
+    val isMaxParticipantsValid = if (editEvent.singleDivision) {
+        editEvent.maxParticipants >= 2
+    } else {
+        divisionDetailsForSettings.isNotEmpty() &&
+            divisionDetailsForSettings.all { detail -> (detail.maxParticipants ?: 0) >= 2 }
+    }
     val isTeamSizeValid = editEvent.teamSizeLimit >= 1
     val isLocationValid = editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0
     val isSkillLevelValid = editEvent.eventType == EventType.LEAGUE || editEvent.divisions.isNotEmpty()
@@ -271,6 +276,7 @@ internal fun computeEventValidationResult(
     val isPaymentPlansValid = paymentPlanValidationErrors.isEmpty()
 
     val isValid = isPriceValid &&
+        isMaxParticipantsValid &&
         isTeamSizeValid &&
         isWinnerSetCountValid &&
         isWinnerPointsValid &&
@@ -301,6 +307,16 @@ internal fun computeEventValidationResult(
         }
         if (!isPriceValid) {
             add("Price must be 0 or higher.")
+        }
+        if (!isMaxParticipantsValid) {
+            add(
+                when {
+                    editEvent.singleDivision && editEvent.teamSignup -> "Max teams must be at least 2."
+                    editEvent.singleDivision -> "Max participants must be at least 2."
+                    editEvent.teamSignup -> "Each division must have max teams of at least 2."
+                    else -> "Each division must have max participants of at least 2."
+                },
+            )
         }
         if (!isTeamSizeValid) {
             add("Team size must be at least 1.")

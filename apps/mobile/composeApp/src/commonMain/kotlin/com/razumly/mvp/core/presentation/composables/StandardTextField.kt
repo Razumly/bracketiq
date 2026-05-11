@@ -50,6 +50,7 @@ fun StandardTextField(
     keyboardType: String = "default",
     isError: Boolean = false,
     supportingText: String = "",
+    supportingContent: (@Composable () -> Unit)? = null,
     enabled: Boolean = true,
     readOnly: Boolean = false,
     trailingIcon: @Composable (() -> Unit)? = null,
@@ -154,6 +155,12 @@ fun StandardTextField(
         imeAction = imeAction,
         autoCorrectEnabled = if (usesPasswordKeyboard) false else null,
     )
+    val supportingTextContent: (@Composable () -> Unit)? =
+        supportingContent ?: if (supportingText.isNotEmpty()) {
+            { Text(supportingText) }
+        } else {
+            null
+        }
 
     val defaultColors = OutlinedTextFieldDefaults.colors(
         focusedTextColor = MaterialTheme.colorScheme.onSurface,
@@ -242,7 +249,7 @@ fun StandardTextField(
                 textStyle = finalTextStyle,
                 visualTransformation = visualTransformation,
                 isError = isError,
-                supportingText = if (supportingText.isNotEmpty()) ({ Text(supportingText) }) else null,
+                supportingText = supportingTextContent,
                 trailingIcon = trailingIcon,
                 leadingIcon = leadingIcon,
                 keyboardOptions = keyboardOptionsValue,
@@ -283,7 +290,7 @@ fun StandardTextField(
             onSend = { runDoneAction() },
         ),
         isError = isError,
-        supportingText = if (supportingText.isNotEmpty()) ({ Text(supportingText) }) else null,
+        supportingText = supportingTextContent,
         trailingIcon = trailingIcon,
         leadingIcon = leadingIcon,
         singleLine = true,

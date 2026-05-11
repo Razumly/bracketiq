@@ -28,6 +28,8 @@ import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.removeOfficialUser
 import com.razumly.mvp.core.data.dataTypes.shouldReplaceOfficialPositionsWithSportDefaults
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
+import com.razumly.mvp.core.data.dataTypes.usesTeamOfficialScheduling
+import com.razumly.mvp.core.data.dataTypes.withDoTeamsOfficiate
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
@@ -602,17 +604,14 @@ class DefaultCreateEventComponent(
 
     override fun updateDoTeamsOfficiate(doTeamsOfficiate: Boolean) {
         updateEventField {
-            copy(
-                doTeamsOfficiate = doTeamsOfficiate,
-                teamOfficialsMaySwap = if (doTeamsOfficiate) teamOfficialsMaySwap else false,
-            )
+            withDoTeamsOfficiate(doTeamsOfficiate)
         }
     }
 
     override fun updateTeamOfficialsMaySwap(teamOfficialsMaySwap: Boolean) {
         updateEventField {
             copy(
-                teamOfficialsMaySwap = if (doTeamsOfficiate == true) teamOfficialsMaySwap else false,
+                teamOfficialsMaySwap = if (usesTeamOfficialScheduling()) teamOfficialsMaySwap else false,
             )
         }
     }

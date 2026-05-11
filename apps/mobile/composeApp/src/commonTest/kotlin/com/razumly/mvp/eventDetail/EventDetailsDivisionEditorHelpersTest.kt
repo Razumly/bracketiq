@@ -271,4 +271,20 @@ class EventDetailsDivisionEditorHelpersTest {
         assertEquals("group alpha", "  Group   Alpha ".normalizeDivisionNameKey())
         assertEquals("group alpha", "group alpha".normalizeDivisionNameKey())
     }
+
+    @Test
+    fun default_division_editor_state_keeps_default_pool_count() {
+        val state = defaultDivisionEditorState(
+            defaultPriceCents = 0,
+            defaultMaxParticipants = 12,
+            defaultPlayoffTeamCount = 6,
+            defaultPoolCount = 3,
+            defaultAllowPaymentPlans = false,
+            defaultInstallmentCount = null,
+            defaultInstallmentDueDates = emptyList(),
+            defaultInstallmentAmounts = emptyList(),
+        )
+
+        assertEquals(3, state.poolCount)
+    }
 }

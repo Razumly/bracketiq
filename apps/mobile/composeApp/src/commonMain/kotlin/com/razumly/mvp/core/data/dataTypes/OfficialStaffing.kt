@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class OfficialSchedulingMode {
     STAFFING,
+    TEAM_STAFFING,
     SCHEDULE,
     OFF,
 }
@@ -51,8 +52,34 @@ data class MatchOfficialAssignment(
 
 fun OfficialSchedulingMode.label(): String = when (this) {
     OfficialSchedulingMode.STAFFING -> "Staffing first"
+    OfficialSchedulingMode.TEAM_STAFFING -> "Team staffing"
     OfficialSchedulingMode.SCHEDULE -> "Schedule first"
     OfficialSchedulingMode.OFF -> "Ignore staffing conflicts"
+}
+
+fun OfficialSchedulingMode.requiresTeamOfficials(): Boolean = this == OfficialSchedulingMode.TEAM_STAFFING
+
+fun Event.usesTeamOfficialScheduling(): Boolean =
+    doTeamsOfficiate == true || officialSchedulingMode.requiresTeamOfficials()
+
+fun Event.withDoTeamsOfficiate(doTeamsOfficiate: Boolean): Event = copy(
+    doTeamsOfficiate = doTeamsOfficiate,
+    teamOfficialsMaySwap = if (doTeamsOfficiate) teamOfficialsMaySwap else false,
+    officialSchedulingMode = if (!doTeamsOfficiate && officialSchedulingMode.requiresTeamOfficials()) {
+        OfficialSchedulingMode.SCHEDULE
+    } else {
+        officialSchedulingMode
+    },
+)
+
+fun Event.withOfficialSchedulingMode(mode: OfficialSchedulingMode): Event {
+    val requiresTeamOfficials = mode.requiresTeamOfficials()
+    val nextDoTeamsOfficiate = if (requiresTeamOfficials) true else doTeamsOfficiate
+    return copy(
+        officialSchedulingMode = mode,
+        doTeamsOfficiate = nextDoTeamsOfficiate,
+        teamOfficialsMaySwap = if (nextDoTeamsOfficiate == true) teamOfficialsMaySwap else false,
+    )
 }
 
 fun buildEventOfficialPositionId(

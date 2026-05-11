@@ -166,7 +166,7 @@ private fun CollapsibleSectionHeaderCard(
         targetValue = if (isPinned) topInset else 0.dp,
         label = "pinnedHeaderTopInset",
     )
-    val pinnedHeaderOffset = (pinnedTopInset - stickyHeaderTopSpacing).coerceAtLeast(0.dp)
+    val pinnedHeaderTopPadding = (pinnedTopInset - stickyHeaderTopSpacing).coerceAtLeast(0.dp)
 
     Box(
         modifier = Modifier
@@ -177,10 +177,12 @@ private fun CollapsibleSectionHeaderCard(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .offset(y = pinnedHeaderOffset)
                 .padding(
                     start = horizontalCardPadding,
                     end = horizontalCardPadding,
+                    top = pinnedHeaderTopPadding,
+                )
+                .padding(
                     top = stickyHeaderTopSpacing,
                     bottom = if (expanded) 0.dp else 6.dp,
                 ),

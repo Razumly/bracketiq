@@ -49,6 +49,7 @@ internal fun defaultDivisionEditorState(
     defaultPriceCents: Int,
     defaultMaxParticipants: Int,
     defaultPlayoffTeamCount: Int?,
+    defaultPoolCount: Int? = null,
     defaultAllowPaymentPlans: Boolean,
     defaultInstallmentCount: Int?,
     defaultInstallmentDueDates: List<String>,
@@ -57,6 +58,7 @@ internal fun defaultDivisionEditorState(
 ): DivisionEditorState {
     val fallbackMax = defaultMaxParticipants.takeIf { value -> value >= 2 }
     val fallbackPlayoff = defaultPlayoffTeamCount?.coerceAtLeast(2)
+    val fallbackPoolCount = defaultPoolCount?.takeIf { value -> value >= 1 }
     val normalizedInstallmentAmounts = defaultInstallmentAmounts.map { amount ->
         amount.coerceAtLeast(0)
     }
@@ -84,6 +86,7 @@ internal fun defaultDivisionEditorState(
         priceCents = defaultPriceCents.coerceAtLeast(0),
         maxParticipants = fallbackMax,
         playoffTeamCount = fallbackPlayoff,
+        poolCount = fallbackPoolCount,
         allowPaymentPlans = normalizedAllowPaymentPlans,
         installmentCount = if (normalizedAllowPaymentPlans) normalizedInstallmentCount else 0,
         installmentDueDates = if (normalizedAllowPaymentPlans) normalizedInstallmentDueDates else emptyList(),

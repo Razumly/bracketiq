@@ -41,6 +41,7 @@ import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.updateOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.updateOfficialUserPositions
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.withOfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
@@ -215,7 +216,7 @@ fun CreateEventScreen(
         remember(component) {
             { mode ->
                 component.updateEventField {
-                    copy(officialSchedulingMode = mode)
+                    withOfficialSchedulingMode(mode)
                 }
             }
         }

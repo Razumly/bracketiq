@@ -10,6 +10,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.requiresTeamOfficials
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import kotlinx.serialization.Serializable
@@ -95,8 +96,9 @@ data class EventDTO(
     val allowTeamSplitDefault: Boolean? = null,
     val requiredTemplateIds: List<String> = emptyList(),
 ) {
-    fun toEvent(id: String): Event =
-        Event(
+    fun toEvent(id: String): Event {
+        val effectiveDoTeamsOfficiate = if (officialSchedulingMode.requiresTeamOfficials()) true else doTeamsOfficiate
+        return Event(
             doubleElimination = doubleElimination,
             winnerSetCount = winnerSetCount,
             loserSetCount = loserSetCount,
@@ -154,8 +156,8 @@ data class EventDTO(
             matchDurationMinutes = matchDurationMinutes,
             setDurationMinutes = setDurationMinutes,
             setsPerMatch = setsPerMatch,
-            doTeamsOfficiate = doTeamsOfficiate,
-            teamOfficialsMaySwap = if (doTeamsOfficiate == true) teamOfficialsMaySwap else false,
+            doTeamsOfficiate = effectiveDoTeamsOfficiate,
+            teamOfficialsMaySwap = if (effectiveDoTeamsOfficiate == true) teamOfficialsMaySwap else false,
             matchRulesOverride = matchRulesOverride,
             autoCreatePointMatchIncidents = autoCreatePointMatchIncidents,
             resolvedMatchRules = resolvedMatchRules,
@@ -175,4 +177,5 @@ data class EventDTO(
             allowTeamSplitDefault = allowTeamSplitDefault,
             requiredTemplateIds = requiredTemplateIds,
         )
+    }
 }

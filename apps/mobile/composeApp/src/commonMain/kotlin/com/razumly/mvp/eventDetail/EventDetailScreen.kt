@@ -140,6 +140,9 @@ import com.razumly.mvp.core.data.dataTypes.removeOfficialUser
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.updateOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.updateOfficialUserPositions
+import com.razumly.mvp.core.data.dataTypes.usesTeamOfficialScheduling
+import com.razumly.mvp.core.data.dataTypes.withDoTeamsOfficiate
+import com.razumly.mvp.core.data.dataTypes.withOfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
@@ -3886,22 +3889,19 @@ fun EventDetailScreen(
                             divisionTypeParameters = divisionTypeParameters,
                             onUpdateDoTeamsOfficiate = { doTeamsOfficiate ->
                                 component.editEventField {
-                                    copy(
-                                        doTeamsOfficiate = doTeamsOfficiate,
-                                        teamOfficialsMaySwap = if (doTeamsOfficiate) teamOfficialsMaySwap else false,
-                                    )
+                                    withDoTeamsOfficiate(doTeamsOfficiate)
                                 }
                             },
                             onUpdateTeamOfficialsMaySwap = { teamOfficialsMaySwap ->
                                 component.editEventField {
                                     copy(
-                                        teamOfficialsMaySwap = if (doTeamsOfficiate == true) teamOfficialsMaySwap else false,
+                                        teamOfficialsMaySwap = if (usesTeamOfficialScheduling()) teamOfficialsMaySwap else false,
                                     )
                                 }
                             },
                             onUpdateOfficialSchedulingMode = { mode ->
                                 component.editEventField {
-                                    copy(officialSchedulingMode = mode)
+                                    withOfficialSchedulingMode(mode)
                                 }
                             },
                             onLoadOfficialPositionDefaults = {

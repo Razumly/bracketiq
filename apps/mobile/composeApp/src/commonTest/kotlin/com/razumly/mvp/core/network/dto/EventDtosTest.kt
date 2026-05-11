@@ -712,6 +712,46 @@ class EventDtosTest {
     }
 
     @Test
+    fun event_api_dto_maps_team_staffing_and_enables_team_officials() {
+        val dto = EventApiDto(
+            id = "event-team-staffing",
+            name = "API Event",
+            hostId = "host-team-staffing",
+            start = "2026-02-10T00:00:00Z",
+            end = "2026-02-10T01:00:00Z",
+            officialSchedulingMode = "TEAM_STAFFING",
+            doTeamsOfficiate = false,
+            teamOfficialsMaySwap = true,
+        )
+
+        val event = dto.toEventOrNull()
+
+        assertEquals(OfficialSchedulingMode.TEAM_STAFFING, event?.officialSchedulingMode)
+        assertEquals(true, event?.doTeamsOfficiate)
+        assertEquals(true, event?.teamOfficialsMaySwap)
+    }
+
+    @Test
+    fun to_update_dto_forces_team_officials_for_team_staffing() {
+        val event = Event(
+            id = "event-team-staffing-update",
+            name = "Team Staffing Event",
+            hostId = "host-team-staffing-update",
+            start = Instant.fromEpochMilliseconds(1_700_000_000_000),
+            end = Instant.fromEpochMilliseconds(1_700_003_600_000),
+            officialSchedulingMode = OfficialSchedulingMode.TEAM_STAFFING,
+            doTeamsOfficiate = false,
+            teamOfficialsMaySwap = true,
+        )
+
+        val dto = event.toUpdateDto()
+
+        assertEquals("TEAM_STAFFING", dto.officialSchedulingMode)
+        assertEquals(true, dto.doTeamsOfficiate)
+        assertEquals(true, dto.teamOfficialsMaySwap)
+    }
+
+    @Test
     fun event_api_dto_defaults_official_scheduling_mode_to_schedule_when_missing() {
         val dto = EventApiDto(
             id = "event-23",

@@ -227,8 +227,9 @@ fun Event.lifecycleStateLabel(): String {
     }
 }
 
-fun Event.toEventDTO(): EventDTO =
-    EventDTO(
+fun Event.toEventDTO(): EventDTO {
+    val effectiveDoTeamsOfficiate = if (officialSchedulingMode.requiresTeamOfficials()) true else doTeamsOfficiate
+    return EventDTO(
         id = id,
         name = name,
         description = description,
@@ -287,8 +288,8 @@ fun Event.toEventDTO(): EventDTO =
         matchDurationMinutes = matchDurationMinutes,
         setDurationMinutes = setDurationMinutes,
         setsPerMatch = setsPerMatch,
-        doTeamsOfficiate = doTeamsOfficiate,
-        teamOfficialsMaySwap = if (doTeamsOfficiate == true) teamOfficialsMaySwap else false,
+        doTeamsOfficiate = effectiveDoTeamsOfficiate,
+        teamOfficialsMaySwap = if (effectiveDoTeamsOfficiate == true) teamOfficialsMaySwap else false,
         matchRulesOverride = matchRulesOverride,
         autoCreatePointMatchIncidents = autoCreatePointMatchIncidents,
         resolvedMatchRules = resolvedMatchRules,
@@ -307,3 +308,4 @@ fun Event.toEventDTO(): EventDTO =
         allowTeamSplitDefault = allowTeamSplitDefault,
         requiredTemplateIds = requiredTemplateIds,
     )
+}

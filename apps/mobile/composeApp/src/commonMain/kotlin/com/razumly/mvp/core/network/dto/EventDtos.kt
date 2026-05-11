@@ -15,6 +15,7 @@ import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.requiresTeamOfficials
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionDetails
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
@@ -253,6 +254,17 @@ data class EventApiDto(
             )
         }
 
+        val resolvedOfficialSchedulingMode = runCatching {
+            OfficialSchedulingMode.valueOf(
+                officialSchedulingMode?.trim()?.uppercase() ?: OfficialSchedulingMode.SCHEDULE.name,
+            )
+        }.getOrDefault(OfficialSchedulingMode.SCHEDULE)
+        val effectiveDoTeamsOfficiate = if (resolvedOfficialSchedulingMode.requiresTeamOfficials()) {
+            true
+        } else {
+            doTeamsOfficiate
+        }
+
         return Event(
             id = resolvedId,
             name = resolvedName,
@@ -305,19 +317,15 @@ data class EventApiDto(
             matchDurationMinutes = matchDurationMinutes,
             setDurationMinutes = setDurationMinutes,
             setsPerMatch = setsPerMatch,
-            doTeamsOfficiate = doTeamsOfficiate,
-            teamOfficialsMaySwap = if (doTeamsOfficiate == true) teamOfficialsMaySwap else false,
+            doTeamsOfficiate = effectiveDoTeamsOfficiate,
+            teamOfficialsMaySwap = if (effectiveDoTeamsOfficiate == true) teamOfficialsMaySwap else false,
             matchRulesOverride = matchRulesOverride,
             autoCreatePointMatchIncidents = autoCreatePointMatchIncidents ?: false,
             resolvedMatchRules = resolvedMatchRules,
             restTimeMinutes = restTimeMinutes,
             state = state ?: "UNPUBLISHED",
             pointsToVictory = pointsToVictory ?: emptyList(),
-            officialSchedulingMode = runCatching {
-                OfficialSchedulingMode.valueOf(
-                    officialSchedulingMode?.trim()?.uppercase() ?: OfficialSchedulingMode.SCHEDULE.name,
-                )
-            }.getOrDefault(OfficialSchedulingMode.SCHEDULE),
+            officialSchedulingMode = resolvedOfficialSchedulingMode,
             officialPositions = officialPositions ?: emptyList(),
             eventOfficials = eventOfficials ?: emptyList(),
             officialIds = officialIds ?: emptyList(),
@@ -833,6 +841,8 @@ fun Event.toUpdateDto(
         )
     }
 
+    val effectiveDoTeamsOfficiate = if (officialSchedulingMode.requiresTeamOfficials()) true else doTeamsOfficiate
+
     return EventUpdateDto(
         name = name,
         start = start.toString(),
@@ -894,8 +904,8 @@ fun Event.toUpdateDto(
         organizationId = if (includeOrganizationId) organizationId else null,
         autoCancellation = autoCancellation,
         eventType = eventType.name,
-        doTeamsOfficiate = doTeamsOfficiate,
-        teamOfficialsMaySwap = if (doTeamsOfficiate == true) teamOfficialsMaySwap else false,
+        doTeamsOfficiate = effectiveDoTeamsOfficiate,
+        teamOfficialsMaySwap = if (effectiveDoTeamsOfficiate == true) teamOfficialsMaySwap else false,
         matchRulesOverride = matchRulesOverride,
         autoCreatePointMatchIncidents = autoCreatePointMatchIncidents,
         officialIds = officialIds,

@@ -13,6 +13,7 @@ fun MoneyInputField(
     placeholder: String = "0",
     isError: Boolean = false,
     supportingText: String = "",
+    supportingContent: (@Composable () -> Unit)? = null,
     enabled: Boolean = true,
     readOnly: Boolean = false
 ) {
@@ -25,6 +26,7 @@ fun MoneyInputField(
         keyboardType = "money",
         isError = isError,
         supportingText = supportingText,
+        supportingContent = supportingContent,
         enabled = enabled,
         readOnly = readOnly,
         inputFilter = MoneyInputUtils::moneyInputFilter
