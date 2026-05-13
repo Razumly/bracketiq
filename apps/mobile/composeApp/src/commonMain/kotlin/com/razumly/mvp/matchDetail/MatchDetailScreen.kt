@@ -26,9 +26,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -387,6 +389,7 @@ private fun isTeamAgnosticIncidentType(type: String): Boolean = when (type.trim(
 fun MatchDetailScreen(
     component: MatchContentComponent,
     mapComponent: MapComponent,
+    onBackClick: () -> Unit,
 ) {
     val match by component.matchWithTeams.collectAsState()
     val event by component.event.collectAsState()
@@ -916,6 +919,28 @@ fun MatchDetailScreen(
                 },
                 onAddIncident = { openIncidentDialog(match.match.team2Id) },
             )
+        }
+
+        if (!showMap) {
+            Box(
+                modifier = Modifier
+                    .padding(top = 64.dp, start = 16.dp)
+                    .align(Alignment.TopStart)
+            ) {
+                IconButton(
+                    onClick = onBackClick,
+                    modifier = Modifier.background(
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                        shape = CircleShape,
+                    ),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
         }
 
         Column(

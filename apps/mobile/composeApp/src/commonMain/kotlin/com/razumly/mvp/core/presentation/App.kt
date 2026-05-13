@@ -242,7 +242,7 @@ private fun AppContent(
                 }
 
                 is RootComponent.Child.MatchContent -> {
-                    MatchDetailScreen(instance.component, instance.mapComponent)
+                    MatchDetailScreen(instance.component, instance.mapComponent, root::onBackClicked)
                 }
 
                 is RootComponent.Child.ChatList -> {
