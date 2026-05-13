@@ -61,6 +61,7 @@ internal class MobileApiTestSession private constructor(
     }
 
     fun close() {
+        eventRepository.close()
         httpClient.close()
         database.close()
     }

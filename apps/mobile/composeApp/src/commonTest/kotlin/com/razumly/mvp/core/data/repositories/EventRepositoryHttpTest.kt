@@ -1513,14 +1513,15 @@ class EventRepositoryHttpTest {
                             "teamIds": []
                           },
                           "participants": {
-                            "teamIds": [],
+                            "teamIds": ["team_1", "team_2", "team_3", "team_4"],
                             "userIds": [],
                             "waitListIds": [],
                             "freeAgentIds": ["u1"],
                             "divisions": []
                           },
                           "users": [{"id":"u1","firstName":"Test","lastName":"User","userName":"u1"}],
-                          "participantCount": 0
+                          "participantCount": 4,
+                          "participantCapacity": 4
                         }
                     """.trimIndent(),
                     status = HttpStatusCode.OK,
@@ -1537,6 +1538,8 @@ class EventRepositoryHttpTest {
 
         val teamSignupEvent = makeEvent(id = "e1", hostId = "h1", userIds = emptyList()).copy(
             teamSignup = true,
+            teamIds = listOf("team_1", "team_2", "team_3", "team_4"),
+            maxParticipants = 4,
         )
 
         repo.addCurrentUserToEvent(teamSignupEvent).getOrThrow()

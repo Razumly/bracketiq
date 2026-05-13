@@ -65,6 +65,7 @@ import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -502,6 +503,10 @@ class EventRepository(
                 }
             }
         }
+    }
+
+    fun close() {
+        scope.cancel()
     }
 
     private fun filterHiddenEvents(events: List<Event>, currentUser: UserData?): List<Event> {
@@ -1283,11 +1288,15 @@ class EventRepository(
     ): Result<SelfRegistrationResult> =
         runCatching {
             val currentUser = userRepository.currentUser.value.getOrThrow()
-            val eventAtCapacity = isEventAtCapacity(
-                event = event,
-                preferredDivisionId = preferredDivisionId,
-                occurrence = occurrence,
-            )
+            val eventAtCapacity = if (event.teamSignup) {
+                false
+            } else {
+                isEventAtCapacity(
+                    event = event,
+                    preferredDivisionId = preferredDivisionId,
+                    occurrence = occurrence,
+                )
+            }
             val divisionPayload = resolveRegistrationDivisionPayload(
                 event = event,
                 preferredDivisionId = preferredDivisionId,
