@@ -636,8 +636,7 @@ class DefaultEventDetailComponent(
     }
 
     private fun canEditEventDetails(targetEvent: Event): Boolean {
-        return targetEvent.organizationId.isNullOrBlank() ||
-            targetEvent.state.equals("TEMPLATE", ignoreCase = true)
+        return mobileEventEditUnsupportedFeatures(targetEvent).isEmpty()
     }
 
     private fun canManageMatchEditing(): Boolean {
@@ -3604,9 +3603,10 @@ class DefaultEventDetailComponent(
     }
 
     private fun setEventEditMode(enabled: Boolean) {
-        if (enabled && !canEditEventDetails(selectedEvent.value)) {
+        val unsupportedFeatures = mobileEventEditUnsupportedFeatures(selectedEvent.value)
+        if (enabled && unsupportedFeatures.isNotEmpty()) {
             _errorState.value = ErrorMessage(
-                "Organization-owned events can't be edited on mobile. You can still manage matches here."
+                mobileEventEditUnsupportedMessage(unsupportedFeatures)
             )
             return
         }

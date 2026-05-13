@@ -2918,15 +2918,14 @@ fun EventDetailScreen(
     }
     val canEditEventDetails = remember(
         isHost,
-        isTemplateEvent,
         canManageTemplate,
-        selectedEvent.event.organizationId,
+        selectedEvent.event,
     ) {
-        if (isTemplateEvent) {
-            canManageTemplate
-        } else {
-            isHost && selectedEvent.event.organizationId.isNullOrBlank()
-        }
+        canEditEventDetailsOnMobile(
+            event = selectedEvent.event,
+            isHost = isHost,
+            canManageTemplate = canManageTemplate,
+        )
     }
     val canDeleteEvent = remember(isHost, isTemplateEvent, canManageTemplate) {
         if (isTemplateEvent) {
