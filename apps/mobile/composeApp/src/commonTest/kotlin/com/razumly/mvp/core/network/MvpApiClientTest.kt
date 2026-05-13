@@ -6,6 +6,7 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpResponseValidator
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -129,5 +130,22 @@ class MvpApiClientTest {
         val api = MvpApiClient(http, "http://example.test", tokenStore)
         val ex = assertFailsWith<ApiException> { api.get<OkResponse>("/api/ping") }
         assertEquals(401, ex.statusCode)
+    }
+
+    @Test
+    fun switching_protocols_is_allowed_by_shared_validator_for_websocket_handshake() = runTest {
+        val engine = MockEngine {
+            respond(
+                content = "",
+                status = HttpStatusCode.SwitchingProtocols,
+            )
+        }
+        val http = HttpClient(engine) {
+            configureMvpHttpClient()
+        }
+
+        val response = http.get("http://example.test/api/realtime/matches")
+
+        assertEquals(HttpStatusCode.SwitchingProtocols, response.status)
     }
 }

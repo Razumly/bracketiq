@@ -8,6 +8,7 @@ import com.arkivanov.essenty.lifecycle.LifecycleRegistry
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventRegistrationCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
@@ -16,6 +17,7 @@ import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -34,6 +36,7 @@ import com.razumly.mvp.core.data.repositories.FamilyJoinRequestResolution
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
+import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
@@ -68,6 +71,76 @@ import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
+    @Test
+    fun published_event_defers_sports_catalog_load_until_editing() =
+        runTest(testDispatcher) {
+            val host = mobileUser(id = "host_1", firstName = "Host", lastName = "User")
+            val sportsRepository = FailingSportsRepository()
+            val initialEvent = Event(
+                id = "sports_timeout_event",
+                name = "Sports Timeout Event",
+                hostId = host.id,
+                state = "PUBLISHED",
+                eventType = EventType.EVENT,
+                singleDivision = true,
+                divisions = listOf("open"),
+                divisionDetails = listOf(freeOpenDivisionDetail()),
+            )
+            val component = DefaultEventDetailComponent(
+                componentContext = createTestComponentContext(),
+                userRepository = EventDetailFakeUserRepository(host),
+                fieldRepository = EventDetailFakeFieldRepository(
+                    fields = emptyList(),
+                    timeSlots = emptyList(),
+                    fieldMatches = emptyList(),
+                ),
+                event = initialEvent,
+                notificationsRepository = NoopPushNotificationsRepository,
+                billingRepository = CreateEvent_FakeBillingRepository(),
+                eventRepository = EventDetailFakeEventRepository(
+                    initialEvent = initialEvent,
+                    host = host,
+                    currentUser = host,
+                    players = emptyList(),
+                    teams = emptyList(),
+                    staffInvites = emptyList(),
+                ),
+                matchRepository = EventDetailFakeMatchRepository(
+                    matches = emptyList(),
+                    fieldsById = emptyMap(),
+                    teamsById = emptyMap(),
+                ),
+                teamRepository = EventDetailFakeTeamRepository(
+                    teams = emptyList(),
+                    users = listOf(host),
+                ),
+                sportsRepository = sportsRepository,
+                imageRepository = CreateEvent_FakeImagesRepository(),
+                navigationHandler = NoopNavigationHandler,
+            )
+            component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+            advance()
+
+            assertEquals(0, sportsRepository.getSportsCalls)
+            assertEquals(0, sportsRepository.getDivisionTypeParametersCalls)
+            assertNull(component.errorState.value)
+
+            component.startEditingEvent()
+            advance()
+
+            assertEquals(1, sportsRepository.getSportsCalls)
+            assertEquals(1, sportsRepository.getDivisionTypeParametersCalls)
+            assertEquals(
+                "Failed to load sports: Request timeout has expired",
+                component.errorState.value?.message,
+            )
+
+            component.clearError()
+
+            assertNull(component.errorState.value)
+        }
+
     @Test
     fun league_mobile_flow_loads_playoffs_staff_invites_schedule_and_periphery_then_keeps_them_after_join() =
         runTest(testDispatcher) {
@@ -2173,6 +2246,23 @@ private class EventDetailFakeMatchRepository(
     override suspend fun getMatchesOfTournament(tournamentId: String): Result<List<MatchMVP>> {
         requestedTournamentIds += tournamentId
         return Result.success(matchesByTournamentId[tournamentId].orEmpty())
+    }
+}
+
+private class FailingSportsRepository : ISportsRepository {
+    var getSportsCalls = 0
+        private set
+    var getDivisionTypeParametersCalls = 0
+        private set
+
+    override suspend fun getSports(): Result<List<Sport>> {
+        getSportsCalls += 1
+        return Result.failure(IllegalStateException("Request timeout has expired"))
+    }
+
+    override suspend fun getDivisionTypeParameters(): Result<DivisionTypeParameters> {
+        getDivisionTypeParametersCalls += 1
+        return Result.success(DivisionTypeParameters())
     }
 }
 

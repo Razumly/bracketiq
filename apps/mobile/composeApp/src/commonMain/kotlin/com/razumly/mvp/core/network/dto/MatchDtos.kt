@@ -152,6 +152,21 @@ data class MatchResponseDto(
 )
 
 @Serializable
+data class MatchRealtimeTokenResponseDto(
+    val token: String,
+    val expiresAt: String? = null,
+)
+
+@Serializable
+data class MatchRealtimeMessageDto(
+    val type: String,
+    val eventId: String? = null,
+    val matches: List<MatchApiDto> = emptyList(),
+    val deleted: List<String> = emptyList(),
+    val sentAt: String? = null,
+)
+
+@Serializable
 data class MatchLifecycleOperationDto(
     val status: String? = null,
     val resultStatus: String? = null,

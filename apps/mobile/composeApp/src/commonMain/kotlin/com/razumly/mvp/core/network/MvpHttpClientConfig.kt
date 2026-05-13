@@ -11,6 +11,7 @@ import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.plugins.logging.LogLevel
 import io.ktor.client.plugins.logging.Logger
 import io.ktor.client.plugins.logging.Logging
+import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -43,6 +44,8 @@ internal fun HttpClientConfig<*>.configureMvpHttpClient() {
         json(jsonMVP)
     }
 
+    install(WebSockets)
+
     if (Platform.isDebugBuild) {
         install(Logging) {
             level = LogLevel.INFO
@@ -61,7 +64,7 @@ internal fun HttpClientConfig<*>.configureMvpHttpClient() {
 
     HttpResponseValidator {
         validateResponse { response ->
-            if (!response.status.isSuccess()) {
+            if (!response.status.isSuccess() && response.status != HttpStatusCode.SwitchingProtocols) {
                 val body = runCatching { response.bodyAsText() }.getOrNull()
                 throw ApiException(
                     statusCode = response.status.value,

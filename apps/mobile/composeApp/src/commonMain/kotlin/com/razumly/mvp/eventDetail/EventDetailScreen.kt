@@ -3737,6 +3737,7 @@ fun EventDetailScreen(
         component.errorState.collect { error ->
             if (error != null) {
                 popupHandler.showPopup(error)
+                component.clearError()
             }
         }
     }

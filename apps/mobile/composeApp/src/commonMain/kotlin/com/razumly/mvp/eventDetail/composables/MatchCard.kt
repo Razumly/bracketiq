@@ -41,6 +41,7 @@ import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
@@ -54,6 +55,7 @@ import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
+import com.razumly.mvp.eventDetail.resolveEventMatchRules
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
@@ -250,6 +252,13 @@ fun MatchCard(
                                 modifier = Modifier.widthIn(max = maxMatchInfoWidth),
                             )
                             VerticalDivider(color = localColors.current.onPrimary)
+                            val scoreDisplay = remember(selectedEvent, eventWithRelations.sport, match.match) {
+                                resolveMatchCardScoreDisplay(
+                                    event = selectedEvent,
+                                    sport = eventWithRelations.sport,
+                                    match = match.match,
+                                )
+                            }
                             TeamsSection(
                                 event = selectedEvent,
                                 team1 = teams[match.match.team1Id],
@@ -257,7 +266,7 @@ fun MatchCard(
                                 match = match,
                                 matches = matches,
                                 playoffPlaceholders = playoffPlaceholderBySlot,
-                                displaySetCount = resolveDisplaySetCount(selectedEvent, match.match),
+                                scoreDisplay = scoreDisplay,
                                 showManageOfficials = showManageOfficials,
                                 manageOfficialRows = manageOfficialRows,
                             )
@@ -435,7 +444,7 @@ private fun TeamsSection(
     match: MatchWithRelations,
     matches: Map<String, MatchWithRelations>,
     playoffPlaceholders: Map<BracketSlotKey, String>,
-    displaySetCount: Int,
+    scoreDisplay: MatchCardScoreDisplay,
     showManageOfficials: Boolean,
     manageOfficialRows: List<ManageOfficialRow>,
 ) {
@@ -472,7 +481,8 @@ private fun TeamsSection(
                 match = match.match,
                 teamId = match.match.team1Id,
                 legacyPoints = match.match.team1Points,
-                displaySetCount = displaySetCount,
+                displaySetCount = scoreDisplay.displaySetCount,
+                scoringModel = scoreDisplay.scoringModel,
             ),
             previousMatch = leftMatch,
             isLosersBracket = match.match.losersBracket,
@@ -487,7 +497,8 @@ private fun TeamsSection(
                 match = match.match,
                 teamId = match.match.team2Id,
                 legacyPoints = match.match.team2Points,
-                displaySetCount = displaySetCount,
+                displaySetCount = scoreDisplay.displaySetCount,
+                scoringModel = scoreDisplay.scoringModel,
             ),
             previousMatch = rightMatch,
             isLosersBracket = match.match.losersBracket,
@@ -565,6 +576,11 @@ internal fun displayPointsForTeam(
     teamId: String?,
     legacyPoints: List<Int>,
     displaySetCount: Int,
+    scoringModel: String = resolveMatchCardScoreDisplay(
+        event = event,
+        sport = null,
+        match = match,
+    ).scoringModel,
 ): List<Int> {
     val normalizedTeamId = teamId?.trim()?.takeIf(String::isNotBlank)
     val orderedSegments = match.segments.sortedBy { segment -> segment.sequence }
@@ -580,30 +596,76 @@ internal fun displayPointsForTeam(
     if (sourcePoints.isEmpty()) {
         return emptyList()
     }
-    if (!event.usesSets) {
+    if (normalizeScoringModel(scoringModel) != "SETS") {
         return listOf(sourcePoints.sum())
     }
-    return sourcePoints.take(displaySetCount.coerceAtLeast(1))
+    val setCount = displaySetCount.coerceAtLeast(1)
+    return List(setCount) { index -> sourcePoints.getOrElse(index) { 0 } }
 }
 
-private fun resolveDisplaySetCount(event: Event, match: MatchMVP): Int {
+internal data class MatchCardScoreDisplay(
+    val scoringModel: String,
+    val displaySetCount: Int,
+)
+
+internal fun resolveMatchCardScoreDisplay(
+    event: Event,
+    sport: Sport?,
+    match: MatchMVP,
+): MatchCardScoreDisplay {
+    val eventRules = runCatching {
+        resolveEventMatchRules(event = event, sport = sport)
+    }.getOrNull()
+    val sportUsesSetScoring = sport?.let { currentSport ->
+        currentSport.usePointsPerSetWin ||
+            currentSport.usePointsPerSetLoss ||
+            normalizeScoringModel(currentSport.matchRulesTemplate?.scoringModel) == "SETS"
+    } == true
+    val eventRulesModel = normalizeScoringModel(eventRules?.scoringModel)
+    val scoringModel = normalizeScoringModel(match.matchRulesSnapshot?.scoringModel)
+        ?: normalizeScoringModel(match.resolvedMatchRules?.scoringModel)
+        ?: eventRulesModel?.takeUnless { model -> model == "POINTS_ONLY" && sportUsesSetScoring }
+        ?: (if (sportUsesSetScoring) "SETS" else null)
+        ?: if (event.usesSets) "SETS" else "POINTS_ONLY"
+    if (scoringModel != "SETS") {
+        return MatchCardScoreDisplay(
+            scoringModel = scoringModel,
+            displaySetCount = 1,
+        )
+    }
+
     val fallbackSetCount = listOf(
+        match.segments.size,
         match.setResults.size,
         match.team1Points.size,
         match.team2Points.size,
         1,
     ).maxOrNull() ?: 1
-
-    if (!event.usesSets) {
-        return 1
-    }
-
-    return when {
+    val contextualSetCount = when {
         match.losersBracket -> event.loserSetCount.coerceAtLeast(1)
         event.eventType == EventType.LEAGUE && !isBracketMatch(match) ->
             (event.setsPerMatch ?: fallbackSetCount).coerceAtLeast(1)
         else -> event.winnerSetCount.coerceAtLeast(1)
     }
+    val displaySetCount = listOfNotNull(
+        contextualSetCount,
+        match.matchRulesSnapshot?.segmentCount?.takeIf { it > 0 },
+        match.resolvedMatchRules?.segmentCount?.takeIf { it > 0 },
+        eventRules?.segmentCount?.takeIf { it > 0 },
+        fallbackSetCount,
+    ).maxOrNull()?.coerceAtLeast(1) ?: 1
+
+    return MatchCardScoreDisplay(
+        scoringModel = scoringModel,
+        displaySetCount = displaySetCount,
+    )
+}
+
+private fun normalizeScoringModel(value: String?): String? {
+    return value
+        ?.trim()
+        ?.uppercase()
+        ?.takeIf { it in setOf("SETS", "PERIODS", "INNINGS", "POINTS_ONLY") }
 }
 
 private fun isBracketMatch(match: MatchMVP): Boolean {

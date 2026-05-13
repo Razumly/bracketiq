@@ -9,6 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
 import com.razumly.mvp.core.data.dataTypes.normalizedMatchOfficialAssignments
 import com.razumly.mvp.core.data.repositories.IMVPRepository
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
+import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.BulkMatchCreateEntryDto
 import com.razumly.mvp.core.network.dto.BulkMatchUpdateEntryDto
@@ -18,6 +19,8 @@ import com.razumly.mvp.core.network.dto.MatchApiDto
 import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
 import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
 import com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto
+import com.razumly.mvp.core.network.dto.MatchRealtimeMessageDto
+import com.razumly.mvp.core.network.dto.MatchRealtimeTokenResponseDto
 import com.razumly.mvp.core.network.dto.MatchResponseDto
 import com.razumly.mvp.core.network.dto.MatchScoreSetDto
 import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
@@ -25,17 +28,27 @@ import com.razumly.mvp.core.network.dto.MatchUpdateDto
 import com.razumly.mvp.core.network.dto.MatchesResponseDto
 import com.razumly.mvp.core.network.dto.toBulkMatchCreateEntryDto
 import com.razumly.mvp.core.network.dto.toBulkMatchUpdateEntryDto
+import com.razumly.mvp.core.util.jsonMVP
 import io.ktor.http.encodeURLQueryComponent
+import io.ktor.websocket.Frame
+import io.ktor.websocket.readText
 import io.github.aakira.napier.Napier
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.serialization.decodeFromString
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
@@ -87,8 +100,9 @@ interface IMatchRepository : IMVPRepository {
         rangeEnd: Instant? = null,
     ): Result<List<MatchMVP>>
     suspend fun deleteMatchesOfTournament(tournamentId: String): Result<Unit>
-    suspend fun subscribeToMatches(): Result<Unit>
+    suspend fun subscribeToMatches(eventId: String): Result<Unit>
     suspend fun unsubscribeFromRealtime(): Result<Unit>
+    fun setRealtimePaused(reason: String, paused: Boolean): Result<Unit>
     fun setIgnoreMatch(match: MatchMVP?): Result<Unit>
 }
 
@@ -104,9 +118,45 @@ class MatchRepository(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var _ignoreMatch = MutableStateFlow<MatchMVP?>(null)
+    private val realtimePauseReasons = MutableStateFlow<Set<String>>(emptySet())
+    private var realtimeJob: Job? = null
+    private var realtimeEventId: String? = null
+    private var activeRealtimeEventId: String? = null
 
     private fun normalizeOptionalToken(value: String?): String? =
         value?.trim()?.takeIf(String::isNotBlank)
+
+    private fun isRealtimePaused(): Boolean = realtimePauseReasons.value.isNotEmpty()
+
+    private fun cancelRealtimeJob() {
+        realtimeJob?.cancel()
+        realtimeJob = null
+        activeRealtimeEventId = null
+    }
+
+    private fun startRealtimeJobIfAllowed(refreshBeforeConnect: Boolean = false) {
+        val eventId = realtimeEventId
+        if (eventId.isNullOrBlank() || isRealtimePaused()) {
+            cancelRealtimeJob()
+            return
+        }
+        if (activeRealtimeEventId == eventId && realtimeJob?.isActive == true) {
+            return
+        }
+        cancelRealtimeJob()
+        activeRealtimeEventId = eventId
+        realtimeJob = scope.launch {
+            if (refreshBeforeConnect) {
+                runCatching { refreshMatchesFromRemote(eventId) }
+                    .onFailure { error ->
+                        Napier.w(
+                            "Failed to refresh matches before realtime reconnect for event $eventId: ${error.message}"
+                        )
+                    }
+            }
+            runMatchRealtimeLoop(eventId)
+        }
+    }
 
     private fun sanitizeTeamId(value: String?): String? {
         val normalized = normalizeOptionalToken(value) ?: return null
@@ -303,6 +353,102 @@ class MatchRepository(
             return remoteMatches
         }
         return localMatches
+    }
+
+    private suspend fun fetchMatchRealtimeToken(eventId: String): String {
+        val response = api.get<MatchRealtimeTokenResponseDto>(
+            "api/realtime/matches/token?eventId=${eventId.encodeURLQueryComponent()}"
+        )
+        return normalizeOptionalToken(response.token)
+            ?: error("Match realtime token response missing token")
+    }
+
+    private suspend fun handleMatchRealtimeMessage(eventId: String, text: String) {
+        val message = runCatching {
+            jsonMVP.decodeFromString<MatchRealtimeMessageDto>(text)
+        }.getOrElse { error ->
+            Napier.w("Ignoring malformed match realtime message: ${error.message}")
+            return
+        }
+        if (message.type != "match.changed") {
+            return
+        }
+        if (normalizeOptionalToken(message.eventId) != eventId) {
+            return
+        }
+
+        persistEmbeddedFields(message.matches)
+        val remoteMatches = message.matches.mapNotNull { match -> match.toMatchOrNull() }
+        if (remoteMatches.isNotEmpty()) {
+            upsertRemoteMatchesPreservingPendingIncidents(remoteMatches)
+        }
+
+        val deletedIds = message.deleted.mapNotNull { id -> normalizeOptionalToken(id) }
+        if (deletedIds.isNotEmpty()) {
+            databaseService.getMatchDao.deleteMatchesById(deletedIds)
+        }
+    }
+
+    private suspend fun runMatchRealtimeLoop(eventId: String) {
+        var reconnectDelayMs = 1_000L
+        while (
+            currentCoroutineContext().isActive &&
+            realtimeEventId == eventId &&
+            activeRealtimeEventId == eventId &&
+            !isRealtimePaused()
+        ) {
+            try {
+                val token = fetchMatchRealtimeToken(eventId)
+                val path = buildString {
+                    append("api/realtime/matches?eventId=")
+                    append(eventId.encodeURLQueryComponent())
+                    append("&token=")
+                    append(token.encodeURLQueryComponent())
+                }
+                api.webSocket(path) {
+                    reconnectDelayMs = 1_000L
+                    for (frame in incoming) {
+                        if (frame is Frame.Text) {
+                            handleMatchRealtimeMessage(eventId, frame.readText())
+                        }
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: ApiException) {
+                if (error.statusCode == 401 || error.statusCode == 403 || error.statusCode == 404) {
+                    Napier.w(
+                        "Match realtime subscription stopped for event $eventId: HTTP ${error.statusCode}"
+                    )
+                    if (realtimeEventId == eventId) {
+                        realtimeEventId = null
+                    }
+                    if (activeRealtimeEventId == eventId) {
+                        activeRealtimeEventId = null
+                    }
+                    return
+                }
+                Napier.w("Match realtime socket disconnected for event $eventId: ${error.message}")
+            } catch (error: Throwable) {
+                Napier.w("Match realtime socket disconnected for event $eventId: ${error.message}")
+            }
+
+            if (
+                currentCoroutineContext().isActive &&
+                realtimeEventId == eventId &&
+                activeRealtimeEventId == eventId &&
+                !isRealtimePaused()
+            ) {
+                runCatching { refreshMatchesFromRemote(eventId) }
+                    .onFailure { error ->
+                        Napier.w(
+                            "Failed to refresh matches after realtime disconnect for event $eventId: ${error.message}"
+                        )
+                    }
+                delay(reconnectDelayMs)
+                reconnectDelayMs = (reconnectDelayMs * 2).coerceAtMost(30_000L)
+            }
+        }
     }
 
     override suspend fun getMatch(matchId: String): Result<MatchMVP> =
@@ -659,12 +805,39 @@ class MatchRepository(
         databaseService.getMatchDao.deleteMatchesOfTournament(normalizedId)
     }
 
-    override suspend fun subscribeToMatches(): Result<Unit> {
-        return Result.success(Unit)
+    override suspend fun subscribeToMatches(eventId: String): Result<Unit> = runCatching {
+        val normalizedEventId = normalizeOptionalToken(eventId)
+            ?: error("Match realtime subscription requires an event id")
+        if (realtimeEventId == normalizedEventId && realtimeJob?.isActive == true) {
+            return@runCatching
+        }
+        realtimeEventId = normalizedEventId
+        startRealtimeJobIfAllowed()
     }
 
-    override suspend fun unsubscribeFromRealtime(): Result<Unit> =
-        Result.success(Unit)
+    override suspend fun unsubscribeFromRealtime(): Result<Unit> = runCatching {
+        realtimeEventId = null
+        cancelRealtimeJob()
+    }
+
+    override fun setRealtimePaused(reason: String, paused: Boolean): Result<Unit> = runCatching {
+        val normalizedReason = normalizeOptionalToken(reason)
+            ?: error("Match realtime pause requires a reason")
+        val wasPaused = isRealtimePaused()
+        realtimePauseReasons.update { reasons ->
+            if (paused) {
+                reasons + normalizedReason
+            } else {
+                reasons - normalizedReason
+            }
+        }
+        val isPaused = isRealtimePaused()
+        if (isPaused) {
+            cancelRealtimeJob()
+        } else {
+            startRealtimeJobIfAllowed(refreshBeforeConnect = wasPaused)
+        }
+    }
 
     override fun setIgnoreMatch(match: MatchMVP?) = runCatching { _ignoreMatch.value = match }
 }

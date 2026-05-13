@@ -205,6 +205,9 @@ private class TopStartedPullToRefreshConnection(
         val consumed = if (enabled && refreshAllowedThisDrag) {
             onRelease(available.y)
         } else {
+            if (!isRefreshing && distancePulled > 0f) {
+                animateToHidden()
+            }
             0f
         }
         resetDragTracking()
@@ -212,6 +215,9 @@ private class TopStartedPullToRefreshConnection(
     }
 
     override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+        if (!isRefreshing && distancePulled > 0f) {
+            animateToHidden()
+        }
         resetDragTracking()
         return Velocity.Zero
     }
@@ -219,7 +225,7 @@ private class TopStartedPullToRefreshConnection(
     suspend fun updateRefreshState(refreshing: Boolean) {
         if (refreshing) {
             animateToThreshold()
-        } else if (!userDragActive) {
+        } else {
             animateToHidden()
         }
     }

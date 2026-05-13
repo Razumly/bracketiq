@@ -24,8 +24,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -83,24 +81,16 @@ class DefaultChatGroupComponent(
     override val isChatMuted: StateFlow<Boolean> = _isChatMuted.asStateFlow()
     override val chatTermsState = userRepository.chatTermsConsentState
     override val isCheckingChatTerms = userRepository.chatTermsConsentLoading
-    private val _showChatTermsPrompt = MutableStateFlow(!chatTermsState.value.accepted)
+    private val _showChatTermsPrompt = MutableStateFlow(false)
     override val showChatTermsPrompt = _showChatTermsPrompt.asStateFlow()
 
-    override val chatGroup = chatTermsState
-        .map { state -> state.accepted }
-        .distinctUntilChanged()
-        .flatMapLatest { accepted ->
-            if (accepted) {
-                chatGroupRepository.getChatGroupFlow(messageUser, initialChatGroup).map { result ->
-                    val chatGroup = result.getOrElse {
-                        _errorState.value = it.userMessage()
-                        null
-                    }
-                    chatGroup?.copy(messages = chatGroup.messages.sortedBy { it.sentTime })
-                }
-            } else {
-                flowOf(null)
+    override val chatGroup = chatGroupRepository.getChatGroupFlow(messageUser, initialChatGroup)
+        .map { result ->
+            val chatGroup = result.getOrElse {
+                _errorState.value = it.userMessage()
+                null
             }
+            chatGroup?.copy(messages = chatGroup.messages.sortedBy { it.sentTime })
         }
         .stateIn(scope, SharingStarted.Eagerly, null)
 
@@ -123,8 +113,6 @@ class DefaultChatGroupComponent(
                         chatGroupRepository.refreshChatGroupsAndMessages().onFailure {
                             _errorState.value = it.userMessage("Failed to load chat.")
                         }
-                    } else {
-                        _showChatTermsPrompt.value = true
                     }
                 }
         }
@@ -216,30 +204,34 @@ class DefaultChatGroupComponent(
 
     override fun sendMessage() {
         val text = _messageInput.value.trim()
+        if (text.isBlank()) return
+        if (!chatTermsState.value.accepted) {
+            _showChatTermsPrompt.value = true
+            return
+        }
+        val currentChatGroup = chatGroup.value ?: return
         _messageInput.value = ""
-        if (text.isNotBlank()) {
-            chatGroup.value ?: return
-            val message = MessageMVP(
-                id = newId(),
-                userId = currentUser.id,
-                body = text,
-                attachmentUrls = listOf(),
-                chatId = chatGroup.value!!.chatGroup.id,
-                readByIds = listOf(currentUser.id),
-                sentTime = Clock.System.now()
-            )
+        val chatId = currentChatGroup.chatGroup.id
+        val message = MessageMVP(
+            id = newId(),
+            userId = currentUser.id,
+            body = text,
+            attachmentUrls = listOf(),
+            chatId = chatId,
+            readByIds = listOf(currentUser.id),
+            sentTime = Clock.System.now()
+        )
 
-            scope.launch {
-                val createResult = messagesRepository.createMessage(message)
-                if (createResult.isFailure) {
-                    _errorState.value = createResult.exceptionOrNull()?.userMessage()
-                    return@launch
-                }
-                pushNotificationsRepository.sendChatGroupNotification(
-                    chatGroup.value!!.chatGroup.id, "New message from ${currentUser.fullName}", text
-                ).onFailure {
-                    _errorState.value = it.userMessage()
-                }
+        scope.launch {
+            val createResult = messagesRepository.createMessage(message)
+            if (createResult.isFailure) {
+                _errorState.value = createResult.exceptionOrNull()?.userMessage()
+                return@launch
+            }
+            pushNotificationsRepository.sendChatGroupNotification(
+                chatId, "New message from ${currentUser.fullName}", text
+            ).onFailure {
+                _errorState.value = it.userMessage()
             }
         }
     }
@@ -354,16 +346,14 @@ class DefaultChatGroupComponent(
 
     override fun dismissChatTermsPrompt() {
         _showChatTermsPrompt.value = false
-        if (!chatTermsState.value.accepted) {
-            pushNotificationsRepository.setActiveChat(null)
-            navigationHandler.navigateBack()
-        }
     }
 
     override fun acceptChatTermsPrompt() {
         scope.launch {
             userRepository.acceptChatTermsConsent()
-                .onSuccess { }
+                .onSuccess {
+                    _showChatTermsPrompt.value = false
+                }
                 .onFailure {
                     _errorState.value = it.userMessage("Failed to record chat terms consent.")
                 }

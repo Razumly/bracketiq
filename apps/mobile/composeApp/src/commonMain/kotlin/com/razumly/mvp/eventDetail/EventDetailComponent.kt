@@ -204,6 +204,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun onHostCreateAccount()
     fun selectDivision(division: String)
     fun setLoadingHandler(loadingHandler: LoadingHandler)
+    fun clearError()
     fun toggleBracketView()
     fun toggleLosersBracket()
     fun toggleDetails()
@@ -633,6 +634,7 @@ class DefaultEventDetailComponent(
     private companion object {
         const val CLIENT_MATCH_PREFIX = "client:"
         const val LOCAL_PLACEHOLDER_PREFIX = "placeholder-local:"
+        const val MATCH_REALTIME_EDIT_PAUSE_REASON = "event-detail-editing"
     }
 
     private fun canEditEventDetails(targetEvent: Event): Boolean {
@@ -740,6 +742,10 @@ class DefaultEventDetailComponent(
         this.loadingHandler = loadingHandler
     }
 
+    override fun clearError() {
+        _errorState.value = null
+    }
+
     private val _editedEvent = MutableStateFlow(event)
     override var editedEvent = _editedEvent.asStateFlow()
 
@@ -786,6 +792,9 @@ class DefaultEventDetailComponent(
 
     private val _leagueStandingsConfirming = MutableStateFlow(false)
     override val leagueStandingsConfirming = _leagueStandingsConfirming.asStateFlow()
+    private var sportsLoadJob: Job? = null
+    private var sportsCatalogLoaded = false
+    private var reportSportsLoadErrors = false
 
     private val eventRelations: StateFlow<EventWithRelations> =
         eventRepository.getEventWithRelationsFlow(event.id).map { result ->
@@ -1217,7 +1226,9 @@ class DefaultEventDetailComponent(
 
     init {
         backHandler.register(backCallback)
-        loadSports()
+        if (_isEditing.value) {
+            loadSports(reportErrors = true)
+        }
         scope.launch {
             selectedEvent
                 .map { selected -> selected.organizationId?.trim().orEmpty() }
@@ -1376,7 +1387,27 @@ class DefaultEventDetailComponent(
         }
         scope.launch {
             matchRepository.setIgnoreMatch(null)
-            matchRepository.subscribeToMatches()
+            try {
+                combine(selectedEventId, _isEditing, _isEditingMatches) { eventId, isEditing, isEditingMatches ->
+                    Triple(eventId, isEditing, isEditingMatches)
+                }.collectLatest { (eventId, isEditing, isEditingMatches) ->
+                    if (eventId.isBlank()) {
+                        matchRepository.setRealtimePaused(MATCH_REALTIME_EDIT_PAUSE_REASON, false)
+                        matchRepository.unsubscribeFromRealtime()
+                    } else {
+                        matchRepository.subscribeToMatches(eventId)
+                        matchRepository.setRealtimePaused(
+                            MATCH_REALTIME_EDIT_PAUSE_REASON,
+                            isEditing || isEditingMatches,
+                        )
+                    }
+                }
+            } finally {
+                matchRepository.setRealtimePaused(MATCH_REALTIME_EDIT_PAUSE_REASON, false)
+                matchRepository.unsubscribeFromRealtime()
+            }
+        }
+        scope.launch {
             eventWithRelations.collect { relations ->
                 if (!canEditEventDetails(relations.event) && _isEditing.value) {
                     _isEditing.value = false
@@ -1522,10 +1553,17 @@ class DefaultEventDetailComponent(
             }
     }
 
-    private fun loadSports() {
-        scope.launch {
+    private fun loadSports(reportErrors: Boolean) {
+        reportSportsLoadErrors = reportSportsLoadErrors || reportErrors
+        if (sportsLoadJob?.isActive == true) {
+            return
+        }
+        sportsLoadJob = scope.launch {
+            var loadedSports = false
+            var loadedDivisionTypes = false
             sportsRepository.getSports()
                 .onSuccess {
+                    loadedSports = true
                     _sports.value = it
                     if (_isEditing.value) {
                         _editedEvent.value = syncOfficialStaffingForSportTransition(
@@ -1535,15 +1573,24 @@ class DefaultEventDetailComponent(
                     }
                 }
                 .onFailure {
-                    _errorState.value = ErrorMessage("Failed to load sports: ${it.userMessage()}")
+                    Napier.w("Failed to load sports.", it)
+                    if (reportSportsLoadErrors || _isEditing.value) {
+                        _errorState.value = ErrorMessage("Failed to load sports: ${it.userMessage()}")
+                    }
                 }
             sportsRepository.getDivisionTypeParameters()
                 .onSuccess {
+                    loadedDivisionTypes = true
                     _divisionTypeParameters.value = it
                 }
                 .onFailure {
-                    _errorState.value = ErrorMessage("Failed to load division options: ${it.userMessage()}")
+                    Napier.w("Failed to load division options.", it)
+                    if (reportSportsLoadErrors || _isEditing.value) {
+                        _errorState.value = ErrorMessage("Failed to load division options: ${it.userMessage()}")
+                    }
                 }
+            sportsCatalogLoaded = loadedSports && loadedDivisionTypes
+            reportSportsLoadErrors = false
         }
     }
 
@@ -3612,6 +3659,9 @@ class DefaultEventDetailComponent(
         }
         if (_isEditing.value == enabled) {
             return
+        }
+        if (enabled && !sportsCatalogLoaded) {
+            loadSports(reportErrors = true)
         }
         // Initialize or reset the draft from the latest selected event when mode changes.
         val selected = selectedEvent.value

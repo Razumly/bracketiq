@@ -61,6 +61,7 @@ private val INCIDENT_RETRY_DELAYS_MS = longArrayOf(3_000L, 15_000L, 30_000L)
 private const val INCIDENT_CONFIRM_NO_PROGRESS_TIMEOUT_MS = 10_000L
 private const val DIRECT_SCORE_DEBOUNCE_MS = 500L
 private const val MATCH_DETAIL_CLEANUP_KEY = "Cleanup_MatchDetail"
+private const val MATCH_DETAIL_REALTIME_PAUSE_PREFIX = "match-detail-open:"
 
 private fun incidentRetryDelayMs(attempt: Int): Long =
     INCIDENT_RETRY_DELAYS_MS[attempt.coerceIn(0, INCIDENT_RETRY_DELAYS_MS.lastIndex)]
@@ -165,8 +166,8 @@ class DefaultMatchContentComponent(
             }.stateIn(scope, SharingStarted.Eagerly, selectedEvent)
 
     private val _optimisticMatch = MutableStateFlow<MatchWithTeams?>(null)
-    @Suppress("unused")
-    private val ignoreMatchRegistration = matchRepository.setIgnoreMatch(selectedMatch.match)
+    private val selectedMatchForRealtime = selectedMatch.match
+    private val realtimePauseReason = "$MATCH_DETAIL_REALTIME_PAUSE_PREFIX${selectedMatch.match.id}"
     private val localMatchSaveMutex = Mutex()
     private val scoreSetMutex = Mutex()
     private val incidentQueueMutex = Mutex()
@@ -314,7 +315,18 @@ class DefaultMatchContentComponent(
     private var setsNeeded = 1
 
     init {
-        instanceKeeper.put(MATCH_DETAIL_CLEANUP_KEY, Cleanup(matchRepository))
+        instanceKeeper.put(MATCH_DETAIL_CLEANUP_KEY, Cleanup(matchRepository, realtimePauseReason))
+        scope.launch {
+            _isOfficial.collect { ownsMatchEditing ->
+                if (ownsMatchEditing) {
+                    matchRepository.setIgnoreMatch(selectedMatchForRealtime)
+                    matchRepository.setRealtimePaused(realtimePauseReason, true)
+                } else {
+                    matchRepository.setIgnoreMatch(null)
+                    matchRepository.setRealtimePaused(realtimePauseReason, false)
+                }
+            }
+        }
         scope.launch {
             event.collect {
                 val normalizedMatch = updateMatchStructureForCurrentContext(matchWithTeams.value.match)
@@ -1726,9 +1738,11 @@ private data class PendingDirectScoreSync(
 
 private class Cleanup(
     private val matchRepository: IMatchRepository,
+    private val realtimePauseReason: String,
 ) : InstanceKeeper.Instance {
     override fun onDestroy() {
         matchRepository.setIgnoreMatch(null)
+        matchRepository.setRealtimePaused(realtimePauseReason, false)
     }
 }
 

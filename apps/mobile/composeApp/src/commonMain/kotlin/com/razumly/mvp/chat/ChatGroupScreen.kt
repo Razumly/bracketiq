@@ -415,7 +415,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
             loading = isCheckingChatTerms,
             onAccept = component::acceptChatTermsPrompt,
             onDismiss = component::dismissChatTermsPrompt,
-            intro = "Opening chats or creating events in Bracket IQ requires agreement to the Terms and EULA.",
+            intro = "Sending chat messages in Bracket IQ requires agreement to the Terms and EULA.",
         )
     }
 

@@ -33,7 +33,7 @@ private data class TermsAgreementSection(
 private val fullAgreementSections = listOf(
     TermsAgreementSection(
         title = "Content Creation Access",
-        body = "Creating chats, events, or other user-generated content in Bracket IQ requires agreement to the Terms and EULA. If you do not agree, those creation flows remain unavailable until you accept.",
+        body = "Sending chat messages, creating events, or other user-generated content in Bracket IQ requires agreement to the Terms and EULA. If you do not agree, those flows remain unavailable until you accept.",
     ),
     TermsAgreementSection(
         title = "No Tolerance Policy",
@@ -60,7 +60,7 @@ fun TermsConsentDialog(
     onAccept: () -> Unit,
     onDismiss: (() -> Unit)? = null,
     title: String = "Agree to the Terms and EULA",
-    intro: String = "Creating chats, events, or other user-generated content in Bracket IQ requires agreement to the Terms and EULA.",
+    intro: String = "Sending chat messages, creating events, or other user-generated content in Bracket IQ requires agreement to the Terms and EULA.",
     confirmLabel: String = "Agree",
     dismissLabel: String = "Not now",
 ) {

@@ -91,31 +91,13 @@ fun ChatListScreen(component: ChatListComponent) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            if (chatTermsState.accepted) {
-                items(chatList) {
-                    ChatListItem(
-                        modifier = Modifier.clickable { component.onChatSelected(it) },
-                        chatGroup = it,
-                        currentUserId = component.currentUser.id,
-                        summary = chatSummaries[it.chatGroup.id],
-                    )
-                }
-            } else if (isCheckingChatTerms) {
-                item {
-                    Text(
-                        text = "Checking chat access...",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            } else if (!chatTermsState.accepted) {
-                item {
-                    Text(
-                        text = "Agree to the Terms and EULA to view or create chats.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            items(chatList) {
+                ChatListItem(
+                    modifier = Modifier.clickable { component.onChatSelected(it) },
+                    chatGroup = it,
+                    currentUserId = component.currentUser.id,
+                    summary = chatSummaries[it.chatGroup.id],
+                )
             }
         }
         AnimatedVisibility(showNewChatDialog) {
@@ -128,7 +110,7 @@ fun ChatListScreen(component: ChatListComponent) {
                 loading = isCheckingChatTerms,
                 onAccept = component::acceptChatTermsPrompt,
                 onDismiss = component::dismissChatTermsPrompt,
-                intro = "Opening chats or creating events in Bracket IQ requires agreement to the Terms and EULA.",
+                intro = "Sending chat messages in Bracket IQ requires agreement to the Terms and EULA.",
             )
         }
     }

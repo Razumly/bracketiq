@@ -498,9 +498,12 @@ private object NoopMatchRepository : IMatchRepository {
 
     override suspend fun deleteMatchesOfTournament(tournamentId: String): Result<Unit> = Result.success(Unit)
 
-    override suspend fun subscribeToMatches(): Result<Unit> = Result.success(Unit)
+    override suspend fun subscribeToMatches(eventId: String): Result<Unit> = Result.success(Unit)
 
     override suspend fun unsubscribeFromRealtime(): Result<Unit> = Result.success(Unit)
+
+    override fun setRealtimePaused(reason: String, paused: Boolean): Result<Unit> =
+        Result.success(Unit)
 
     override fun setIgnoreMatch(match: com.razumly.mvp.core.data.dataTypes.MatchMVP?): Result<Unit> =
         Result.success(Unit)

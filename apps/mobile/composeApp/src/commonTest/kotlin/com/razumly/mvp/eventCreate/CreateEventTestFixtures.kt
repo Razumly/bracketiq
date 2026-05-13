@@ -609,8 +609,9 @@ internal class CreateEvent_FakeMatchRepository : IMatchRepository {
         tournamentMatches.filter { match -> eventIds.contains(match.eventId) }
     )
     override suspend fun deleteMatchesOfTournament(tournamentId: String): Result<Unit> = Result.success(Unit)
-    override suspend fun subscribeToMatches(): Result<Unit> = Result.success(Unit)
+    override suspend fun subscribeToMatches(eventId: String): Result<Unit> = Result.success(Unit)
     override suspend fun unsubscribeFromRealtime(): Result<Unit> = Result.success(Unit)
+    override fun setRealtimePaused(reason: String, paused: Boolean): Result<Unit> = Result.success(Unit)
     override fun setIgnoreMatch(match: MatchMVP?): Result<Unit> = Result.success(Unit)
 }
 
