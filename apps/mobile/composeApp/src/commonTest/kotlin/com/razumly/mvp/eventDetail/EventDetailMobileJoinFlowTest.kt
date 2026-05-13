@@ -7,6 +7,7 @@ import com.arkivanov.essenty.backhandler.BackDispatcher
 import com.arkivanov.essenty.lifecycle.LifecycleRegistry
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventRegistrationCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
@@ -22,6 +23,10 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
+import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
+import com.razumly.mvp.core.data.repositories.EventParticipantsSummary
+import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
 import com.razumly.mvp.core.data.repositories.FamilyChild
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequest
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequestAction
@@ -31,9 +36,6 @@ import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
-import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
-import com.razumly.mvp.core.data.repositories.EventParticipantsSummary
-import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
 import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignupProfileSelection
@@ -152,6 +154,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
                 teamSignup = false,
                 singleDivision = true,
                 divisions = listOf("open"),
+                divisionDetails = listOf(freeOpenDivisionDetail(maxParticipants = 32)),
                 fieldIds = listOf(field.id),
                 timeSlotIds = listOf(slot.id),
                 teamIds = teams.map(Team::id),
@@ -273,6 +276,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             teamSignup = false,
             singleDivision = true,
             divisions = listOf("open"),
+            divisionDetails = listOf(freeOpenDivisionDetail(maxParticipants = 6)),
             fieldIds = listOf(field.id),
             timeSlotIds = listOf(slot.id),
             userIds = emptyList(),
@@ -333,6 +337,106 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
 
         assertEquals(1, eventRepository.joinCallCount)
         assertEquals(1, component.selectedWeeklyOccurrenceSummary.value?.participantCount)
+    }
+
+    @Test
+    fun child_registration_flow_shows_linked_children_and_registers_selected_child() = runTest(testDispatcher) {
+        val host = mobileUser(id = "child_event_host", firstName = "Child", lastName = "Host")
+        val currentUser = mobileUser(id = "child_parent", firstName = "Parent", lastName = "User")
+        val linkedChild = FamilyChild(
+            userId = "child_joiner",
+            firstName = "Kid",
+            lastName = "One",
+            email = "kid@example.test",
+            hasEmail = true,
+            linkStatus = "active",
+        )
+        val inactiveChild = FamilyChild(
+            userId = "inactive_child",
+            firstName = "Inactive",
+            lastName = "Child",
+            linkStatus = "removed",
+        )
+        val initialEvent = Event(
+            id = "child_registration_event",
+            name = "Child Registration Event",
+            description = "Linked children should be selectable before registering.",
+            hostId = host.id,
+            coordinates = listOf(-80.1918, 25.7617),
+            location = "Downtown Sports Hub",
+            start = Instant.parse("2030-06-01T15:00:00Z"),
+            end = Instant.parse("2030-06-01T19:00:00Z"),
+            state = "PUBLISHED",
+            eventType = EventType.TOURNAMENT,
+            teamSignup = false,
+            singleDivision = true,
+            divisions = listOf("open"),
+            userIds = emptyList(),
+            maxParticipants = 8,
+        )
+        val userRepository = EventDetailFakeUserRepository(
+            currentUserData = currentUser,
+            children = listOf(linkedChild, inactiveChild),
+        )
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = initialEvent,
+            host = host,
+            currentUser = currentUser,
+            players = emptyList(),
+            teams = emptyList(),
+            staffInvites = emptyList(),
+        )
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = userRepository,
+            fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
+            event = initialEvent,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(emptyList(), emptyMap(), emptyMap()),
+            teamRepository = EventDetailFakeTeamRepository(emptyList(), listOf(host, currentUser)),
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+        advance()
+
+        component.joinEvent()
+        advance()
+
+        assertEquals(listOf(linkedChild.userId), component.joinChoiceDialog.value?.children?.map { it.userId })
+        assertNull(component.childJoinSelectionDialog.value)
+        assertEquals(0, eventRepository.joinCallCount)
+        assertTrue(eventRepository.childRegistrationRequests.isEmpty())
+
+        component.showChildJoinSelection()
+
+        assertNull(component.joinChoiceDialog.value)
+        assertEquals(listOf(linkedChild.userId), component.childJoinSelectionDialog.value?.children?.map { it.userId })
+
+        component.selectChildForJoin(linkedChild.userId)
+        advance()
+
+        assertEquals(
+            listOf(
+                ChildRegistrationRequest(
+                    eventId = initialEvent.id,
+                    childUserId = linkedChild.userId,
+                    joinWaitlist = false,
+                    occurrence = null,
+                )
+            ),
+            eventRepository.childRegistrationRequests,
+        )
+        assertEquals(0, eventRepository.joinCallCount)
+        assertNull(component.childJoinSelectionDialog.value)
+        assertEquals(
+            "${linkedChild.firstName} ${linkedChild.lastName} registration completed.",
+            component.errorState.value?.message,
+        )
     }
 
     @Test
@@ -1846,6 +1950,13 @@ private data class FakeParticipantSyncSnapshot(
     val participantCapacity: Int? = null,
 )
 
+private data class ChildRegistrationRequest(
+    val eventId: String,
+    val childUserId: String,
+    val joinWaitlist: Boolean,
+    val occurrence: EventOccurrenceSelection?,
+)
+
 private class EventDetailFakeEventRepository(
     initialEvent: Event,
     private val host: UserData,
@@ -1856,6 +1967,9 @@ private class EventDetailFakeEventRepository(
     private val syncSnapshotsByOccurrence: Map<String, FakeParticipantSyncSnapshot> = emptyMap(),
     initialCachedRegistrations: List<EventRegistrationCacheEntry> = emptyList(),
     private val defaultSyncSnapshot: FakeParticipantSyncSnapshot? = null,
+    private val childRegistrationResult: ChildRegistrationResult = ChildRegistrationResult(
+        registrationStatus = "ACTIVE",
+    ),
 ) : IEventRepository by com.razumly.mvp.eventCreate.CreateEvent_FakeEventRepository() {
     private val eventFlow = MutableStateFlow(Result.success(initialEvent.toRelations(host, players, teams)))
     private val cachedRegistrationsFlow = MutableStateFlow(initialCachedRegistrations)
@@ -1867,6 +1981,7 @@ private class EventDetailFakeEventRepository(
     var lastSyncedOccurrence: EventOccurrenceSelection? = null
     val addedPlayerIds = mutableListOf<String>()
     val addPlayerEvents = mutableListOf<Event>()
+    val childRegistrationRequests = mutableListOf<ChildRegistrationRequest>()
 
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> = eventFlow
 
@@ -1915,6 +2030,42 @@ private class EventDetailFakeEventRepository(
         val updatedPlayers = (currentRelations.players + player).distinctBy(UserData::id)
         eventFlow.value = Result.success(updatedEvent.toRelations(host, updatedPlayers, teams))
         return Result.success(SelfRegistrationResult())
+    }
+
+    override suspend fun registerChildForEvent(
+        eventId: String,
+        childUserId: String,
+        joinWaitlist: Boolean,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<ChildRegistrationResult> {
+        childRegistrationRequests += ChildRegistrationRequest(
+            eventId = eventId,
+            childUserId = childUserId,
+            joinWaitlist = joinWaitlist,
+            occurrence = occurrence,
+        )
+        val currentRelations = eventFlow.value.getOrThrow()
+        val updatedEvent = if (joinWaitlist) {
+            currentRelations.event.copy(
+                waitListIds = (currentRelations.event.waitListIds + childUserId).distinct(),
+            )
+        } else {
+            currentRelations.event.copy(
+                userIds = (currentRelations.event.userIds + childUserId).distinct(),
+            )
+        }
+        val updatedPlayers = if (joinWaitlist) {
+            currentRelations.players
+        } else {
+            val childUser = mobileUser(
+                id = childUserId,
+                firstName = "Child",
+                lastName = childUserId.takeLast(2),
+            )
+            (currentRelations.players + childUser).distinctBy(UserData::id)
+        }
+        eventFlow.value = Result.success(updatedEvent.toRelations(host, updatedPlayers, teams))
+        return Result.success(childRegistrationResult)
     }
 
     override suspend fun syncEventParticipants(
@@ -2113,6 +2264,7 @@ private class EventDetailFakeTeamRepository(
 
 private class EventDetailFakeUserRepository(
     currentUserData: UserData,
+    private val children: List<FamilyChild> = emptyList(),
 ) : IUserRepository by com.razumly.mvp.eventCreate.CreateEvent_FakeUserRepository() {
     val createdInviteRequests = mutableListOf<InviteCreateDto>()
     private val account = AuthAccount(
@@ -2158,7 +2310,7 @@ private class EventDetailFakeUserRepository(
     override suspend fun acceptInvite(inviteId: String): Result<Unit> = Result.success(Unit)
     override suspend fun declineInvite(inviteId: String): Result<Unit> = Result.success(Unit)
     override suspend fun isCurrentUserChild(minorAgeThreshold: Int): Result<Boolean> = Result.success(false)
-    override suspend fun listChildren(): Result<List<FamilyChild>> = Result.success(emptyList())
+    override suspend fun listChildren(): Result<List<FamilyChild>> = Result.success(children)
     override suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>> = Result.success(emptyList())
     override suspend fun resolveChildJoinRequest(
         registrationId: String,
@@ -2312,6 +2464,17 @@ private fun mobileUser(
     uploadedImages = emptyList(),
     profileImageId = null,
     id = id,
+)
+
+private fun freeOpenDivisionDetail(maxParticipants: Int? = null): DivisionDetail = DivisionDetail(
+    id = "open",
+    key = "open",
+    name = "Open",
+    divisionTypeId = "open",
+    divisionTypeName = "Open",
+    gender = "C",
+    price = 0,
+    maxParticipants = maxParticipants,
 )
 
 private fun mobileTeam(
