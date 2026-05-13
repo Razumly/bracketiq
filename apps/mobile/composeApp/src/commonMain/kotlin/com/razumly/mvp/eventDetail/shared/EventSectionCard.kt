@@ -2,8 +2,6 @@ package com.razumly.mvp.eventDetail.shared
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -12,7 +10,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -30,17 +30,24 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.razumly.mvp.core.presentation.util.transitionSpec
+import kotlin.math.roundToInt
 
-@OptIn(ExperimentalFoundationApi::class)
 internal fun LazyListScope.animatedCardSection(
     sectionId: String,
     sectionExpansionStates: SnapshotStateMap<String, Boolean>,
@@ -63,27 +70,22 @@ internal fun LazyListScope.animatedCardSection(
     val shouldUseStickyHeader = isCollapsible && sectionTitle != null
     val horizontalCardPadding = if (shouldUseStickyHeader) 0.dp else 16.dp
     val sectionStateKey = "$sectionId:${if (isEditMode) "edit" else "view"}"
-    val headerKey = "${sectionStateKey}_header"
     val expanded = sectionExpansionStates[sectionStateKey] ?: false
     val summaryText = if (isEditMode) editSummary else viewSummary
 
     if (shouldUseStickyHeader) {
-        stickyHeader(key = headerKey) {
-            val isPinned by remember(lazyListState, headerKey) {
-                derivedStateOf {
-                    lazyListState?.layoutInfo?.visibleItemsInfo?.any { itemInfo ->
-                        itemInfo.key == headerKey && itemInfo.offset <= 0
-                    } == true
-                }
-            }
-            CollapsibleSectionHeaderCard(
+        item(key = sectionStateKey) {
+            StickyCollapsibleSectionCard(
+                sectionKey = sectionStateKey,
+                lazyListState = lazyListState,
+                stickyHeaderTopInset = stickyHeaderTopInset,
                 title = sectionTitle,
                 expanded = expanded,
                 summaryText = summaryText,
                 requiredMissingCount = requiredMissingCount,
                 horizontalCardPadding = horizontalCardPadding,
-                topInset = stickyHeaderTopInset,
-                isPinned = isPinned,
+                isEditMode = isEditMode,
+                animationDelay = animationDelay,
                 onToggleExpanded = {
                     if (enabled) {
                         sectionExpansionStates[sectionStateKey] = !expanded
@@ -91,15 +93,6 @@ internal fun LazyListScope.animatedCardSection(
                         onDisabledClick?.invoke()
                     }
                 },
-            )
-        }
-
-        item(key = "${sectionStateKey}_body") {
-            CollapsibleSectionBodyCard(
-                expanded = expanded,
-                isEditMode = isEditMode,
-                animationDelay = animationDelay,
-                horizontalCardPadding = horizontalCardPadding,
                 viewContent = viewContent,
                 editContent = editContent,
             )
@@ -150,26 +143,118 @@ internal fun LazyListScope.animatedCardSection(
 }
 
 @Composable
-private fun CollapsibleSectionHeaderCard(
+private fun StickyCollapsibleSectionCard(
+    sectionKey: String,
+    lazyListState: LazyListState?,
+    stickyHeaderTopInset: Dp,
     title: String,
     expanded: Boolean,
     summaryText: String?,
     requiredMissingCount: Int,
     horizontalCardPadding: Dp,
-    topInset: Dp,
-    isPinned: Boolean,
+    isEditMode: Boolean,
+    animationDelay: Int,
     onToggleExpanded: () -> Unit,
+    viewContent: @Composable() (ColumnScope.() -> Unit),
+    editContent: @Composable() (ColumnScope.() -> Unit),
 ) {
-    val bottomCornerSize = if (expanded) 0.dp else 16.dp
-    val stickyHeaderTopSpacing = 6.dp
-    val pinnedTopInset by animateDpAsState(
-        targetValue = if (isPinned) topInset else 0.dp,
-        label = "pinnedHeaderTopInset",
-    )
-    val pinnedHeaderTopPadding = (pinnedTopInset - stickyHeaderTopSpacing).coerceAtLeast(0.dp)
+    val density = LocalDensity.current
+    val stickyTopPx = with(density) { stickyHeaderTopInset.toPx().roundToInt() }
+    val headerTopSpacing = 6.dp
+    val headerTopSpacingPx = with(density) { headerTopSpacing.toPx().roundToInt() }
+    var headerHeightPx by remember { mutableStateOf(0) }
+    val headerOffsetPx by remember(lazyListState, sectionKey, stickyTopPx, headerTopSpacingPx, headerHeightPx) {
+        derivedStateOf {
+            val itemInfo = lazyListState
+                ?.layoutInfo
+                ?.visibleItemsInfo
+                ?.firstOrNull { itemInfo -> itemInfo.key == sectionKey }
+
+            itemInfo?.let {
+                calculateStickyHeaderOffsetPx(
+                    sectionTopPx = it.offset,
+                    sectionHeightPx = it.size,
+                    headerTopSpacingPx = headerTopSpacingPx,
+                    headerHeightPx = headerHeightPx,
+                    stickyTopPx = stickyTopPx,
+                )
+            } ?: 0
+        }
+    }
 
     Box(
         modifier = Modifier
+            .fillMaxWidth()
+            .drawWithContent {
+                val clipTopPx = if (headerOffsetPx > 0) {
+                    headerTopSpacingPx + headerOffsetPx
+                } else {
+                    0
+                }
+                clipRect(top = clipTopPx.toFloat().coerceIn(0f, size.height)) {
+                    this@drawWithContent.drawContent()
+                }
+            },
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Spacer(modifier = Modifier.height(headerTopSpacing))
+            CollapsibleSectionHeaderCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .zIndex(1f)
+                    .onSizeChanged { headerHeightPx = it.height }
+                    .offset { IntOffset(x = 0, y = headerOffsetPx) },
+                title = title,
+                expanded = expanded,
+                summaryText = summaryText,
+                requiredMissingCount = requiredMissingCount,
+                horizontalCardPadding = horizontalCardPadding,
+                onToggleExpanded = onToggleExpanded,
+            )
+            CollapsibleSectionBodyCard(
+                expanded = expanded,
+                isEditMode = isEditMode,
+                animationDelay = animationDelay,
+                horizontalCardPadding = horizontalCardPadding,
+                viewContent = viewContent,
+                editContent = editContent,
+            )
+        }
+    }
+}
+
+internal fun calculateStickyHeaderOffsetPx(
+    sectionTopPx: Int,
+    sectionHeightPx: Int,
+    headerTopSpacingPx: Int,
+    headerHeightPx: Int,
+    stickyTopPx: Int,
+): Int {
+    val headerStartPx = sectionTopPx + headerTopSpacingPx
+    val maxOffsetPx = sectionHeightPx - headerTopSpacingPx - headerHeightPx
+
+    if (headerHeightPx <= 0 || maxOffsetPx <= 0 || headerStartPx >= stickyTopPx) {
+        return 0
+    }
+
+    val pinnedOffsetPx = stickyTopPx - headerStartPx
+    return pinnedOffsetPx.coerceIn(0, maxOffsetPx)
+}
+
+@Composable
+private fun CollapsibleSectionHeaderCard(
+    modifier: Modifier = Modifier,
+    title: String,
+    expanded: Boolean,
+    summaryText: String?,
+    requiredMissingCount: Int,
+    horizontalCardPadding: Dp,
+    onToggleExpanded: () -> Unit,
+) {
+    val bottomCornerSize = if (expanded) 0.dp else 16.dp
+
+    Box(
+        modifier = modifier
             .fillMaxWidth()
             .zIndex(1f)
             .background(MaterialTheme.colorScheme.surface),
@@ -180,10 +265,8 @@ private fun CollapsibleSectionHeaderCard(
                 .padding(
                     start = horizontalCardPadding,
                     end = horizontalCardPadding,
-                    top = pinnedHeaderTopPadding,
                 )
                 .padding(
-                    top = stickyHeaderTopSpacing,
                     bottom = if (expanded) 0.dp else 6.dp,
                 ),
             shape = RoundedCornerShape(

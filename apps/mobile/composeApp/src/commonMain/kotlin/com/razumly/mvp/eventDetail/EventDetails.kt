@@ -2252,7 +2252,7 @@ fun EventDetails(
     val heroSpacerFraction = if (editView) 0.5f else 0.24f
     val heroHeight = (getScreenHeight() * heroHeightFraction).dp
     val statusBarInset = with(LocalDensity.current) { WindowInsets.statusBars.getTop(this).toDp() }
-    val stickyHeaderTopInset = maxOf(topInset, statusBarInset + 12.dp)
+    val stickyHeaderTopInset = maxOf(topInset, statusBarInset) + 6.dp
     val heroSpacerHeight = (getScreenHeight() * heroSpacerFraction).dp
     val heroSpacerHeightPx = with(LocalDensity.current) { heroSpacerHeight.toPx() }
     val heroParallaxOffset by remember(lazyListState, heroSpacerHeightPx) {
