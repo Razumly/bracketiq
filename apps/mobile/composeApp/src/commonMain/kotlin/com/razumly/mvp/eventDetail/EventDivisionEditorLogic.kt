@@ -2,6 +2,8 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameterOption
+import com.razumly.mvp.core.data.dataTypes.LeagueConfig
+import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.toDropdownOptions
 import com.razumly.mvp.core.data.util.buildEventDivisionId
 import com.razumly.mvp.core.data.util.buildGenderSkillAgeDivisionToken
@@ -28,6 +30,8 @@ internal data class DivisionEditorState(
     val installmentDueDates: List<String> = emptyList(),
     val installmentDueRelativeDays: List<Int> = emptyList(),
     val installmentAmounts: List<Int> = emptyList(),
+    val leagueConfig: LeagueConfig = LeagueConfig(),
+    val playoffConfig: TournamentConfig = TournamentConfig(),
     val nameTouched: Boolean = false,
     val error: String? = null,
 )
@@ -55,6 +59,8 @@ internal fun defaultDivisionEditorState(
     defaultInstallmentDueDates: List<String>,
     defaultInstallmentDueRelativeDays: List<Int> = emptyList(),
     defaultInstallmentAmounts: List<Int>,
+    defaultLeagueConfig: LeagueConfig = LeagueConfig(),
+    defaultPlayoffConfig: TournamentConfig = TournamentConfig(),
 ): DivisionEditorState {
     val fallbackMax = defaultMaxParticipants.takeIf { value -> value >= 2 }
     val fallbackPlayoff = defaultPlayoffTeamCount?.coerceAtLeast(2)
@@ -96,6 +102,22 @@ internal fun defaultDivisionEditorState(
             emptyList()
         },
         installmentAmounts = if (normalizedAllowPaymentPlans) normalizedInstallmentAmounts else emptyList(),
+        leagueConfig = defaultLeagueConfig,
+        playoffConfig = defaultPlayoffConfig,
+        nameTouched = false,
+        error = null,
+    )
+}
+
+internal fun divisionDefaultsFromSavedEditor(editor: DivisionEditorState): DivisionEditorState {
+    return editor.copy(
+        editingId = null,
+        gender = "",
+        skillDivisionTypeId = "",
+        skillDivisionTypeName = "",
+        ageDivisionTypeId = "",
+        ageDivisionTypeName = "",
+        name = "",
         nameTouched = false,
         error = null,
     )
@@ -394,6 +416,61 @@ internal fun buildUniqueDivisionIdForToken(
         }
         suffix += 1
     }
+}
+
+internal fun divisionRecordMatchesSelection(
+    detail: DivisionDetail,
+    selection: String?,
+): Boolean {
+    if (selection.isNullOrBlank()) return false
+    val normalizedSelection = selection.normalizeDivisionIdentifier()
+    if (normalizedSelection.isBlank()) return false
+
+    val normalizedId = detail.id.normalizeDivisionIdentifier()
+    val normalizedKey = detail.key.normalizeDivisionIdentifier()
+    if (normalizedId == normalizedSelection || normalizedKey == normalizedSelection) {
+        return true
+    }
+
+    return normalizedKey.isBlank() && divisionsEquivalent(detail.id, normalizedSelection)
+}
+
+internal fun divisionIdentityToken(detail: DivisionDetail): String {
+    val parsedToken = parseDivisionToken(detail)
+    return buildDivisionToken(
+        gender = parsedToken.gender,
+        skillDivisionTypeId = parsedToken.skillDivisionTypeId,
+        ageDivisionTypeId = parsedToken.ageDivisionTypeId,
+    ).normalizeDivisionIdentifier()
+}
+
+internal fun findDuplicateDivisionIdentity(
+    existingDetails: List<DivisionDetail>,
+    divisionToken: String,
+    editingId: String?,
+): DivisionDetail? {
+    val normalizedDivisionToken = divisionToken.normalizeDivisionIdentifier()
+    if (normalizedDivisionToken.isBlank()) return null
+
+    return existingDetails.firstOrNull { detail ->
+        !divisionRecordMatchesSelection(detail, editingId) &&
+            divisionIdentityToken(detail) == normalizedDivisionToken
+    }
+}
+
+internal fun duplicateDivisionIdentityNames(details: List<DivisionDetail>): List<String> {
+    val seenTokens = mutableSetOf<String>()
+    val duplicateNames = linkedSetOf<String>()
+
+    details.forEach { detail ->
+        val token = divisionIdentityToken(detail)
+        if (token.isBlank()) return@forEach
+        if (!seenTokens.add(token)) {
+            duplicateNames += detail.name.trim().ifBlank { detail.id }
+        }
+    }
+
+    return duplicateNames.toList()
 }
 
 internal fun String.normalizeDivisionNameKey(): String {

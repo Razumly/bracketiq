@@ -8,7 +8,7 @@ data class LeagueConfig(
     val includePlayoffs: Boolean = false,
     val playoffTeamCount: Int? = null,
     val usesSets: Boolean = false,
-    val matchDurationMinutes: Int = 60,
+    val matchDurationMinutes: Int? = null,
     val restTimeMinutes: Int = 0,
     val setDurationMinutes: Int? = null,
     val setsPerMatch: Int? = null,
@@ -27,7 +27,7 @@ data class TournamentConfig(
     val fieldCount: Int = 1,
     val restTimeMinutes: Int = 0,
     val usesSets: Boolean = false,
-    val matchDurationMinutes: Int = 60,
+    val matchDurationMinutes: Int? = null,
     val setDurationMinutes: Int? = null,
 )
 
@@ -36,7 +36,7 @@ fun Event.toLeagueConfig(): LeagueConfig = LeagueConfig(
     includePlayoffs = includePlayoffs,
     playoffTeamCount = playoffTeamCount,
     usesSets = usesSets,
-    matchDurationMinutes = matchDurationMinutes ?: 60,
+    matchDurationMinutes = matchDurationMinutes,
     restTimeMinutes = restTimeMinutes ?: 0,
     setDurationMinutes = setDurationMinutes,
     setsPerMatch = setsPerMatch,
@@ -96,7 +96,7 @@ fun Event.toTournamentConfig(): TournamentConfig = TournamentConfig(
         ).coerceAtLeast(1),
     restTimeMinutes = (restTimeMinutes ?: 0).coerceAtLeast(0),
     usesSets = usesSets,
-    matchDurationMinutes = matchDurationMinutes ?: 60,
+    matchDurationMinutes = matchDurationMinutes,
     setDurationMinutes = setDurationMinutes,
 )
 
@@ -109,6 +109,69 @@ fun Event.withTournamentConfig(config: TournamentConfig): Event = copy(
     prize = config.prize,
     restTimeMinutes = config.restTimeMinutes.coerceAtLeast(0),
     usesSets = config.usesSets,
-    matchDurationMinutes = if (config.usesSets) null else config.matchDurationMinutes.coerceAtLeast(15),
-    setDurationMinutes = if (config.usesSets) config.setDurationMinutes?.coerceAtLeast(5) else null,
+    matchDurationMinutes = if (config.usesSets) null else config.matchDurationMinutes,
+    setDurationMinutes = if (config.usesSets) config.setDurationMinutes else null,
+)
+
+fun DivisionDetail.toLeagueConfig(fallback: LeagueConfig = LeagueConfig()): LeagueConfig {
+    val resolvedUsesSets = usesSets ?: fallback.usesSets
+    return LeagueConfig(
+        gamesPerOpponent = gamesPerOpponent ?: fallback.gamesPerOpponent,
+        includePlayoffs = fallback.includePlayoffs,
+        playoffTeamCount = playoffTeamCount ?: fallback.playoffTeamCount,
+        usesSets = resolvedUsesSets,
+        matchDurationMinutes = if (resolvedUsesSets) {
+            null
+        } else {
+            matchDurationMinutes ?: fallback.matchDurationMinutes
+        },
+        restTimeMinutes = restTimeMinutes ?: fallback.restTimeMinutes,
+        setDurationMinutes = if (resolvedUsesSets) {
+            setDurationMinutes ?: fallback.setDurationMinutes
+        } else {
+            null
+        },
+        setsPerMatch = if (resolvedUsesSets) {
+            setsPerMatch ?: fallback.setsPerMatch
+        } else {
+            null
+        },
+        pointsToVictory = if (resolvedUsesSets) {
+            pointsToVictory.takeIf { points -> points.isNotEmpty() } ?: fallback.pointsToVictory
+        } else {
+            emptyList()
+        },
+        doTeamsOfficiate = fallback.doTeamsOfficiate,
+    )
+}
+
+fun DivisionDetail.withLeagueConfig(config: LeagueConfig): DivisionDetail = copy(
+    gamesPerOpponent = config.gamesPerOpponent,
+    restTimeMinutes = config.restTimeMinutes,
+    usesSets = config.usesSets,
+    matchDurationMinutes = if (config.usesSets) null else config.matchDurationMinutes,
+    setDurationMinutes = if (config.usesSets) config.setDurationMinutes else null,
+    setsPerMatch = if (config.usesSets) config.setsPerMatch else null,
+    pointsToVictory = if (config.usesSets) config.pointsToVictory else emptyList(),
+)
+
+fun DivisionDetail.toTournamentConfig(fallback: TournamentConfig = TournamentConfig()): TournamentConfig {
+    val source = playoffConfig ?: fallback
+    return TournamentConfig(
+        doubleElimination = source.doubleElimination,
+        winnerSetCount = source.winnerSetCount,
+        loserSetCount = source.loserSetCount,
+        winnerBracketPointsToVictory = source.winnerBracketPointsToVictory,
+        loserBracketPointsToVictory = source.loserBracketPointsToVictory,
+        prize = source.prize,
+        fieldCount = source.fieldCount,
+        restTimeMinutes = source.restTimeMinutes,
+        usesSets = source.usesSets,
+        matchDurationMinutes = source.matchDurationMinutes,
+        setDurationMinutes = source.setDurationMinutes,
+    )
+}
+
+fun DivisionDetail.withTournamentConfig(config: TournamentConfig?): DivisionDetail = copy(
+    playoffConfig = config,
 )

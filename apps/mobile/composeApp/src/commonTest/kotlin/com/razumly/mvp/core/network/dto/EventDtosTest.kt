@@ -7,6 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.resolvedDivisionPriceCents
@@ -392,6 +393,58 @@ class EventDtosTest {
     }
 
     @Test
+    fun to_update_dto_preserves_division_owned_league_and_playoff_config() {
+        val event = Event(
+            id = "event-15-config",
+            name = "Division Config League",
+            eventType = EventType.LEAGUE,
+            hostId = "host-15",
+            start = Instant.fromEpochMilliseconds(1_700_000_000_000),
+            end = Instant.fromEpochMilliseconds(1_700_003_600_000),
+            singleDivision = false,
+            includePlayoffs = true,
+            divisions = listOf("event-15-config__division__open"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "event-15-config__division__open",
+                    key = "open",
+                    name = "Open",
+                    divisionTypeId = "open",
+                    divisionTypeName = "Open",
+                    ratingType = "SKILL",
+                    gender = "C",
+                    maxParticipants = 16,
+                    playoffTeamCount = 6,
+                    gamesPerOpponent = 2,
+                    restTimeMinutes = 0,
+                    usesSets = true,
+                    setDurationMinutes = 0,
+                    setsPerMatch = 3,
+                    pointsToVictory = listOf(25, 25, 15),
+                    playoffConfig = TournamentConfig(
+                        usesSets = true,
+                        winnerSetCount = 3,
+                        winnerBracketPointsToVictory = listOf(25, 25, 15),
+                        setDurationMinutes = 0,
+                        restTimeMinutes = 0,
+                    ),
+                ),
+            ),
+        )
+
+        val detail = event.toUpdateDto().divisionDetails.first()
+
+        assertEquals(2, detail.gamesPerOpponent)
+        assertEquals(0, detail.restTimeMinutes)
+        assertEquals(true, detail.usesSets)
+        assertEquals(0, detail.setDurationMinutes)
+        assertEquals(listOf(25, 25, 15), detail.pointsToVictory)
+        assertEquals(0, detail.playoffConfig?.setDurationMinutes)
+        assertEquals(0, detail.playoffConfig?.restTimeMinutes)
+        assertEquals(listOf(25, 25, 15), detail.playoffConfig?.winnerBracketPointsToVictory)
+    }
+
+    @Test
     fun to_update_dto_preserves_split_league_playoff_mapping_indexes() {
         val event = Event(
             id = "event-15b",
@@ -596,6 +649,67 @@ class EventDtosTest {
         val divisionA = event?.divisionDetails?.firstOrNull { it.id == "division_a" }
 
         assertEquals(listOf("playoff_gold", ""), divisionA?.playoffPlacementDivisionIds)
+    }
+
+    @Test
+    fun event_api_dto_round_trips_division_owned_schedule_configs() {
+        val dto = EventApiDto(
+            id = "event-25",
+            name = "Configured League",
+            hostId = "host-25",
+            eventType = EventType.LEAGUE.name,
+            includePlayoffs = true,
+            singleDivision = false,
+            start = "2026-02-10T00:00:00Z",
+            end = "2026-02-10T01:00:00Z",
+            divisions = listOf("division_a"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "division_a",
+                    key = "division_a",
+                    name = "Division A",
+                    divisionTypeId = "open",
+                    divisionTypeName = "Open",
+                    ratingType = "SKILL",
+                    gender = "C",
+                    gamesPerOpponent = 2,
+                    restTimeMinutes = 15,
+                    usesSets = true,
+                    setDurationMinutes = 12,
+                    setsPerMatch = 3,
+                    pointsToVictory = listOf(25, 25, 15),
+                    playoffConfig = TournamentConfig(
+                        doubleElimination = true,
+                        winnerSetCount = 3,
+                        loserSetCount = 1,
+                        winnerBracketPointsToVictory = listOf(25, 25, 15),
+                        loserBracketPointsToVictory = listOf(21),
+                        restTimeMinutes = 10,
+                    ),
+                ),
+            ),
+        )
+
+        val event = dto.toEventOrNull()
+        val detail = event?.divisionDetails?.firstOrNull()
+        val updateDetail = event?.toUpdateDto()?.divisionDetails?.firstOrNull()
+
+        assertEquals(2, detail?.gamesPerOpponent)
+        assertEquals(15, detail?.restTimeMinutes)
+        assertEquals(true, detail?.usesSets)
+        assertEquals(3, detail?.setsPerMatch)
+        assertEquals(listOf(25, 25, 15), detail?.pointsToVictory)
+        assertEquals(true, detail?.playoffConfig?.doubleElimination)
+        assertEquals(3, detail?.playoffConfig?.winnerSetCount)
+        assertEquals(10, detail?.playoffConfig?.restTimeMinutes)
+        assertEquals(2, updateDetail?.gamesPerOpponent)
+        assertEquals(15, updateDetail?.restTimeMinutes)
+        assertEquals(true, updateDetail?.usesSets)
+        assertEquals(3, updateDetail?.setsPerMatch)
+        assertEquals(listOf(25, 25, 15), updateDetail?.pointsToVictory)
+        assertEquals(true, updateDetail?.playoffConfig?.doubleElimination)
+        assertEquals(3, updateDetail?.playoffConfig?.winnerSetCount)
+        assertEquals(10, updateDetail?.playoffConfig?.restTimeMinutes)
     }
 
     @Test

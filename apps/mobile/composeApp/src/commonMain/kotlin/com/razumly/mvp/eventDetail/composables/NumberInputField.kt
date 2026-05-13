@@ -16,11 +16,12 @@ fun NumberInputField(
     errorMessage: String? = null,
     supportingText: String? = null,
     placeholder: String? = null,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    showZero: Boolean = false,
 ) {
     Column(modifier = modifier) {
         StandardTextField(
-            value = if (value == "0") "" else value,
+            value = if (!showZero && value == "0") "" else value,
             onValueChange = onValueChange,
             modifier = Modifier.fillMaxWidth(),
             label = label,

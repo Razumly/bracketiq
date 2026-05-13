@@ -121,4 +121,23 @@ class EventConfigsTest {
         assertEquals(null, updated.matchDurationMinutes)
         assertEquals(20, updated.setDurationMinutes)
     }
+
+    @Test
+    fun withTournamentConfig_timed_mode_preserves_zero_and_null_duration_values() {
+        val zeroDuration = Event().withTournamentConfig(
+            TournamentConfig(
+                usesSets = false,
+                matchDurationMinutes = 0,
+            ),
+        )
+        val nullDuration = Event().withTournamentConfig(
+            TournamentConfig(
+                usesSets = false,
+                matchDurationMinutes = null,
+            ),
+        )
+
+        assertEquals(0, zeroDuration.matchDurationMinutes)
+        assertEquals(null, nullDuration.matchDurationMinutes)
+    }
 }

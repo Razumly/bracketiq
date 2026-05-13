@@ -13,11 +13,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -52,7 +50,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -70,7 +67,6 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -101,8 +97,10 @@ import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.data.dataTypes.LeagueConfig
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.Sport
+import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.divisionPriceRangeLabel
@@ -159,10 +157,10 @@ import com.razumly.mvp.eventDetail.composables.LeaguePlayoffConfigurationFields
 import com.razumly.mvp.eventDetail.composables.LeagueScoringConfigFields
 import com.razumly.mvp.eventDetail.composables.LeagueScheduleFields
 import com.razumly.mvp.eventDetail.composables.NumberInputField
-import com.razumly.mvp.eventDetail.composables.PointsTextField
 import com.razumly.mvp.eventDetail.composables.RegistrationOptions
 import com.razumly.mvp.eventDetail.composables.SelectEventImage
 import com.razumly.mvp.eventDetail.composables.TextInputField
+import com.razumly.mvp.eventDetail.composables.TournamentConfigurationFields
 import com.razumly.mvp.eventDetail.division.DivisionDetailEditList
 import com.razumly.mvp.eventDetail.edit.RequiredDocumentsSection
 import com.razumly.mvp.eventDetail.readonly.HostedByReadOnlyRow
@@ -503,6 +501,7 @@ fun EventDetails(
         val normalizedSportId = editEvent.sportId?.trim().orEmpty()
         sports.firstOrNull { sport -> sport.id == normalizedSportId }
     }
+    val divisionScheduleUsesSets = selectedSportForDivisionOptions?.usePointsPerSetWin ?: editEvent.usesSets
     var divisionEditor by remember(editEvent.id) {
         mutableStateOf(
             defaultDivisionEditorState(
@@ -515,6 +514,8 @@ fun EventDetails(
                 defaultInstallmentDueDates = editEvent.installmentDueDates,
                 defaultInstallmentDueRelativeDays = editEvent.installmentDueRelativeDays,
                 defaultInstallmentAmounts = editEvent.installmentAmounts,
+                defaultLeagueConfig = editEvent.toLeagueConfig(),
+                defaultPlayoffConfig = editEvent.toTournamentConfig(),
             ),
         )
     }
@@ -530,6 +531,8 @@ fun EventDetails(
                 defaultInstallmentDueDates = editEvent.installmentDueDates,
                 defaultInstallmentDueRelativeDays = editEvent.installmentDueRelativeDays,
                 defaultInstallmentAmounts = editEvent.installmentAmounts,
+                defaultLeagueConfig = editEvent.toLeagueConfig(),
+                defaultPlayoffConfig = editEvent.toTournamentConfig(),
             ),
         )
     }
@@ -571,16 +574,145 @@ fun EventDetails(
             divisionEditor.ageDivisionTypeId.isNotBlank()
     }
     fun divisionDefaultsFromEditor(editor: DivisionEditorState): DivisionEditorState {
-        return editor.copy(
-            editingId = null,
-            name = "",
-            nameTouched = false,
-            error = null,
-        )
+        return divisionDefaultsFromSavedEditor(editor)
     }
     fun resetDivisionEditor() {
         divisionInstallmentDueDatePickerIndex = null
         divisionEditor = divisionEditorDefaults
+    }
+    fun alignPlayoffConfigWithLeagueConfig(
+        leagueConfig: LeagueConfig,
+        playoffConfig: TournamentConfig,
+    ): TournamentConfig {
+        return if (leagueConfig.usesSets) {
+            playoffConfig.copy(
+                usesSets = true,
+                matchDurationMinutes = null,
+                setDurationMinutes = playoffConfig.setDurationMinutes ?: leagueConfig.setDurationMinutes,
+            )
+        } else {
+            playoffConfig.copy(
+                usesSets = false,
+                matchDurationMinutes = playoffConfig.matchDurationMinutes,
+                setDurationMinutes = null,
+                winnerSetCount = 1,
+                loserSetCount = 1,
+                winnerBracketPointsToVictory = playoffConfig.winnerBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
+                loserBracketPointsToVictory = playoffConfig.loserBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
+            )
+        }
+    }
+    fun normalizeLeagueConfigWithSportMode(config: LeagueConfig): LeagueConfig {
+        val setCount = when (config.setsPerMatch) {
+            1, 3, 5 -> config.setsPerMatch
+            else -> 1
+        }
+        return if (divisionScheduleUsesSets) {
+            val points = config.pointsToVictory.take(setCount).toMutableList()
+            while (points.size < setCount) {
+                points.add(21)
+            }
+            config.copy(
+                usesSets = true,
+                matchDurationMinutes = null,
+                setsPerMatch = setCount,
+                pointsToVictory = points,
+            )
+        } else {
+            config.copy(
+                usesSets = false,
+                setDurationMinutes = null,
+                setsPerMatch = null,
+                pointsToVictory = emptyList(),
+            )
+        }
+    }
+    fun updateDivisionLeagueConfig(updated: LeagueConfig) {
+        val normalizedLeagueConfig = normalizeLeagueConfigWithSportMode(updated).copy(
+            includePlayoffs = editEvent.includePlayoffs,
+            playoffTeamCount = divisionEditor.playoffTeamCount,
+        )
+        val normalizedPlayoffConfig = if (editEvent.eventType == EventType.LEAGUE) {
+            alignPlayoffConfigWithLeagueConfig(
+                leagueConfig = normalizedLeagueConfig,
+                playoffConfig = divisionEditor.playoffConfig,
+            )
+        } else {
+            divisionEditor.playoffConfig
+        }
+        divisionEditor = divisionEditor.copy(
+            leagueConfig = normalizedLeagueConfig,
+            playoffConfig = normalizedPlayoffConfig,
+            error = null,
+        )
+        if (editEvent.singleDivision && editEvent.eventType == EventType.LEAGUE) {
+            onEditEvent {
+                val withLeague = withLeagueConfig(normalizedLeagueConfig)
+                withLeague.copy(
+                    divisionDetails = divisionDetails.map { detail ->
+                        detail.withLeagueConfig(normalizedLeagueConfig)
+                            .withTournamentConfig(if (includePlayoffs) normalizedPlayoffConfig else null)
+                    },
+                )
+            }
+        }
+        if (editEvent.singleDivision && editEvent.eventType == EventType.TOURNAMENT && editEvent.includePlayoffs) {
+            onEditEvent {
+                copy(
+                    divisionDetails = divisionDetails.map { detail ->
+                        detail.withLeagueConfig(normalizedLeagueConfig)
+                    },
+                )
+            }
+        }
+    }
+    fun updateDivisionPlayoffConfig(updated: TournamentConfig) {
+        val normalizedPlayoffConfig = alignPlayoffConfigWithLeagueConfig(
+            leagueConfig = divisionEditor.leagueConfig,
+            playoffConfig = updated,
+        )
+        divisionEditor = divisionEditor.copy(
+            playoffConfig = normalizedPlayoffConfig,
+            error = null,
+        )
+        if (editEvent.singleDivision && editEvent.eventType == EventType.LEAGUE && editEvent.includePlayoffs) {
+            onEditEvent {
+                copy(
+                    divisionDetails = divisionDetails.map { detail ->
+                        detail.withTournamentConfig(normalizedPlayoffConfig)
+                    },
+                )
+            }
+        }
+    }
+    fun normalizeTournamentConfigWithEventMode(config: TournamentConfig): TournamentConfig {
+        return if (divisionScheduleUsesSets) {
+            config.copy(
+                usesSets = true,
+                matchDurationMinutes = null,
+            )
+        } else {
+            config.copy(
+                usesSets = false,
+                setDurationMinutes = null,
+                winnerSetCount = 1,
+                loserSetCount = 1,
+                winnerBracketPointsToVictory = config.winnerBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
+                loserBracketPointsToVictory = config.loserBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
+            )
+        }
+    }
+    fun updateDivisionTournamentConfig(updated: TournamentConfig) {
+        val normalizedTournamentConfig = normalizeTournamentConfigWithEventMode(updated)
+        divisionEditor = divisionEditor.copy(
+            playoffConfig = normalizedTournamentConfig,
+            error = null,
+        )
+        if (editEvent.singleDivision && editEvent.eventType == EventType.TOURNAMENT) {
+            onEditTournament {
+                withTournamentConfig(normalizedTournamentConfig)
+            }
+        }
     }
     fun applySingleDivisionDefaultsToDetails(
         details: List<DivisionDetail>,
@@ -908,11 +1040,27 @@ fun EventDetails(
             return
         }
         val existingDetail = divisionDetailsForSettings.firstOrNull { detail ->
-            divisionsEquivalent(detail.id, divisionEditor.editingId)
+            divisionRecordMatchesSelection(detail, divisionEditor.editingId)
+        }
+        val normalizedToken = buildDivisionToken(
+            gender = normalizedGender,
+            skillDivisionTypeId = normalizedSkillDivisionTypeId,
+            ageDivisionTypeId = normalizedAgeDivisionTypeId,
+        )
+        val duplicateByIdentity = findDuplicateDivisionIdentity(
+            existingDetails = divisionDetailsForSettings,
+            divisionToken = normalizedToken,
+            editingId = existingDetail?.id,
+        )
+        if (duplicateByIdentity != null) {
+            divisionEditor = divisionEditor.copy(
+                error = "A division with this gender, skill division, and age division already exists.",
+            )
+            return
         }
         val normalizedDivisionName = resolvedDivisionName.normalizeDivisionNameKey()
         val duplicateByName = divisionDetailsForSettings.firstOrNull { existing ->
-            val isCurrent = existingDetail != null && divisionsEquivalent(existing.id, existingDetail.id)
+            val isCurrent = existingDetail != null && divisionRecordMatchesSelection(existing, existingDetail.id)
             !isCurrent && existing.name.normalizeDivisionNameKey() == normalizedDivisionName
         }
         if (duplicateByName != null) {
@@ -921,11 +1069,6 @@ fun EventDetails(
             )
             return
         }
-        val normalizedToken = buildDivisionToken(
-            gender = normalizedGender,
-            skillDivisionTypeId = normalizedSkillDivisionTypeId,
-            ageDivisionTypeId = normalizedAgeDivisionTypeId,
-        )
         val nextDivisionId = existingDetail?.id ?: buildUniqueDivisionIdForToken(
             eventId = editEvent.id,
             divisionToken = normalizedToken,
@@ -1000,6 +1143,26 @@ fun EventDetails(
             editEvent.eventType == EventType.LEAGUE -> divisionPlayoffTeamCount
             editEvent.eventType == EventType.TOURNAMENT -> divisionPlayoffTeamCount
             else -> divisionPlayoffTeamCount
+        }
+        val normalizedLeagueConfig = normalizeLeagueConfigWithSportMode(divisionEditor.leagueConfig).copy(
+            includePlayoffs = editEvent.includePlayoffs,
+            playoffTeamCount = normalizedPlayoffTeamCount,
+        )
+        val normalizedDivisionPlayoffConfig = if (
+            editEvent.eventType == EventType.LEAGUE &&
+            editEvent.includePlayoffs
+        ) {
+            alignPlayoffConfigWithLeagueConfig(
+                leagueConfig = normalizedLeagueConfig,
+                playoffConfig = divisionEditor.playoffConfig,
+            )
+        } else {
+            null
+        }
+        val normalizedDivisionTournamentConfig = if (editEvent.eventType == EventType.TOURNAMENT) {
+            normalizeTournamentConfigWithEventMode(divisionEditor.playoffConfig)
+        } else {
+            null
         }
         val defaultInstallmentAmounts = editEvent.installmentAmounts.map { amount ->
             amount.coerceAtLeast(0)
@@ -1104,7 +1267,7 @@ fun EventDetails(
                 return
             }
         }
-        val nextDetail = (existingDetail ?: DivisionDetail(id = nextDivisionId)).copy(
+        var nextDetail = (existingDetail ?: DivisionDetail(id = nextDivisionId)).copy(
             id = nextDivisionId,
             key = normalizedToken,
             name = resolvedDivisionName,
@@ -1134,11 +1297,20 @@ fun EventDetails(
             installmentDueRelativeDays = normalizedInstallmentDueRelativeDays,
             installmentAmounts = normalizedInstallmentAmounts,
         )
+        if (editEvent.eventType == EventType.LEAGUE) {
+            nextDetail = nextDetail
+                .withLeagueConfig(normalizedLeagueConfig)
+                .withTournamentConfig(normalizedDivisionPlayoffConfig)
+        } else if (editEvent.eventType == EventType.TOURNAMENT) {
+            nextDetail = nextDetail
+                .withLeagueConfig(normalizedLeagueConfig)
+                .withTournamentConfig(normalizedDivisionTournamentConfig)
+        }
         val nextDivisionDetails = if (divisionEditor.editingId.isNullOrBlank()) {
             divisionDetailsForSettings + nextDetail
         } else {
             divisionDetailsForSettings.map { detail ->
-                if (divisionsEquivalent(detail.id, divisionEditor.editingId)) nextDetail else detail
+                if (divisionRecordMatchesSelection(detail, divisionEditor.editingId)) nextDetail else detail
             }
         }
         val nextDivisionIds = nextDivisionDetails
@@ -1150,7 +1322,7 @@ fun EventDetails(
             eventId = editEvent.id,
         )
         onEditEvent {
-            copy(
+            val baseEvent = copy(
                 priceCents = normalizedPrice,
                 maxParticipants = normalizedMaxParticipants ?: 0,
                 divisions = nextDivisionIds,
@@ -1165,6 +1337,12 @@ fun EventDetails(
                     playoffTeamCount
                 },
             )
+            when {
+                eventType == EventType.LEAGUE && singleDivision -> baseEvent.withLeagueConfig(normalizedLeagueConfig)
+                eventType == EventType.TOURNAMENT && singleDivision && normalizedDivisionTournamentConfig != null ->
+                    baseEvent.withTournamentConfig(normalizedDivisionTournamentConfig)
+                else -> baseEvent
+            }
         }
         syncLeagueSlotsForSelectedDivisions(nextDivisionIds)
         val nextDefaults = divisionDefaultsFromEditor(
@@ -1173,6 +1351,8 @@ fun EventDetails(
                 maxParticipants = normalizedMaxParticipants,
                 playoffTeamCount = normalizedPlayoffTeamCount,
                 poolCount = if (tournamentPoolPlayEnabled) divisionPoolCount else null,
+                playoffConfig = normalizedDivisionTournamentConfig ?: normalizedDivisionPlayoffConfig
+                    ?: divisionEditor.playoffConfig,
             ),
         )
         divisionEditorDefaults = nextDefaults
@@ -1181,9 +1361,14 @@ fun EventDetails(
     }
     fun handleEditDivisionDetail(divisionId: String) {
         val detail = divisionDetailsForSettings.firstOrNull { existing ->
-            divisionsEquivalent(existing.id, divisionId)
+            divisionRecordMatchesSelection(existing, divisionId)
         } ?: return
         val parsedToken = parseDivisionToken(detail)
+        val detailLeagueConfig = detail.toLeagueConfig(editEvent.toLeagueConfig())
+        val detailPlayoffConfig = alignPlayoffConfigWithLeagueConfig(
+            leagueConfig = detailLeagueConfig,
+            playoffConfig = detail.toTournamentConfig(editEvent.toTournamentConfig()),
+        )
         divisionEditor = DivisionEditorState(
             editingId = detail.id,
             gender = parsedToken.gender,
@@ -1215,13 +1400,15 @@ fun EventDetails(
             installmentDueDates = detail.installmentDueDates,
             installmentDueRelativeDays = detail.installmentDueRelativeDays,
             installmentAmounts = detail.installmentAmounts,
+            leagueConfig = detailLeagueConfig,
+            playoffConfig = detailPlayoffConfig,
             nameTouched = true,
             error = null,
         )
     }
     fun handleRemoveDivisionDetail(divisionId: String) {
         val nextDivisionDetails = divisionDetailsForSettings.filterNot { existing ->
-            divisionsEquivalent(existing.id, divisionId)
+            divisionRecordMatchesSelection(existing, divisionId)
         }
         val nextDivisionIds = nextDivisionDetails.map { detail -> detail.id }.normalizeDivisionIdentifiers()
         val mergedDivisionDetails = mergeDivisionDetailsForDivisions(
@@ -1245,7 +1432,7 @@ fun EventDetails(
             )
         }
         syncLeagueSlotsForSelectedDivisions(nextDivisionIds)
-        if (!divisionEditor.editingId.isNullOrBlank() && divisionsEquivalent(divisionEditor.editingId, divisionId)) {
+        if (!divisionEditor.editingId.isNullOrBlank() && divisionEditor.editingId == divisionId) {
             resetDivisionEditor()
         }
     }
@@ -1517,8 +1704,10 @@ fun EventDetails(
             .filter(String::isNotBlank)
             .distinct()
     }
-    val matchRulesSummary = remember(resolvedMatchRules.scoringModel, resolvedMatchRules.segmentCount) {
-        "${matchScoringModelLabel(resolvedMatchRules.scoringModel)} · ${resolvedMatchRules.segmentCount}"
+    val matchRulesSummary = remember(editEvent.autoCreatePointMatchIncidents, selectedMatchIncidentTypes) {
+        val incidentMode = if (editEvent.autoCreatePointMatchIncidents) "Automatic incidents" else "Manual incidents"
+        val typeCount = selectedMatchIncidentTypes.size
+        "$incidentMode · $typeCount ${if (typeCount == 1) "type" else "types"}"
     }
     val matchIncidentOptions = remember(availableMatchIncidentTypes) {
         availableMatchIncidentTypes.map { incidentType ->
@@ -1930,7 +2119,7 @@ fun EventDetails(
             ),
             divisions = ReadOnlySectionModel(
                 sectionId = "specifics",
-                title = "Division Settings",
+                title = "Divisions",
                 summary = competitionSummaryLine,
             ),
             leagueScoring = ReadOnlySectionModel(
@@ -1940,7 +2129,7 @@ fun EventDetails(
             ),
             schedule = ReadOnlySectionModel(
                 sectionId = "facility_schedule",
-                title = if (editView) "Schedule Config" else "Schedule",
+                title = "Schedule",
                 summary = facilitiesSummaryLine,
             ),
         )
@@ -1988,7 +2177,7 @@ fun EventDetails(
             ),
             divisions = EditSectionModel(
                 sectionId = "specifics",
-                title = "Division Settings",
+                title = "Divisions",
                 summary = competitionSummaryLine,
                 requiredMissingCount = divisionSettingsMissingRequiredCount,
             ),
@@ -1999,7 +2188,7 @@ fun EventDetails(
             ),
             schedule = EditSectionModel(
                 sectionId = "facility_schedule",
-                title = if (editView) "Schedule Config" else "Schedule",
+                title = "Schedule",
                 summary = facilitiesSummaryLine,
                 requiredMissingCount = scheduleMissingRequiredCount,
             ),
@@ -2481,50 +2670,40 @@ fun EventDetails(
                                 },
                             )
                         }
-                        FormSectionDivider()
-                        val playoffsOrPoolsInputs: @Composable () -> Unit = {
+                        val playoffsOrPoolsInput: @Composable () -> Unit = {
                             if (editEvent.eventType == EventType.LEAGUE) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.Top,
-                                ) {
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        LabeledCheckboxRow(
-                                            checked = editEvent.includePlayoffs,
-                                            label = "Include Playoffs",
-                                            onCheckedChange = { checked ->
-                                                onEditEvent {
-                                                    val nextDivisionDetails = mergeDivisionDetailsForDivisions(
-                                                        divisions = divisions,
-                                                        existingDetails = divisionDetails,
-                                                        eventId = id,
-                                                    ).map { detail ->
-                                                        when {
-                                                            !checked -> detail.copy(playoffTeamCount = null)
-                                                            singleDivision -> detail.copy(
-                                                                playoffTeamCount = playoffTeamCount
-                                                                    ?: detail.playoffTeamCount,
-                                                            )
-                                                            else -> detail
-                                                        }
-                                                    }
-                                                    copy(
-                                                        includePlayoffs = checked,
-                                                        playoffTeamCount = when {
-                                                            !checked -> null
-                                                            singleDivision -> playoffTeamCount
-                                                                ?: nextDivisionDetails.firstOrNull()?.playoffTeamCount
-                                                            else -> playoffTeamCount
-                                                        },
-                                                        divisionDetails = nextDivisionDetails,
+                                LabeledCheckboxRow(
+                                    checked = editEvent.includePlayoffs,
+                                    label = "Include Playoffs",
+                                    onCheckedChange = { checked ->
+                                        onEditEvent {
+                                            val nextDivisionDetails = mergeDivisionDetailsForDivisions(
+                                                divisions = divisions,
+                                                existingDetails = divisionDetails,
+                                                eventId = id,
+                                            ).map { detail ->
+                                                when {
+                                                    !checked -> detail.copy(playoffTeamCount = null)
+                                                    singleDivision -> detail.copy(
+                                                        playoffTeamCount = playoffTeamCount
+                                                            ?: detail.playoffTeamCount,
                                                     )
+                                                    else -> detail
                                                 }
-                                            },
-                                        )
-                                    }
-                                    Box(modifier = Modifier.weight(1f))
-                                }
+                                            }
+                                            copy(
+                                                includePlayoffs = checked,
+                                                playoffTeamCount = when {
+                                                    !checked -> null
+                                                    singleDivision -> playoffTeamCount
+                                                        ?: nextDivisionDetails.firstOrNull()?.playoffTeamCount
+                                                    else -> playoffTeamCount
+                                                },
+                                                divisionDetails = nextDivisionDetails,
+                                            )
+                                        }
+                                    },
+                                )
                             } else if (editEvent.eventType == EventType.TOURNAMENT) {
                                 LabeledCheckboxRow(
                                     checked = editEvent.includePlayoffs,
@@ -2556,7 +2735,38 @@ fun EventDetails(
                                 )
                             }
                         }
-                        playoffsOrPoolsInputs()
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Box(modifier = Modifier.weight(1f)) {
+                                playoffsOrPoolsInput()
+                            }
+                            Box(modifier = Modifier.weight(1f)) {
+                                LabeledCheckboxRow(
+                                    checked = if (
+                                        editEvent.eventType == EventType.EVENT ||
+                                        editEvent.eventType == EventType.WEEKLY_EVENT
+                                    ) {
+                                        editEvent.teamSignup
+                                    } else {
+                                        true
+                                    },
+                                    label = "Team Event",
+                                    enabled = editEvent.eventType == EventType.EVENT ||
+                                        editEvent.eventType == EventType.WEEKLY_EVENT,
+                                    onCheckedChange = { checked ->
+                                        if (
+                                            editEvent.eventType == EventType.EVENT ||
+                                            editEvent.eventType == EventType.WEEKLY_EVENT
+                                        ) {
+                                            onEditEvent { copy(teamSignup = checked) }
+                                        }
+                                    },
+                                )
+                            }
+                        }
                         FormSectionDivider()
 
                         Row(
@@ -2651,24 +2861,6 @@ fun EventDetails(
                         viewContent = {
                             DetailKeyValueList(
                                 rows = buildList {
-                                    add(
-                                        DetailRowSpec(
-                                            "Scoring model",
-                                            matchScoringModelLabel(resolvedMatchRules.scoringModel),
-                                        ),
-                                    )
-                                    add(
-                                        DetailRowSpec(
-                                            "${resolvedMatchRules.segmentLabel} count",
-                                            resolvedMatchRules.segmentCount.toString(),
-                                        ),
-                                    )
-                                    add(
-                                        DetailRowSpec(
-                                            "Point incident type",
-                                            matchIncidentTypeLabel(autoPointIncidentType),
-                                        ),
-                                    )
                                     if (resolvedMatchRules.canUseOvertime) {
                                         add(
                                             DetailRowSpec(
@@ -2720,47 +2912,9 @@ fun EventDetails(
                         },
                         editContent = {
                             Text(
-                                text = "The sport defines the match format. This event can adjust segment count, supported result paths, and incident capture without changing the sport default.",
+                                text = "The sport defines the match format. This event can adjust supported result paths and incident capture without changing the sport default.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color(localImageScheme.current.onSurfaceVariant),
-                            )
-                            DetailStatsGrid(
-                                items = listOf(
-                                    DetailGridItem(
-                                        label = "Scoring model",
-                                        value = matchScoringModelLabel(resolvedMatchRules.scoringModel),
-                                    ),
-                                    DetailGridItem(
-                                        label = "Segment label",
-                                        value = resolvedMatchRules.segmentLabel,
-                                    ),
-                                    DetailGridItem(
-                                        label = "Point incident type",
-                                        value = matchIncidentTypeLabel(autoPointIncidentType),
-                                    ),
-                                ),
-                            )
-                            FormSectionDivider()
-                            NumberInputField(
-                                value = editEvent.matchRulesOverride?.segmentCount?.toString().orEmpty(),
-                                label = "${resolvedMatchRules.segmentLabel} Count",
-                                placeholder = baseMatchRules.segmentCount.toString(),
-                                supportingText = "Leave blank to use the sport default of ${baseMatchRules.segmentCount}.",
-                                onValueChange = { newValue ->
-                                    if (newValue.isNotEmpty() && !newValue.all { it.isDigit() }) return@NumberInputField
-                                    val nextValue = newValue.toIntOrNull()
-                                        ?.takeIf { it > 0 }
-                                        ?.takeUnless { it == baseMatchRules.segmentCount }
-                                    onEditEvent {
-                                        copy(
-                                            matchRulesOverride = copyMatchRulesOverride(
-                                                current = matchRulesOverride,
-                                                segmentCount = nextValue,
-                                            ),
-                                        )
-                                    }
-                                },
-                                isError = false,
                             )
                             Column(
                                 modifier = Modifier.fillMaxWidth(),
@@ -3452,40 +3606,11 @@ fun EventDetails(
                         )
                         },
                         editContent = {
-                    Text(
-                        text = "Team settings",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = Color(localImageScheme.current.onSurface),
-                    )
-
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.Top,
                     ) {
-                        Box(modifier = Modifier.weight(1f)) {
-                            LabeledCheckboxRow(
-                                checked = if (
-                                    editEvent.eventType == EventType.EVENT ||
-                                    editEvent.eventType == EventType.WEEKLY_EVENT
-                                ) {
-                                    editEvent.teamSignup
-                                } else {
-                                    true
-                                },
-                                label = "Team Event",
-                                enabled = editEvent.eventType == EventType.EVENT ||
-                                    editEvent.eventType == EventType.WEEKLY_EVENT,
-                                onCheckedChange = { checked ->
-                                    if (
-                                        editEvent.eventType == EventType.EVENT ||
-                                        editEvent.eventType == EventType.WEEKLY_EVENT
-                                    ) {
-                                        onEditEvent { copy(teamSignup = checked) }
-                                    }
-                        },
-                    )
-                }
                         Box(modifier = Modifier.weight(1f)) {
                             LabeledCheckboxRow(
                                 checked = editEvent.singleDivision,
@@ -3643,6 +3768,7 @@ fun EventDetails(
                                 },
                             )
                         }
+                        Box(modifier = Modifier.weight(1f))
                     }
 
                     AnimatedVisibility(editEvent.singleDivision) {
@@ -3887,35 +4013,6 @@ fun EventDetails(
                         }
                     }
 
-                    AnimatedVisibility(!editEvent.singleDivision && editEvent.teamSignup) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.Top,
-                        ) {
-                            Box(modifier = Modifier.weight(1f)) {
-                                LabeledCheckboxRow(
-                                    checked = editEvent.allowTeamSplitDefault == true,
-                                    label = "Allow team bill splitting by default",
-                                    onCheckedChange = { checked ->
-                                        onEditEvent {
-                                            copy(allowTeamSplitDefault = checked)
-                                        }
-                                    },
-                                )
-                            }
-                            Box(modifier = Modifier.weight(1f))
-                        }
-                    }
-
-                    if (editEvent.eventType != EventType.EVENT) {
-                        Text(
-                            "Leagues and tournaments are always team events. Use Single Division to keep one shared capacity for all divisions.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(localImageScheme.current.onSurface),
-                        )
-                    }
-
                     if (isNewEvent) {
                         AnimatedVisibility(!editEvent.teamSignup) {
                             Row(
@@ -3938,8 +4035,59 @@ fun EventDetails(
                         }
                     }
 
+                    DivisionDetailEditList(
+                        event = editEvent,
+                        divisionDetails = divisionDetailsForSettings,
+                        onEditDivision = ::handleEditDivisionDetail,
+                        onRemoveDivision = ::handleRemoveDivisionDetail,
+                    )
+
+                    if (editEvent.eventType == EventType.TOURNAMENT && editEvent.includePlayoffs) {
+                        LeagueConfigurationFields(
+                            title = "Pool Configuration",
+                            leagueConfig = normalizeLeagueConfigWithSportMode(divisionEditor.leagueConfig).copy(
+                                includePlayoffs = false,
+                                playoffTeamCount = null,
+                            ),
+                            onLeagueConfigChange = ::updateDivisionLeagueConfig,
+                        )
+                    }
+
+                    if (editEvent.eventType == EventType.TOURNAMENT) {
+                        TournamentConfigurationFields(
+                            title = "Tournament Configuration",
+                            usesSets = divisionScheduleUsesSets,
+                            tournamentConfig = divisionEditor.playoffConfig,
+                            onTournamentConfigChange = ::updateDivisionTournamentConfig,
+                        )
+                    }
+
+                    if (editEvent.eventType == EventType.LEAGUE) {
+                        LeagueConfigurationFields(
+                            leagueConfig = normalizeLeagueConfigWithSportMode(divisionEditor.leagueConfig).copy(
+                                includePlayoffs = editEvent.includePlayoffs,
+                                playoffTeamCount = divisionEditor.playoffTeamCount,
+                            ),
+                            onLeagueConfigChange = ::updateDivisionLeagueConfig,
+                        )
+                        if (editEvent.includePlayoffs) {
+                            LeaguePlayoffConfigurationFields(
+                                leagueConfig = normalizeLeagueConfigWithSportMode(divisionEditor.leagueConfig).copy(
+                                    includePlayoffs = true,
+                                    playoffTeamCount = divisionEditor.playoffTeamCount,
+                                ),
+                                playoffConfig = divisionEditor.playoffConfig,
+                                onPlayoffConfigChange = ::updateDivisionPlayoffConfig,
+                            )
+                        }
+                    }
+
                     Text(
-                        text = "Divisions",
+                        text = if (divisionEditor.editingId.isNullOrBlank()) {
+                            "New Division"
+                        } else {
+                            "Edit Division"
+                        },
                         style = MaterialTheme.typography.titleSmall,
                         color = Color(localImageScheme.current.onSurface),
                     )
@@ -4088,6 +4236,10 @@ fun EventDetails(
                         }
                         val divisionPoolCount = divisionEditor.poolCount
                         val divisionBracketTeamCount = divisionEditor.playoffTeamCount
+                        val divisionPoolTeamCount = derivePoolTeamCount(
+                            maxTeams = divisionMaxTeams,
+                            poolCount = divisionPoolCount,
+                        )
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -4147,6 +4299,16 @@ fun EventDetails(
                                 errorMessage = "Max teams must divide evenly by pools.",
                             )
                         }
+                        NumberInputField(
+                            modifier = Modifier.fillMaxWidth(0.48f),
+                            value = divisionPoolTeamCount?.toString().orEmpty(),
+                            label = "Pool Team Count",
+                            enabled = false,
+                            onValueChange = {},
+                            isError = divisionPoolTeamCount == null,
+                            errorMessage = "Derived from Pool Count and Max Teams",
+                            supportingText = "Derived from Pool Count and Max Teams",
+                        )
                     }
 
                     if (!isNewEvent && !editEvent.singleDivision) {
@@ -4289,22 +4451,6 @@ fun EventDetails(
                         editEvent.eventType == EventType.LEAGUE &&
                             editEvent.includePlayoffs &&
                             !editEvent.singleDivision
-                    val showPoolTeamCount =
-                        editEvent.eventType == EventType.TOURNAMENT &&
-                            !editEvent.singleDivision &&
-                            editEvent.isTournamentPoolPlayEnabled()
-                    val actionRowPoolTeamCount = if (showPoolTeamCount) {
-                        derivePoolTeamCount(
-                            maxTeams = if (editEvent.singleDivision) {
-                                editEvent.maxParticipants.takeIf { value -> value >= 2 } ?: 0
-                            } else {
-                                divisionEditor.maxParticipants ?: 0
-                            },
-                            poolCount = divisionEditor.poolCount,
-                        )
-                    } else {
-                        null
-                    }
                     val isEditingDivision = !divisionEditor.editingId.isNullOrBlank()
                     @Composable
                     fun DivisionActionLeadingField(modifier: Modifier) {
@@ -4331,24 +4477,12 @@ fun EventDetails(
                                     errorMessage = "Required and must be at least 2.",
                                 )
                             }
-                            showPoolTeamCount -> {
-                                NumberInputField(
-                                    modifier = modifier,
-                                    value = actionRowPoolTeamCount?.toString().orEmpty(),
-                                    label = "Pool Team Count",
-                                    enabled = false,
-                                    onValueChange = {},
-                                    isError = actionRowPoolTeamCount == null,
-                                    errorMessage = "Derived from Pool Count and Max Teams",
-                                    supportingText = "Derived from Pool Count and Max Teams",
-                                )
-                            }
                             else -> Spacer(modifier = modifier)
                         }
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (isEditingDivision) {
-                            if (showDivisionPlayoffTeamCount || showPoolTeamCount) {
+                            if (showDivisionPlayoffTeamCount) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -4416,12 +4550,6 @@ fun EventDetails(
                         )
                     }
 
-                    DivisionDetailEditList(
-                        event = editEvent,
-                        divisionDetails = divisionDetailsForSettings,
-                        onEditDivision = ::handleEditDivisionDetail,
-                        onRemoveDivision = ::handleRemoveDivisionDetail,
-                    )
                     }
 
                     )
@@ -4501,349 +4629,6 @@ fun EventDetails(
                             )
                         },
                         editContent = {
-                            val setCountOptions = listOf(
-                                DropdownOption(value = "1", label = "Best of 1"),
-                                DropdownOption(value = "3", label = "Best of 3"),
-                                DropdownOption(value = "5", label = "Best of 5"),
-                            )
-                            if (editEvent.eventType == EventType.LEAGUE) {
-                                LeagueConfigurationFields(
-                                    leagueConfig = editEvent.toLeagueConfig(),
-                                    onLeagueConfigChange = { updated ->
-                                        onEditEvent { withLeagueConfig(updated) }
-                                    },
-                                )
-                                if (editEvent.includePlayoffs) {
-                                    FormSectionDivider()
-                                    LeaguePlayoffConfigurationFields(
-                                        leagueConfig = editEvent.toLeagueConfig(),
-                                        playoffConfig = editEvent.toTournamentConfig(),
-                                        onPlayoffConfigChange = { updated ->
-                                            onEditTournament { withTournamentConfig(updated) }
-                                        },
-                                    )
-                                }
-                                if (!isLeagueGamesValid) {
-                                    Text(
-                                        "Games per opponent must be at least 1.",
-                                        color = MaterialTheme.colorScheme.error,
-                                    )
-                                }
-                                if (!isLeagueDurationValid) {
-                                    Text(
-                                        if (editEvent.usesSets) {
-                                            "Set duration must be at least 5 minutes and sets must be Best of 1, 3, or 5."
-                                        } else {
-                                            "Match duration must be at least 15 minutes."
-                                        },
-                                        color = MaterialTheme.colorScheme.error,
-                                    )
-                                }
-                                if (!isLeaguePointsValid) {
-                                    Text(
-                                        "Points to victory must be greater than 0 for every configured set.",
-                                        color = MaterialTheme.colorScheme.error,
-                                    )
-                                }
-                                if (!isLeaguePlayoffTeamsValid) {
-                                    Text(
-                                        if (editEvent.singleDivision) {
-                                            "Playoff team count must be at least 2 when playoffs are enabled."
-                                        } else {
-                                            "Each division must have a playoff team count of at least 2 when playoffs are enabled."
-                                        },
-                                        color = MaterialTheme.colorScheme.error,
-                                    )
-                                }
-                            }
-
-                            if (editEvent.eventType == EventType.TOURNAMENT) {
-                                Text(
-                                    text = if (editEvent.usesSets) {
-                                        "Set-based scoring is determined by the selected sport."
-                                    } else {
-                                        "Timed match scoring is determined by the selected sport."
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.Top,
-                                ) {
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        LabeledCheckboxRow(
-                                            checked = editEvent.doubleElimination,
-                                            label = "Double Elimination",
-                                            onCheckedChange = { checked ->
-                                                onEditTournament {
-                                                    copy(
-                                                        doubleElimination = checked,
-                                                        loserBracketPointsToVictory = listOf(21),
-                                                        loserSetCount = 1
-                                                    )
-                                                }
-                                            },
-                                        )
-                                    }
-                                    Box(modifier = Modifier.weight(1f))
-                                }
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.Top,
-                                ) {
-                                    StandardTextField(
-                                        modifier = Modifier.weight(1f),
-                                        value = editEvent.prize,
-                                        onValueChange = {
-                                            if (it.length <= 50) onEditTournament {
-                                                copy(prize = it)
-                                            }
-                                        },
-                                        label = "Prize",
-                                        supportingText = "If there is a prize, enter it here",
-                                    )
-                                    NumberInputField(
-                                        modifier = Modifier.weight(1f),
-                                        value = if (editEvent.usesSets) {
-                                            (editEvent.setDurationMinutes ?: 20).toString()
-                                        } else {
-                                            (editEvent.matchDurationMinutes ?: 60).toString()
-                                        },
-                                        onValueChange = { newValue ->
-                                            if (newValue.all { it.isDigit() }) {
-                                                onEditTournament {
-                                                    if (editEvent.usesSets) {
-                                                        copy(setDurationMinutes = newValue.toIntOrNull())
-                                                    } else {
-                                                        copy(matchDurationMinutes = newValue.toIntOrNull() ?: 0)
-                                                    }
-                                                }
-                                            }
-                                        },
-                                        label = if (editEvent.usesSets) {
-                                            "Set Duration (min)"
-                                        } else {
-                                            "Match Duration (min)"
-                                        },
-                                        isError = !isLeagueDurationValid,
-                                        supportingText = if (!isLeagueDurationValid) {
-                                            if (editEvent.usesSets) {
-                                                "Set duration must be at least 5 minutes."
-                                            } else {
-                                                "Match duration must be at least 15 minutes."
-                                            }
-                                        } else {
-                                            ""
-                                        },
-                                    )
-                                }
-
-                                if (editEvent.usesSets) {
-                                    val normalizedWinnerSetCount = remember(editEvent.winnerSetCount) {
-                                        when (editEvent.winnerSetCount) {
-                                            1, 3, 5 -> editEvent.winnerSetCount
-                                            else -> 1
-                                        }
-                                    }
-                                    val constrainedWinnerSetCount = remember(editEvent.winnerSetCount) {
-                                        when (editEvent.winnerSetCount) {
-                                            1, 3, 5 -> editEvent.winnerSetCount
-                                            else -> 1
-                                        }
-                                    }
-                                    val winnerFocusRequesters = remember(constrainedWinnerSetCount) {
-                                        List(constrainedWinnerSetCount) { FocusRequester() }
-                                    }
-                                    val normalizedLoserSetCount = remember(editEvent.loserSetCount) {
-                                        when (editEvent.loserSetCount) {
-                                            1, 3, 5 -> editEvent.loserSetCount
-                                            else -> 1
-                                        }
-                                    }
-                                    val constrainedLoserSetCount = remember(editEvent.loserSetCount) {
-                                        when (editEvent.loserSetCount) {
-                                            1, 3, 5 -> editEvent.loserSetCount
-                                            else -> 1
-                                        }
-                                    }
-                                    val loserFocusRequesters = remember(constrainedLoserSetCount) {
-                                        List(constrainedLoserSetCount) { FocusRequester() }
-                                    }
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(IntrinsicSize.Min),
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                        verticalAlignment = Alignment.Top,
-                                    ) {
-                                        Column(
-                                            modifier = Modifier.weight(1f),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                                        ) {
-                                            PlatformDropdown(
-                                                selectedValue = normalizedWinnerSetCount.toString(),
-                                                onSelectionChange = { selected ->
-                                                    val newValue = selected.toInt()
-                                                    onEditTournament {
-                                                        copy(
-                                                            winnerSetCount = newValue,
-                                                            winnerBracketPointsToVictory = List(newValue) { 21 }
-                                                        )
-                                                    }
-                                                },
-                                                options = setCountOptions,
-                                                label = "Winner Set Count",
-                                                modifier = Modifier.fillMaxWidth(),
-                                                isError = !isWinnerSetCountValid,
-                                                supportingText = if (!isWinnerSetCountValid) {
-                                                    "Winner set count must be 1, 3, or 5."
-                                                } else {
-                                                    ""
-                                                },
-                                            )
-                                            repeat(constrainedWinnerSetCount) { index ->
-                                                PointsTextField(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    value = editEvent.winnerBracketPointsToVictory.getOrNull(
-                                                        index
-                                                    )?.toString() ?: "",
-                                                    label = "Set ${index + 1} Points",
-                                                    onValueChange = { newValue ->
-                                                        if (newValue.all { it.isDigit() } && newValue.length <= 2) {
-                                                            val winnerPoints = if (newValue.isBlank()) {
-                                                                0
-                                                            } else {
-                                                                if (editEvent.winnerBracketPointsToVictory.getOrNull(
-                                                                        index
-                                                                    ) == 0 && newValue.toInt() >= 10
-                                                                ) {
-                                                                    newValue.toInt() / 10
-                                                                } else {
-                                                                    newValue.toInt()
-                                                                }
-                                                            }
-                                                            onEditTournament {
-                                                                copy(
-                                                                    winnerBracketPointsToVictory = editEvent.winnerBracketPointsToVictory.toMutableList()
-                                                                        .apply {
-                                                                            while (size <= index) add(0)
-                                                                            set(index, winnerPoints)
-                                                                        }
-                                                                )
-                                                            }
-                                                        }
-                                                    },
-                                                    isError = editEvent.winnerBracketPointsToVictory.getOrNull(
-                                                        index
-                                                    )?.let { it <= 0 } ?: true,
-                                                    errorMessage = "Points must be greater than 0",
-                                                    focusRequester = winnerFocusRequesters[index],
-                                                    nextFocus = {
-                                                        if (index < constrainedWinnerSetCount - 1) {
-                                                            winnerFocusRequesters[index + 1].requestFocus()
-                                                        }
-                                                    })
-                                            }
-                                            if (!isWinnerPointsValid) {
-                                                Text(
-                                                    text = "Winner points must be greater than 0 for every set.",
-                                                    color = MaterialTheme.colorScheme.error,
-                                                )
-                                            }
-                                        }
-
-                                        if (editEvent.doubleElimination) {
-                                            VerticalDivider(
-                                                modifier = Modifier.fillMaxHeight(),
-                                                color = MaterialTheme.colorScheme.outlineVariant,
-                                            )
-                                            Column(
-                                                modifier = Modifier.weight(1f),
-                                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                            ) {
-                                            PlatformDropdown(
-                                                selectedValue = normalizedLoserSetCount.toString(),
-                                                onSelectionChange = { selected ->
-                                                    val newValue = selected.toInt()
-                                                    onEditTournament {
-                                                        copy(
-                                                            loserSetCount = newValue,
-                                                            loserBracketPointsToVictory = List(newValue) { 21 }
-                                                        )
-                                                    }
-                                                },
-                                                options = setCountOptions,
-                                                label = "Loser Set Count",
-                                                modifier = Modifier.fillMaxWidth(),
-                                                isError = !isLoserSetCountValid,
-                                                supportingText = if (!isLoserSetCountValid) {
-                                                    "Loser set count must be 1, 3, or 5."
-                                                } else {
-                                                    ""
-                                                },
-                                            )
-                                            repeat(constrainedLoserSetCount) { index ->
-                                                PointsTextField(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    value = editEvent.loserBracketPointsToVictory.getOrNull(
-                                                        index
-                                                    )?.toString() ?: "",
-                                                    label = "Set ${index + 1} Points",
-                                                    onValueChange = { newValue ->
-                                                        if (newValue.all { it.isDigit() } && newValue.length <= 2) {
-                                                            val loserPoints = if (newValue.isBlank()) {
-                                                                0
-                                                            } else {
-                                                                newValue.toInt()
-                                                            }
-                                                            onEditTournament {
-                                                                copy(
-                                                                    loserBracketPointsToVictory = editEvent.loserBracketPointsToVictory.toMutableList()
-                                                                        .apply {
-                                                                            while (size <= index) add(0)
-                                                                            set(index, loserPoints)
-                                                                        })
-                                                            }
-                                                        }
-                                                    },
-                                                    isError = editEvent.loserBracketPointsToVictory.getOrNull(
-                                                        index
-                                                    )?.let { it <= 0 } ?: true,
-                                                    errorMessage = "Points must be greater than 0",
-                                                    focusRequester = loserFocusRequesters[index],
-                                                    nextFocus = {
-                                                        if (index < constrainedLoserSetCount - 1) {
-                                                            loserFocusRequesters[index + 1].requestFocus()
-                                                        }
-                                                    })
-                                            }
-                                            if (!isLoserPointsValid) {
-                                                Text(
-                                                    text = "Loser points must be greater than 0 for every set.",
-                                                    color = MaterialTheme.colorScheme.error,
-                                                )
-                                            }
-                                        }
-                                        } else {
-                                            Box(modifier = Modifier.weight(1f))
-                                        }
-                                    }
-                                } else {
-                                    Spacer(Modifier.height(12.dp))
-                                }
-                            }
-
-                            if (
-                                editEvent.eventType == EventType.LEAGUE ||
-                                    editEvent.eventType == EventType.TOURNAMENT
-                            ) {
-                                FormSectionDivider()
-                            }
                             LeagueScheduleFields(
                                 fieldCount = fieldCount,
                                 fields = editableFields,

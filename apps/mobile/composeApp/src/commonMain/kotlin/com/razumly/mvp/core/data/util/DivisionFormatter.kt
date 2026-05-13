@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.data.util
 
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 
 private val whitespaceRegex = "\\s+".toRegex()
 private val delimiterRegex = "[\\s-]+".toRegex()
@@ -510,6 +511,34 @@ fun inferDivisionDetail(
     )
 }
 
+private val supportedDivisionSetCounts = setOf(1, 3, 5)
+
+private fun normalizeDivisionPointTargets(values: List<Int>, count: Int): List<Int> {
+    val normalized = values.map { value -> value.coerceAtLeast(1) }.take(count)
+    return normalized + List((count - normalized.size).coerceAtLeast(0)) { 21 }
+}
+
+private fun TournamentConfig.normalizeDivisionPlayoffConfig(): TournamentConfig {
+    val normalizedWinnerSetCount = winnerSetCount.takeIf { count -> count in supportedDivisionSetCounts } ?: 1
+    val normalizedLoserSetCount = loserSetCount.takeIf { count -> count in supportedDivisionSetCounts } ?: 1
+    return copy(
+        winnerSetCount = normalizedWinnerSetCount,
+        loserSetCount = normalizedLoserSetCount,
+        winnerBracketPointsToVictory = normalizeDivisionPointTargets(
+            winnerBracketPointsToVictory,
+            normalizedWinnerSetCount,
+        ),
+        loserBracketPointsToVictory = normalizeDivisionPointTargets(
+            loserBracketPointsToVictory,
+            normalizedLoserSetCount,
+        ),
+        fieldCount = fieldCount.coerceAtLeast(1),
+        restTimeMinutes = restTimeMinutes.coerceAtLeast(0),
+        matchDurationMinutes = matchDurationMinutes?.coerceAtLeast(0),
+        setDurationMinutes = setDurationMinutes?.coerceAtLeast(0),
+    )
+}
+
 fun DivisionDetail.normalizeDivisionDetail(eventId: String? = null): DivisionDetail {
     val candidateIdentifier = when {
         id.isNotBlank() -> id
@@ -586,6 +615,17 @@ fun DivisionDetail.normalizeDivisionDetail(eventId: String? = null): DivisionDet
     val normalizedPlayoffPlacementDivisionIds = playoffPlacementDivisionIds.map { divisionId ->
         divisionId.normalizeDivisionIdentifier()
     }
+    val inferredUsesSets = usesSets ?: if (
+        setsPerMatch != null ||
+        setDurationMinutes != null ||
+        pointsToVictory.isNotEmpty()
+    ) {
+        true
+    } else {
+        null
+    }
+    val normalizedPointsToVictory = pointsToVictory
+        .map { points -> points.coerceAtLeast(1) }
 
     return copy(
         id = normalizedId,
@@ -642,6 +682,14 @@ fun DivisionDetail.normalizeDivisionDetail(eventId: String? = null): DivisionDet
             .filter(String::isNotBlank)
             .distinct(),
         playoffPlacementDivisionIds = normalizedPlayoffPlacementDivisionIds,
+        playoffConfig = playoffConfig?.normalizeDivisionPlayoffConfig(),
+        gamesPerOpponent = gamesPerOpponent?.takeIf { count -> count >= 1 },
+        restTimeMinutes = restTimeMinutes?.coerceAtLeast(0),
+        usesSets = inferredUsesSets,
+        matchDurationMinutes = matchDurationMinutes?.takeIf { minutes -> minutes >= 0 },
+        setDurationMinutes = setDurationMinutes?.takeIf { minutes -> minutes >= 0 },
+        setsPerMatch = setsPerMatch?.takeIf { count -> count in supportedDivisionSetCounts },
+        pointsToVictory = if (inferredUsesSets == false) emptyList() else normalizedPointsToVictory,
         teamIds = teamIds
             .map(String::trim)
             .filter(String::isNotBlank)

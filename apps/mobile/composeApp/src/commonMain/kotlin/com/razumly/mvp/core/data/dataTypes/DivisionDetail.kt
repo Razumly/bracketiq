@@ -33,5 +33,13 @@ data class DivisionDetail(
     val ageCutoffSource: String? = null,
     val fieldIds: List<String> = emptyList(),
     val playoffPlacementDivisionIds: List<String> = emptyList(),
+    val playoffConfig: TournamentConfig? = null,
+    val gamesPerOpponent: Int? = null,
+    val restTimeMinutes: Int? = null,
+    val usesSets: Boolean? = null,
+    val matchDurationMinutes: Int? = null,
+    val setDurationMinutes: Int? = null,
+    val setsPerMatch: Int? = null,
+    val pointsToVictory: List<Int> = emptyList(),
     val teamIds: List<String> = emptyList(),
 )

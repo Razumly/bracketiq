@@ -3,9 +3,11 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.util.buildEventDivisionId
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameterOption
+import com.razumly.mvp.core.data.dataTypes.LeagueConfig
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class EventDetailsDivisionEditorHelpersTest {
@@ -267,6 +269,68 @@ class EventDetailsDivisionEditorHelpersTest {
     }
 
     @Test
+    fun find_duplicate_division_identity_matches_same_type_even_when_name_differs() {
+        val existing = DivisionDetail(
+            id = buildEventDivisionId("event-1", "m_skill_open_age_u18"),
+            key = "m_skill_open_age_u18",
+            name = "Men's Open U18",
+            gender = "M",
+            skillDivisionTypeId = "open",
+            ageDivisionTypeId = "u18",
+        )
+
+        val duplicate = findDuplicateDivisionIdentity(
+            existingDetails = listOf(existing),
+            divisionToken = "m_skill_open_age_u18",
+            editingId = null,
+        )
+
+        assertEquals(existing, duplicate)
+    }
+
+    @Test
+    fun find_duplicate_division_identity_ignores_current_record_by_exact_id() {
+        val existing = DivisionDetail(
+            id = buildEventDivisionId("event-1", "m_skill_open_age_u18"),
+            key = "m_skill_open_age_u18",
+            name = "Men's Open U18",
+            gender = "M",
+            skillDivisionTypeId = "open",
+            ageDivisionTypeId = "u18",
+        )
+
+        val duplicate = findDuplicateDivisionIdentity(
+            existingDetails = listOf(existing),
+            divisionToken = "m_skill_open_age_u18",
+            editingId = existing.id,
+        )
+
+        assertNull(duplicate)
+    }
+
+    @Test
+    fun duplicate_division_identity_names_reports_same_type_with_different_ids() {
+        val first = DivisionDetail(
+            id = buildEventDivisionId("event-1", "m_skill_open_age_u18"),
+            key = "m_skill_open_age_u18",
+            name = "Men's Open U18",
+            gender = "M",
+            skillDivisionTypeId = "open",
+            ageDivisionTypeId = "u18",
+        )
+        val second = DivisionDetail(
+            id = buildEventDivisionId("event-1_2", "m_skill_open_age_u18"),
+            key = "m_skill_open_age_u18",
+            name = "Renamed U18",
+            gender = "M",
+            skillDivisionTypeId = "open",
+            ageDivisionTypeId = "u18",
+        )
+
+        assertEquals(listOf("Renamed U18"), duplicateDivisionIdentityNames(listOf(first, second)))
+    }
+
+    @Test
     fun normalize_division_name_key_is_case_and_whitespace_insensitive() {
         assertEquals("group alpha", "  Group   Alpha ".normalizeDivisionNameKey())
         assertEquals("group alpha", "group alpha".normalizeDivisionNameKey())
@@ -286,5 +350,40 @@ class EventDetailsDivisionEditorHelpersTest {
         )
 
         assertEquals(3, state.poolCount)
+    }
+
+    @Test
+    fun division_defaults_from_saved_editor_clear_identity_fields_for_next_add() {
+        val saved = DivisionEditorState(
+            editingId = "event-1__division__c_skill_open_age_u18",
+            gender = "C",
+            skillDivisionTypeId = "open",
+            skillDivisionTypeName = "Open",
+            ageDivisionTypeId = "u18",
+            ageDivisionTypeName = "U18",
+            name = "Coed Open U18",
+            priceCents = 2500,
+            maxParticipants = 12,
+            playoffTeamCount = 4,
+            leagueConfig = LeagueConfig(gamesPerOpponent = 2),
+            nameTouched = true,
+            error = "stale",
+        )
+
+        val next = divisionDefaultsFromSavedEditor(saved)
+
+        assertEquals(null, next.editingId)
+        assertEquals("", next.gender)
+        assertEquals("", next.skillDivisionTypeId)
+        assertEquals("", next.skillDivisionTypeName)
+        assertEquals("", next.ageDivisionTypeId)
+        assertEquals("", next.ageDivisionTypeName)
+        assertEquals("", next.name)
+        assertEquals(false, next.nameTouched)
+        assertEquals(null, next.error)
+        assertEquals(2500, next.priceCents)
+        assertEquals(12, next.maxParticipants)
+        assertEquals(4, next.playoffTeamCount)
+        assertEquals(2, next.leagueConfig.gamesPerOpponent)
     }
 }

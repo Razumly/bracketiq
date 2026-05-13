@@ -6,14 +6,6 @@ import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-internal fun matchScoringModelLabel(value: String?): String {
-    return when (value?.trim()?.uppercase()) {
-        "SETS" -> "Sets"
-        "INNINGS" -> "Innings"
-        "POINTS_ONLY" -> "Points only"
-        else -> "Periods"
-    }
-}
 
 private fun matchSegmentLabelForModel(value: String): String {
     return when (value.trim().uppercase()) {
@@ -172,6 +164,25 @@ private fun mergeMatchRulesTemplate(
     )
 }
 
+private fun isMatchRulesOverrideEmpty(value: MatchRulesConfigMVP): Boolean =
+    value.scoringModel == null &&
+        value.segmentCount == null &&
+        value.segmentLabel == null &&
+        value.supportsDraw == null &&
+        value.supportsOvertime == null &&
+        value.supportsShootout == null &&
+        value.canUseOvertime == null &&
+        value.canUseShootout == null &&
+        value.officialRoles.isNullOrEmpty() &&
+        value.supportedIncidentTypes.isNullOrEmpty() &&
+        value.autoCreatePointIncidentType == null &&
+        value.pointIncidentRequiresParticipant == null
+
+internal fun matchRulesOverrideWithoutSegmentCount(value: MatchRulesConfigMVP?): MatchRulesConfigMVP? {
+    val sanitized = value?.copy(segmentCount = null) ?: return null
+    return sanitized.takeUnless(::isMatchRulesOverrideEmpty)
+}
+
 private fun segmentCountFallbackForModel(scoringModel: String, event: Event): Int {
     return when (scoringModel) {
         "SETS" -> when (event.eventType) {
@@ -221,12 +232,10 @@ private fun normalizeMatchRulesOverride(value: MatchRulesConfigMVP?): MatchRules
         return null
     }
 
-    val segmentCount = value.segmentCount?.takeIf { it > 0 }
     val supportedIncidentTypes = normalizedMatchRuleStringList(value.supportedIncidentTypes)
         .takeIf { it.isNotEmpty() }
 
     val normalized = MatchRulesConfigMVP(
-        segmentCount = segmentCount,
         supportsDraw = value.supportsDraw,
         supportsOvertime = value.supportsOvertime,
         supportsShootout = value.supportsShootout,
@@ -237,14 +246,7 @@ private fun normalizeMatchRulesOverride(value: MatchRulesConfigMVP?): MatchRules
     )
 
     return if (
-        normalized.segmentCount == null &&
-        normalized.supportsDraw == null &&
-        normalized.supportsOvertime == null &&
-        normalized.supportsShootout == null &&
-        normalized.canUseOvertime == null &&
-        normalized.canUseShootout == null &&
-        normalized.supportedIncidentTypes == null &&
-        normalized.pointIncidentRequiresParticipant == null
+        isMatchRulesOverrideEmpty(normalized)
     ) {
         null
     } else {
@@ -254,7 +256,6 @@ private fun normalizeMatchRulesOverride(value: MatchRulesConfigMVP?): MatchRules
 
 internal fun copyMatchRulesOverride(
     current: MatchRulesConfigMVP?,
-    segmentCount: Int? = current?.segmentCount,
     supportsDraw: Boolean? = current?.supportsDraw,
     supportsOvertime: Boolean? = current?.supportsOvertime,
     supportsShootout: Boolean? = current?.supportsShootout,
@@ -265,7 +266,6 @@ internal fun copyMatchRulesOverride(
 ): MatchRulesConfigMVP? {
     return normalizeMatchRulesOverride(
         MatchRulesConfigMVP(
-            segmentCount = segmentCount,
             supportsDraw = supportsDraw,
             supportsOvertime = supportsOvertime,
             supportsShootout = supportsShootout,
@@ -334,9 +334,7 @@ internal fun resolveEventMatchRules(
 
     val fallbackSegmentCount = resolvedRulesFallback?.segmentCount?.takeIf { it > 0 }
         ?: segmentCountFallbackForModel(scoringModel, event)
-    val segmentCount = eventOverride?.segmentCount
-        ?.takeIf { it > 0 }
-        ?: sportTemplate?.segmentCount?.takeIf { it > 0 }
+    val segmentCount = sportTemplate?.segmentCount?.takeIf { it > 0 }
         ?: fallbackSegmentCount
     val defaultIncidentTypes = resolvedRulesFallback?.supportedIncidentTypes
         ?.takeIf { it.isNotEmpty() }

@@ -9,6 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class EventDetailsMatchRulesTest {
@@ -97,6 +98,35 @@ class EventDetailsMatchRulesTest {
         assertTrue(rules.canUseShootout)
         assertTrue(rules.supportsShootout)
         assertFalse(rules.supportsDraw)
+    }
+
+    @Test
+    fun given_segment_count_override_when_resolving_rules_then_sport_count_remains_source_of_truth() {
+        val event = Event(
+            sportId = "Indoor Soccer",
+            eventType = EventType.LEAGUE,
+            matchRulesOverride = MatchRulesConfigMVP(segmentCount = 4),
+        )
+        val sport = sport(id = "Indoor Soccer")
+
+        val rules = resolveEventMatchRules(event = event, sport = sport)
+
+        assertEquals(2, rules.segmentCount)
+        assertEquals("Half", rules.segmentLabel)
+    }
+
+    @Test
+    fun given_match_rules_override_when_removing_segment_count_then_other_overrides_are_preserved() {
+        val sanitized = matchRulesOverrideWithoutSegmentCount(
+            MatchRulesConfigMVP(
+                segmentCount = 4,
+                supportsOvertime = true,
+            ),
+        )
+
+        assertNull(sanitized?.segmentCount)
+        assertEquals(true, sanitized?.supportsOvertime)
+        assertNull(matchRulesOverrideWithoutSegmentCount(MatchRulesConfigMVP(segmentCount = 4)))
     }
 
     @Test

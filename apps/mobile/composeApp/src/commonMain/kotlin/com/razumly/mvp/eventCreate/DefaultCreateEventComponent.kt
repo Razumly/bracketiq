@@ -1988,7 +1988,7 @@ class DefaultCreateEventComponent(
                 setsPerMatch = normalizedSets,
                 setDurationMinutes = setDurationMinutes ?: 20,
                 pointsToVictory = normalizedPoints,
-                matchDurationMinutes = 60,
+                matchDurationMinutes = null,
             )
         } else {
             copy(
@@ -1996,7 +1996,7 @@ class DefaultCreateEventComponent(
                 setsPerMatch = null,
                 setDurationMinutes = null,
                 pointsToVictory = emptyList(),
-                matchDurationMinutes = matchDurationMinutes ?: 60,
+                matchDurationMinutes = matchDurationMinutes,
                 winnerSetCount = 1,
                 loserSetCount = 1,
                 winnerBracketPointsToVictory = winnerBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
@@ -2010,7 +2010,7 @@ class DefaultCreateEventComponent(
             copy(
                 usesSets = false,
                 setDurationMinutes = null,
-                matchDurationMinutes = matchDurationMinutes ?: 60,
+                matchDurationMinutes = matchDurationMinutes,
                 winnerSetCount = 1,
                 loserSetCount = 1,
                 winnerBracketPointsToVictory = winnerBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
@@ -2023,7 +2023,7 @@ class DefaultCreateEventComponent(
             copy(
                 usesSets = true,
                 setDurationMinutes = setDurationMinutes ?: 20,
-                matchDurationMinutes = matchDurationMinutes ?: 60,
+                matchDurationMinutes = null,
                 winnerSetCount = winnerSets,
                 loserSetCount = loserSets,
                 winnerBracketPointsToVictory = winnerBracketPointsToVictory

@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import kotlinx.datetime.LocalDate
 internal fun validatePaymentPlans(
@@ -130,6 +131,7 @@ internal data class EventValidationResult(
     val isLeaguePlayoffTeamsValid: Boolean,
     val isLeagueSlotsValid: Boolean,
     val isSkillLevelValid: Boolean,
+    val isDivisionIdentityValid: Boolean,
     val isSportValid: Boolean,
     val isFixedEndDateRangeValid: Boolean,
     val isPaymentPlansValid: Boolean,
@@ -160,6 +162,8 @@ internal fun computeEventValidationResult(
     val isTeamSizeValid = editEvent.teamSizeLimit >= 1
     val isLocationValid = editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0
     val isSkillLevelValid = editEvent.eventType == EventType.LEAGUE || editEvent.divisions.isNotEmpty()
+    val duplicateDivisionNames = duplicateDivisionIdentityNames(divisionDetailsForSettings)
+    val isDivisionIdentityValid = duplicateDivisionNames.isEmpty()
     val isSportValid = !isNewEvent || !editEvent.sportId.isNullOrBlank()
     val requiresFixedEndValidation = requiresFixedEndRangeValidation(
         event = editEvent,
@@ -195,17 +199,37 @@ internal fun computeEventValidationResult(
     val isWinnerPointsValid: Boolean
     val isLoserPointsValid: Boolean
     if (editEvent.eventType == EventType.TOURNAMENT) {
-        isWinnerSetCountValid = editEvent.winnerSetCount in setOf(1, 3, 5)
-        isWinnerPointsValid = editEvent.winnerBracketPointsToVictory.size >= editEvent.winnerSetCount &&
-            editEvent.winnerBracketPointsToVictory.take(editEvent.winnerSetCount).all { it > 0 }
-        if (editEvent.doubleElimination) {
-            isLoserSetCountValid = editEvent.loserSetCount in setOf(1, 3, 5)
-            isLoserPointsValid = editEvent.loserBracketPointsToVictory.size >= editEvent.loserSetCount &&
-                editEvent.loserBracketPointsToVictory.take(editEvent.loserSetCount).all { it > 0 }
+        val validSetCounts = setOf(1, 3, 5)
+        val tournamentDetails = mergeDivisionDetailsForDivisions(
+            divisions = editEvent.divisions,
+            existingDetails = editEvent.divisionDetails,
+            eventId = editEvent.id,
+        )
+        val tournamentConfigs = if (editEvent.singleDivision) {
+            listOf(tournamentDetails.firstOrNull()?.toTournamentConfig(editEvent.toTournamentConfig())
+                ?: editEvent.toTournamentConfig())
         } else {
-            isLoserSetCountValid = true
-            isLoserPointsValid = true
+            tournamentDetails.map { detail -> detail.toTournamentConfig(editEvent.toTournamentConfig()) }
         }
+        isWinnerSetCountValid = tournamentConfigs.isNotEmpty() &&
+            tournamentConfigs.all { config -> config.winnerSetCount in validSetCounts }
+        isWinnerPointsValid = tournamentConfigs.isNotEmpty() &&
+            tournamentConfigs.all { config ->
+                config.winnerBracketPointsToVictory.size >= config.winnerSetCount &&
+                    config.winnerBracketPointsToVictory.take(config.winnerSetCount).all { points -> points > 0 }
+            }
+        isLoserSetCountValid = tournamentConfigs.isNotEmpty() &&
+            tournamentConfigs.all { config ->
+                !config.doubleElimination || config.loserSetCount in validSetCounts
+            }
+        isLoserPointsValid = tournamentConfigs.isNotEmpty() &&
+            tournamentConfigs.all { config ->
+                !config.doubleElimination ||
+                    (
+                        config.loserBracketPointsToVictory.size >= config.loserSetCount &&
+                            config.loserBracketPointsToVictory.take(config.loserSetCount).all { points -> points > 0 }
+                        )
+            }
     } else {
         isWinnerSetCountValid = true
         isWinnerPointsValid = true
@@ -218,49 +242,142 @@ internal fun computeEventValidationResult(
     val isLeaguePointsValid: Boolean
     val isLeagueDurationValid: Boolean
     if (editEvent.eventType == EventType.LEAGUE) {
-        val setCount = when (editEvent.setsPerMatch) {
-            1, 3, 5 -> editEvent.setsPerMatch
-            else -> null
+        val validSetCounts = setOf(1, 3, 5)
+        fun validSetCount(value: Int?): Int? = value?.takeIf { count -> count in validSetCounts }
+        fun isDurationValid(
+            usesSets: Boolean,
+            matchDurationMinutes: Int?,
+            setDurationMinutes: Int?,
+            setsPerMatch: Int?,
+        ): Boolean {
+            val setCount = validSetCount(setsPerMatch)
+            return if (usesSets) {
+                setCount != null && (setDurationMinutes ?: 0) >= 5
+            } else {
+                (matchDurationMinutes ?: 0) >= 1
+            }
         }
-        isLeagueGamesValid = (editEvent.gamesPerOpponent ?: 1) >= 1
+        fun arePointsValid(
+            usesSets: Boolean,
+            setsPerMatch: Int?,
+            pointsToVictory: List<Int>,
+        ): Boolean {
+            if (!usesSets) return true
+            val setCount = validSetCount(setsPerMatch) ?: return false
+            return pointsToVictory.size >= setCount &&
+                pointsToVictory.take(setCount).all { points -> points > 0 }
+        }
+        fun isPlayoffConfigValid(detail: DivisionDetail): Boolean {
+            val fallbackUsesSets = detail.usesSets ?: editEvent.usesSets
+            val config = detail.playoffConfig
+            val usesSets = config?.usesSets ?: fallbackUsesSets
+            if (!isDurationValid(
+                    usesSets = usesSets,
+                    matchDurationMinutes = config?.matchDurationMinutes ?: editEvent.matchDurationMinutes,
+                    setDurationMinutes = config?.setDurationMinutes ?: detail.setDurationMinutes ?: editEvent.setDurationMinutes,
+                    setsPerMatch = if (usesSets) {
+                        config?.winnerSetCount ?: detail.setsPerMatch ?: editEvent.winnerSetCount
+                    } else {
+                        1
+                    },
+                )
+            ) {
+                return false
+            }
+            if (!usesSets) return true
+            val winnerSetCount = validSetCount(config?.winnerSetCount ?: editEvent.winnerSetCount) ?: return false
+            val winnerPoints = config?.winnerBracketPointsToVictory ?: editEvent.winnerBracketPointsToVictory
+            if (winnerPoints.size < winnerSetCount || winnerPoints.take(winnerSetCount).any { points -> points <= 0 }) {
+                return false
+            }
+            val doubleElimination = config?.doubleElimination ?: editEvent.doubleElimination
+            if (!doubleElimination) return true
+            val loserSetCount = validSetCount(config?.loserSetCount ?: editEvent.loserSetCount) ?: return false
+            val loserPoints = config?.loserBracketPointsToVictory ?: editEvent.loserBracketPointsToVictory
+            return loserPoints.size >= loserSetCount &&
+                loserPoints.take(loserSetCount).all { points -> points > 0 }
+        }
+        val leagueDetails = mergeDivisionDetailsForDivisions(
+            divisions = editEvent.divisions,
+            existingDetails = editEvent.divisionDetails,
+            eventId = editEvent.id,
+        )
+        val singleLeagueDetail = if (editEvent.singleDivision) leagueDetails.firstOrNull() else null
+        isLeagueGamesValid = if (editEvent.singleDivision) {
+            (singleLeagueDetail?.gamesPerOpponent ?: editEvent.gamesPerOpponent ?: 1) >= 1
+        } else {
+            leagueDetails.isNotEmpty() &&
+                leagueDetails.all { detail -> (detail.gamesPerOpponent ?: editEvent.gamesPerOpponent ?: 1) >= 1 }
+        }
         isLeaguePlayoffTeamsValid = if (!editEvent.includePlayoffs) {
             true
         } else if (editEvent.singleDivision) {
-            (editEvent.playoffTeamCount ?: 0) >= 2
+            (editEvent.playoffTeamCount ?: singleLeagueDetail?.playoffTeamCount ?: 0) >= 2 &&
+                (singleLeagueDetail?.let(::isPlayoffConfigValid) ?: true)
         } else {
-            val details = mergeDivisionDetailsForDivisions(
-                divisions = editEvent.divisions,
-                existingDetails = editEvent.divisionDetails,
-                eventId = editEvent.id,
-            )
-            details.isNotEmpty() && details.all { detail -> (detail.playoffTeamCount ?: 0) >= 2 }
+            leagueDetails.isNotEmpty() &&
+                leagueDetails.all { detail -> (detail.playoffTeamCount ?: 0) >= 2 && isPlayoffConfigValid(detail) }
         }
-        if (editEvent.usesSets) {
-            isLeagueDurationValid = setCount != null && (editEvent.setDurationMinutes ?: 0) >= 5
-            isLeaguePointsValid = setCount != null &&
-                editEvent.pointsToVictory.size >= setCount &&
-                editEvent.pointsToVictory.take(setCount).all { it > 0 }
+        if (editEvent.singleDivision) {
+            val usesSets = singleLeagueDetail?.usesSets ?: editEvent.usesSets
+            isLeagueDurationValid = isDurationValid(
+                usesSets = usesSets,
+                matchDurationMinutes = singleLeagueDetail?.matchDurationMinutes ?: editEvent.matchDurationMinutes,
+                setDurationMinutes = singleLeagueDetail?.setDurationMinutes ?: editEvent.setDurationMinutes,
+                setsPerMatch = singleLeagueDetail?.setsPerMatch ?: editEvent.setsPerMatch,
+            )
+            isLeaguePointsValid = arePointsValid(
+                usesSets = usesSets,
+                setsPerMatch = singleLeagueDetail?.setsPerMatch ?: editEvent.setsPerMatch,
+                pointsToVictory = singleLeagueDetail?.pointsToVictory?.takeIf { points -> points.isNotEmpty() }
+                    ?: editEvent.pointsToVictory,
+            )
         } else {
-            isLeagueDurationValid = (editEvent.matchDurationMinutes ?: 0) >= 15
-            isLeaguePointsValid = true
+            isLeagueDurationValid = leagueDetails.isNotEmpty() &&
+                leagueDetails.all { detail ->
+                    val usesSets = detail.usesSets ?: editEvent.usesSets
+                    isDurationValid(
+                        usesSets = usesSets,
+                        matchDurationMinutes = detail.matchDurationMinutes ?: editEvent.matchDurationMinutes,
+                        setDurationMinutes = detail.setDurationMinutes ?: editEvent.setDurationMinutes,
+                        setsPerMatch = detail.setsPerMatch ?: editEvent.setsPerMatch,
+                    )
+                }
+            isLeaguePointsValid = leagueDetails.isNotEmpty() &&
+                leagueDetails.all { detail ->
+                    val usesSets = detail.usesSets ?: editEvent.usesSets
+                    arePointsValid(
+                        usesSets = usesSets,
+                        setsPerMatch = detail.setsPerMatch ?: editEvent.setsPerMatch,
+                        pointsToVictory = detail.pointsToVictory.takeIf { points -> points.isNotEmpty() }
+                            ?: editEvent.pointsToVictory,
+                    )
+                }
         }
     } else if (editEvent.eventType == EventType.TOURNAMENT) {
         isLeagueGamesValid = true
+        val details = mergeDivisionDetailsForDivisions(
+            divisions = editEvent.divisions,
+            existingDetails = editEvent.divisionDetails,
+            eventId = editEvent.id,
+        )
         isLeaguePlayoffTeamsValid = if (!editEvent.includePlayoffs) {
             true
         } else {
-            val details = mergeDivisionDetailsForDivisions(
-                divisions = editEvent.divisions,
-                existingDetails = editEvent.divisionDetails,
-                eventId = editEvent.id,
-            )
             details.isNotEmpty() && details.all(::isTournamentPoolDivisionValid)
         }
         isLeaguePointsValid = true
-        isLeagueDurationValid = if (editEvent.usesSets) {
-            (editEvent.setDurationMinutes ?: 0) >= 5
+        val tournamentConfigs = if (editEvent.singleDivision) {
+            listOf(details.firstOrNull()?.toTournamentConfig(editEvent.toTournamentConfig()) ?: editEvent.toTournamentConfig())
         } else {
-            (editEvent.matchDurationMinutes ?: 0) >= 15
+            details.map { detail -> detail.toTournamentConfig(editEvent.toTournamentConfig()) }
+        }
+        isLeagueDurationValid = tournamentConfigs.isNotEmpty() && tournamentConfigs.all { config ->
+            if (config.usesSets) {
+                (config.setDurationMinutes ?: 0) >= 5
+            } else {
+                (config.matchDurationMinutes ?: 0) >= 1
+            }
         }
     } else {
         isLeagueGamesValid = true
@@ -284,6 +401,7 @@ internal fun computeEventValidationResult(
         isLoserPointsValid &&
         isLocationValid &&
         isSkillLevelValid &&
+        isDivisionIdentityValid &&
         isFieldCountValid &&
         isLeagueGamesValid &&
         isLeagueDurationValid &&
@@ -324,6 +442,9 @@ internal fun computeEventValidationResult(
         if (!isSkillLevelValid) {
             add("Add at least one division.")
         }
+        if (!isDivisionIdentityValid) {
+            add("Each division must have a unique gender, skill division, and age division.")
+        }
         if (!isLocationValid) {
             add("Select a location.")
         }
@@ -350,7 +471,7 @@ internal fun computeEventValidationResult(
                 if (editEvent.usesSets) {
                     "Set duration must be at least 5 minutes and sets must be Best of 1, 3, or 5."
                 } else {
-                    "Match duration must be at least 15 minutes."
+                    "Match duration must be at least 1 minute."
                 },
             )
         }
@@ -407,6 +528,7 @@ internal fun computeEventValidationResult(
         isLeaguePlayoffTeamsValid = isLeaguePlayoffTeamsValid,
         isLeagueSlotsValid = isLeagueSlotsValid,
         isSkillLevelValid = isSkillLevelValid,
+        isDivisionIdentityValid = isDivisionIdentityValid,
         isSportValid = isSportValid,
         isFixedEndDateRangeValid = isFixedEndDateRangeValid,
         isPaymentPlansValid = isPaymentPlansValid,
