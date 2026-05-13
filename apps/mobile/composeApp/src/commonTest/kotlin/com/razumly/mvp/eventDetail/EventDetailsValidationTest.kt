@@ -2,6 +2,7 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.buildEventDivisionId
 import kotlin.test.Test
@@ -102,6 +103,72 @@ class EventDetailsValidationTest {
         assertFalse(result.isLeagueDurationValid)
         assertFalse(result.isValid)
         assertTrue("Match duration must be at least 1 minute." in result.validationErrors)
+    }
+
+    @Test
+    fun given_tournament_pool_play_when_bracket_settings_are_valid_then_validation_passes() {
+        val eventId = "event-1"
+        val bracketDivisionId = buildEventDivisionId(eventId, "m_skill_open_age_18plus")
+        val poolDivisionIds = listOf("pool_a", "pool_b", "pool_c", "pool_d")
+            .map { suffix -> "${bracketDivisionId}_$suffix" }
+        val poolDetails = poolDivisionIds.map { poolDivisionId ->
+            DivisionDetail(
+                id = poolDivisionId,
+                kind = "LEAGUE",
+                name = "Pool",
+                maxParticipants = 4,
+                playoffTeamCount = 2,
+                playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId),
+                usesSets = true,
+                setsPerMatch = 3,
+                pointsToVictory = listOf(21, 21, 21),
+                setDurationMinutes = 20,
+            )
+        }
+        val bracketDetail = DivisionDetail(
+            id = bracketDivisionId,
+            kind = "PLAYOFF",
+            name = "Mens Open 18+",
+            maxParticipants = 16,
+            playoffTeamCount = 8,
+            poolCount = 4,
+            usesSets = true,
+            setsPerMatch = 3,
+            pointsToVictory = listOf(21, 21, 21),
+            setDurationMinutes = 20,
+            playoffConfig = TournamentConfig(
+                winnerSetCount = 3,
+                winnerBracketPointsToVictory = listOf(21, 21, 21),
+                setDurationMinutes = 20,
+            ),
+        )
+        val event = Event(
+            id = eventId,
+            name = "Test Phone Tourny with pools",
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            teamSignup = true,
+            singleDivision = false,
+            divisions = poolDivisionIds,
+            divisionDetails = poolDetails + bracketDetail,
+            maxParticipants = 16,
+            teamSizeLimit = 2,
+            location = "Lacamas Park",
+            coordinates = listOf(-122.0, 37.0),
+            imageId = "image-1",
+            usesSets = true,
+            winnerSetCount = 1,
+            winnerBracketPointsToVictory = listOf(21),
+            setDurationMinutes = 20,
+        )
+
+        val result = validateEvent(
+            event,
+            divisionDetailsForSettings = listOf(bracketDetail),
+        )
+
+        assertTrue(result.isLeaguePlayoffTeamsValid)
+        assertTrue(result.isValid)
     }
 
     private fun validateEvent(

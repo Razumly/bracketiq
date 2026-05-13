@@ -4056,6 +4056,8 @@ fun EventDetailScreen(
                                                 editedEvent.eventType == EventType.LEAGUE &&
                                                     editedEvent.includePlayoffs
                                                 )
+                                    val eventActionEnabled =
+                                        !editedEvent.state.equals("TEMPLATE", ignoreCase = true)
                                     Column(
                                         verticalArrangement = Arrangement.spacedBy(8.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally
@@ -4132,7 +4134,7 @@ fun EventDetailScreen(
                                         if (canRescheduleEditedEvent) {
                                             Button(
                                                 onClick = { component.rescheduleEvent() },
-                                                enabled = isValid,
+                                                enabled = eventActionEnabled,
                                                 colors = buttonColors,
                                                 modifier = Modifier.fillMaxWidth(),
                                             ) {
@@ -4141,7 +4143,7 @@ fun EventDetailScreen(
                                             if (canBuildBracketsForEditedEvent) {
                                                 Button(
                                                     onClick = { showBuildBracketConfirmDialog = true },
-                                                    enabled = isValid,
+                                                    enabled = eventActionEnabled,
                                                     colors = buttonColors,
                                                     modifier = Modifier.fillMaxWidth(),
                                                 ) {
@@ -4150,7 +4152,7 @@ fun EventDetailScreen(
                                             }
                                             Button(
                                                 onClick = { showRebuildWithoutPlaceholdersConfirmDialog = true },
-                                                enabled = isValid,
+                                                enabled = eventActionEnabled,
                                                 colors = buttonColors,
                                                 modifier = Modifier.fillMaxWidth(),
                                             ) {

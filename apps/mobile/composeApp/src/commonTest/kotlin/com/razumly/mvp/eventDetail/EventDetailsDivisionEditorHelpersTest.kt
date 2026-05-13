@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.util.buildEventDivisionId
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameterOption
 import com.razumly.mvp.core.data.dataTypes.LeagueConfig
+import com.razumly.mvp.core.data.util.normalizeDivisionDetail
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -350,6 +351,21 @@ class EventDetailsDivisionEditorHelpersTest {
         )
 
         assertEquals(3, state.poolCount)
+    }
+
+    @Test
+    fun normalize_division_detail_replaces_event_scoped_id_name_with_display_name() {
+        val eventId = "abfb6091-87ed-4aec-9ce9-90c38eec21cf"
+        val divisionId = buildEventDivisionId(eventId, "m_skill_open_age_18plus")
+        val detail = DivisionDetail(
+            id = divisionId,
+            key = "m_skill_open_age_18plus",
+            name = divisionId,
+        )
+
+        val normalized = detail.normalizeDivisionDetail(eventId)
+
+        assertEquals("Mens Open 18+", normalized.name)
     }
 
     @Test

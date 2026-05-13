@@ -113,7 +113,7 @@ private fun DivisionDetailEditCard(
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                text = detail.name,
+                text = normalizedDetail.name,
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurface,
             )

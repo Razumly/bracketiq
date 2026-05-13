@@ -157,6 +157,11 @@ fun DivisionDetail.withLeagueConfig(config: LeagueConfig): DivisionDetail = copy
 
 fun DivisionDetail.toTournamentConfig(fallback: TournamentConfig = TournamentConfig()): TournamentConfig {
     val source = playoffConfig ?: fallback
+    val resolvedUsesSets = if (usesSets == true) {
+        true
+    } else {
+        source.usesSets || fallback.usesSets
+    }
     return TournamentConfig(
         doubleElimination = source.doubleElimination,
         winnerSetCount = source.winnerSetCount,
@@ -166,9 +171,17 @@ fun DivisionDetail.toTournamentConfig(fallback: TournamentConfig = TournamentCon
         prize = source.prize,
         fieldCount = source.fieldCount,
         restTimeMinutes = source.restTimeMinutes,
-        usesSets = source.usesSets,
-        matchDurationMinutes = source.matchDurationMinutes,
-        setDurationMinutes = source.setDurationMinutes,
+        usesSets = resolvedUsesSets,
+        matchDurationMinutes = if (resolvedUsesSets) {
+            null
+        } else {
+            source.matchDurationMinutes ?: matchDurationMinutes ?: fallback.matchDurationMinutes
+        },
+        setDurationMinutes = if (resolvedUsesSets) {
+            source.setDurationMinutes ?: setDurationMinutes ?: fallback.setDurationMinutes
+        } else {
+            null
+        },
     )
 }
 

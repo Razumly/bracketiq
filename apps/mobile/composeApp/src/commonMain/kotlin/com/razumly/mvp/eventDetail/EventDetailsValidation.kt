@@ -200,11 +200,7 @@ internal fun computeEventValidationResult(
     val isLoserPointsValid: Boolean
     if (editEvent.eventType == EventType.TOURNAMENT) {
         val validSetCounts = setOf(1, 3, 5)
-        val tournamentDetails = mergeDivisionDetailsForDivisions(
-            divisions = editEvent.divisions,
-            existingDetails = editEvent.divisionDetails,
-            eventId = editEvent.id,
-        )
+        val tournamentDetails = tournamentValidationDetails(editEvent, divisionDetailsForSettings)
         val tournamentConfigs = if (editEvent.singleDivision) {
             listOf(tournamentDetails.firstOrNull()?.toTournamentConfig(editEvent.toTournamentConfig())
                 ?: editEvent.toTournamentConfig())
@@ -356,11 +352,7 @@ internal fun computeEventValidationResult(
         }
     } else if (editEvent.eventType == EventType.TOURNAMENT) {
         isLeagueGamesValid = true
-        val details = mergeDivisionDetailsForDivisions(
-            divisions = editEvent.divisions,
-            existingDetails = editEvent.divisionDetails,
-            eventId = editEvent.id,
-        )
+        val details = tournamentValidationDetails(editEvent, divisionDetailsForSettings)
         isLeaguePlayoffTeamsValid = if (!editEvent.includePlayoffs) {
             true
         } else {
@@ -536,4 +528,17 @@ internal fun computeEventValidationResult(
         validationErrors = validationErrors,
         isValid = isValid,
     )
+}
+
+private fun tournamentValidationDetails(
+    editEvent: Event,
+    divisionDetailsForSettings: List<DivisionDetail>,
+): List<DivisionDetail> {
+    return divisionDetailsForSettings.ifEmpty {
+        mergeDivisionDetailsForDivisions(
+            divisions = editEvent.divisions,
+            existingDetails = editEvent.divisionDetails,
+            eventId = editEvent.id,
+        )
+    }
 }

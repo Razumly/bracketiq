@@ -500,39 +500,70 @@ fun EventDetails(
         sports.firstOrNull { sport -> sport.id == normalizedSportId }
     }
     val divisionScheduleUsesSets = selectedSportForDivisionOptions?.usePointsPerSetWin ?: editEvent.usesSets
-    var divisionEditor by remember(editEvent.id) {
-        mutableStateOf(
-            defaultDivisionEditorState(
-                defaultPriceCents = editEvent.priceCents,
-                defaultMaxParticipants = editEvent.maxParticipants,
-                defaultPlayoffTeamCount = editEvent.playoffTeamCount,
-                defaultPoolCount = normalizedDivisionDetails.firstOrNull()?.poolCount,
-                defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true,
-                defaultInstallmentCount = editEvent.installmentCount,
-                defaultInstallmentDueDates = editEvent.installmentDueDates,
-                defaultInstallmentDueRelativeDays = editEvent.installmentDueRelativeDays,
-                defaultInstallmentAmounts = editEvent.installmentAmounts,
-                defaultLeagueConfig = editEvent.toLeagueConfig(),
-                defaultPlayoffConfig = editEvent.toTournamentConfig(),
-            ),
+    val baseLeagueConfig = remember(editEvent) {
+        editEvent.toLeagueConfig()
+    }
+    val baseTournamentConfig = remember(editEvent) {
+        editEvent.toTournamentConfig()
+    }
+    val defaultDivisionConfigDetail = remember(
+        editEvent.id,
+        editEvent.singleDivision,
+        editEvent.eventType,
+        editEvent.includePlayoffs,
+        divisionDetailsForSettings,
+    ) {
+        if (!editEvent.singleDivision && editEvent.isTournamentPoolPlayEnabled()) {
+            divisionDetailsForSettings.firstOrNull()
+        } else {
+            null
+        }
+    }
+    val divisionEditorBaseState = remember(
+        editEvent.priceCents,
+        editEvent.maxParticipants,
+        editEvent.playoffTeamCount,
+        editEvent.allowPaymentPlans,
+        editEvent.installmentCount,
+        editEvent.installmentDueDates,
+        editEvent.installmentDueRelativeDays,
+        editEvent.installmentAmounts,
+        baseLeagueConfig,
+        baseTournamentConfig,
+        defaultDivisionConfigDetail,
+    ) {
+        defaultDivisionEditorState(
+            defaultPriceCents = editEvent.priceCents,
+            defaultMaxParticipants = editEvent.maxParticipants,
+            defaultPlayoffTeamCount = editEvent.playoffTeamCount,
+            defaultPoolCount = defaultDivisionConfigDetail?.poolCount,
+            defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true,
+            defaultInstallmentCount = editEvent.installmentCount,
+            defaultInstallmentDueDates = editEvent.installmentDueDates,
+            defaultInstallmentDueRelativeDays = editEvent.installmentDueRelativeDays,
+            defaultInstallmentAmounts = editEvent.installmentAmounts,
+            defaultLeagueConfig = defaultDivisionConfigDetail?.toLeagueConfig(baseLeagueConfig)
+                ?: baseLeagueConfig,
+            defaultPlayoffConfig = defaultDivisionConfigDetail?.toTournamentConfig(baseTournamentConfig)
+                ?: baseTournamentConfig,
         )
     }
+    var divisionEditor by remember(editEvent.id) {
+        mutableStateOf(divisionEditorBaseState)
+    }
     var divisionEditorDefaults by remember(editEvent.id) {
-        mutableStateOf(
-            defaultDivisionEditorState(
-                defaultPriceCents = editEvent.priceCents,
-                defaultMaxParticipants = editEvent.maxParticipants,
-                defaultPlayoffTeamCount = editEvent.playoffTeamCount,
-                defaultPoolCount = normalizedDivisionDetails.firstOrNull()?.poolCount,
-                defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true,
-                defaultInstallmentCount = editEvent.installmentCount,
-                defaultInstallmentDueDates = editEvent.installmentDueDates,
-                defaultInstallmentDueRelativeDays = editEvent.installmentDueRelativeDays,
-                defaultInstallmentAmounts = editEvent.installmentAmounts,
-                defaultLeagueConfig = editEvent.toLeagueConfig(),
-                defaultPlayoffConfig = editEvent.toTournamentConfig(),
-            ),
-        )
+        mutableStateOf(divisionEditorBaseState)
+    }
+    LaunchedEffect(editEvent.id, divisionEditorBaseState) {
+        divisionEditorDefaults = divisionEditorBaseState
+        val editorIsIdle = divisionEditor.editingId.isNullOrBlank() &&
+            divisionEditor.gender.isBlank() &&
+            divisionEditor.skillDivisionTypeId.isBlank() &&
+            divisionEditor.ageDivisionTypeId.isBlank() &&
+            !divisionEditor.nameTouched
+        if (editorIsIdle) {
+            divisionEditor = divisionEditorBaseState
+        }
     }
     val skillDivisionTypeSelectOptions = remember(
         divisionDetailsForSettings,
