@@ -4882,8 +4882,6 @@ class DefaultEventDetailComponent(
         val selectedDivisionIds = event.divisions
             .normalizeDivisionIdentifiers()
             .ifEmpty { listOf(DEFAULT_DIVISION) }
-        val splitByDivision = !event.singleDivision && event.allowTeamSplitDefault == true
-        val selectedDivisionSet = selectedDivisionIds.toSet()
         val validFieldIds = event.fieldIds
             .map(String::trim)
             .filter(String::isNotBlank)
@@ -4900,16 +4898,11 @@ class DefaultEventDetailComponent(
                 return@mapNotNull null
             }
 
-            val mappedDivisionIds = slot.normalizedDivisionIds()
-                .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
-                .filter(String::isNotBlank)
-                .filter(selectedDivisionSet::contains)
-                .distinct()
-            val effectiveDivisionIds = if (splitByDivision) {
-                mappedDivisionIds.ifEmpty { selectedDivisionIds }
-            } else {
-                selectedDivisionIds
-            }
+            val effectiveDivisionIds = resolveEffectiveLeagueSlotDivisionIds(
+                singleDivision = event.singleDivision,
+                selectedDivisionIds = selectedDivisionIds,
+                slotDivisionIds = slot.normalizedDivisionIds(),
+            )
 
             if (!slot.repeating) {
                 val slotStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start

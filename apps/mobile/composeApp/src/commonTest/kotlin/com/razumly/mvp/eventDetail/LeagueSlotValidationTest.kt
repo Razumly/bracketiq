@@ -164,6 +164,28 @@ class LeagueSlotValidationTest {
         assertEquals("Each division must be assigned to at least one timeslot.", errors[0])
     }
 
+    @Test
+    fun multi_division_slot_payload_preserves_selected_slot_divisions() {
+        val divisions = resolveEffectiveLeagueSlotDivisionIds(
+            singleDivision = false,
+            selectedDivisionIds = listOf("division_a", "division_b"),
+            slotDivisionIds = listOf("division_b"),
+        )
+
+        assertEquals(listOf("division_b"), divisions)
+    }
+
+    @Test
+    fun single_division_slot_payload_uses_all_event_divisions() {
+        val divisions = resolveEffectiveLeagueSlotDivisionIds(
+            singleDivision = true,
+            selectedDivisionIds = listOf("division_a", "division_b"),
+            slotDivisionIds = listOf("division_b"),
+        )
+
+        assertEquals(listOf("division_a", "division_b"), divisions)
+    }
+
     private fun buildSlot(
         id: String,
         repeating: Boolean,

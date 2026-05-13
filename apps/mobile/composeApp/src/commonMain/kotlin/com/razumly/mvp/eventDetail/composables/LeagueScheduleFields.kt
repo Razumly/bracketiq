@@ -115,6 +115,7 @@ fun LeagueScheduleFields(
     showSlotDivisions: Boolean = true,
     lockSlotDivisions: Boolean = false,
     lockedDivisionIds: List<String> = emptyList(),
+    allowDivisionEditsWhenReadOnly: Boolean = false,
     fieldCountError: String? = null,
     readOnly: Boolean = false,
 ) {
@@ -315,6 +316,7 @@ fun LeagueScheduleFields(
                         showSlotDivisions = showSlotDivisions,
                         lockSlotDivisions = lockSlotDivisions,
                         lockedDivisionIds = lockedDivisionIds,
+                        allowDivisionEditsWhenReadOnly = allowDivisionEditsWhenReadOnly,
                         slotErrors = slotErrors,
                         onUpdateSlot = onUpdateSlot,
                         onRemoveSlot = onRemoveSlot,
@@ -341,6 +343,7 @@ fun LeagueScheduleFields(
                         showSlotDivisions = showSlotDivisions,
                         lockSlotDivisions = lockSlotDivisions,
                         lockedDivisionIds = lockedDivisionIds,
+                        allowDivisionEditsWhenReadOnly = allowDivisionEditsWhenReadOnly,
                         slotErrors = slotErrors,
                         onUpdateSlot = onUpdateSlot,
                         onRemoveSlot = onRemoveSlot,
@@ -364,6 +367,7 @@ private fun TimeslotCard(
     showSlotDivisions: Boolean,
     lockSlotDivisions: Boolean,
     lockedDivisionIds: List<String>,
+    allowDivisionEditsWhenReadOnly: Boolean,
     slotErrors: Map<Int, String>,
     onUpdateSlot: (Int, TimeSlot) -> Unit,
     onRemoveSlot: (Int) -> Unit,
@@ -384,6 +388,7 @@ private fun TimeslotCard(
             } else {
                 selectedDivisionIds
             }
+            val divisionsReadOnly = readOnly && !allowDivisionEditsWhenReadOnly
             val divisionOptionsForSlot = (
                 slotDivisionOptions +
                     effectiveDivisionIds.map { divisionId ->
@@ -441,7 +446,7 @@ private fun TimeslotCard(
                     multiSelect = true,
                     selectedValues = effectiveDivisionIds,
                     onMultiSelectionChange = { selected ->
-                        if (readOnly || lockSlotDivisions) {
+                        if (divisionsReadOnly || lockSlotDivisions) {
                             return@PlatformDropdown
                         }
                         onUpdateSlot(
@@ -454,7 +459,7 @@ private fun TimeslotCard(
                     } else {
                         ""
                     },
-                    enabled = !readOnly && !lockSlotDivisions,
+                    enabled = !divisionsReadOnly && !lockSlotDivisions,
                 )
             }
 

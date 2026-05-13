@@ -1329,6 +1329,65 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun given_league_creation_with_multi_division_timeslots_when_submitted_then_slot_divisions_are_preserved() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        harness.component.setLoadingHandler(harness.loadingHandler)
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        advance()
+        harness.component.selectFieldCount(1)
+        advance()
+        val fieldId = harness.component.localFields.value.first().id
+        harness.component.setUseManualTimeSlots(true)
+        advance()
+
+        harness.component.updateEventField {
+            copy(
+                name = "League Split Division Slots",
+                organizationId = "org-split",
+                singleDivision = false,
+                allowTeamSplitDefault = false,
+                divisions = listOf("division_a", "division_b"),
+                start = instant(1_700_000_000_000),
+                end = instant(1_700_086_400_000),
+            )
+        }
+        harness.component.updateLeagueTimeSlot(0) {
+            copy(
+                dayOfWeek = 1,
+                daysOfWeek = listOf(1),
+                divisions = listOf("division_a"),
+                startTimeMinutes = 600,
+                endTimeMinutes = 660,
+                scheduledFieldId = fieldId,
+                scheduledFieldIds = listOf(fieldId),
+            )
+        }
+        harness.component.addLeagueTimeSlot()
+        harness.component.updateLeagueTimeSlot(1) {
+            copy(
+                dayOfWeek = 2,
+                daysOfWeek = listOf(2),
+                divisions = listOf("division_b"),
+                startTimeMinutes = 600,
+                endTimeMinutes = 660,
+                scheduledFieldId = fieldId,
+                scheduledFieldIds = listOf(fieldId),
+            )
+        }
+        advance()
+
+        harness.component.createEvent()
+        advance()
+
+        val createdSlots = harness.eventRepository.createEventCalls.single().timeSlots.orEmpty()
+        assertEquals(2, createdSlots.size)
+        assertEquals(listOf("division_a"), createdSlots[0].divisions)
+        assertEquals(listOf("division_b"), createdSlots[1].divisions)
+    }
+
+    @Test
     fun given_tournament_creation_when_submitted_then_fields_are_created_without_league_slots_or_scoring_config() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         harness.component.setLoadingHandler(harness.loadingHandler)

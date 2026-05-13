@@ -228,6 +228,22 @@ internal fun computeLeagueSlotErrors(
     return errors
 }
 
+internal fun resolveEffectiveLeagueSlotDivisionIds(
+    singleDivision: Boolean,
+    selectedDivisionIds: List<String>,
+    slotDivisionIds: List<String>,
+): List<String> {
+    val normalizedSelectedDivisions = selectedDivisionIds.normalizeDivisionIdentifiers()
+    if (singleDivision) {
+        return normalizedSelectedDivisions
+    }
+    val selectedDivisionSet = normalizedSelectedDivisions.toSet()
+    return slotDivisionIds
+        .normalizeDivisionIdentifiers()
+        .filter(selectedDivisionSet::contains)
+        .ifEmpty { normalizedSelectedDivisions }
+}
+
 private fun slotsOverlap(startA: Int, endA: Int, startB: Int, endB: Int): Boolean {
     return maxOf(startA, startB) < minOf(endA, endB)
 }

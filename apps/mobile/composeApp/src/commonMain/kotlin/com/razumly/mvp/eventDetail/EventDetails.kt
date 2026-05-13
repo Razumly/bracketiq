@@ -390,8 +390,8 @@ fun EventDetails(
     val selectedDivisions = remember(editEvent.divisions) {
         editEvent.divisions.normalizeDivisionIdentifiers()
     }
-    val splitByDivisionScheduling = remember(editEvent.singleDivision, editEvent.allowTeamSplitDefault) {
-        !editEvent.singleDivision && editEvent.allowTeamSplitDefault == true
+    val splitByDivisionScheduling = remember(editEvent.singleDivision) {
+        !editEvent.singleDivision
     }
     val normalizedDivisionDetails = remember(
         editEvent.divisions,
@@ -1325,7 +1325,6 @@ fun EventDetails(
         leagueTimeSlots,
         editEvent.eventType,
         editEvent.singleDivision,
-        editEvent.allowTeamSplitDefault,
         editEvent.divisions,
         isNewEvent,
     ) {
@@ -3639,7 +3638,7 @@ fun EventDetails(
                                     }
                                     syncLeagueSlotsForSelectedDivisions(
                                         normalizedSelection = selectedDivisions,
-                                        splitByDivisionOverride = if (checked) false else splitByDivisionScheduling,
+                                        splitByDivisionOverride = !checked,
                                     )
                                 },
                             )
@@ -3888,10 +3887,7 @@ fun EventDetails(
                         }
                     }
 
-                    val supportsSplitDivisionSlots = editEvent.eventType == EventType.LEAGUE ||
-                        editEvent.eventType == EventType.TOURNAMENT ||
-                        editEvent.eventType == EventType.WEEKLY_EVENT
-                    AnimatedVisibility(!editEvent.singleDivision && supportsSplitDivisionSlots) {
+                    AnimatedVisibility(!editEvent.singleDivision && editEvent.teamSignup) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -3900,15 +3896,11 @@ fun EventDetails(
                             Box(modifier = Modifier.weight(1f)) {
                                 LabeledCheckboxRow(
                                     checked = editEvent.allowTeamSplitDefault == true,
-                                    label = "Split divisions by timeslot",
+                                    label = "Allow team bill splitting by default",
                                     onCheckedChange = { checked ->
                                         onEditEvent {
                                             copy(allowTeamSplitDefault = checked)
                                         }
-                                        syncLeagueSlotsForSelectedDivisions(
-                                            normalizedSelection = selectedDivisions,
-                                            splitByDivisionOverride = checked,
-                                        )
                                     },
                                 )
                             }
@@ -4879,6 +4871,7 @@ fun EventDetails(
                                 showSlotDivisions = splitByDivisionScheduling,
                                 lockSlotDivisions = false,
                                 lockedDivisionIds = editEvent.divisions.normalizeDivisionIdentifiers(),
+                                allowDivisionEditsWhenReadOnly = scheduleTimeLocked && splitByDivisionScheduling,
                                 fieldCountError = if (!isFieldCountValid) {
                                     "Field count must be at least 1."
                                 } else {
