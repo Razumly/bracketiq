@@ -372,6 +372,7 @@ fun EventDetails(
     var pricePreviewBreakdown by remember { mutableStateOf<PricePreviewBreakdown?>(null) }
     var officialPositionsExpanded by rememberSaveable(editEvent.id, editView) { mutableStateOf(false) }
     var assignedStaffExpanded by rememberSaveable(editEvent.id, editView) { mutableStateOf(false) }
+    var divisionInputsExpanded by rememberSaveable(editEvent.id, editView) { mutableStateOf(true) }
     val sectionExpansionStates = rememberSaveable(
         editEvent.id,
         saver = SectionExpansionStatesSaver,
@@ -1434,6 +1435,7 @@ fun EventDetails(
             nameTouched = true,
             error = null,
         )
+        divisionInputsExpanded = true
     }
     fun handleRemoveDivisionDetail(divisionId: String) {
         val nextDivisionDetails = divisionDetailsForSettings.filterNot { existing ->
@@ -3800,6 +3802,49 @@ fun EventDetails(
                         Box(modifier = Modifier.weight(1f))
                     }
 
+                    @Composable
+                    fun DivisionScheduleConfigurationFields() {
+                        if (editEvent.eventType == EventType.TOURNAMENT && editEvent.includePlayoffs) {
+                            LeagueConfigurationFields(
+                                title = "Pool Configuration",
+                                leagueConfig = normalizeLeagueConfigWithSportMode(divisionEditor.leagueConfig).copy(
+                                    includePlayoffs = false,
+                                    playoffTeamCount = null,
+                                ),
+                                onLeagueConfigChange = ::updateDivisionLeagueConfig,
+                            )
+                        }
+
+                        if (editEvent.eventType == EventType.TOURNAMENT) {
+                            TournamentConfigurationFields(
+                                title = "Tournament Configuration",
+                                usesSets = divisionScheduleUsesSets,
+                                tournamentConfig = divisionEditor.playoffConfig,
+                                onTournamentConfigChange = ::updateDivisionTournamentConfig,
+                            )
+                        }
+
+                        if (editEvent.eventType == EventType.LEAGUE) {
+                            LeagueConfigurationFields(
+                                leagueConfig = normalizeLeagueConfigWithSportMode(divisionEditor.leagueConfig).copy(
+                                    includePlayoffs = editEvent.includePlayoffs,
+                                    playoffTeamCount = divisionEditor.playoffTeamCount,
+                                ),
+                                onLeagueConfigChange = ::updateDivisionLeagueConfig,
+                            )
+                            if (editEvent.includePlayoffs) {
+                                LeaguePlayoffConfigurationFields(
+                                    leagueConfig = normalizeLeagueConfigWithSportMode(divisionEditor.leagueConfig).copy(
+                                        includePlayoffs = true,
+                                        playoffTeamCount = divisionEditor.playoffTeamCount,
+                                    ),
+                                    playoffConfig = divisionEditor.playoffConfig,
+                                    onPlayoffConfigChange = ::updateDivisionPlayoffConfig,
+                                )
+                            }
+                        }
+                    }
+
                     AnimatedVisibility(editEvent.singleDivision) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             val singleDivisionTournamentPoolPlayEnabled = editEvent.isTournamentPoolPlayEnabled()
@@ -4039,6 +4084,7 @@ fun EventDetails(
                                     )
                                 }
                             }
+                            DivisionScheduleConfigurationFields()
                         }
                     }
 
@@ -4064,59 +4110,28 @@ fun EventDetails(
                         }
                     }
 
-                    DivisionDetailEditList(
-                        event = editEvent,
-                        divisionDetails = divisionDetailsForSettings,
-                        onEditDivision = ::handleEditDivisionDetail,
-                        onRemoveDivision = ::handleRemoveDivisionDetail,
+                    val divisionInputsTitle = if (divisionEditor.editingId.isNullOrBlank()) {
+                        "New Division"
+                    } else {
+                        "Edit Division"
+                    }
+                    FormSectionDivider()
+                    CollapsibleEditorSubsectionHeader(
+                        title = divisionInputsTitle,
+                        expanded = divisionInputsExpanded,
+                        onToggle = { divisionInputsExpanded = !divisionInputsExpanded },
                     )
-
-                    if (editEvent.eventType == EventType.TOURNAMENT && editEvent.includePlayoffs) {
-                        LeagueConfigurationFields(
-                            title = "Pool Configuration",
-                            leagueConfig = normalizeLeagueConfigWithSportMode(divisionEditor.leagueConfig).copy(
-                                includePlayoffs = false,
-                                playoffTeamCount = null,
-                            ),
-                            onLeagueConfigChange = ::updateDivisionLeagueConfig,
-                        )
-                    }
-
-                    if (editEvent.eventType == EventType.TOURNAMENT) {
-                        TournamentConfigurationFields(
-                            title = "Tournament Configuration",
-                            usesSets = divisionScheduleUsesSets,
-                            tournamentConfig = divisionEditor.playoffConfig,
-                            onTournamentConfigChange = ::updateDivisionTournamentConfig,
-                        )
-                    }
-
-                    if (editEvent.eventType == EventType.LEAGUE) {
-                        LeagueConfigurationFields(
-                            leagueConfig = normalizeLeagueConfigWithSportMode(divisionEditor.leagueConfig).copy(
-                                includePlayoffs = editEvent.includePlayoffs,
-                                playoffTeamCount = divisionEditor.playoffTeamCount,
-                            ),
-                            onLeagueConfigChange = ::updateDivisionLeagueConfig,
-                        )
-                        if (editEvent.includePlayoffs) {
-                            LeaguePlayoffConfigurationFields(
-                                leagueConfig = normalizeLeagueConfigWithSportMode(divisionEditor.leagueConfig).copy(
-                                    includePlayoffs = true,
-                                    playoffTeamCount = divisionEditor.playoffTeamCount,
-                                ),
-                                playoffConfig = divisionEditor.playoffConfig,
-                                onPlayoffConfigChange = ::updateDivisionPlayoffConfig,
-                            )
-                        }
-                    }
+                    AnimatedVisibility(visible = divisionInputsExpanded) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            if (!editEvent.singleDivision) {
+                                DivisionScheduleConfigurationFields()
+                            }
 
                     Text(
-                        text = if (divisionEditor.editingId.isNullOrBlank()) {
-                            "New Division"
-                        } else {
-                            "Edit Division"
-                        },
+                        text = "Division Info",
                         style = MaterialTheme.typography.titleSmall,
                         color = Color(localImageScheme.current.onSurface),
                     )
@@ -4195,10 +4210,10 @@ fun EventDetails(
                             enabled = divisionEditorReady,
                         )
                     }
-                    FormSectionDivider()
 
                     AnimatedVisibility(!editEvent.singleDivision) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FormSectionDivider()
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -4578,6 +4593,16 @@ fun EventDetails(
                             color = MaterialTheme.colorScheme.error,
                         )
                     }
+
+                        }
+                    }
+
+                    DivisionDetailEditList(
+                        event = editEvent,
+                        divisionDetails = divisionDetailsForSettings,
+                        onEditDivision = ::handleEditDivisionDetail,
+                        onRemoveDivision = ::handleRemoveDivisionDetail,
+                    )
 
                     }
 
