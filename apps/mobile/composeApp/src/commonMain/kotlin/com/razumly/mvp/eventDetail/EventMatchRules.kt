@@ -34,7 +34,6 @@ private fun setBasedMatchRulesTemplate(segmentLabel: String = "Set"): MatchRules
         officialRoles = emptyList(),
         supportedIncidentTypes = defaultPointIncidentTypes(),
         autoCreatePointIncidentType = "POINT",
-        pointIncidentRequiresParticipant = false,
     )
 
 private fun periodMatchRulesTemplate(
@@ -47,7 +46,6 @@ private fun periodMatchRulesTemplate(
     supportsShootout: Boolean = false,
     canUseOvertime: Boolean = false,
     canUseShootout: Boolean = false,
-    pointIncidentRequiresParticipant: Boolean = false,
 ): MatchRulesConfigMVP =
     MatchRulesConfigMVP(
         scoringModel = "PERIODS",
@@ -61,7 +59,6 @@ private fun periodMatchRulesTemplate(
         officialRoles = emptyList(),
         supportedIncidentTypes = supportedIncidentTypes,
         autoCreatePointIncidentType = autoCreatePointIncidentType,
-        pointIncidentRequiresParticipant = pointIncidentRequiresParticipant,
     )
 
 private fun defaultSportMatchRulesTemplate(sport: Sport): MatchRulesConfigMVP? {
@@ -82,7 +79,6 @@ private fun defaultSportMatchRulesTemplate(sport: Sport): MatchRulesConfigMVP? {
             supportsDraw = true,
             canUseOvertime = true,
             canUseShootout = true,
-            pointIncidentRequiresParticipant = true,
         )
         "tennis" in key -> setBasedMatchRulesTemplate()
         "pickleball" in key -> setBasedMatchRulesTemplate(segmentLabel = "Game")
@@ -103,7 +99,6 @@ private fun defaultSportMatchRulesTemplate(sport: Sport): MatchRulesConfigMVP? {
             supportsShootout = true,
             canUseOvertime = true,
             canUseShootout = true,
-            pointIncidentRequiresParticipant = true,
         )
         "baseball" in key -> MatchRulesConfigMVP(
             scoringModel = "INNINGS",
@@ -117,7 +112,6 @@ private fun defaultSportMatchRulesTemplate(sport: Sport): MatchRulesConfigMVP? {
             officialRoles = emptyList(),
             supportedIncidentTypes = defaultRunIncidentTypes(),
             autoCreatePointIncidentType = "RUN",
-            pointIncidentRequiresParticipant = false,
         )
         "other" in key -> MatchRulesConfigMVP(
             scoringModel = "POINTS_ONLY",
@@ -131,7 +125,6 @@ private fun defaultSportMatchRulesTemplate(sport: Sport): MatchRulesConfigMVP? {
             officialRoles = emptyList(),
             supportedIncidentTypes = defaultPointIncidentTypes(),
             autoCreatePointIncidentType = "POINT",
-            pointIncidentRequiresParticipant = false,
         )
         else -> null
     }
@@ -159,8 +152,6 @@ private fun mergeMatchRulesTemplate(
         officialRoles = override.officialRoles ?: defaults.officialRoles,
         supportedIncidentTypes = override.supportedIncidentTypes ?: defaults.supportedIncidentTypes,
         autoCreatePointIncidentType = override.autoCreatePointIncidentType ?: defaults.autoCreatePointIncidentType,
-        pointIncidentRequiresParticipant = override.pointIncidentRequiresParticipant
-            ?: defaults.pointIncidentRequiresParticipant,
     )
 }
 
@@ -179,7 +170,10 @@ private fun isMatchRulesOverrideEmpty(value: MatchRulesConfigMVP): Boolean =
         value.pointIncidentRequiresParticipant == null
 
 internal fun matchRulesOverrideWithoutSegmentCount(value: MatchRulesConfigMVP?): MatchRulesConfigMVP? {
-    val sanitized = value?.copy(segmentCount = null) ?: return null
+    val sanitized = value?.copy(
+        segmentCount = null,
+        pointIncidentRequiresParticipant = null,
+    ) ?: return null
     return sanitized.takeUnless(::isMatchRulesOverrideEmpty)
 }
 
@@ -242,7 +236,6 @@ private fun normalizeMatchRulesOverride(value: MatchRulesConfigMVP?): MatchRules
         canUseOvertime = value.canUseOvertime,
         canUseShootout = value.canUseShootout,
         supportedIncidentTypes = supportedIncidentTypes,
-        pointIncidentRequiresParticipant = value.pointIncidentRequiresParticipant,
     )
 
     return if (
@@ -262,7 +255,6 @@ internal fun copyMatchRulesOverride(
     canUseOvertime: Boolean? = current?.canUseOvertime,
     canUseShootout: Boolean? = current?.canUseShootout,
     supportedIncidentTypes: List<String>? = current?.supportedIncidentTypes,
-    pointIncidentRequiresParticipant: Boolean? = current?.pointIncidentRequiresParticipant,
 ): MatchRulesConfigMVP? {
     return normalizeMatchRulesOverride(
         MatchRulesConfigMVP(
@@ -272,7 +264,6 @@ internal fun copyMatchRulesOverride(
             canUseOvertime = canUseOvertime,
             canUseShootout = canUseShootout,
             supportedIncidentTypes = supportedIncidentTypes,
-            pointIncidentRequiresParticipant = pointIncidentRequiresParticipant,
         ),
     )
 }
@@ -413,9 +404,6 @@ internal fun resolveEventMatchRules(
                 ?.takeIf(String::isNotBlank)
             ?: resolvedRulesFallback?.autoCreatePointIncidentType
             ?: "POINT",
-        pointIncidentRequiresParticipant = eventOverride?.pointIncidentRequiresParticipant
-            ?: sportTemplate?.pointIncidentRequiresParticipant
-            ?: resolvedRulesFallback?.pointIncidentRequiresParticipant
-            ?: false,
+        pointIncidentRequiresParticipant = event.autoCreatePointMatchIncidents,
     )
 }

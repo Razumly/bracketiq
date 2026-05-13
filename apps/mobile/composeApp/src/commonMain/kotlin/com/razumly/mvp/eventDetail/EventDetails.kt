@@ -1729,24 +1729,41 @@ fun EventDetails(
             .filter(String::isNotBlank)
             .distinct()
     }
-    val selectedMatchIncidentTypes = remember(resolvedMatchRules.supportedIncidentTypes) {
+    val selectedMatchIncidentTypes = remember(
+        resolvedMatchRules.supportedIncidentTypes,
+        editEvent.autoCreatePointMatchIncidents,
+        autoPointIncidentType,
+    ) {
+        val normalizedAutoPointType = autoPointIncidentType.trim().uppercase()
         resolvedMatchRules.supportedIncidentTypes
             .map(String::trim)
             .filter(String::isNotBlank)
             .distinct()
+            .filter { incidentType ->
+                editEvent.autoCreatePointMatchIncidents || incidentType.uppercase() != normalizedAutoPointType
+            }
     }
     val matchRulesSummary = remember(editEvent.autoCreatePointMatchIncidents, selectedMatchIncidentTypes) {
         val incidentMode = if (editEvent.autoCreatePointMatchIncidents) "Automatic incidents" else "Manual incidents"
         val typeCount = selectedMatchIncidentTypes.size
         "$incidentMode · $typeCount ${if (typeCount == 1) "type" else "types"}"
     }
-    val matchIncidentOptions = remember(availableMatchIncidentTypes) {
-        availableMatchIncidentTypes.map { incidentType ->
-            DropdownOption(
-                value = incidentType,
-                label = matchIncidentTypeLabel(incidentType),
-            )
-        }
+    val matchIncidentOptions = remember(
+        availableMatchIncidentTypes,
+        editEvent.autoCreatePointMatchIncidents,
+        autoPointIncidentType,
+    ) {
+        val normalizedAutoPointType = autoPointIncidentType.trim().uppercase()
+        availableMatchIncidentTypes
+            .filter { incidentType ->
+                editEvent.autoCreatePointMatchIncidents || incidentType.trim().uppercase() != normalizedAutoPointType
+            }
+            .map { incidentType ->
+                DropdownOption(
+                    value = incidentType,
+                    label = matchIncidentTypeLabel(incidentType),
+                )
+            }
     }
     var lastAutoLoadedOfficialDefaultsSportId by rememberSaveable(editEvent.id, editView) {
         mutableStateOf<String?>(null)
@@ -2910,14 +2927,8 @@ fun EventDetails(
                                     }
                                     add(
                                         DetailRowSpec(
-                                            "Automatic point incidents",
+                                            "Create a scoring incident for each point / goal",
                                             if (event.autoCreatePointMatchIncidents) "Yes" else "No",
-                                        ),
-                                    )
-                                    add(
-                                        DetailRowSpec(
-                                            "Point incidents require participant",
-                                            if (resolvedMatchRules.pointIncidentRequiresParticipant) "Yes" else "No",
                                         ),
                                     )
                                     if (selectedMatchIncidentTypes.isNotEmpty()) {
@@ -2983,55 +2994,6 @@ fun EventDetails(
                                         },
                                     )
                                 }
-                                LabeledCheckboxRow(
-                                    checked = editEvent.autoCreatePointMatchIncidents,
-                                    label = "Create a scoring incident for each point / goal",
-                                    onCheckedChange = { checked ->
-                                        val enforcedIncidentTypes = enforceAutoPointIncidentType(
-                                            selected = selectedMatchIncidentTypes,
-                                            autoPointIncidentType = autoPointIncidentType,
-                                            enabled = checked,
-                                        )
-                                        val incidentOverride = supportedIncidentTypesOverrideOrNull(
-                                            selected = enforcedIncidentTypes,
-                                            defaults = baseMatchRules.supportedIncidentTypes,
-                                        )
-                                        onEditEvent {
-                                            copy(
-                                                autoCreatePointMatchIncidents = checked,
-                                                matchRulesOverride = copyMatchRulesOverride(
-                                                    current = matchRulesOverride,
-                                                    supportedIncidentTypes = incidentOverride,
-                                                ),
-                                            )
-                                        }
-                                    },
-                                )
-                                Text(
-                                    text = if (editEvent.autoCreatePointMatchIncidents) {
-                                        "${matchIncidentTypeLabel(autoPointIncidentType)} incidents will stay available while automatic scoring capture is on."
-                                    } else {
-                                        "Officials can still add incidents manually when needed."
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color(localImageScheme.current.onSurfaceVariant),
-                                )
-                                LabeledCheckboxRow(
-                                    checked = resolvedMatchRules.pointIncidentRequiresParticipant,
-                                    label = "Point incidents require a participant",
-                                    onCheckedChange = { checked ->
-                                        onEditEvent {
-                                            copy(
-                                                matchRulesOverride = copyMatchRulesOverride(
-                                                    current = matchRulesOverride,
-                                                    pointIncidentRequiresParticipant = checked.takeUnless {
-                                                        it == baseMatchRules.pointIncidentRequiresParticipant
-                                                    },
-                                                ),
-                                            )
-                                        }
-                                    },
-                                )
                             }
                             PlatformDropdown(
                                 selectedValue = "",
@@ -3060,6 +3022,46 @@ fun EventDetails(
                                         )
                                     }
                                 },
+                            )
+                            LabeledCheckboxRow(
+                                checked = editEvent.autoCreatePointMatchIncidents,
+                                label = "Create a scoring incident for each point / goal",
+                                onCheckedChange = { checked ->
+                                    val nextSelectedIncidentTypes = if (checked) {
+                                        enforceAutoPointIncidentType(
+                                            selected = selectedMatchIncidentTypes,
+                                            autoPointIncidentType = autoPointIncidentType,
+                                            enabled = true,
+                                        )
+                                    } else {
+                                        val normalizedAutoPointType = autoPointIncidentType.trim().uppercase()
+                                        selectedMatchIncidentTypes.filter { incidentType ->
+                                            incidentType.trim().uppercase() != normalizedAutoPointType
+                                        }
+                                    }
+                                    val incidentOverride = supportedIncidentTypesOverrideOrNull(
+                                        selected = nextSelectedIncidentTypes,
+                                        defaults = baseMatchRules.supportedIncidentTypes,
+                                    )
+                                    onEditEvent {
+                                        copy(
+                                            autoCreatePointMatchIncidents = checked,
+                                            matchRulesOverride = copyMatchRulesOverride(
+                                                current = matchRulesOverride,
+                                                supportedIncidentTypes = incidentOverride,
+                                            ),
+                                        )
+                                    }
+                                },
+                            )
+                            Text(
+                                text = if (editEvent.autoCreatePointMatchIncidents) {
+                                    "${matchIncidentTypeLabel(autoPointIncidentType)} incidents will stay available while automatic scoring capture is on."
+                                } else {
+                                    "Officials can still add incidents manually when needed."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(localImageScheme.current.onSurfaceVariant),
                             )
                             if (resolvedMatchRules.officialRoles.isNotEmpty()) {
                                 Text(

@@ -1668,7 +1668,9 @@ private fun resolveActiveRules(match: MatchMVP, currentEvent: Event?): ResolvedM
             ?.takeIf { it.isNotEmpty() }
             ?: listOf("POINT", "DISCIPLINE", "NOTE", "ADMIN"),
         autoCreatePointIncidentType = source?.autoCreatePointIncidentType ?: "POINT",
-        pointIncidentRequiresParticipant = source?.pointIncidentRequiresParticipant ?: false,
+        pointIncidentRequiresParticipant = currentEvent?.autoCreatePointMatchIncidents
+            ?: source?.pointIncidentRequiresParticipant
+            ?: false,
     )
 }
 
@@ -1693,7 +1695,7 @@ internal fun shouldRequireScoringIncident(
     rules: ResolvedMatchRulesMVP,
     event: Event?,
 ): Boolean {
-    return rules.pointIncidentRequiresParticipant
+    return event?.autoCreatePointMatchIncidents ?: rules.pointIncidentRequiresParticipant
 }
 
 internal fun isScoringIncidentType(type: String?): Boolean = when (type?.trim()?.uppercase()) {

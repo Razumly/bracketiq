@@ -101,6 +101,41 @@ class EventDetailsMatchRulesTest {
     }
 
     @Test
+    fun given_auto_point_incidents_when_sport_template_disables_player_requirement_then_auto_capture_requires_participant() {
+        val event = Event(
+            sportId = "Basketball",
+            eventType = EventType.LEAGUE,
+            autoCreatePointMatchIncidents = true,
+            matchRulesOverride = MatchRulesConfigMVP(pointIncidentRequiresParticipant = false),
+        )
+        val sport = sport(
+            id = "Basketball",
+            template = MatchRulesConfigMVP(pointIncidentRequiresParticipant = false),
+        )
+
+        val rules = resolveEventMatchRules(event = event, sport = sport)
+
+        assertTrue(rules.pointIncidentRequiresParticipant)
+    }
+
+    @Test
+    fun given_auto_point_incidents_disabled_when_sport_template_requires_player_then_requirement_is_off() {
+        val event = Event(
+            sportId = "Indoor Soccer",
+            eventType = EventType.LEAGUE,
+            autoCreatePointMatchIncidents = false,
+        )
+        val sport = sport(
+            id = "Indoor Soccer",
+            template = MatchRulesConfigMVP(pointIncidentRequiresParticipant = true),
+        )
+
+        val rules = resolveEventMatchRules(event = event, sport = sport)
+
+        assertFalse(rules.pointIncidentRequiresParticipant)
+    }
+
+    @Test
     fun given_segment_count_override_when_resolving_rules_then_sport_count_remains_source_of_truth() {
         val event = Event(
             sportId = "Indoor Soccer",

@@ -199,7 +199,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_event_rules_require_participant_when_evaluating_scoring_incidents_then_incident_entry_is_required() {
+    fun given_rules_require_participant_without_event_when_evaluating_scoring_incidents_then_incident_entry_is_required() {
         val rules = ResolvedMatchRulesMVP(
             scoringModel = "PERIODS",
             segmentCount = 2,
@@ -211,15 +211,13 @@ class MatchContentComponentTest : MainDispatcherTest() {
         assertTrue(
             shouldRequireScoringIncident(
                 rules = rules,
-                event = createEvent(teamIds = listOf("team-a", "team-b")).copy(
-                    autoCreatePointMatchIncidents = false,
-                ),
+                event = null,
             )
         )
     }
 
     @Test
-    fun given_auto_point_incidents_without_player_requirement_when_evaluating_scoring_then_direct_score_controls_remain() {
+    fun given_auto_point_incidents_when_evaluating_scoring_then_incident_entry_is_required() {
         val rules = ResolvedMatchRulesMVP(
             scoringModel = "POINTS_ONLY",
             segmentCount = 1,
@@ -228,7 +226,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
             pointIncidentRequiresParticipant = false,
         )
 
-        assertFalse(
+        assertTrue(
             shouldRequireScoringIncident(
                 rules = rules,
                 event = createEvent(teamIds = listOf("team-a", "team-b")).copy(
@@ -236,7 +234,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
                 ),
             )
         )
-        assertEquals(listOf("DISCIPLINE"), incidentDialogTypes(rules, teamScoped = true))
     }
 
     @Test
@@ -629,6 +626,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
         val user = createUser(id = "official-1")
         val event = createEvent(teamIds = listOf("team-a", "team-b")).copy(
             usesSets = false,
+            autoCreatePointMatchIncidents = true,
             resolvedMatchRules = ResolvedMatchRulesMVP(
                 scoringModel = "PERIODS",
                 segmentCount = 2,
