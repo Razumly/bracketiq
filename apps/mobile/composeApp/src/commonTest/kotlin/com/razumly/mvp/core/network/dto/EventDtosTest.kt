@@ -11,6 +11,7 @@ import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.resolvedDivisionPriceCents
+import com.razumly.mvp.core.data.dataTypes.toEventDTO
 import com.razumly.mvp.core.util.jsonMVP
 import kotlinx.serialization.decodeFromString
 import kotlin.test.Test
@@ -804,6 +805,26 @@ class EventDtosTest {
 
         assertEquals(true, event?.doTeamsOfficiate)
         assertEquals(true, event?.teamOfficialsMaySwap)
+    }
+
+    @Test
+    fun event_api_dto_maps_split_league_playoff_division_setting() {
+        val dto = EventApiDto(
+            id = "event-20-split",
+            name = "API Event",
+            hostId = "host-20",
+            eventType = "LEAGUE",
+            includePlayoffs = true,
+            splitLeaguePlayoffDivisions = true,
+            start = "2026-02-10T00:00:00Z",
+            end = "2026-02-10T01:00:00Z",
+        )
+
+        val event = dto.toEventOrNull()
+
+        assertEquals(true, event?.splitLeaguePlayoffDivisions)
+        assertEquals(true, event?.toEventDTO()?.splitLeaguePlayoffDivisions)
+        assertEquals(true, event?.toUpdateDto()?.splitLeaguePlayoffDivisions)
     }
 
     @Test

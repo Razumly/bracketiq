@@ -84,6 +84,7 @@ data class EventApiDto(
     val gamesPerOpponent: Int? = null,
     val includePlayoffs: Boolean? = null,
     val includePlayoffsOrPools: Boolean? = null,
+    val splitLeaguePlayoffDivisions: Boolean? = null,
     val playoffTeamCount: Int? = null,
 
     val doubleElimination: Boolean? = null,
@@ -306,6 +307,7 @@ data class EventApiDto(
             fieldCount = resolvedFieldCount,
             gamesPerOpponent = gamesPerOpponent,
             includePlayoffs = resolvedIncludePlayoffsOrPools,
+            splitLeaguePlayoffDivisions = splitLeaguePlayoffDivisions ?: false,
             playoffTeamCount = resolvedEventPlayoffTeamCount,
             doubleElimination = doubleElimination ?: false,
             winnerSetCount = winnerSetCount ?: 1,
@@ -646,6 +648,7 @@ data class EventUpdateDto(
     val gamesPerOpponent: Int? = null,
     val includePlayoffs: Boolean? = null,
     val includePlayoffsOrPools: Boolean? = null,
+    val splitLeaguePlayoffDivisions: Boolean? = null,
     val playoffTeamCount: Int? = null,
     val usesSets: Boolean? = null,
     val matchDurationMinutes: Int? = null,
@@ -919,6 +922,7 @@ fun Event.toUpdateDto(
         gamesPerOpponent = gamesPerOpponent,
         includePlayoffs = includePlayoffs,
         includePlayoffsOrPools = includePlayoffs,
+        splitLeaguePlayoffDivisions = splitLeaguePlayoffDivisions,
         playoffTeamCount = if (includePlayoffs) {
             playoffTeamCount
         } else {

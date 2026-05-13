@@ -136,12 +136,14 @@ fun MatchCard(
                     selectedEvent.playoffTeamCount,
                     selectedEvent.includePlayoffs,
                     selectedEvent.singleDivision,
+                    selectedEvent.splitLeaguePlayoffDivisions,
                     selectedEvent.eventType,
                 ) {
                     buildPlayoffPlaceholderAssignmentsForEvent(
                         eventType = selectedEvent.eventType,
                         includePlayoffs = selectedEvent.includePlayoffs,
                         singleDivision = selectedEvent.singleDivision,
+                        splitLeaguePlayoffDivisions = selectedEvent.splitLeaguePlayoffDivisions,
                         eventDivisions = selectedEvent.divisions,
                         divisionDetails = selectedEvent.divisionDetails,
                         eventPlayoffTeamCount = selectedEvent.playoffTeamCount,
@@ -890,6 +892,7 @@ internal fun buildPlayoffPlaceholderAssignmentsForEvent(
     eventType: EventType,
     includePlayoffs: Boolean,
     singleDivision: Boolean,
+    splitLeaguePlayoffDivisions: Boolean = false,
     eventDivisions: List<String>,
     divisionDetails: List<DivisionDetail>,
     eventPlayoffTeamCount: Int?,
@@ -937,6 +940,7 @@ internal fun buildPlayoffPlaceholderAssignmentsForEvent(
             eventDivisions = eventDivisions,
             divisionDetails = divisionDetails,
             eventPlayoffTeamCount = eventPlayoffTeamCount,
+            splitLeaguePlayoffDivisions = splitLeaguePlayoffDivisions,
             slots = slots,
         )
     }
@@ -1090,6 +1094,7 @@ internal fun buildLeaguePlayoffPlaceholderAssignments(
     eventDivisions: List<String>,
     divisionDetails: List<DivisionDetail>,
     eventPlayoffTeamCount: Int?,
+    splitLeaguePlayoffDivisions: Boolean = false,
     slots: List<PlayoffBracketSlot>,
 ): Map<BracketSlotKey, String> {
     if (divisionDetails.isEmpty() || slots.isEmpty()) {
@@ -1097,7 +1102,6 @@ internal fun buildLeaguePlayoffPlaceholderAssignments(
     }
 
     val orderedDetails = orderDivisionDetailsForMappings(eventDivisions, divisionDetails)
-        .filter { detail -> detail.playoffPlacementDivisionIds.isNotEmpty() }
     if (orderedDetails.isEmpty()) {
         return emptyMap()
     }
@@ -1123,6 +1127,7 @@ internal fun buildLeaguePlayoffPlaceholderAssignments(
             mappingDivisionDetails = orderedDetails,
             allDivisionDetails = divisionDetails,
             eventPlayoffTeamCount = eventPlayoffTeamCount,
+            implicitSelfMappings = !splitLeaguePlayoffDivisions,
         )
         if (labelsByPlacement.isEmpty()) {
             continue
@@ -1306,11 +1311,34 @@ private fun buildMappedPlacementLabelsForPlayoffDivision(
     mappingDivisionDetails: List<DivisionDetail>,
     allDivisionDetails: List<DivisionDetail>,
     eventPlayoffTeamCount: Int?,
+    implicitSelfMappings: Boolean = false,
 ): Map<Int, List<String>> {
+    fun resolvePlacementMappings(detail: DivisionDetail): List<String> {
+        val explicitMappings = detail.playoffPlacementDivisionIds
+        val hasExplicitMapping = explicitMappings.any { divisionId ->
+            divisionId.normalizeDivisionIdentifier().isNotBlank()
+        }
+        if (hasExplicitMapping || !implicitSelfMappings) {
+            return explicitMappings
+        }
+        if (detail.kind?.trim()?.equals("PLAYOFF", ignoreCase = true) == true) {
+            return explicitMappings
+        }
+
+        val placementLimit = detail.playoffTeamCount
+            ?: eventPlayoffTeamCount
+            ?: 0
+        if (placementLimit <= 0) {
+            return emptyList()
+        }
+        return List(placementLimit) { detail.id }
+    }
+
     val labelsByPlacement = mutableMapOf<Int, List<String>>()
     val maxPlacementIndex = mappingDivisionDetails.maxOfOrNull { detail ->
+        val mappedDivisionIds = resolvePlacementMappings(detail)
         maxOf(
-            detail.playoffPlacementDivisionIds.size,
+            mappedDivisionIds.size,
             detail.playoffTeamCount ?: eventPlayoffTeamCount ?: 0,
         )
     } ?: 0
@@ -1318,13 +1346,14 @@ private fun buildMappedPlacementLabelsForPlayoffDivision(
     for (placementIndex in 0 until maxPlacementIndex) {
         val placementLabels = mutableListOf<String>()
         for (detail in mappingDivisionDetails) {
+            val mappedDivisionIds = resolvePlacementMappings(detail)
             val placementLimit = detail.playoffTeamCount
                 ?: eventPlayoffTeamCount
-                ?: detail.playoffPlacementDivisionIds.size
+                ?: mappedDivisionIds.size
             if (placementIndex >= placementLimit) {
                 continue
             }
-            val mappedPlayoffDivisionId = detail.playoffPlacementDivisionIds
+            val mappedPlayoffDivisionId = mappedDivisionIds
                 .getOrNull(placementIndex)
                 ?.normalizeDivisionIdentifier()
                 .orEmpty()

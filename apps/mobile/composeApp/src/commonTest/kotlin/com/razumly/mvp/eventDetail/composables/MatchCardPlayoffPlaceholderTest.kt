@@ -130,6 +130,63 @@ class MatchCardPlayoffPlaceholderTest {
     }
 
     @Test
+    fun build_playoff_placeholder_assignments_for_non_split_multi_division_league_uses_implicit_self_mappings() {
+        val eventId = "event_1"
+        val openDivision = DivisionDetail(
+            id = "${eventId}__division__open",
+            key = "open",
+            name = "Open",
+            playoffTeamCount = 12,
+        )
+        val mensDivision = DivisionDetail(
+            id = "${eventId}__division__m_skill_bb_age_u10",
+            key = "m_skill_bb_age_u10",
+            name = "Men's BB U10",
+            playoffTeamCount = 12,
+        )
+        val match = matchWithRelations(
+            id = "match_135",
+            division = openDivision.id,
+            team1Seed = 6,
+            team2Seed = 11,
+            previousLeftId = null,
+            previousRightId = null,
+        )
+
+        val assignments = buildPlayoffPlaceholderAssignmentsForEvent(
+            eventType = EventType.LEAGUE,
+            includePlayoffs = true,
+            singleDivision = false,
+            splitLeaguePlayoffDivisions = false,
+            eventDivisions = listOf(openDivision.id, mensDivision.id),
+            divisionDetails = listOf(openDivision, mensDivision),
+            eventPlayoffTeamCount = 12,
+            matches = listOf(match).associateBy { it.match.id },
+        )
+        val splitAssignments = buildPlayoffPlaceholderAssignmentsForEvent(
+            eventType = EventType.LEAGUE,
+            includePlayoffs = true,
+            singleDivision = false,
+            splitLeaguePlayoffDivisions = true,
+            eventDivisions = listOf(openDivision.id, mensDivision.id),
+            divisionDetails = listOf(openDivision, mensDivision),
+            eventPlayoffTeamCount = 12,
+            matches = listOf(match).associateBy { it.match.id },
+        )
+
+        assertEquals(
+            "6th place (Open)",
+            assignments[BracketSlotKey("match_135", BracketTeamSlot.TEAM1)],
+        )
+        assertEquals(
+            "11th place (Open)",
+            assignments[BracketSlotKey("match_135", BracketTeamSlot.TEAM2)],
+        )
+        assertNull(splitAssignments[BracketSlotKey("match_135", BracketTeamSlot.TEAM1)])
+        assertNull(splitAssignments[BracketSlotKey("match_135", BracketTeamSlot.TEAM2)])
+    }
+
+    @Test
     fun build_single_division_playoff_placeholder_assignments_ignores_invalid_or_out_of_range_seeds() {
         val assignments = buildSingleDivisionPlayoffPlaceholderAssignments(
             slots = listOf(
