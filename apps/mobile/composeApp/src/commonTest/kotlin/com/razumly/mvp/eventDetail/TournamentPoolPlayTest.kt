@@ -68,4 +68,43 @@ class TournamentPoolPlayTest {
 
         assertEquals("event-1__division__championship", detail.tournamentBracketDivisionId())
     }
+
+    @Test
+    fun divisionDetailsForEventSettings_prefers_tournament_pool_bracket_details() {
+        val eventId = "event-2"
+        val bracketDivisionId = buildEventDivisionId(eventId, "c_skill_open_age_18plus")
+        val poolDivisionId = "${bracketDivisionId}_pool_a"
+        val event = Event(
+            id = eventId,
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            singleDivision = false,
+            divisions = listOf(poolDivisionId),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = poolDivisionId,
+                    key = "c_skill_open_age_18plus_pool_a",
+                    name = "Pool A",
+                    maxParticipants = 8,
+                    playoffTeamCount = 4,
+                    playoffPlacementDivisionIds = listOf(bracketDivisionId),
+                ),
+                DivisionDetail(
+                    id = bracketDivisionId,
+                    key = "c_skill_open_age_18plus",
+                    name = "CoEd Open 18+",
+                    kind = "PLAYOFF",
+                    maxParticipants = 16,
+                    playoffTeamCount = 8,
+                    poolCount = 2,
+                ),
+            ),
+        )
+
+        val details = event.divisionDetailsForEventSettings()
+
+        assertEquals(listOf(bracketDivisionId), details.map(DivisionDetail::id))
+        assertEquals(2, details.single().poolCount)
+        assertTrue(isTournamentPoolDivisionValid(details.single()))
+    }
 }

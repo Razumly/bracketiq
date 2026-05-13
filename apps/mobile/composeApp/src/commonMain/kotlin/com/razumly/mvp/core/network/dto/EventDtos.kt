@@ -616,6 +616,7 @@ data class EventUpdateDto(
     val description: String? = null,
     val divisions: List<String>? = null,
     val divisionDetails: List<DivisionDetail> = emptyList(),
+    val playoffDivisionDetails: List<DivisionDetail> = emptyList(),
     val winnerSetCount: Int? = null,
     val loserSetCount: Int? = null,
     val doubleElimination: Boolean? = null,
@@ -694,6 +695,14 @@ data class UpdateEventRequestDto(
     val event: EventUpdateDto,
 )
 
+private fun DivisionDetail.isTournamentPoolBracketPayloadDetail(): Boolean {
+    if (kind?.trim()?.equals("PLAYOFF", ignoreCase = true) == true) return true
+    if (playoffPlacementDivisionIds.any { divisionId -> divisionId.isNotBlank() }) return false
+    return poolCount != null ||
+        poolTeamCount != null ||
+        playoffConfig != null
+}
+
 fun Event.toUpdateDto(
     requiredTemplateIdsOverride: List<String>? = null,
     leagueScoringConfigOverride: LeagueScoringConfigDTO? = null,
@@ -715,7 +724,36 @@ fun Event.toUpdateDto(
         existingDetails = divisionDetails,
         eventId = id,
     )
-    val normalizedDivisionDetailsForPayload = normalizedDivisionDetails.map { detail ->
+    val normalizedAllDivisionDetails = divisionDetails.normalizeDivisionDetails(id)
+    val isTournamentPoolPlay = eventType == EventType.TOURNAMENT && includePlayoffs
+    val tournamentPoolBracketDetails = if (isTournamentPoolPlay) {
+        normalizedAllDivisionDetails
+            .filter(DivisionDetail::isTournamentPoolBracketPayloadDetail)
+            .map { detail ->
+                detail.copy(
+                    kind = "PLAYOFF",
+                    playoffPlacementDivisionIds = emptyList(),
+                    teamIds = emptyList(),
+                    fieldIds = emptyList(),
+                )
+            }
+    } else {
+        emptyList()
+    }
+    val tournamentPoolBracketIds = tournamentPoolBracketDetails
+        .flatMap { detail -> listOf(detail.id, detail.key) }
+        .normalizeDivisionIdentifiers()
+        .toSet()
+    val regularDivisionDetailsForPayload = if (isTournamentPoolPlay && tournamentPoolBracketIds.isNotEmpty()) {
+        normalizedDivisionDetails.filterNot { detail ->
+            listOf(detail.id, detail.key)
+                .normalizeDivisionIdentifiers()
+                .any { divisionId -> divisionId in tournamentPoolBracketIds }
+        }
+    } else {
+        normalizedDivisionDetails
+    }
+    fun normalizeDivisionDetailForPayload(detail: DivisionDetail): DivisionDetail {
         val defaultPriceForCreate = priceCents.coerceAtLeast(0)
         val fallbackMaxParticipantsForCreate = maxParticipants.coerceAtLeast(2)
         val resolvedMaxParticipantsForDetail = if (applyEventDefaultsToMissingDivisionDetails) {
@@ -723,7 +761,6 @@ fun Event.toUpdateDto(
         } else {
             detail.maxParticipants?.coerceAtLeast(2) ?: 0
         }
-        val isTournamentPoolPlay = eventType == EventType.TOURNAMENT && includePlayoffs
         val normalizedPoolCount = detail.poolCount?.takeIf { count -> count >= 1 }
         val normalizedPoolTeamCount = if (
             isTournamentPoolPlay &&
@@ -767,7 +804,7 @@ fun Event.toUpdateDto(
         val detailAllowPaymentPlans = detail.allowPaymentPlans == true &&
             detailInstallmentCount != null &&
             (detailPrice ?: 0) > 0
-        detail.copy(
+        return detail.copy(
             price = detailPrice,
             maxParticipants = if (applyEventDefaultsToMissingDivisionDetails) {
                 (detail.maxParticipants ?: fallbackMaxParticipantsForCreate).coerceAtLeast(2)
@@ -840,6 +877,8 @@ fun Event.toUpdateDto(
             },
         )
     }
+    val normalizedDivisionDetailsForPayload = regularDivisionDetailsForPayload.map(::normalizeDivisionDetailForPayload)
+    val normalizedPlayoffDivisionDetailsForPayload = tournamentPoolBracketDetails.map(::normalizeDivisionDetailForPayload)
 
     val effectiveDoTeamsOfficiate = if (officialSchedulingMode.requiresTeamOfficials()) true else doTeamsOfficiate
 
@@ -850,6 +889,7 @@ fun Event.toUpdateDto(
         description = description,
         divisions = normalizedDivisions,
         divisionDetails = normalizedDivisionDetailsForPayload,
+        playoffDivisionDetails = normalizedPlayoffDivisionDetailsForPayload,
         winnerSetCount = winnerSetCount,
         loserSetCount = loserSetCount,
         doubleElimination = doubleElimination,

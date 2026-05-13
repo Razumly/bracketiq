@@ -570,6 +570,59 @@ class EventDtosTest {
     }
 
     @Test
+    fun to_update_dto_sends_tournament_pool_bracket_details_as_playoff_details() {
+        val bracketId = "event-12b__division__c_skill_open_age_18plus"
+        val event = Event(
+            id = "event-12b",
+            name = "Pool Tournament",
+            hostId = "host-12b",
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            singleDivision = false,
+            start = Instant.fromEpochMilliseconds(1_700_000_000_000),
+            end = Instant.fromEpochMilliseconds(1_700_003_600_000),
+            divisions = listOf(bracketId),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = bracketId,
+                    key = "c_skill_open_age_18plus",
+                    name = "CoEd Open 18+",
+                    divisionTypeId = "open",
+                    divisionTypeName = "Open",
+                    ratingType = "SKILL",
+                    gender = "C",
+                    maxParticipants = 16,
+                    playoffTeamCount = 8,
+                    poolCount = 2,
+                    usesSets = true,
+                    setDurationMinutes = 20,
+                    setsPerMatch = 3,
+                    pointsToVictory = listOf(25, 25, 15),
+                    playoffConfig = TournamentConfig(
+                        winnerSetCount = 3,
+                        winnerBracketPointsToVictory = listOf(25, 25, 15),
+                        setDurationMinutes = 20,
+                        usesSets = true,
+                    ),
+                ),
+            ),
+        )
+
+        val dto = event.toUpdateDto()
+        val bracketDetail = dto.playoffDivisionDetails.single()
+
+        assertEquals(emptyList(), dto.divisionDetails)
+        assertEquals("PLAYOFF", bracketDetail.kind)
+        assertEquals(bracketId, bracketDetail.id)
+        assertEquals(2, bracketDetail.poolCount)
+        assertEquals(8, bracketDetail.playoffTeamCount)
+        assertEquals(3, bracketDetail.setsPerMatch)
+        assertEquals(listOf(25, 25, 15), bracketDetail.pointsToVictory)
+        assertEquals(3, bracketDetail.playoffConfig?.winnerSetCount)
+        assertEquals(listOf(25, 25, 15), bracketDetail.playoffConfig?.winnerBracketPointsToVictory)
+    }
+
+    @Test
     fun event_api_dto_maps_weekly_relative_installment_due_days() {
         val dto = EventApiDto(
             id = "weekly-event-2",

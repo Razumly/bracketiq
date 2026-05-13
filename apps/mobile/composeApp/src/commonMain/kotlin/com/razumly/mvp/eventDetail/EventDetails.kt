@@ -395,12 +395,10 @@ fun EventDetails(
         editEvent.divisions,
         editEvent.divisionDetails,
         editEvent.id,
+        editEvent.eventType,
+        editEvent.includePlayoffs,
     ) {
-        mergeDivisionDetailsForDivisions(
-            divisions = editEvent.divisions,
-            existingDetails = editEvent.divisionDetails,
-            eventId = editEvent.id,
-        )
+        editEvent.divisionDetailsForEventSettings()
     }
     val divisionDetailsForSettings = remember(
         normalizedDivisionDetails,

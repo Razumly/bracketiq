@@ -4145,7 +4145,7 @@ fun EventDetailScreen(
                                                     colors = buttonColors,
                                                     modifier = Modifier.fillMaxWidth(),
                                                 ) {
-                                                    Text("Build Bracket(s)")
+                                                    Text("Rebuild Bracket(s)")
                                                 }
                                             }
                                             Button(
@@ -5179,7 +5179,7 @@ fun EventDetailScreen(
             if (showBuildBracketConfirmDialog) {
                 AlertDialog(
                     onDismissRequest = { showBuildBracketConfirmDialog = false },
-                    title = { Text("Build Bracket(s)") },
+                    title = { Text("Rebuild Bracket(s)") },
                     text = {
                         Text(
                             "This rebuilds playoff/tournament bracket(s) from max participant count. " +
@@ -5193,7 +5193,7 @@ fun EventDetailScreen(
                                 component.buildBrackets()
                             }
                         ) {
-                            Text("Build")
+                            Text("Rebuild")
                         }
                     },
                     dismissButton = {
