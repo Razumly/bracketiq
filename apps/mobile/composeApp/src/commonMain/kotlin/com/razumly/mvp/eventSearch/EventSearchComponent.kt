@@ -76,6 +76,7 @@ interface EventSearchComponent {
     fun refreshEvents(force: Boolean = false)
     fun refreshOrganizations(force: Boolean = false)
     fun refreshRentals(force: Boolean = false)
+    fun searchThisArea(center: LatLng, radiusMiles: Double? = null)
     fun loadRentalFieldOptions(fieldIds: List<String>)
     fun loadRentalBusyBlocks(organizationId: String, fieldIds: List<String>)
     fun clearRentalFieldOptions()
@@ -135,6 +136,7 @@ class DefaultEventSearchComponent(
     private val _currentLocation = MutableStateFlow<LatLng?>(null)
     override val currentLocation = _currentLocation.asStateFlow()
     private val _isLocationSearchEnabled = MutableStateFlow(true)
+    private val _searchCenter = MutableStateFlow<LatLng?>(null)
 
     private val _suggestedEvents = MutableStateFlow<List<Event>>(emptyList())
     override val suggestedEvents: StateFlow<List<Event>> = _suggestedEvents.asStateFlow()
@@ -224,8 +226,8 @@ class DefaultEventSearchComponent(
                     val previousLocation = _currentLocation.value
                     _currentLocation.value = trackedLocation
 
-                    if (previousLocation == null ||
-                        calcDistance(previousLocation, trackedLocation) > 50
+                    if (_searchCenter.value == null && (previousLocation == null ||
+                            calcDistance(previousLocation, trackedLocation) > 50)
                     ) {
                         refreshOrganizations(force = false)
                         refreshRentals(force = false)
@@ -286,7 +288,7 @@ class DefaultEventSearchComponent(
 
         suggestEventsJob?.cancel()
         suggestEventsJob = scope.launch {
-            val userLocation = _currentLocation.value ?: SAN_FRANCISCO_LOCATION
+            val userLocation = activeSearchLocation()
             eventRepository.searchEvents(
                 searchQuery = normalizedQuery,
                 userLocation = userLocation,
@@ -352,7 +354,7 @@ class DefaultEventSearchComponent(
             _isLoadingMore.value = true
             try {
                 val activeFilter = _filter.value
-                val currentLocation = _currentLocation.value ?: SAN_FRANCISCO_LOCATION
+                val currentLocation = activeSearchLocation()
                 val currentBounds =
                     getBounds(_currentRadius.value, currentLocation.latitude, currentLocation.longitude)
 
@@ -362,7 +364,7 @@ class DefaultEventSearchComponent(
                     dateTo = activeFilter.date.second,
                     limit = EVENTS_PAGE_SIZE,
                     offset = eventOffset,
-                    includeDistanceFilter = false,
+                    includeDistanceFilter = true,
                 )
                     .onSuccess { (eventsPage, hasMore) ->
                         eventOffset += eventsPage.size
@@ -412,6 +414,17 @@ class DefaultEventSearchComponent(
         scope.launch {
             loadRentalOrganizations(force = force)
         }
+    }
+
+    override fun searchThisArea(center: LatLng, radiusMiles: Double?) {
+        _searchCenter.value = center
+        if (radiusMiles != null && radiusMiles > 0) {
+            _currentRadius.value = radiusMiles
+        }
+        _isLocationSearchEnabled.value = true
+        refreshEvents(force = true)
+        refreshOrganizations(force = true)
+        refreshRentals(force = true)
     }
 
     override fun loadRentalFieldOptions(fieldIds: List<String>) {
@@ -605,7 +618,7 @@ class DefaultEventSearchComponent(
     }
 
     private fun applyDistanceFilter(organizations: List<Organization>): List<Organization> {
-        val currentLocation = _currentLocation.value ?: return organizations
+        val currentLocation = activeSearchLocationOrNull() ?: return organizations
         val radiusMiles = _currentRadius.value
         if (radiusMiles <= 0) return organizations
 
@@ -624,6 +637,12 @@ class DefaultEventSearchComponent(
         return LatLng(latitude, longitude)
     }
 
+    private fun activeSearchLocation(): LatLng =
+        activeSearchLocationOrNull() ?: SAN_FRANCISCO_LOCATION
+
+    private fun activeSearchLocationOrNull(): LatLng? =
+        _searchCenter.value ?: _currentLocation.value
+
     private suspend fun startTrackingLocationSafely() {
         try {
             locationTracker.startTracking()
@@ -640,6 +659,7 @@ class DefaultEventSearchComponent(
     }
 
     private fun handleLocationPermissionDenied(alwaysDenied: Boolean) {
+        _searchCenter.value = null
         _isLocationSearchEnabled.value = false
         _currentLocation.value = SAN_FRANCISCO_LOCATION
         _errorState.value = ErrorMessage(

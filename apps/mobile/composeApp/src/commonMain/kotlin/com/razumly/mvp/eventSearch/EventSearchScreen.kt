@@ -129,6 +129,11 @@ import kotlinx.datetime.toLocalDateTime
 import kotlinx.datetime.toInstant
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlin.math.PI
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
@@ -175,6 +180,7 @@ internal data class RentalBusyRange(
 private val DISCOVER_FIRST_ITEM_EXTRA_TOP_GAP = 4.dp
 private val DISCOVER_PULL_INDICATOR_TOP_OFFSET = 64.dp
 private val DISCOVER_TAB_ROW_HEIGHT = 48.dp
+private const val DISCOVER_SEARCH_THIS_AREA_THRESHOLD_MILES = 0.25
 
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
@@ -205,6 +211,8 @@ fun EventSearchScreen(
     var revealCenter by remember { mutableStateOf(Offset.Zero) }
     val suggestions by component.suggestedEvents.collectAsState()
     val currentLocation by component.currentLocation.collectAsState()
+    val mapViewCenter by mapComponent.currentViewCenter.collectAsState()
+    val mapViewRadiusMiles by mapComponent.currentViewRadiusMiles.collectAsState()
     val currentFilter by component.filter.collectAsState()
 
     var selectedTab by rememberSaveable { mutableStateOf(DiscoverTab.EVENTS) }
@@ -219,6 +227,9 @@ fun EventSearchScreen(
     var showFab by remember { mutableStateOf(true) }
     var showFloatingSearch by remember { mutableStateOf(true) }
     var showingFilter by remember { mutableStateOf(false) }
+    var lastMapSearchCenter by remember { mutableStateOf<LatLng?>(null) }
+    var lastMapSearchRadiusMiles by remember { mutableStateOf<Double?>(null) }
+    var loadedInitialMapArea by remember { mutableStateOf(false) }
 
     val eventsScrollingUp by eventsListState.isScrollingUp()
     val organizationsScrollingUp by organizationsListState.isScrollingUp()
@@ -228,15 +239,24 @@ fun EventSearchScreen(
     var overlayTopOffset by remember { mutableStateOf(0.dp) }
     var overlayStartOffset by remember { mutableStateOf(0.dp) }
     var overlayWidth by remember { mutableStateOf(0.dp) }
+    val searchAreaButtonTopOffset = if (searchBoxSize.height > 0) {
+        overlayTopOffset + 16.dp
+    } else {
+        136.dp
+    }
 
     val organizationLookup = remember(allOrganizations, rentals) {
         (allOrganizations + rentals).associateBy { organization -> organization.id }
     }
     val organizationPlaces = remember(organizations) {
-        organizations.mapNotNull { organization -> organization.toMvpPlaceOrNull() }
+        organizations.mapNotNull { organization ->
+            organization.toMvpPlaceOrNull(MVPPlace.MARKER_KIND_ORGANIZATION)
+        }
     }
     val rentalPlaces = remember(rentals) {
-        rentals.mapNotNull { organization -> organization.toMvpPlaceOrNull() }
+        rentals.mapNotNull { organization ->
+            organization.toMvpPlaceOrNull(MVPPlace.MARKER_KIND_RENTAL)
+        }
     }
 
     val currentListScrollingUp = when (selectedTab) {
@@ -249,6 +269,13 @@ fun EventSearchScreen(
         DiscoverTab.ORGANIZATIONS -> isLoadingOrganizations
         DiscoverTab.RENTALS -> isLoadingRentals
     }
+    val hasMapSearchMoved = mapViewCenter?.let { currentCenter ->
+        lastMapSearchCenter?.let { previousCenter ->
+            distanceMilesBetween(currentCenter, previousCenter) >= DISCOVER_SEARCH_THIS_AREA_THRESHOLD_MILES
+        }
+    } == true
+    val showSearchThisArea = isMapVisible &&
+        (hasMapSearchMoved || mapRadiusChangedEnough(mapViewRadiusMiles, lastMapSearchRadiusMiles))
 
     val loadingHandler = LocalLoadingHandler.current
     val popupHandler = LocalPopupHandler.current
@@ -283,6 +310,24 @@ fun EventSearchScreen(
             DiscoverTab.RENTALS -> {
                 mapComponent.setEvents(emptyList())
                 mapComponent.setPlaces(rentalPlaces)
+            }
+        }
+    }
+
+    LaunchedEffect(isMapVisible, currentLocation, mapViewCenter, mapViewRadiusMiles) {
+        if (!isMapVisible) {
+            lastMapSearchCenter = null
+            lastMapSearchRadiusMiles = null
+            loadedInitialMapArea = false
+            return@LaunchedEffect
+        }
+        if (!loadedInitialMapArea && mapViewRadiusMiles != null) {
+            val initialCenter = currentLocation ?: mapViewCenter
+            if (initialCenter != null) {
+                component.searchThisArea(initialCenter, mapViewRadiusMiles)
+                lastMapSearchCenter = initialCenter
+                lastMapSearchRadiusMiles = mapViewRadiusMiles
+                loadedInitialMapArea = true
             }
         }
     }
@@ -585,6 +630,29 @@ fun EventSearchScreen(
             }
         }
 
+        AnimatedVisibility(
+            visible = showFloatingSearch && showSearchThisArea && !showSearchOverlay,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .offset(y = searchAreaButtonTopOffset),
+            enter = slideInVertically { -it / 2 } + fadeIn(),
+            exit = slideOutVertically { -it / 2 } + fadeOut()
+        ) {
+            Button(
+                onClick = {
+                    mapViewCenter?.let { center ->
+                        component.searchThisArea(center, mapViewRadiusMiles)
+                        lastMapSearchCenter = center
+                        lastMapSearchRadiusMiles = mapViewRadiusMiles
+                    }
+                },
+                shape = RoundedCornerShape(50),
+                colors = ButtonDefaults.buttonColors(),
+            ) {
+                Text("Search this area")
+            }
+        }
+
         SearchOverlay(
             modifier = Modifier
                 .width(overlayWidth)
@@ -695,4 +763,23 @@ fun EventSearchScreen(
         )
     }
 
+}
+
+private fun distanceMilesBetween(start: LatLng, end: LatLng): Double {
+    val earthRadiusMiles = 3958.8
+    val startLat = start.latitude * PI / 180.0
+    val endLat = end.latitude * PI / 180.0
+    val deltaLat = (end.latitude - start.latitude) * PI / 180.0
+    val deltaLong = (end.longitude - start.longitude) * PI / 180.0
+    val a = sin(deltaLat / 2) * sin(deltaLat / 2) +
+        cos(startLat) * cos(endLat) * sin(deltaLong / 2) * sin(deltaLong / 2)
+    val normalizedA = a.coerceIn(0.0, 1.0)
+    val c = 2 * atan2(sqrt(normalizedA), sqrt(1 - normalizedA))
+    return earthRadiusMiles * c
+}
+
+private fun mapRadiusChangedEnough(current: Double?, last: Double?): Boolean {
+    if (current == null || last == null) return false
+    val threshold = maxOf(0.25, last * 0.15)
+    return kotlin.math.abs(current - last) >= threshold
 }

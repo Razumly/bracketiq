@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.StateFlow
 
 expect class MapComponent {
     val currentLocation: StateFlow<LatLng?>
+    val currentViewCenter: StateFlow<LatLng?>
+    val currentViewRadiusMiles: StateFlow<Double?>
     val showMap: StateFlow<Boolean>
     val places: StateFlow<List<MVPPlace>>
     fun setEvents(events: List<Event>)

@@ -46,6 +46,11 @@ actual class MapComponent(
     private val _currentLocation = MutableStateFlow<LatLng?>(null)
     actual val currentLocation = _currentLocation.asStateFlow()
 
+    private val _currentViewCenter = MutableStateFlow<LatLng?>(null)
+    actual val currentViewCenter = _currentViewCenter.asStateFlow()
+    private val _currentViewRadiusMiles = MutableStateFlow<Double?>(null)
+    actual val currentViewRadiusMiles = _currentViewRadiusMiles.asStateFlow()
+
     private val _events = MutableStateFlow<List<Event>>(emptyList())
     val events: StateFlow<List<Event>> = _events.asStateFlow()
 
@@ -106,6 +111,15 @@ actual class MapComponent(
         _places.value = places
     }
 
+    fun updateCameraCenter(center: LatLng) {
+        _currentViewCenter.value = center
+    }
+
+    fun updateCameraViewport(center: LatLng, radiusMiles: Double) {
+        _currentViewCenter.value = center
+        _currentViewRadiusMiles.value = radiusMiles.coerceAtLeast(MIN_MAP_VIEW_RADIUS_MILES)
+    }
+
     /**
      * Fetch full place details (including photos) via the Place Details Web Service.
      */
@@ -152,7 +166,7 @@ actual class MapComponent(
         query: String,
         latLng: LatLng
     ): List<MVPPlace> {
-        val radius = _currentRadiusMeters.value
+        val radius = currentPlaceBiasRadiusMeters()
         val bias = LocationBias(
             circle = LocationBias.Circle(
                 center = LatLngDto(latLng.latitude, latLng.longitude),
@@ -204,7 +218,7 @@ actual class MapComponent(
         query: String,
         latLng: LatLng,
     ): List<MVPPlace> {
-        val radius = _currentRadiusMeters.value
+        val radius = currentPlaceBiasRadiusMeters()
         val bias = LocationBias(
             circle = LocationBias.Circle(
                 center = LatLngDto(latLng.latitude, latLng.longitude),
@@ -247,14 +261,15 @@ actual class MapComponent(
         _isLoading.value = true
         _error.value = null
 
-        val currentLocation = _currentLocation.value ?: run {
+        val searchCenter = _currentViewCenter.value ?: _currentLocation.value ?: run {
             _error.value = "Location not available"
             return
         }
+        val searchRadiusMiles = _currentViewRadiusMiles.value ?: _currentRadiusMeters.value
         val currentBounds = getBounds(
-            _currentRadiusMeters.value,
-            currentLocation.latitude,
-            currentLocation.longitude
+            searchRadiusMiles,
+            searchCenter.latitude,
+            searchCenter.longitude
         )
 
         eventRepository.getEventsInBounds(currentBounds).onSuccess {
@@ -266,6 +281,10 @@ actual class MapComponent(
         _isLoading.value = false
     }
 
+    private fun currentPlaceBiasRadiusMeters(): Double =
+        ((_currentViewRadiusMiles.value?.times(METERS_PER_MILE)) ?: _currentRadiusMeters.value)
+            .coerceIn(MIN_PLACE_BIAS_RADIUS_METERS, MAX_PLACE_BIAS_RADIUS_METERS)
+
     class Cleanup(private val locationTracker: LocationTracker) : InstanceKeeper.Instance {
         override fun onDestroy() {
             locationTracker.stopTracking()
@@ -274,6 +293,10 @@ actual class MapComponent(
 
     companion object {
         const val CLEANUP_KEY = "Cleanup_Map"
+        private const val MIN_MAP_VIEW_RADIUS_MILES = 0.25
+        private const val METERS_PER_MILE = 1609.344
+        private const val MIN_PLACE_BIAS_RADIUS_METERS = 1.0
+        private const val MAX_PLACE_BIAS_RADIUS_METERS = 50000.0
     }
 
     actual fun toggleMap() {

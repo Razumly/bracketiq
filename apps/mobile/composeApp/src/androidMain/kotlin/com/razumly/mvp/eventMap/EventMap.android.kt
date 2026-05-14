@@ -27,11 +27,16 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImagePainter
+import coil3.compose.rememberAsyncImagePainter
+import coil3.request.ImageRequest
+import coil3.request.allowHardware
 import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
 import com.google.android.gms.maps.model.PointOfInterest
@@ -39,16 +44,22 @@ import com.google.android.libraries.places.api.model.Place
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapUiSettings
-import com.google.maps.android.compose.MarkerInfoWindow
+import com.google.maps.android.compose.MarkerInfoWindowComposable
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.razumly.mvp.BuildConfig
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import com.razumly.mvp.core.network.apiBaseUrl
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.util.toGoogle
 import com.razumly.mvp.eventMap.composables.MapEventCard
+import com.razumly.mvp.eventMap.composables.MapEventMarker
+import com.razumly.mvp.eventMap.composables.MapInitialsMarker
 import com.razumly.mvp.eventMap.composables.MapPOICard
+import com.razumly.mvp.eventMap.composables.MapPlaceCard
+import com.razumly.mvp.eventMap.composables.MapPlaceMarker
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.Dispatchers
@@ -57,6 +68,74 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Collections.emptyList
 import java.util.Locale
+
+private val DISCOVER_EVENT_MARKER_COLOR = Color(0xFF2563EB)
+private val DISCOVER_ORGANIZATION_MARKER_COLOR = Color(0xFF16A34A)
+private val DISCOVER_RENTAL_MARKER_COLOR = Color(0xFFF97316)
+private val MAP_SELECTED_MARKER_COLOR = Color(0xFF2563EB)
+private val MAP_ORIGINAL_MARKER_COLOR = Color(0xFFDC2626)
+private val MAP_PLACE_MARKER_COLOR = Color(0xFF64748B)
+private const val MAP_MARKER_IMAGE_SIZE_PX = 96
+private const val MAP_EVENT_CARD_IMAGE_WIDTH_PX = 560
+private const val MAP_EVENT_CARD_IMAGE_HEIGHT_PX = 220
+
+private data class MarkerImage(
+    val painter: Painter?,
+    val renderKey: String,
+)
+
+private fun resolveMarkerImageUrl(
+    imageRef: String?,
+    imageUrl: String? = null,
+    width: Int = MAP_MARKER_IMAGE_SIZE_PX,
+    height: Int = MAP_MARKER_IMAGE_SIZE_PX,
+): String? {
+    val normalizedImageUrl = imageUrl?.trim().orEmpty()
+    if (normalizedImageUrl.isNotBlank()) {
+        return normalizedImageUrl
+    }
+
+    val normalizedImageRef = imageRef?.trim().orEmpty()
+    if (normalizedImageRef.isBlank()) {
+        return null
+    }
+
+    return when {
+        normalizedImageRef.startsWith("http://", ignoreCase = true) ||
+            normalizedImageRef.startsWith("https://", ignoreCase = true) -> normalizedImageRef
+        normalizedImageRef.startsWith("/") -> "${apiBaseUrl.trimEnd('/')}$normalizedImageRef"
+        else -> getImageUrl(
+            fileId = normalizedImageRef,
+            width = width,
+            height = height,
+        )
+    }
+}
+
+@Composable
+private fun rememberMarkerImage(imageUrl: String?): MarkerImage {
+    val normalizedUrl = imageUrl?.trim()?.takeIf { it.isNotBlank() }
+    val context = LocalContext.current
+    val imageRequest = remember(context, normalizedUrl) {
+        normalizedUrl?.let { url ->
+            ImageRequest.Builder(context)
+                .data(url)
+                .allowHardware(false)
+                .build()
+        }
+    }
+    val painter = rememberAsyncImagePainter(model = imageRequest)
+    val painterState by painter.state.collectAsState()
+    val loaded = normalizedUrl != null && painterState is AsyncImagePainter.State.Success
+    return MarkerImage(
+        painter = if (loaded) painter else null,
+        renderKey = if (loaded) {
+            "image-loaded:$normalizedUrl"
+        } else {
+            "image-fallback:${normalizedUrl.orEmpty()}"
+        },
+    )
+}
 
 @Composable
 actual fun EventMap(
@@ -448,15 +527,42 @@ actual fun EventMap(
                 events.forEach { event ->
                     val markerState = eventMarkerStates[event.id]
                     markerState?.let {
-                        MarkerInfoWindow(
+                        val markerImageUrl = remember(event.id, event.imageId) {
+                            resolveMarkerImageUrl(event.imageId)
+                        }
+                        val markerImage = rememberMarkerImage(markerImageUrl)
+                        val cardImageUrl = remember(event.id, event.imageId) {
+                            resolveMarkerImageUrl(
+                                imageRef = event.imageId,
+                                width = MAP_EVENT_CARD_IMAGE_WIDTH_PX,
+                                height = MAP_EVENT_CARD_IMAGE_HEIGHT_PX,
+                            )
+                        }
+                        val cardImage = rememberMarkerImage(cardImageUrl)
+                        MarkerInfoWindowComposable(
+                            event.id,
+                            event.name,
+                            event.imageId,
+                            markerImage.renderKey,
+                            cardImage.renderKey,
                             state = it,
-                            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
+                            anchor = Offset(0.5f, 0.5f),
+                            infoWindowAnchor = Offset(0.5f, 0.0f),
                             onClick = { false },
                             onInfoWindowClick = { onEventSelected(event) },
+                            infoContent = {
+                                MapEventCard(
+                                    event = event,
+                                    imagePainter = cardImage.painter,
+                                    loadImageInternally = false,
+                                    modifier = Modifier.wrapContentSize(),
+                                )
+                            },
                         ) {
-                            MapEventCard(
+                            MapEventMarker(
                                 event = event,
-                                modifier = Modifier.wrapContentSize(),
+                                backgroundColor = DISCOVER_EVENT_MARKER_COLOR,
+                                imagePainter = markerImage.painter,
                             )
                         }
                     }
@@ -471,16 +577,28 @@ actual fun EventMap(
                 if (markerState.position != newPosition) {
                     markerState.position = newPosition
                 }
+                val markerColor = when {
+                    sameLocation(place, distinctSelectedPlace) -> MAP_SELECTED_MARKER_COLOR
+                    sameLocation(place, originalPlace) -> MAP_ORIGINAL_MARKER_COLOR
+                    place.markerKind == MVPPlace.MARKER_KIND_RENTAL -> DISCOVER_RENTAL_MARKER_COLOR
+                    place.markerKind == MVPPlace.MARKER_KIND_ORGANIZATION -> DISCOVER_ORGANIZATION_MARKER_COLOR
+                    else -> MAP_PLACE_MARKER_COLOR
+                }
+                val markerImageUrl = remember(place.id, place.imageRef, place.imageUrl) {
+                    resolveMarkerImageUrl(place.imageRef, place.imageUrl)
+                }
+                val markerImage = rememberMarkerImage(markerImageUrl)
 
-                MarkerInfoWindow(
+                MarkerInfoWindowComposable(
+                    place.id,
+                    place.name,
+                    place.imageRef.orEmpty(),
+                    place.imageUrl.orEmpty(),
+                    place.markerKind,
+                    markerImage.renderKey,
                     state = markerState,
-                    icon = BitmapDescriptorFactory.defaultMarker(
-                        when {
-                            sameLocation(place, distinctSelectedPlace) -> BitmapDescriptorFactory.HUE_AZURE
-                            sameLocation(place, originalPlace) -> BitmapDescriptorFactory.HUE_RED
-                            else -> BitmapDescriptorFactory.HUE_ORANGE
-                        },
-                    ),
+                    anchor = Offset(0.5f, 0.5f),
+                    infoWindowAnchor = Offset(0.5f, 0.0f),
                     onClick = {
                         if (!canClickPOI) {
                             false
@@ -517,15 +635,22 @@ actual fun EventMap(
                         updateRevealCenterFor(newPosition)
                         onPlaceSelected(place)
                     },
+                    infoContent = {
+                        MapPlaceCard(
+                            place = place,
+                            callToAction = if (canClickPOI && !selectionRequiresConfirmation) {
+                                placeSelectionHint
+                            } else {
+                                null
+                            },
+                            modifier = Modifier.wrapContentSize(),
+                        )
+                    },
                 ) {
-                    MapPOICard(
-                        name = place.name,
-                        callToAction = if (canClickPOI && !selectionRequiresConfirmation) {
-                            placeSelectionHint
-                        } else {
-                            null
-                        },
-                        modifier = Modifier.wrapContentSize(),
+                    MapPlaceMarker(
+                        place = place,
+                        backgroundColor = markerColor,
+                        imagePainter = markerImage.painter,
                     )
                 }
             }
@@ -535,16 +660,18 @@ actual fun EventMap(
                 val markerState = searchedPlaceMarkerStates.getOrPut(place.id.orEmpty()) {
                     MarkerState(position = place.location!!)
                 }
+                val markerColor = when {
+                    matchesSearchPlace(place, distinctSelectedPlace) -> MAP_SELECTED_MARKER_COLOR
+                    matchesSearchPlace(place, originalPlace) -> MAP_ORIGINAL_MARKER_COLOR
+                    else -> MAP_PLACE_MARKER_COLOR
+                }
 
-                MarkerInfoWindow(
+                MarkerInfoWindowComposable(
+                    place.id.orEmpty(),
+                    place.displayName.orEmpty(),
                     state = markerState,
-                    icon = BitmapDescriptorFactory.defaultMarker(
-                        when {
-                            matchesSearchPlace(place, distinctSelectedPlace) -> BitmapDescriptorFactory.HUE_AZURE
-                            matchesSearchPlace(place, originalPlace) -> BitmapDescriptorFactory.HUE_RED
-                            else -> BitmapDescriptorFactory.HUE_AZURE
-                        },
-                    ),
+                    anchor = Offset(0.5f, 0.5f),
+                    infoWindowAnchor = Offset(0.5f, 0.0f),
                     onClick = {
                         if (!canClickPOI) {
                             false
@@ -581,25 +708,33 @@ actual fun EventMap(
                             selectSearchedPlace(place)
                         }
                     },
+                    infoContent = {
+                        MapPOICard(
+                            name = place.displayName ?: "Unknown Place",
+                            callToAction = if (selectionRequiresConfirmation) null else placeSelectionHint,
+                            modifier = Modifier.wrapContentSize(),
+                        )
+                    },
                 ) {
-                    MapPOICard(
+                    MapInitialsMarker(
                         name = place.displayName ?: "Unknown Place",
-                        callToAction = if (selectionRequiresConfirmation) null else placeSelectionHint,
-                        modifier = Modifier.wrapContentSize(),
+                        backgroundColor = markerColor,
                     )
                 }
             }
 
             selectedPOI?.let { poi ->
-                MarkerInfoWindow(
+                val markerColor = when {
+                    matchesPoi(poi, distinctSelectedPlace) -> MAP_SELECTED_MARKER_COLOR
+                    matchesPoi(poi, originalPlace) -> MAP_ORIGINAL_MARKER_COLOR
+                    else -> MAP_PLACE_MARKER_COLOR
+                }
+                MarkerInfoWindowComposable(
+                    poi.placeId,
+                    poi.name,
                     state = poiMarkerState,
-                    icon = BitmapDescriptorFactory.defaultMarker(
-                        when {
-                            matchesPoi(poi, distinctSelectedPlace) -> BitmapDescriptorFactory.HUE_AZURE
-                            matchesPoi(poi, originalPlace) -> BitmapDescriptorFactory.HUE_RED
-                            else -> BitmapDescriptorFactory.HUE_AZURE
-                        },
-                    ),
+                    anchor = Offset(0.5f, 0.5f),
+                    infoWindowAnchor = Offset(0.5f, 0.0f),
                     onClick = {
                         if (!canClickPOI) {
                             false
@@ -634,11 +769,17 @@ actual fun EventMap(
                             selectPoiPlace(poi)
                         }
                     },
+                    infoContent = {
+                        MapPOICard(
+                            name = poi.name,
+                            callToAction = if (selectionRequiresConfirmation) null else placeSelectionHint,
+                            modifier = Modifier.wrapContentSize(),
+                        )
+                    },
                 ) {
-                    MapPOICard(
+                    MapInitialsMarker(
                         name = poi.name,
-                        callToAction = if (selectionRequiresConfirmation) null else placeSelectionHint,
-                        modifier = Modifier.wrapContentSize(),
+                        backgroundColor = markerColor,
                     )
                 }
             }
@@ -653,9 +794,19 @@ actual fun EventMap(
 
                 if (shouldRenderOriginalPlaceMarker && !hasExistingOriginalMarker) {
                     originalPlaceMarkerState.position = LatLng(place.latitude, place.longitude)
-                    MarkerInfoWindow(
+                    val markerImageUrl = remember(place.id, place.imageRef, place.imageUrl) {
+                        resolveMarkerImageUrl(place.imageRef, place.imageUrl)
+                    }
+                    val markerImage = rememberMarkerImage(markerImageUrl)
+                    MarkerInfoWindowComposable(
+                        place.id,
+                        place.name,
+                        place.imageRef.orEmpty(),
+                        place.imageUrl.orEmpty(),
+                        markerImage.renderKey,
                         state = originalPlaceMarkerState,
-                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED),
+                        anchor = Offset(0.5f, 0.5f),
+                        infoWindowAnchor = Offset(0.5f, 0.0f),
                         onClick = {
                             if (!canClickPOI) {
                                 false
@@ -679,10 +830,17 @@ actual fun EventMap(
                                 }
                             }
                         },
+                        infoContent = {
+                            MapPlaceCard(
+                                place = place,
+                                modifier = Modifier.wrapContentSize(),
+                            )
+                        },
                     ) {
-                        MapPOICard(
-                            name = place.name,
-                            modifier = Modifier.wrapContentSize(),
+                        MapPlaceMarker(
+                            place = place,
+                            backgroundColor = MAP_ORIGINAL_MARKER_COLOR,
+                            imagePainter = markerImage.painter,
                         )
                     }
                 }
@@ -698,15 +856,32 @@ actual fun EventMap(
 
                 if (shouldRenderSelectedPlaceMarker && !hasExistingSelectedMarker) {
                     selectedPlaceMarkerState.position = LatLng(place.latitude, place.longitude)
-                    MarkerInfoWindow(
+                    val markerImageUrl = remember(place.id, place.imageRef, place.imageUrl) {
+                        resolveMarkerImageUrl(place.imageRef, place.imageUrl)
+                    }
+                    val markerImage = rememberMarkerImage(markerImageUrl)
+                    MarkerInfoWindowComposable(
+                        place.id,
+                        place.name,
+                        place.imageRef.orEmpty(),
+                        place.imageUrl.orEmpty(),
+                        markerImage.renderKey,
                         state = selectedPlaceMarkerState,
-                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
+                        anchor = Offset(0.5f, 0.5f),
+                        infoWindowAnchor = Offset(0.5f, 0.0f),
                         onClick = { true },
                         onInfoWindowClick = {},
+                        infoContent = {
+                            MapPlaceCard(
+                                place = place,
+                                modifier = Modifier.wrapContentSize(),
+                            )
+                        },
                     ) {
-                        MapPOICard(
-                            name = place.name,
-                            modifier = Modifier.wrapContentSize(),
+                        MapPlaceMarker(
+                            place = place,
+                            backgroundColor = MAP_SELECTED_MARKER_COLOR,
+                            imagePainter = markerImage.painter,
                         )
                     }
                 }
@@ -716,15 +891,42 @@ actual fun EventMap(
                 val focusedMarkerState = remember(event.id) {
                     MarkerState(position = LatLng(event.latitude, event.longitude))
                 }
-                MarkerInfoWindow(
+                val markerImageUrl = remember(event.id, event.imageId) {
+                    resolveMarkerImageUrl(event.imageId)
+                }
+                val markerImage = rememberMarkerImage(markerImageUrl)
+                val cardImageUrl = remember(event.id, event.imageId) {
+                    resolveMarkerImageUrl(
+                        imageRef = event.imageId,
+                        width = MAP_EVENT_CARD_IMAGE_WIDTH_PX,
+                        height = MAP_EVENT_CARD_IMAGE_HEIGHT_PX,
+                    )
+                }
+                val cardImage = rememberMarkerImage(cardImageUrl)
+                MarkerInfoWindowComposable(
+                    event.id,
+                    event.name,
+                    event.imageId,
+                    markerImage.renderKey,
+                    cardImage.renderKey,
                     state = focusedMarkerState,
-                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED),
+                    anchor = Offset(0.5f, 0.5f),
+                    infoWindowAnchor = Offset(0.5f, 0.0f),
                     onClick = { false },
                     onInfoWindowClick = { onEventSelected(event) },
+                    infoContent = {
+                        MapEventCard(
+                            event = event,
+                            imagePainter = cardImage.painter,
+                            loadImageInternally = false,
+                            modifier = Modifier.wrapContentSize(),
+                        )
+                    },
                 ) {
-                    MapEventCard(
+                    MapEventMarker(
                         event = event,
-                        modifier = Modifier.wrapContentSize(),
+                        backgroundColor = DISCOVER_EVENT_MARKER_COLOR,
+                        imagePainter = markerImage.painter,
                     )
                 }
             }

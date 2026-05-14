@@ -54,6 +54,7 @@ fun NetworkAvatar(
     contentDescription: String?,
     modifier: Modifier = Modifier,
     jerseyNumber: String? = null,
+    softwareRenderingSafe: Boolean = false,
 ) {
     val sizePx = remember(size) { size.value.toInt().coerceAtLeast(16) }
     val resolvedSource = remember(displayName, imageRef, jerseyNumber, sizePx) {
@@ -76,6 +77,12 @@ fun NetworkAvatar(
         imageModel = normalizedImageUrl ?: initialsUrl
     }
 
+    val renderedImageModel = if (softwareRenderingSafe) {
+        rememberSoftwareRenderedImageModel(imageModel)
+    } else {
+        imageModel
+    }
+
     Box(
         modifier = modifier
             .size(size)
@@ -88,9 +95,9 @@ fun NetworkAvatar(
             modifier = Modifier.fillMaxSize(),
         )
 
-        if (!imageModel.isNullOrBlank()) {
+        if (renderedImageModel != null) {
             SubcomposeAsyncImage(
-                model = imageModel,
+                model = renderedImageModel,
                 contentDescription = contentDescription,
                 modifier = Modifier
                     .fillMaxSize()

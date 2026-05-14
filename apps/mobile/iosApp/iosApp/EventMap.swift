@@ -11,6 +11,14 @@ import ComposeApp
 import GoogleMaps
 import CoreLocation
 
+private let discoverEventMarkerColor = UIColor(red: 37.0 / 255.0, green: 99.0 / 255.0, blue: 235.0 / 255.0, alpha: 1)
+private let discoverOrganizationMarkerColor = UIColor(red: 22.0 / 255.0, green: 163.0 / 255.0, blue: 74.0 / 255.0, alpha: 1)
+private let discoverRentalMarkerColor = UIColor(red: 249.0 / 255.0, green: 115.0 / 255.0, blue: 22.0 / 255.0, alpha: 1)
+private let mapSelectedMarkerColor = UIColor(red: 37.0 / 255.0, green: 99.0 / 255.0, blue: 235.0 / 255.0, alpha: 1)
+private let mapOriginalMarkerColor = UIColor(red: 220.0 / 255.0, green: 38.0 / 255.0, blue: 38.0 / 255.0, alpha: 1)
+private let mapPlaceMarkerColor = UIColor(red: 100.0 / 255.0, green: 116.0 / 255.0, blue: 139.0 / 255.0, alpha: 1)
+private let eventMarkerImageRequestSize = 96
+
 private func focusedLocationMatchesUser(
     focusedLocation: LatLng?,
     userLocation: LatLng?,
@@ -45,6 +53,57 @@ private func eventTypeWithSportLabel(for event: Event) -> String {
     }
 
     return "\(eventTypeLabel): \(sportLabel)"
+}
+
+private func markerInitials(_ name: String) -> String {
+    let parts = name
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .split(whereSeparator: \.isWhitespace)
+
+    guard !parts.isEmpty else { return "?" }
+    if parts.count == 1 {
+        return String(parts[0].prefix(3)).uppercased()
+    }
+    return parts.prefix(3)
+        .compactMap { $0.first }
+        .map { String($0).uppercased() }
+        .joined()
+}
+
+private func imagePreviewURL(imageId: String?, width: Int? = nil, height: Int? = nil) -> URL? {
+    let normalizedImageId = imageId?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        ?? ""
+    guard !normalizedImageId.isEmpty else { return nil }
+
+    if normalizedImageId.hasPrefix("http://") || normalizedImageId.hasPrefix("https://") {
+        return URL(string: normalizedImageId)
+    }
+
+    let baseURLString = UtilKt.getImageUrl(fileId: normalizedImageId, width: nil, height: nil)
+    guard var components = URLComponents(string: baseURLString) else {
+        return URL(string: baseURLString)
+    }
+
+    var queryItems = components.queryItems ?? []
+    if let width {
+        queryItems.append(URLQueryItem(name: "w", value: "\(width)"))
+    }
+    if let height {
+        queryItems.append(URLQueryItem(name: "h", value: "\(height)"))
+    }
+    components.queryItems = queryItems.isEmpty ? nil : queryItems
+    return components.url
+}
+
+private func remoteURL(_ value: String?) -> URL? {
+    let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    guard !normalized.isEmpty else { return nil }
+    return URL(string: normalized)
+}
+
+private func placeImageURL(_ place: MVPPlace, width: Int? = nil, height: Int? = nil) -> URL? {
+    remoteURL(place.imageUrl) ?? imagePreviewURL(imageId: place.imageRef, width: width, height: height)
 }
 
 private func isSyntheticPlaceId(_ id: String) -> Bool {
@@ -100,6 +159,108 @@ private func markerRepresentsSelection(_ marker: GMSMarker?, place: MVPPlace?) -
     }
 
     return false
+}
+
+private func markerColor(for place: MVPPlace, selectedPlace: MVPPlace?, originalPlace: MVPPlace?) -> UIColor {
+    if placesRepresentSameLocation(place, selectedPlace) {
+        return mapSelectedMarkerColor
+    }
+    if placesRepresentSameLocation(place, originalPlace) {
+        return mapOriginalMarkerColor
+    }
+    switch place.markerKind {
+    case "organization":
+        return discoverOrganizationMarkerColor
+    case "rental":
+        return discoverRentalMarkerColor
+    default:
+        return mapPlaceMarkerColor
+    }
+}
+
+private func loadRemoteImage(
+    from url: URL?,
+    into imageView: UIImageView,
+    marker: GMSMarker?,
+    tracksMarkerView: Bool
+) {
+    guard let url else { return }
+
+    if tracksMarkerView {
+        marker?.tracksViewChanges = true
+    } else {
+        marker?.tracksInfoWindowChanges = true
+    }
+
+    URLSession.shared.dataTask(with: url) { data, _, _ in
+        guard let data, let image = UIImage(data: data) else {
+            DispatchQueue.main.async {
+                if tracksMarkerView {
+                    marker?.tracksViewChanges = false
+                } else {
+                    marker?.tracksInfoWindowChanges = false
+                }
+            }
+            return
+        }
+
+        DispatchQueue.main.async {
+            imageView.image = image
+            if tracksMarkerView {
+                marker?.tracksViewChanges = false
+            } else {
+                marker?.tracksInfoWindowChanges = false
+            }
+        }
+    }.resume()
+}
+
+private func makeMarkerIconView(
+    name: String,
+    color: UIColor,
+    imageURL: URL?,
+    marker: GMSMarker?
+) -> UIView {
+    let size: CGFloat = 50
+    let outerView = UIView(frame: CGRect(x: 0, y: 0, width: size, height: size))
+    outerView.backgroundColor = .white
+    outerView.layer.cornerRadius = size / 2
+    outerView.layer.borderWidth = imageURL == nil ? 0 : 3
+    outerView.layer.borderColor = color.cgColor
+    outerView.layer.shadowColor = UIColor.black.cgColor
+    outerView.layer.shadowOffset = CGSize(width: 0, height: 3)
+    outerView.layer.shadowOpacity = 0.25
+    outerView.layer.shadowRadius = 6
+
+    if let imageURL {
+        let fallbackLabel = UILabel(frame: CGRect(x: 5, y: 5, width: 40, height: 40))
+        fallbackLabel.text = markerInitials(name)
+        fallbackLabel.textAlignment = .center
+        fallbackLabel.textColor = color
+        fallbackLabel.font = UIFont.boldSystemFont(ofSize: 14)
+        outerView.addSubview(fallbackLabel)
+
+        let imageView = UIImageView(frame: CGRect(x: 5, y: 5, width: 40, height: 40))
+        imageView.backgroundColor = .clear
+        imageView.contentMode = .scaleAspectFill
+        imageView.layer.cornerRadius = 20
+        imageView.clipsToBounds = true
+        outerView.addSubview(imageView)
+        loadRemoteImage(from: imageURL, into: imageView, marker: marker, tracksMarkerView: true)
+    } else {
+        outerView.backgroundColor = color
+        outerView.layer.borderWidth = 3
+        outerView.layer.borderColor = UIColor.white.cgColor
+        let label = UILabel(frame: outerView.bounds.insetBy(dx: 4, dy: 4))
+        label.text = markerInitials(name)
+        label.textAlignment = .center
+        label.textColor = .white
+        label.font = UIFont.boldSystemFont(ofSize: 15)
+        label.adjustsFontSizeToFitWidth = true
+        outerView.addSubview(label)
+    }
+
+    return outerView
 }
 
 private func dedupePlaces(_ places: [MVPPlace]) -> [MVPPlace] {
@@ -327,6 +488,7 @@ struct GoogleMapView: UIViewRepresentable {
         mapView.settings.scrollGestures = true
         mapView.settings.zoomGestures = true
         context.coordinator.attach(to: mapView)
+        context.coordinator.updateCameraViewport(mapView)
 
         if isFocusedOnUserLocation, let focusedLocation {
             context.coordinator.lastUserCameraLocation = CLLocation(
@@ -357,6 +519,7 @@ struct GoogleMapView: UIViewRepresentable {
             right: 16
         )
         context.coordinator.currentLocation = currentLocation
+        context.coordinator.updateCameraViewport(mapView)
 
         if selectionRequiresConfirmation && selectedPlace == nil {
             context.coordinator.currentPOIMarker?.map = nil
@@ -410,7 +573,16 @@ struct GoogleMapView: UIViewRepresentable {
             marker.title = fe.name
             marker.snippet = "\(eventTypeWithSportLabel(for: fe)) – $\(fe.price)"
             marker.userData = EventMarkerData(event: fe)
-            marker.icon = GMSMarker.markerImage(with: .red)
+            marker.iconView = makeMarkerIconView(
+                name: fe.name,
+                color: discoverEventMarkerColor,
+                imageURL: imagePreviewURL(
+                    imageId: fe.imageId,
+                    width: eventMarkerImageRequestSize,
+                    height: eventMarkerImageRequestSize
+                ),
+                marker: marker
+            )
             marker.map = mapView
             if selectedMarkerKey == context.coordinator.selectionKey(for: marker) {
                 markerToReselect = marker
@@ -425,7 +597,16 @@ struct GoogleMapView: UIViewRepresentable {
                 marker.title = event.name
                 marker.snippet = "\(eventTypeWithSportLabel(for: event)) – $\(event.price)"
                 marker.userData = EventMarkerData(event: event)
-                marker.icon = GMSMarker.markerImage(with: .blue)
+                marker.iconView = makeMarkerIconView(
+                    name: event.name,
+                    color: discoverEventMarkerColor,
+                    imageURL: imagePreviewURL(
+                        imageId: event.imageId,
+                        width: eventMarkerImageRequestSize,
+                        height: eventMarkerImageRequestSize
+                    ),
+                    marker: marker
+                )
                 marker.map = mapView
                 if selectedMarkerKey == context.coordinator.selectionKey(for: marker) {
                     markerToReselect = marker
@@ -434,13 +615,15 @@ struct GoogleMapView: UIViewRepresentable {
         }
 
         if let currentPOIMarker = context.coordinator.currentPOIMarker {
-            if markerRepresentsSelection(currentPOIMarker, place: distinctSelectedPlace) {
-                currentPOIMarker.icon = GMSMarker.markerImage(with: .systemBlue)
-            } else if markerRepresentsSelection(currentPOIMarker, place: originalPlace) {
-                currentPOIMarker.icon = GMSMarker.markerImage(with: .red)
-            } else {
-                currentPOIMarker.icon = GMSMarker.markerImage(with: .systemBlue)
-            }
+            let poiColor = markerRepresentsSelection(currentPOIMarker, place: originalPlace)
+                ? mapOriginalMarkerColor
+                : mapSelectedMarkerColor
+            currentPOIMarker.iconView = makeMarkerIconView(
+                name: currentPOIMarker.title ?? "Place",
+                color: poiColor,
+                imageURL: nil,
+                marker: currentPOIMarker
+            )
             currentPOIMarker.map = mapView
             if selectedMarkerKey == context.coordinator.selectionKey(for: currentPOIMarker) {
                 markerToReselect = currentPOIMarker
@@ -453,12 +636,15 @@ struct GoogleMapView: UIViewRepresentable {
             let marker = GMSMarker(position: coord)
             marker.title = place.name
             marker.userData = PlaceMarkerData(place: place)
-            marker.icon = GMSMarker.markerImage(
-                with: placesRepresentSameLocation(place, distinctSelectedPlace)
-                    ? .systemBlue
-                    : placesRepresentSameLocation(place, originalPlace)
-                        ? .red
-                        : .systemBlue
+            marker.iconView = makeMarkerIconView(
+                name: place.name,
+                color: markerColor(for: place, selectedPlace: distinctSelectedPlace, originalPlace: originalPlace),
+                imageURL: placeImageURL(
+                    place,
+                    width: eventMarkerImageRequestSize,
+                    height: eventMarkerImageRequestSize
+                ),
+                marker: marker
             )
             marker.map = mapView
 
@@ -492,7 +678,16 @@ struct GoogleMapView: UIViewRepresentable {
                 let marker = GMSMarker(position: coord)
                 marker.title = originalPlace.name
                 marker.userData = PlaceMarkerData(place: originalPlace)
-                marker.icon = GMSMarker.markerImage(with: .red)
+                marker.iconView = makeMarkerIconView(
+                    name: originalPlace.name,
+                    color: mapOriginalMarkerColor,
+                    imageURL: placeImageURL(
+                        originalPlace,
+                        width: eventMarkerImageRequestSize,
+                        height: eventMarkerImageRequestSize
+                    ),
+                    marker: marker
+                )
                 marker.map = mapView
                 context.coordinator.placeMarkers.append(marker)
                 if selectedMarkerKey == context.coordinator.selectionKey(for: marker) {
@@ -517,7 +712,16 @@ struct GoogleMapView: UIViewRepresentable {
                 let marker = GMSMarker(position: coord)
                 marker.title = distinctSelectedPlace.name
                 marker.userData = PlaceMarkerData(place: distinctSelectedPlace)
-                marker.icon = GMSMarker.markerImage(with: .systemBlue)
+                marker.iconView = makeMarkerIconView(
+                    name: distinctSelectedPlace.name,
+                    color: mapSelectedMarkerColor,
+                    imageURL: placeImageURL(
+                        distinctSelectedPlace,
+                        width: eventMarkerImageRequestSize,
+                        height: eventMarkerImageRequestSize
+                    ),
+                    marker: marker
+                )
                 marker.map = mapView
                 context.coordinator.placeMarkers.append(marker)
                 if selectedMarkerKey == context.coordinator.selectionKey(for: marker) {
@@ -647,15 +851,44 @@ class Coordinator: NSObject, GMSMapViewDelegate {
         mapView.animate(to: GMSCameraPosition.camera(withTarget: coordinate, zoom: zoom))
         recordUserCameraLocation(coordinate)
     }
+
+    func updateCameraCenter(_ coordinate: CLLocationCoordinate2D) {
+        parent.component.updateCameraCenter(
+            center: LatLng(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        )
+    }
+
+    func updateCameraViewport(_ mapView: GMSMapView) {
+        let coordinate = mapView.camera.target
+        parent.component.updateCameraViewport(
+            center: LatLng(latitude: coordinate.latitude, longitude: coordinate.longitude),
+            radiusMiles: visibleRegionRadiusMiles(for: mapView)
+        )
+    }
+
+    private func visibleRegionRadiusMiles(for mapView: GMSMapView) -> Double {
+        let center = mapView.camera.target
+        let centerLocation = CLLocation(latitude: center.latitude, longitude: center.longitude)
+        let region = mapView.projection.visibleRegion()
+        let corners = [region.nearLeft, region.nearRight, region.farLeft, region.farRight]
+        let farthestMeters = corners
+            .map { CLLocation(latitude: $0.latitude, longitude: $0.longitude).distance(from: centerLocation) }
+            .max() ?? 0
+        return max(farthestMeters / 1609.344, 0.25)
+    }
+
+    func mapView(_ mapView: GMSMapView, idleAt position: GMSCameraPosition) {
+        updateCameraViewport(mapView)
+    }
     
     // MARK: - Custom Info Windows
     
     // This method creates custom info windows (like Android's MarkerInfoWindow)
     func mapView(_ mapView: GMSMapView, markerInfoWindow marker: GMSMarker) -> UIView? {
         if let eventData = marker.userData as? EventMarkerData {
-            return createEventInfoWindow(for: eventData.event)
+            return createEventInfoWindow(for: eventData.event, marker: marker)
         } else if let placeData = marker.userData as? PlaceMarkerData {
-            return createPlaceInfoWindow(for: placeData.place)
+            return createPlaceInfoWindow(for: placeData.place, marker: marker)
         } else if let poiData = marker.userData as? POIMarkerData {
             return createPOIInfoWindow(for: poiData.name, placeId: poiData.placeId)
         }
@@ -706,8 +939,13 @@ class Coordinator: NSObject, GMSMapViewDelegate {
         let marker = GMSMarker(position: location)
         marker.title = name
         marker.userData = POIMarkerData(name: name, placeId: placeID)
-        marker.icon = GMSMarker.markerImage(
-            with: markerRepresentsSelection(marker, place: parent.originalPlace) ? .red : .systemBlue
+        marker.iconView = makeMarkerIconView(
+            name: name,
+            color: markerRepresentsSelection(marker, place: parent.originalPlace)
+                ? mapOriginalMarkerColor
+                : mapSelectedMarkerColor,
+            imageURL: nil,
+            marker: marker
         )
         marker.map = mapView
         
@@ -724,41 +962,68 @@ class Coordinator: NSObject, GMSMapViewDelegate {
     
     // MARK: - Custom Info Window Creation
     
-    private func createEventInfoWindow(for event: Event) -> UIView {
-        let containerView = UIView(frame: CGRect(x: 0, y: 0, width: 240, height: 160))
+    private func createEventInfoWindow(for event: Event, marker: GMSMarker) -> UIView {
+        let imageURL = imagePreviewURL(imageId: event.imageId, width: 560, height: 220)
+        let locationText = event.location.trimmingCharacters(in: .whitespacesAndNewlines)
+        let descriptionText = event.eventDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasDescription = !descriptionText.isEmpty && descriptionText.localizedCaseInsensitiveCompare(locationText) != .orderedSame
+        let imageHeight: CGFloat = imageURL == nil ? 0 : 96
+        let descriptionHeight: CGFloat = hasDescription ? 46 : 0
+        let bodyTop = imageHeight + 12
+        let containerHeight = imageHeight + 170 + descriptionHeight
+        let containerView = UIView(frame: CGRect(x: 0, y: 0, width: 280, height: containerHeight))
         containerView.backgroundColor = UIColor.systemBackground
         containerView.layer.cornerRadius = 12
+        containerView.clipsToBounds = false
         containerView.layer.shadowColor = UIColor.black.cgColor
         containerView.layer.shadowOffset = CGSize(width: 0, height: 2)
         containerView.layer.shadowOpacity = 0.3
         containerView.layer.shadowRadius = 8
+
+        if let imageURL {
+            let imageView = UIImageView(frame: CGRect(x: 0, y: 0, width: 280, height: imageHeight))
+            imageView.backgroundColor = UIColor.secondarySystemBackground
+            imageView.contentMode = .scaleAspectFill
+            imageView.clipsToBounds = true
+            imageView.layer.cornerRadius = 12
+            imageView.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+            containerView.addSubview(imageView)
+            loadRemoteImage(from: imageURL, into: imageView, marker: marker, tracksMarkerView: false)
+        }
         
-        // Event name
-        let nameLabel = UILabel(frame: CGRect(x: 12, y: 12, width: 216, height: 40))
+        let nameLabel = UILabel(frame: CGRect(x: 12, y: bodyTop, width: 256, height: 38))
         nameLabel.text = event.name
         nameLabel.font = UIFont.boldSystemFont(ofSize: 16)
         nameLabel.numberOfLines = 2
         nameLabel.textColor = UIColor.label
         containerView.addSubview(nameLabel)
         
-        // Location
-        let locationLabel = UILabel(frame: CGRect(x: 12, y: 52, width: 216, height: 20))
-        locationLabel.text = event.location
-        locationLabel.font = UIFont.systemFont(ofSize: 14)
-        locationLabel.textColor = UIColor.secondaryLabel
-        containerView.addSubview(locationLabel)
-        
-        // Event type and sport type
-        let typeLabel = UILabel(frame: CGRect(x: 12, y: 76, width: 216, height: 16))
+        let typeLabel = UILabel(frame: CGRect(x: 12, y: bodyTop + 42, width: 256, height: 18))
         typeLabel.text = eventTypeWithSportLabel(for: event)
         typeLabel.font = UIFont.systemFont(ofSize: 12)
         typeLabel.textColor = UIColor.systemBlue
         typeLabel.numberOfLines = 1
         typeLabel.lineBreakMode = .byTruncatingTail
         containerView.addSubview(typeLabel)
-        
-        // Price
-        let priceLabel = UILabel(frame: CGRect(x: 12, y: 100, width: 216, height: 30))
+
+        let locationLabel = UILabel(frame: CGRect(x: 12, y: bodyTop + 64, width: 256, height: 20))
+        locationLabel.text = locationText
+        locationLabel.font = UIFont.systemFont(ofSize: 14)
+        locationLabel.textColor = UIColor.secondaryLabel
+        containerView.addSubview(locationLabel)
+
+        var nextY = bodyTop + 88
+        if hasDescription {
+            let descriptionLabel = UILabel(frame: CGRect(x: 12, y: nextY, width: 256, height: descriptionHeight))
+            descriptionLabel.text = descriptionText
+            descriptionLabel.font = UIFont.systemFont(ofSize: 13)
+            descriptionLabel.textColor = UIColor.secondaryLabel
+            descriptionLabel.numberOfLines = 3
+            containerView.addSubview(descriptionLabel)
+            nextY += descriptionHeight + 4
+        }
+
+        let priceLabel = UILabel(frame: CGRect(x: 12, y: nextY + 4, width: 256, height: 28))
         priceLabel.text = "$\(event.price)"
         priceLabel.font = UIFont.boldSystemFont(ofSize: 20)
         priceLabel.textColor = UIColor.systemBlue
@@ -768,10 +1033,16 @@ class Coordinator: NSObject, GMSMapViewDelegate {
         return containerView
     }
     
-    private func createPlaceInfoWindow(for place: MVPPlace) -> UIView {
+    private func createPlaceInfoWindow(for place: MVPPlace, marker: GMSMarker) -> UIView {
         let hasSelectionHint = parent.canClickPOI && !parent.selectionRequiresConfirmation
-        let containerHeight: CGFloat = hasSelectionHint ? 84 : 60
-        let containerView = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: containerHeight))
+        let summaryText = place.summary?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let hasRichContent = !summaryText.isEmpty || placeImageURL(place) != nil
+        let containerWidth: CGFloat = hasRichContent ? 260 : 200
+        let summaryHeight: CGFloat = summaryText.isEmpty ? 0 : 48
+        let containerHeight: CGFloat = hasRichContent
+            ? 72 + summaryHeight + (hasSelectionHint ? 24 : 10)
+            : (hasSelectionHint ? 84 : 60)
+        let containerView = UIView(frame: CGRect(x: 0, y: 0, width: containerWidth, height: containerHeight))
         containerView.backgroundColor = UIColor.systemBackground
         containerView.layer.cornerRadius = 8
         containerView.layer.shadowColor = UIColor.black.cgColor
@@ -779,23 +1050,65 @@ class Coordinator: NSObject, GMSMapViewDelegate {
         containerView.layer.shadowOpacity = 0.2
         containerView.layer.shadowRadius = 4
         
-        let nameLabel = UILabel(
-            frame: CGRect(
-                x: 12,
-                y: 12,
-                width: 176,
-                height: hasSelectionHint ? 28 : 36
+        if hasRichContent {
+            let avatarView = UIView(frame: CGRect(x: 12, y: 12, width: 40, height: 40))
+            avatarView.backgroundColor = markerColor(for: place, selectedPlace: parent.selectedPlace, originalPlace: parent.originalPlace).withAlphaComponent(0.14)
+            avatarView.layer.cornerRadius = 20
+            avatarView.clipsToBounds = true
+            containerView.addSubview(avatarView)
+
+            let initialsLabel = UILabel(frame: avatarView.bounds)
+            initialsLabel.text = markerInitials(place.name)
+            initialsLabel.textAlignment = .center
+            initialsLabel.textColor = markerColor(for: place, selectedPlace: parent.selectedPlace, originalPlace: parent.originalPlace)
+            initialsLabel.font = UIFont.boldSystemFont(ofSize: 14)
+            avatarView.addSubview(initialsLabel)
+
+            if let imageUrl = placeImageURL(place, width: eventMarkerImageRequestSize, height: eventMarkerImageRequestSize) {
+                let imageView = UIImageView(frame: avatarView.bounds)
+                imageView.backgroundColor = UIColor.clear
+                imageView.contentMode = .scaleAspectFill
+                imageView.layer.cornerRadius = 20
+                imageView.clipsToBounds = true
+                avatarView.addSubview(imageView)
+                loadRemoteImage(from: imageUrl, into: imageView, marker: marker, tracksMarkerView: false)
+            }
+
+            let nameLabel = UILabel(frame: CGRect(x: 62, y: 10, width: 186, height: 44))
+            nameLabel.text = place.name
+            nameLabel.font = UIFont.boldSystemFont(ofSize: 16)
+            nameLabel.numberOfLines = 2
+            nameLabel.textColor = UIColor.label
+            containerView.addSubview(nameLabel)
+
+            if !summaryText.isEmpty {
+                let summaryLabel = UILabel(frame: CGRect(x: 12, y: 62, width: 236, height: summaryHeight))
+                summaryLabel.text = summaryText
+                summaryLabel.font = UIFont.systemFont(ofSize: 13)
+                summaryLabel.textColor = UIColor.secondaryLabel
+                summaryLabel.numberOfLines = 3
+                containerView.addSubview(summaryLabel)
+            }
+        } else {
+            let nameLabel = UILabel(
+                frame: CGRect(
+                    x: 12,
+                    y: 12,
+                    width: 176,
+                    height: hasSelectionHint ? 28 : 36
+                )
             )
-        )
-        nameLabel.text = place.name
-        nameLabel.font = UIFont.systemFont(ofSize: 14)
-        nameLabel.numberOfLines = 2
-        nameLabel.textColor = UIColor.label
-        nameLabel.textAlignment = .center
-        containerView.addSubview(nameLabel)
+            nameLabel.text = place.name
+            nameLabel.font = UIFont.systemFont(ofSize: 14)
+            nameLabel.numberOfLines = 2
+            nameLabel.textColor = UIColor.label
+            nameLabel.textAlignment = .center
+            containerView.addSubview(nameLabel)
+        }
 
         if hasSelectionHint {
-            let hintLabel = UILabel(frame: CGRect(x: 12, y: 44, width: 176, height: 20))
+            let hintY: CGFloat = hasRichContent ? containerHeight - 26 : 44
+            let hintLabel = UILabel(frame: CGRect(x: 12, y: hintY, width: containerWidth - 24, height: 20))
             hintLabel.text = "Click to select"
             hintLabel.font = UIFont.systemFont(ofSize: 12, weight: .semibold)
             hintLabel.textColor = UIColor.systemBlue

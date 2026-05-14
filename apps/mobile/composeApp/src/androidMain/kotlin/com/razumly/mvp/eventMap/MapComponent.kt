@@ -38,6 +38,12 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resumeWithException
+import kotlin.math.PI
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 actual class MapComponent(
     componentContext: ComponentContext,
@@ -95,8 +101,10 @@ actual class MapComponent(
     private val _showMap = MutableStateFlow(false)
     actual val showMap = _showMap.asStateFlow()
 
-    // Add internal bounds tracking
-    private val _currentViewCenter = MutableStateFlow<LatLng?>(null)
+    private val _currentViewCenter = MutableStateFlow<dev.icerock.moko.geo.LatLng?>(null)
+    actual val currentViewCenter = _currentViewCenter.asStateFlow()
+    private val _currentViewRadiusMiles = MutableStateFlow<Double?>(null)
+    actual val currentViewRadiusMiles = _currentViewRadiusMiles.asStateFlow()
     private val _currentBounds = MutableStateFlow<LatLngBounds?>(null)
 
     private val placesClient: PlacesClient by lazy {
@@ -194,9 +202,12 @@ actual class MapComponent(
         }
     }
 
-    // Add method to update camera bounds from the map
     fun updateCameraBounds(center: LatLng, bounds: LatLngBounds) {
-        _currentViewCenter.value = center
+        _currentViewCenter.value = dev.icerock.moko.geo.LatLng(center.latitude, center.longitude)
+        _currentViewRadiusMiles.value = max(
+            distanceMilesBetween(center, bounds.northeast),
+            distanceMilesBetween(center, bounds.southwest),
+        ).coerceAtLeast(MIN_MAP_VIEW_RADIUS_MILES)
         _currentBounds.value = bounds
     }
 
@@ -357,15 +368,16 @@ actual class MapComponent(
     suspend fun getEvents() {
         _isLoading.value = true
         _error.value = null
-        val currentLocation = _currentLocation.value ?: run {
+        val searchCenter = _currentViewCenter.value ?: _currentLocation.value ?: run {
             _error.value = "Location not available"
             return
         }
+        val searchRadiusMiles = _currentViewRadiusMiles.value ?: _currentRadiusMeters.value
 
         val currentBounds = getBounds(
-            _currentRadiusMeters.value,
-            currentLocation.latitude,
-            currentLocation.longitude
+            searchRadiusMiles,
+            searchCenter.latitude,
+            searchCenter.longitude
         )
 
         eventRepository.getEventsInBounds(currentBounds).onSuccess {
@@ -375,5 +387,22 @@ actual class MapComponent(
         }
 
         _isLoading.value = false
+    }
+
+    private fun distanceMilesBetween(start: LatLng, end: LatLng): Double {
+        val earthRadiusMiles = 3958.8
+        val startLat = start.latitude * PI / 180.0
+        val endLat = end.latitude * PI / 180.0
+        val deltaLat = (end.latitude - start.latitude) * PI / 180.0
+        val deltaLong = (end.longitude - start.longitude) * PI / 180.0
+        val a = sin(deltaLat / 2) * sin(deltaLat / 2) +
+            cos(startLat) * cos(endLat) * sin(deltaLong / 2) * sin(deltaLong / 2)
+        val normalizedA = a.coerceIn(0.0, 1.0)
+        val c = 2 * atan2(sqrt(normalizedA), sqrt(1 - normalizedA))
+        return earthRadiusMiles * c
+    }
+
+    private companion object {
+        const val MIN_MAP_VIEW_RADIUS_MILES = 0.25
     }
 }
