@@ -96,6 +96,7 @@ import com.razumly.mvp.core.presentation.util.moneyFormat
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
+import com.razumly.mvp.core.util.toTimeZoneOrUtc
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
 import dev.chrisbanes.haze.hazeEffect
@@ -124,8 +125,9 @@ internal fun resolveRentalSelection(
     timeZone: TimeZone,
 ): ResolvedRentalSelection? {
     val option = fieldOptions.firstOrNull { option -> option.field.id == selection.fieldId } ?: return null
-    val startInstant = selection.date.toInstantAtMinutes(selection.startMinutes, timeZone)
-    val endInstant = selection.date.toInstantAtMinutes(selection.endMinutes, timeZone)
+    val fieldTimeZone = option.resolvedRentalTimeZone(timeZone)
+    val startInstant = selection.date.toInstantAtMinutes(selection.startMinutes, fieldTimeZone)
+    val endInstant = selection.date.toInstantAtMinutes(selection.endMinutes, fieldTimeZone)
     if (endInstant <= startInstant) {
         return null
     }
@@ -135,7 +137,7 @@ internal fun resolveRentalSelection(
         date = selection.date,
         startMinutes = selection.startMinutes,
         endMinutes = selection.endMinutes,
-        timeZone = timeZone,
+        timeZone = fieldTimeZone,
     ) ?: return null
 
     return ResolvedRentalSelection(
@@ -210,6 +212,7 @@ internal fun selectBestSlotForInterval(
                 rangeStart = rangeStart,
                 rangeEnd = rangeEnd,
                 fieldId = fieldId,
+                fallbackTimeZone = timeZone,
             )
         }
         .sortedWith(
@@ -232,14 +235,15 @@ internal fun findMatchingSlot(
     if (startMinutes < RENTAL_TIMELINE_START_MINUTES || endMinutes > RENTAL_TIMELINE_END_MINUTES) {
         return null
     }
-    val startInstant = date.toInstantAtMinutes(startMinutes, timeZone)
-    val endInstant = date.toInstantAtMinutes(endMinutes, timeZone)
+    val fieldTimeZone = option.resolvedRentalTimeZone(timeZone)
+    val startInstant = date.toInstantAtMinutes(startMinutes, fieldTimeZone)
+    val endInstant = date.toInstantAtMinutes(endMinutes, fieldTimeZone)
     return selectBestSlotForInterval(
         slots = option.rentalSlots,
         rangeStart = startInstant,
         rangeEnd = endInstant,
         fieldId = option.field.id,
-        timeZone = timeZone,
+        timeZone = fieldTimeZone,
     )
 }
 
@@ -276,6 +280,7 @@ internal fun canApplyRentalSelectionRange(
     val fieldOption = fieldOptions.firstOrNull { option ->
         option.field.id == fieldId
     } ?: return false
+    val fieldTimeZone = fieldOption.resolvedRentalTimeZone(timeZone)
 
     val overlapsSelection = selections.any { selection ->
         selection.id != selectionId &&
@@ -299,7 +304,7 @@ internal fun canApplyRentalSelectionRange(
                 date = date,
                 startMinutes = startMinutes,
                 endMinutes = endMinutes,
-                timeZone = timeZone,
+                timeZone = fieldTimeZone,
             )
     }
     if (overlapsBusyBlock) {
@@ -311,7 +316,7 @@ internal fun canApplyRentalSelectionRange(
         date = date,
         startMinutes = startMinutes,
         endMinutes = endMinutes,
-        timeZone = timeZone,
+        timeZone = fieldTimeZone,
     )
 }
 
@@ -420,8 +425,8 @@ internal val RENTAL_AUTO_SCROLL_STEP = 8.dp
 internal const val RENTAL_AUTO_SCROLL_EDGE_RATIO = 0.25f
 internal const val RENTAL_AUTO_SCROLL_FRAME_DELAY_MS = 16L
 
-internal fun Instant.toDisplayDateTime(): String {
-    return toLocalDateTime(TimeZone.currentSystemDefault()).format(dateTimeFormat)
+internal fun Instant.toDisplayDateTime(timeZone: TimeZone = TimeZone.currentSystemDefault()): String {
+    return toLocalDateTime(timeZone).format(dateTimeFormat)
 }
 
 internal fun Field.displayLabel(): String {
@@ -435,15 +440,16 @@ internal fun TimeSlot.matchesRentalSelection(
     rangeStart: Instant,
     rangeEnd: Instant,
     fieldId: String,
+    fallbackTimeZone: TimeZone = TimeZone.currentSystemDefault(),
 ): Boolean {
     if (rangeEnd <= rangeStart) {
         return false
     }
 
-    val timeZone = TimeZone.currentSystemDefault()
-    val slotStartLocal = startDate.toLocalDateTime(timeZone)
-    val selectedStartLocal = rangeStart.toLocalDateTime(timeZone)
-    val selectedEndLocal = rangeEnd.toLocalDateTime(timeZone)
+    val slotTimeZone = this.timeZone.toTimeZoneOrUtc(fallbackTimeZone)
+    val slotStartLocal = startDate.toLocalDateTime(slotTimeZone)
+    val selectedStartLocal = rangeStart.toLocalDateTime(slotTimeZone)
+    val selectedEndLocal = rangeEnd.toLocalDateTime(slotTimeZone)
 
     if (selectedStartLocal.date != selectedEndLocal.date) {
         return false
@@ -454,7 +460,7 @@ internal fun TimeSlot.matchesRentalSelection(
 
     val slotStartMinutes = startTimeMinutes ?: (slotStartLocal.hour * 60 + slotStartLocal.minute)
     val slotEndMinutes = endTimeMinutes ?: endDate
-        ?.toLocalDateTime(timeZone)
+        ?.toLocalDateTime(slotTimeZone)
         ?.let { endLocal -> endLocal.hour * 60 + endLocal.minute }
         ?: return false
 
@@ -467,7 +473,7 @@ internal fun TimeSlot.matchesRentalSelection(
 
     if (repeating) {
         val selectedDayIndex = selectedStartLocal.dayOfWeek.toRentalDayIndex()
-        val slotDayIndex = toMondayBasedDayIndex(timeZone) ?: slotStartLocal.dayOfWeek.toRentalDayIndex()
+        val slotDayIndex = toMondayBasedDayIndex(slotTimeZone) ?: slotStartLocal.dayOfWeek.toRentalDayIndex()
         if (selectedDayIndex != slotDayIndex) {
             return false
         }
@@ -475,7 +481,7 @@ internal fun TimeSlot.matchesRentalSelection(
         if (selectedStartLocal.date < slotStartLocal.date) {
             return false
         }
-        if (endDate != null && selectedStartLocal.date > endDate!!.toLocalDateTime(timeZone).date) {
+        if (endDate != null && selectedStartLocal.date > endDate!!.toLocalDateTime(slotTimeZone).date) {
             return false
         }
         return true
@@ -491,10 +497,13 @@ internal fun TimeSlot.matchesRentalSelection(
     return rangeStart >= startDate && rangeEnd <= slotEndInstant
 }
 
-internal fun TimeSlot.toRentalAvailabilityLabel(): String {
+internal fun TimeSlot.toRentalAvailabilityLabel(
+    fallbackTimeZone: TimeZone = TimeZone.currentSystemDefault(),
+): String {
+    val slotTimeZone = timeZone.toTimeZoneOrUtc(fallbackTimeZone)
     val slotStart = startTimeMinutes.toClockLabel()
     val slotEnd = endTimeMinutes.toClockLabel()
-    val dayLabel = toMondayBasedDayIndex(TimeZone.currentSystemDefault()).toDayLabel()
+    val dayLabel = toMondayBasedDayIndex(slotTimeZone).toDayLabel()
     return if (slotStart != null && slotEnd != null) {
         "$dayLabel $slotStart - $slotEnd"
     } else {
@@ -528,6 +537,16 @@ internal fun TimeSlot.toMondayBasedDayIndex(timeZone: TimeZone): Int? {
         raw == sundayBasedStartIndex -> (raw + 6) % 7
         else -> raw
     }
+}
+
+internal fun RentalFieldOption.resolvedRentalTimeZone(
+    fallback: TimeZone = TimeZone.currentSystemDefault(),
+): TimeZone {
+    return rentalSlots
+        .asSequence()
+        .map { slot -> slot.timeZone }
+        .firstOrNull { value -> value.isNotBlank() }
+        .toTimeZoneOrUtc(fallback)
 }
 
 internal fun Int?.toClockLabel(): String? {

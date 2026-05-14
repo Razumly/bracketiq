@@ -51,9 +51,12 @@ import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.util.Platform
+import com.razumly.mvp.core.util.toTimeZoneOrUtc
+import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.isoDayNumber
+import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
 import kotlin.math.min
 import kotlin.time.Clock
@@ -101,6 +104,7 @@ fun LeagueScheduleFields(
     slots: List<TimeSlot>,
     eventStart: Instant,
     eventEnd: Instant? = null,
+    eventTimeZone: TimeZone = TimeZone.currentSystemDefault(),
     onFieldCountChange: (Int) -> Unit,
     onFieldNameChange: (Int, String) -> Unit,
     onAddSlot: () -> Unit,
@@ -311,6 +315,7 @@ fun LeagueScheduleFields(
                         slots = slots,
                         eventStart = eventStart,
                         eventEnd = eventEnd,
+                        eventTimeZone = eventTimeZone,
                         fieldOptions = fieldOptions,
                         slotDivisionOptions = slotDivisionOptions,
                         showSlotDivisions = showSlotDivisions,
@@ -338,6 +343,7 @@ fun LeagueScheduleFields(
                         slots = slots,
                         eventStart = eventStart,
                         eventEnd = eventEnd,
+                        eventTimeZone = eventTimeZone,
                         fieldOptions = fieldOptions,
                         slotDivisionOptions = slotDivisionOptions,
                         showSlotDivisions = showSlotDivisions,
@@ -362,6 +368,7 @@ private fun TimeslotCard(
     slots: List<TimeSlot>,
     eventStart: Instant,
     eventEnd: Instant?,
+    eventTimeZone: TimeZone,
     fieldOptions: List<DropdownOption>,
     slotDivisionOptions: List<DropdownOption>,
     showSlotDivisions: Boolean,
@@ -383,6 +390,7 @@ private fun TimeslotCard(
             val normalizedLockedDivisionIds = lockedDivisionIds.normalizeDivisionIdentifiers()
             val selectedDivisionIds = slot.normalizedDivisionIds().normalizeDivisionIdentifiers()
             val repeating = slot.repeating
+            val slotTimeZone = slot.timeZone.toTimeZoneOrUtc(eventTimeZone)
             val effectiveDivisionIds = if (lockSlotDivisions && normalizedLockedDivisionIds.isNotEmpty()) {
                 normalizedLockedDivisionIds
             } else {
@@ -471,6 +479,7 @@ private fun TimeslotCard(
                     onDateSelected = { selected ->
                         onUpdateSlot(index, slot.copy(startDate = selected))
                     },
+                    timeZone = slotTimeZone,
                     supportingText = "Defaults to the event start date.",
                     enabled = !readOnly,
                 )
@@ -491,6 +500,7 @@ private fun TimeslotCard(
                     onDateSelected = { selected ->
                         onUpdateSlot(index, slot.copy(endDate = selected))
                     },
+                    timeZone = slotTimeZone,
                     supportingText = "Leave empty for no end date.",
                     enabled = !readOnly,
                 )
@@ -570,6 +580,7 @@ private fun TimeslotCard(
                     onDateTimeSelected = { selected ->
                         onUpdateSlot(index, slot.copy(startDate = selected))
                     },
+                    timeZone = slotTimeZone,
                     isError = slot.startDate == Instant.DISTANT_PAST,
                     enabled = !readOnly,
                 )
@@ -579,6 +590,7 @@ private fun TimeslotCard(
                     onDateTimeSelected = { selected ->
                         onUpdateSlot(index, slot.copy(endDate = selected))
                     },
+                    timeZone = slotTimeZone,
                     isError = slot.endDate == null || slot.endDate <= slot.startDate,
                     enabled = !readOnly,
                 )
@@ -590,7 +602,14 @@ private fun TimeslotCard(
                     horizontalArrangement = Arrangement.End,
                 ) {
                     TextButton(onClick = {
-                        onUpdateSlot(index, slot.toggleRepeating(eventStart = eventStart, eventEnd = eventEnd))
+                        onUpdateSlot(
+                            index,
+                            slot.toggleRepeating(
+                                eventStart = eventStart,
+                                eventEnd = eventEnd,
+                                eventTimeZone = eventTimeZone,
+                            ),
+                        )
                     }) {
                         Text(if (slot.repeating) "Repeats weekly" else "One-time slot")
                     }
@@ -609,44 +628,59 @@ private fun TimeslotCard(
 }
 
 @OptIn(ExperimentalTime::class)
-private fun TimeSlot.toggleRepeating(eventStart: Instant, eventEnd: Instant?): TimeSlot {
+private fun TimeSlot.toggleRepeating(
+    eventStart: Instant,
+    eventEnd: Instant?,
+    eventTimeZone: TimeZone,
+): TimeSlot {
     return if (repeating) {
-        toOneTimeSlot(eventStart = eventStart, eventEnd = eventEnd)
+        toOneTimeSlot(eventStart = eventStart, eventEnd = eventEnd, eventTimeZone = eventTimeZone)
     } else {
-        toRepeatingSlot(eventStart = eventStart, eventEnd = eventEnd)
+        toRepeatingSlot(eventStart = eventStart, eventEnd = eventEnd, eventTimeZone = eventTimeZone)
     }
 }
 
 @OptIn(ExperimentalTime::class)
-private fun TimeSlot.toOneTimeSlot(eventStart: Instant, eventEnd: Instant?): TimeSlot {
+private fun TimeSlot.toOneTimeSlot(
+    eventStart: Instant,
+    eventEnd: Instant?,
+    eventTimeZone: TimeZone,
+): TimeSlot {
+    val slotTimeZone = timeZone.toTimeZoneOrUtc(eventTimeZone)
     val baselineDate = startDate.takeUnless { it == Instant.DISTANT_PAST } ?: eventStart
-    val startInstant = startTimeMinutes?.let { baselineDate.withMinutesOfDay(it) } ?: baselineDate
+    val startInstant = startTimeMinutes?.let { baselineDate.withMinutesOfDay(it, slotTimeZone) } ?: baselineDate
     val fallbackEnd = when {
         endDate != null && endDate > startInstant -> endDate
         endTimeMinutes != null && startTimeMinutes != null && endTimeMinutes > startTimeMinutes ->
-            baselineDate.withMinutesOfDay(endTimeMinutes)
+            baselineDate.withMinutesOfDay(endTimeMinutes, slotTimeZone)
         eventEnd != null && eventEnd > startInstant -> eventEnd
         else -> Instant.fromEpochMilliseconds(startInstant.toEpochMilliseconds() + 60L * 60L * 1000L)
     }
-    val day = startInstant.toMondayFirstDay()
+    val day = startInstant.toMondayFirstDay(slotTimeZone)
     return copy(
         repeating = false,
         dayOfWeek = day,
         daysOfWeek = listOf(day),
         startDate = startInstant,
         endDate = fallbackEnd,
-        startTimeMinutes = startInstant.toMinutesOfDay(),
-        endTimeMinutes = fallbackEnd.toMinutesOfDay(),
+        startTimeMinutes = startInstant.toMinutesOfDay(slotTimeZone),
+        endTimeMinutes = fallbackEnd.toMinutesOfDay(slotTimeZone),
     )
 }
 
 @OptIn(ExperimentalTime::class)
-private fun TimeSlot.toRepeatingSlot(eventStart: Instant, eventEnd: Instant?): TimeSlot {
+private fun TimeSlot.toRepeatingSlot(
+    eventStart: Instant,
+    eventEnd: Instant?,
+    eventTimeZone: TimeZone,
+): TimeSlot {
+    val slotTimeZone = timeZone.toTimeZoneOrUtc(eventTimeZone)
     val effectiveStart = startDate.takeUnless { it == Instant.DISTANT_PAST } ?: eventStart
-    val day = effectiveStart.toMondayFirstDay()
-    val resolvedStartMinutes = startTimeMinutes ?: effectiveStart.toMinutesOfDay()
-    val resolvedEndDate = (endDate ?: eventEnd)?.toDateOnlyInstant()
-    val resolvedEndMinutes = endTimeMinutes ?: resolvedEndDate?.toMinutesOfDay()
+    val day = effectiveStart.toMondayFirstDay(slotTimeZone)
+    val resolvedStartMinutes = startTimeMinutes ?: effectiveStart.toMinutesOfDay(slotTimeZone)
+    val endSource = endDate ?: eventEnd
+    val resolvedEndDate = endSource?.toDateOnlyInstant(slotTimeZone)
+    val resolvedEndMinutes = endTimeMinutes ?: endSource?.toMinutesOfDay(slotTimeZone)
     return copy(
         repeating = true,
         dayOfWeek = day,
@@ -765,6 +799,7 @@ private fun DatePickerField(
     label: String,
     value: Instant,
     onDateSelected: (Instant) -> Unit,
+    timeZone: TimeZone,
     modifier: Modifier = Modifier,
     isError: Boolean = false,
     supportingText: String = "",
@@ -772,7 +807,7 @@ private fun DatePickerField(
 ) {
     var showPicker by remember { mutableStateOf(false) }
     StandardTextField(
-        value = value.toDateLabel(),
+        value = value.toDateLabel(timeZone),
         onValueChange = {},
         modifier = modifier,
         label = label,
@@ -801,14 +836,14 @@ private fun DatePickerField(
     if (showPicker) {
         PlatformDateTimePicker(
             onDateSelected = { selected ->
-                selected?.let(onDateSelected)
+                selected?.reinterpretSystemLocalSelectionIn(timeZone)?.let(onDateSelected)
                 showPicker = false
             },
             onDismissRequest = { showPicker = false },
             showPicker = showPicker,
             getTime = false,
             canSelectPast = true,
-            initialDate = value,
+            initialDate = value.asSystemLocalPickerInstant(timeZone),
         )
     }
 }
@@ -819,6 +854,7 @@ private fun OptionalDatePickerField(
     label: String,
     value: Instant?,
     onDateSelected: (Instant?) -> Unit,
+    timeZone: TimeZone,
     modifier: Modifier = Modifier,
     isError: Boolean = false,
     supportingText: String = "",
@@ -826,7 +862,7 @@ private fun OptionalDatePickerField(
 ) {
     var showPicker by remember { mutableStateOf(false) }
     StandardTextField(
-        value = value?.toDateLabel() ?: "",
+        value = value?.toDateLabel(timeZone) ?: "",
         onValueChange = {},
         modifier = modifier,
         label = label,
@@ -856,14 +892,14 @@ private fun OptionalDatePickerField(
     if (showPicker) {
         PlatformDateTimePicker(
             onDateSelected = { selected ->
-                onDateSelected(selected)
+                onDateSelected(selected?.reinterpretSystemLocalSelectionIn(timeZone))
                 showPicker = false
             },
             onDismissRequest = { showPicker = false },
             showPicker = showPicker,
             getTime = false,
             canSelectPast = true,
-            initialDate = value ?: Clock.System.now(),
+            initialDate = (value ?: Clock.System.now()).asSystemLocalPickerInstant(timeZone),
         )
     }
 }
@@ -874,13 +910,14 @@ private fun DateTimePickerField(
     label: String,
     value: Instant?,
     onDateTimeSelected: (Instant) -> Unit,
+    timeZone: TimeZone,
     modifier: Modifier = Modifier,
     isError: Boolean = false,
     enabled: Boolean = true,
 ) {
     var showPicker by remember { mutableStateOf(false) }
     StandardTextField(
-        value = value?.toDateTimeLabel() ?: "Select date and time",
+        value = value?.toDateTimeLabel(timeZone) ?: "Select date and time",
         onValueChange = {},
         modifier = modifier,
         label = label,
@@ -908,14 +945,14 @@ private fun DateTimePickerField(
     if (showPicker) {
         PlatformDateTimePicker(
             onDateSelected = { selected ->
-                selected?.let(onDateTimeSelected)
+                selected?.reinterpretSystemLocalSelectionIn(timeZone)?.let(onDateTimeSelected)
                 showPicker = false
             },
             onDismissRequest = { showPicker = false },
             showPicker = showPicker,
             getTime = true,
             canSelectPast = true,
-            initialDate = value,
+            initialDate = value?.asSystemLocalPickerInstant(timeZone),
         )
     }
 }
@@ -931,43 +968,53 @@ private fun Int.toTodayInstant(): Instant {
 }
 
 @OptIn(ExperimentalTime::class)
-private fun Instant.toDateLabel(): String = this.toLocalDateTime(TimeZone.currentSystemDefault()).date.toString()
+private fun Instant.toDateLabel(timeZone: TimeZone): String = this.toLocalDateTime(timeZone).date.toString()
 
 @OptIn(ExperimentalTime::class)
-private fun Instant.toDateTimeLabel(): String {
-    val local = this.toLocalDateTime(TimeZone.currentSystemDefault())
+private fun Instant.toDateTimeLabel(timeZone: TimeZone): String {
+    val local = this.toLocalDateTime(timeZone)
     val minutes = local.time.hour * 60 + local.time.minute
     return "${local.date} ${minutes.toTimeLabel()}"
 }
 
 @OptIn(ExperimentalTime::class)
-private fun Instant.withMinutesOfDay(minutes: Int): Instant {
-    val timezone = TimeZone.currentSystemDefault()
-    val localDate = this.toLocalDateTime(timezone).date
+private fun Instant.withMinutesOfDay(minutes: Int, timeZone: TimeZone): Instant {
+    val localDate = this.toLocalDateTime(timeZone).date
     val clampedMinutes = minutes.coerceIn(0, 23 * 60 + 59)
-    val startOfDay = localDate.atStartOfDayIn(timezone)
+    val startOfDay = localDate.atStartOfDayIn(timeZone)
     return Instant.fromEpochMilliseconds(
         startOfDay.toEpochMilliseconds() + clampedMinutes.toLong() * 60_000L
     )
 }
 
 @OptIn(ExperimentalTime::class)
-private fun Instant.toMinutesOfDay(): Int {
-    val localTime = this.toLocalDateTime(TimeZone.currentSystemDefault()).time
+private fun Instant.toMinutesOfDay(timeZone: TimeZone): Int {
+    val localTime = this.toLocalDateTime(timeZone).time
     return localTime.hour * 60 + localTime.minute
 }
 
 @OptIn(ExperimentalTime::class)
-private fun Instant.toDateOnlyInstant(): Instant {
-    val timezone = TimeZone.currentSystemDefault()
-    val localDate = this.toLocalDateTime(timezone).date
-    return localDate.atStartOfDayIn(timezone)
+private fun Instant.toDateOnlyInstant(timeZone: TimeZone): Instant {
+    val localDate = this.toLocalDateTime(timeZone).date
+    return localDate.atStartOfDayIn(timeZone)
 }
 
 @OptIn(ExperimentalTime::class)
-private fun Instant.toMondayFirstDay(): Int {
-    val isoDay = this.toLocalDateTime(TimeZone.currentSystemDefault()).date.dayOfWeek.isoDayNumber
+private fun Instant.toMondayFirstDay(timeZone: TimeZone): Int {
+    val isoDay = this.toLocalDateTime(timeZone).date.dayOfWeek.isoDayNumber
     return (isoDay - 1).mod(7)
+}
+
+@OptIn(ExperimentalTime::class)
+private fun Instant.reinterpretSystemLocalSelectionIn(timeZone: TimeZone): Instant {
+    val local = toLocalDateTime(TimeZone.currentSystemDefault())
+    return LocalDateTime(local.date, local.time).toInstant(timeZone)
+}
+
+@OptIn(ExperimentalTime::class)
+private fun Instant.asSystemLocalPickerInstant(timeZone: TimeZone): Instant {
+    val local = toLocalDateTime(timeZone)
+    return LocalDateTime(local.date, local.time).toInstant(TimeZone.currentSystemDefault())
 }
 
 private fun Int.toTimeLabel(): String {

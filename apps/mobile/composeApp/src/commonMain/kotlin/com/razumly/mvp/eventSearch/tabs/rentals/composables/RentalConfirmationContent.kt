@@ -22,7 +22,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.presentation.util.moneyFormat
+import com.razumly.mvp.core.util.toTimeZoneOrUtc
 import com.razumly.mvp.eventSearch.composables.EmptyDiscoverListItem
+import kotlinx.datetime.TimeZone
 
 @Composable
 internal fun RentalConfirmationContent(
@@ -77,6 +79,9 @@ internal fun RentalConfirmationContent(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(sortedSelections, key = { resolved -> resolved.selection.id }) { resolved ->
+                        val selectionTimeZone = remember(resolved.slots) {
+                            resolved.slots.firstOrNull()?.timeZone.toTimeZoneOrUtc(TimeZone.currentSystemDefault())
+                        }
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(
@@ -95,13 +100,13 @@ internal fun RentalConfirmationContent(
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
-                                    text = "${resolved.startInstant.toDisplayDateTime()} - ${resolved.endInstant.toDisplayDateTime()}",
+                                    text = "${resolved.startInstant.toDisplayDateTime(selectionTimeZone)} - ${resolved.endInstant.toDisplayDateTime(selectionTimeZone)}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
                                     text = if (resolved.slots.size == 1) {
-                                        "Slot: ${resolved.slots.first().toRentalAvailabilityLabel()}"
+                                        "Slot: ${resolved.slots.first().toRentalAvailabilityLabel(selectionTimeZone)}"
                                     } else {
                                         "Slots: ${resolved.slots.size} selected"
                                     },

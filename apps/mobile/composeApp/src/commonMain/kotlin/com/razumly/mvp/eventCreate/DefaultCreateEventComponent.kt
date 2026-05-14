@@ -52,6 +52,8 @@ import com.razumly.mvp.core.presentation.util.convertPhotoResultToUploadFile
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.newId
+import com.razumly.mvp.core.util.resolvedTimeZone
+import com.razumly.mvp.core.util.toTimeZoneOrUtc
 import com.razumly.mvp.eventCreate.CreateEventComponent.Child
 import com.razumly.mvp.eventCreate.CreateEventComponent.Config
 import com.razumly.mvp.eventDetail.assignedUserIdsForRole
@@ -1165,7 +1167,9 @@ class DefaultCreateEventComponent(
         fallbackStart: Instant,
         fallbackEnd: Instant,
     ): List<TimeSlot> {
-        val defaultDivisions = defaultFieldDivisions(_newEventState.value)
+        val currentEvent = _newEventState.value
+        val eventTimeZone = currentEvent.resolvedTimeZone()
+        val defaultDivisions = defaultFieldDivisions(currentEvent)
         val explicitSlots = context.lockedSelections.mapNotNull { selection ->
             val fieldId = selection.fieldId.trim().takeIf(String::isNotEmpty) ?: return@mapNotNull null
             val requestedStart = Instant.fromEpochMilliseconds(selection.startEpochMillis)
@@ -1176,15 +1180,16 @@ class DefaultCreateEventComponent(
             } else {
                 Instant.fromEpochMilliseconds(slotStart.toEpochMilliseconds() + ONE_HOUR_MILLIS)
             }
-            val slotDay = slotStart.toMondayFirstDay()
+            val slotDay = slotStart.toMondayFirstDay(eventTimeZone)
             TimeSlot(
                 id = newId(),
                 dayOfWeek = slotDay,
                 daysOfWeek = listOf(slotDay),
                 divisions = defaultDivisions,
-                startTimeMinutes = slotStart.toMinutesOfDay(),
-                endTimeMinutes = slotEnd.toMinutesOfDay(),
+                startTimeMinutes = slotStart.toMinutesOfDay(eventTimeZone),
+                endTimeMinutes = slotEnd.toMinutesOfDay(eventTimeZone),
                 startDate = slotStart,
+                timeZone = currentEvent.timeZone,
                 repeating = false,
                 endDate = slotEnd,
                 scheduledFieldId = fieldId,
@@ -1202,16 +1207,17 @@ class DefaultCreateEventComponent(
         if (normalizedFallbackFieldIds.isEmpty()) {
             return emptyList()
         }
-        val slotDay = fallbackStart.toMondayFirstDay()
+        val slotDay = fallbackStart.toMondayFirstDay(eventTimeZone)
         return normalizedFallbackFieldIds.map { fieldId ->
             TimeSlot(
                 id = newId(),
                 dayOfWeek = slotDay,
                 daysOfWeek = listOf(slotDay),
                 divisions = defaultDivisions,
-                startTimeMinutes = fallbackStart.toMinutesOfDay(),
-                endTimeMinutes = fallbackEnd.toMinutesOfDay(),
+                startTimeMinutes = fallbackStart.toMinutesOfDay(eventTimeZone),
+                endTimeMinutes = fallbackEnd.toMinutesOfDay(eventTimeZone),
                 startDate = fallbackStart,
+                timeZone = currentEvent.timeZone,
                 repeating = false,
                 endDate = fallbackEnd,
                 scheduledFieldId = fieldId,
@@ -1737,12 +1743,13 @@ class DefaultCreateEventComponent(
             }
 
             if (!slot.repeating) {
+                val slotTimeZone = slot.timeZone.toTimeZoneOrUtc(event.resolvedTimeZone())
                 val slotStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start
                 val slotEndDate = slot.endDate ?: return@mapNotNull null
                 if (slotEndDate <= slotStartDate) {
                     return@mapNotNull null
                 }
-                val slotDayOfWeek = slotStartDate.toMondayFirstDay()
+                val slotDayOfWeek = slotStartDate.toMondayFirstDay(slotTimeZone)
                 return@mapNotNull slot.copy(
                     id = slot.id.ifBlank { newId() },
                     dayOfWeek = slotDayOfWeek,
@@ -1752,8 +1759,8 @@ class DefaultCreateEventComponent(
                     scheduledFieldIds = mappedFieldIds,
                     startDate = slotStartDate,
                     endDate = slotEndDate,
-                    startTimeMinutes = slotStartDate.toMinutesOfDay(),
-                    endTimeMinutes = slotEndDate.toMinutesOfDay(),
+                    startTimeMinutes = slotStartDate.toMinutesOfDay(slotTimeZone),
+                    endTimeMinutes = slotEndDate.toMinutesOfDay(slotTimeZone),
                     repeating = false,
                 )
             }
@@ -1770,7 +1777,7 @@ class DefaultCreateEventComponent(
             } else if (event.noFixedEndDateTime) {
                 null
             } else {
-                slot.endDate?.toDateOnlyInstant()
+                slot.endDate?.toDateOnlyInstant(slot.timeZone.toTimeZoneOrUtc(event.resolvedTimeZone()))
             }
             slot.copy(
                 id = slot.id.ifBlank { newId() },
@@ -1812,16 +1819,18 @@ class DefaultCreateEventComponent(
         }
         val slotStart = event.start
         val slotEnd = event.end.takeIf { it > slotStart } ?: defaultEventEnd(slotStart)
-        val slotDayOfWeek = slotStart.toMondayFirstDay()
+        val eventTimeZone = event.resolvedTimeZone()
+        val slotDayOfWeek = slotStart.toMondayFirstDay(eventTimeZone)
         return listOf(
             TimeSlot(
                 id = newId(),
                 dayOfWeek = slotDayOfWeek,
                 daysOfWeek = listOf(slotDayOfWeek),
                 divisions = defaultFieldDivisions(event),
-                startTimeMinutes = slotStart.toMinutesOfDay(),
-                endTimeMinutes = slotEnd.toMinutesOfDay(),
+                startTimeMinutes = slotStart.toMinutesOfDay(eventTimeZone),
+                endTimeMinutes = slotEnd.toMinutesOfDay(eventTimeZone),
                 startDate = slotStart,
+                timeZone = event.timeZone,
                 repeating = false,
                 endDate = slotEnd,
                 scheduledFieldId = normalizedFieldIds.first(),
@@ -2054,6 +2063,7 @@ class DefaultCreateEventComponent(
             startTimeMinutes = null,
             endTimeMinutes = null,
             startDate = startDate,
+            timeZone = event.timeZone,
             repeating = true,
             endDate = endDate,
             scheduledFieldId = null,
@@ -2092,22 +2102,21 @@ class DefaultCreateEventComponent(
         }
         return end
             .takeIf { value -> value > start }
-            ?.toDateOnlyInstant()
+            ?.toDateOnlyInstant(resolvedTimeZone())
     }
 
-    private fun Instant.toDateOnlyInstant(): Instant {
-        val timezone = TimeZone.currentSystemDefault()
+    private fun Instant.toDateOnlyInstant(timezone: TimeZone): Instant {
         val localDate = toLocalDateTime(timezone).date
         return localDate.atStartOfDayIn(timezone)
     }
 
-    private fun Instant.toMinutesOfDay(): Int {
-        val localTime = toLocalDateTime(TimeZone.currentSystemDefault()).time
+    private fun Instant.toMinutesOfDay(timezone: TimeZone): Int {
+        val localTime = toLocalDateTime(timezone).time
         return localTime.hour * 60 + localTime.minute
     }
 
-    private fun Instant.toMondayFirstDay(): Int {
-        val isoDay = toLocalDateTime(TimeZone.currentSystemDefault()).date.dayOfWeek.isoDayNumber
+    private fun Instant.toMondayFirstDay(timezone: TimeZone): Int {
+        val isoDay = toLocalDateTime(timezone).date.dayOfWeek.isoDayNumber
         return (isoDay - 1).mod(7)
     }
 
@@ -2356,6 +2365,7 @@ class DefaultCreateEventComponent(
         return Event(
             start = start,
             end = defaultEventEnd(start),
+            timeZone = TimeZone.currentSystemDefault().id,
             hostId = initialHostId.trim(),
             singleDivision = false,
         )

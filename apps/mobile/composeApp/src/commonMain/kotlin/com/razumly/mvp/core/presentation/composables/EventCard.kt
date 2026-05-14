@@ -52,6 +52,7 @@ import com.razumly.mvp.core.data.util.divisionDisplayLabels
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.eventTypeWithSportLabel
 import com.razumly.mvp.core.presentation.util.getImageUrl
+import com.razumly.mvp.core.util.resolvedTimeZone
 import dev.chrisbanes.haze.ExperimentalHazeApi
 import dev.chrisbanes.haze.HazeInputScale
 import dev.chrisbanes.haze.HazeProgressive
@@ -60,7 +61,6 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
 import dev.chrisbanes.haze.rememberHazeState
-import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.ExperimentalTime
@@ -89,9 +89,10 @@ fun EventCard(
     val hazeState = rememberHazeState()
     var mapButtonOffset by remember { mutableStateOf(Offset.Zero) }
 
-    val dateRangeText = remember(event.start, event.end) {
-        val startDate = event.start.toLocalDateTime(TimeZone.currentSystemDefault()).date
-        val endDate = event.end.toLocalDateTime(TimeZone.currentSystemDefault()).date
+    val eventTimeZone = remember(event.timeZone) { event.resolvedTimeZone() }
+    val dateRangeText = remember(event.start, event.end, eventTimeZone) {
+        val startDate = event.start.toLocalDateTime(eventTimeZone).date
+        val endDate = event.end.toLocalDateTime(eventTimeZone).date
 
         val startStr = startDate.format(dateFormat)
 

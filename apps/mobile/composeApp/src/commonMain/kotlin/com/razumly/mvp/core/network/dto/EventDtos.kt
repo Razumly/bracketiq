@@ -44,6 +44,7 @@ data class EventApiDto(
 
     val start: String? = null,
     val end: String? = null,
+    val timeZone: String? = null,
 
     val price: Int? = null,
     val rating: Double? = null,
@@ -276,6 +277,7 @@ data class EventApiDto(
             address = address,
             start = parsedStart,
             end = parsedEnd,
+            timeZone = timeZone?.trim()?.takeIf(String::isNotBlank) ?: "UTC",
             priceCents = resolvedPriceCents,
             rating = rating,
             imageId = imageId ?: "",
@@ -614,6 +616,7 @@ data class EventUpdateDto(
     val name: String? = null,
     val start: String? = null,
     val end: String? = null,
+    val timeZone: String? = null,
     @property:ObjCName(swiftName = "eventDescription")
     val description: String? = null,
     val divisions: List<String>? = null,
@@ -889,6 +892,7 @@ fun Event.toUpdateDto(
         name = name,
         start = start.toString(),
         end = end.toString(),
+        timeZone = timeZone,
         description = description,
         divisions = normalizedDivisions,
         divisionDetails = normalizedDivisionDetailsForPayload,

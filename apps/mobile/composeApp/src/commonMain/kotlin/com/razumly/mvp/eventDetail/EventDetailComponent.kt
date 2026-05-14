@@ -91,6 +91,8 @@ import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.emailAddressRegex
 import com.razumly.mvp.core.util.newId
+import com.razumly.mvp.core.util.resolvedTimeZone
+import com.razumly.mvp.core.util.toTimeZoneOrUtc
 import com.razumly.mvp.eventDetail.data.BracketNode
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import com.razumly.mvp.eventDetail.data.StagedMatchCreate
@@ -5020,6 +5022,7 @@ class DefaultEventDetailComponent(
             .toSet()
 
         return _editableLeagueTimeSlots.value.mapNotNull { slot ->
+            val slotTimeZone = slot.timeZone.toTimeZoneOrUtc(event.resolvedTimeZone())
             val normalizedFieldIds = slot.normalizedScheduledFieldIds()
             val mappedFieldIds = if (validFieldIds.isEmpty()) {
                 normalizedFieldIds
@@ -5042,7 +5045,7 @@ class DefaultEventDetailComponent(
                 if (slotEndDate <= slotStartDate) {
                     return@mapNotNull null
                 }
-                val slotDayOfWeek = slotStartDate.toMondayFirstDay()
+                val slotDayOfWeek = slotStartDate.toMondayFirstDay(slotTimeZone)
                 return@mapNotNull slot.copy(
                     id = slot.id.ifBlank { newId() },
                     dayOfWeek = slotDayOfWeek,
@@ -5052,8 +5055,8 @@ class DefaultEventDetailComponent(
                     scheduledFieldIds = mappedFieldIds,
                     startDate = slotStartDate,
                     endDate = slotEndDate,
-                    startTimeMinutes = slotStartDate.toMinutesOfDay(),
-                    endTimeMinutes = slotEndDate.toMinutesOfDay(),
+                    startTimeMinutes = slotStartDate.toMinutesOfDay(slotTimeZone),
+                    endTimeMinutes = slotEndDate.toMinutesOfDay(slotTimeZone),
                     repeating = false,
                 )
             }
@@ -5257,6 +5260,7 @@ class DefaultEventDetailComponent(
             startTimeMinutes = null,
             endTimeMinutes = null,
             startDate = startDate,
+            timeZone = event.timeZone,
             repeating = true,
             endDate = endDate,
             scheduledFieldId = null,
@@ -5271,22 +5275,21 @@ class DefaultEventDetailComponent(
         }
         return end
             .takeIf { value -> value > start }
-            ?.toDateOnlyInstant()
+            ?.toDateOnlyInstant(resolvedTimeZone())
     }
 
-    private fun Instant.toDateOnlyInstant(): Instant {
-        val timezone = TimeZone.currentSystemDefault()
+    private fun Instant.toDateOnlyInstant(timezone: TimeZone): Instant {
         val localDate = toLocalDateTime(timezone).date
         return localDate.atStartOfDayIn(timezone)
     }
 
-    private fun Instant.toMinutesOfDay(): Int {
-        val localTime = toLocalDateTime(TimeZone.currentSystemDefault()).time
+    private fun Instant.toMinutesOfDay(timezone: TimeZone): Int {
+        val localTime = toLocalDateTime(timezone).time
         return localTime.hour * 60 + localTime.minute
     }
 
-    private fun Instant.toMondayFirstDay(): Int {
-        val isoDay = toLocalDateTime(TimeZone.currentSystemDefault()).date.dayOfWeek.isoDayNumber
+    private fun Instant.toMondayFirstDay(timezone: TimeZone): Int {
+        val isoDay = toLocalDateTime(timezone).date.dayOfWeek.isoDayNumber
         return (isoDay - 1).mod(7)
     }
 
@@ -6737,7 +6740,7 @@ internal fun resolveRecurringSlotDateBoundsForEventDraft(
     } else {
         event.end
             .takeIf { value -> value > event.start }
-            ?.toDateOnlyInstantForScheduling()
+            ?.toDateOnlyInstantForScheduling(event.resolvedTimeZone())
     }
     return RecurringSlotDateBounds(
         startDate = slotStartDate,
@@ -6745,8 +6748,7 @@ internal fun resolveRecurringSlotDateBoundsForEventDraft(
     )
 }
 
-private fun Instant.toDateOnlyInstantForScheduling(): Instant {
-    val timezone = TimeZone.currentSystemDefault()
+private fun Instant.toDateOnlyInstantForScheduling(timezone: TimeZone): Instant {
     val localDate = toLocalDateTime(timezone).date
     return localDate.atStartOfDayIn(timezone)
 }

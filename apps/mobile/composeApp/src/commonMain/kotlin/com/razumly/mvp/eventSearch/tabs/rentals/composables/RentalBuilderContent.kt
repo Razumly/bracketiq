@@ -275,7 +275,10 @@ private fun RentalWeekSelector(
     fieldOptions: List<RentalFieldOption>,
     onSelectedDateChange: (LocalDate) -> Unit,
 ) {
-    val timeZone = remember { TimeZone.currentSystemDefault() }
+    val fallbackTimeZone = remember { TimeZone.currentSystemDefault() }
+    val timeZone = remember(fieldOptions, fallbackTimeZone) {
+        fieldOptions.firstOrNull()?.resolvedRentalTimeZone(fallbackTimeZone) ?: fallbackTimeZone
+    }
     val today = remember(timeZone) { Clock.System.now().toLocalDateTime(timeZone).date }
     val boundedSelectedDate = remember(selectedDate, today) {
         if (selectedDate < today) today else selectedDate
@@ -419,12 +422,13 @@ private fun hasRentalAvailabilityForDate(
             val endMinutes = (startMinutes + SLOT_INTERVAL_MINUTES)
                 .coerceAtMost(RENTAL_TIMELINE_END_MINUTES)
             fieldOptions.any { option ->
+                val fieldTimeZone = option.resolvedRentalTimeZone(timeZone)
                 isRangeCoveredByRentalAvailability(
                     option = option,
                     date = date,
                     startMinutes = startMinutes,
                     endMinutes = endMinutes,
-                    timeZone = timeZone,
+                    timeZone = fieldTimeZone,
                 )
             }
         }
@@ -455,7 +459,7 @@ private fun RentalTimelineGrid(
     val timelineHeight = remember(startsByMinute) {
         RENTAL_FIELD_HEADER_HEIGHT + (RENTAL_TIMELINE_ROW_HEIGHT * startsByMinute.size)
     }
-    val timeZone = remember { TimeZone.currentSystemDefault() }
+    val fallbackTimeZone = remember { TimeZone.currentSystemDefault() }
 
     Row(
         modifier = Modifier
@@ -488,6 +492,9 @@ private fun RentalTimelineGrid(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(fieldOptions, key = { option -> option.field.id }) { option ->
+                val fieldTimeZone = remember(option, fallbackTimeZone) {
+                    option.resolvedRentalTimeZone(fallbackTimeZone)
+                }
                 val selectionsForField = selectionsForSelectedDate.filter { selection ->
                     selection.fieldId == option.field.id
                 }
@@ -498,7 +505,7 @@ private fun RentalTimelineGrid(
                     startsByMinute = startsByMinute,
                     busyBlocks = busyBlocks,
                     selections = selectionsForField,
-                    timeZone = timeZone,
+                    timeZone = fieldTimeZone,
                     verticalScrollState = verticalScrollState,
                     viewportBoundsInWindow = viewportBoundsInWindow,
                     onCreateSelection = onCreateSelection,

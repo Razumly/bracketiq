@@ -124,6 +124,7 @@ import com.razumly.mvp.core.data.dataTypes.addOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.addOfficialUser
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.divisionPriceRange
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Organization
@@ -170,6 +171,7 @@ import com.razumly.mvp.core.presentation.util.toNameCase
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
+import com.razumly.mvp.core.util.resolvedTimeZone
 import com.razumly.mvp.eventDetail.composables.DropdownField
 import com.razumly.mvp.eventDetail.composables.MatchEditDialog
 import com.razumly.mvp.eventDetail.composables.ParticipantsSection
@@ -194,6 +196,7 @@ import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.DayOfWeek
@@ -256,6 +259,7 @@ private data class EventDetailTabIconStyle(
 private val FloatingDockShape = RoundedCornerShape(20.dp)
 private val FloatingDockMinHeight = 60.dp
 private val FloatingDockShadowPadding = 8.dp
+private const val FloatingDockExpandDurationMillis = 260
 
 @Composable
 private fun eventDetailTabVisuals(selected: Boolean): EventDetailTabVisuals {
@@ -394,6 +398,40 @@ private fun EventDetailTabStrip(
             }
         }
     }
+}
+
+@Composable
+private fun EventDetailSelectedDivisionPill(
+    label: String,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        tonalElevation = 1.dp,
+    ) {
+        Text(
+            text = "Division: $label",
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+private fun List<BracketDivisionOption>.resolveDivisionLabel(divisionId: String?): String? {
+    val normalizedDivisionId = divisionId
+        ?.normalizeDivisionIdentifier()
+        .orEmpty()
+    if (normalizedDivisionId.isBlank()) return null
+
+    return firstOrNull { option -> divisionsEquivalent(option.id, normalizedDivisionId) }
+        ?.label
+        ?.takeIf(String::isNotBlank)
 }
 
 internal fun canViewOfficialsPanel(
@@ -564,6 +602,34 @@ private fun Event.resolveBracketDivisionForPool(poolDivisionId: String?): String
         ?.takeIf(String::isNotBlank)
 }
 
+private fun Event.hasLosersBracketSelector(
+    selectedDivisionId: String?,
+    matches: List<MatchWithRelations>,
+): Boolean {
+    if (doubleElimination) return true
+
+    val normalizedDivisionId = selectedDivisionId
+        ?.normalizeDivisionIdentifier()
+        .orEmpty()
+    val selectedDivisionHasDoubleEliminationConfig = divisionDetails.any { detail ->
+        val detailMatchesSelectedDivision = normalizedDivisionId.isBlank() ||
+            divisionsEquivalent(detail.id, normalizedDivisionId) ||
+            divisionsEquivalent(detail.key, normalizedDivisionId) ||
+            divisionsEquivalent(detail.normalizedTournamentDivisionId(), normalizedDivisionId) ||
+            detail.referencesBracketDivision(normalizedDivisionId)
+
+        detail.playoffConfig?.doubleElimination == true && detailMatchesSelectedDivision
+    }
+    if (selectedDivisionHasDoubleEliminationConfig) return true
+
+    return matches.any { match ->
+        val matchInSelectedDivision = normalizedDivisionId.isBlank() ||
+            divisionsEquivalent(match.match.division, normalizedDivisionId)
+
+        match.match.losersBracket && matchInSelectedDivision
+    }
+}
+
 private fun Event.teamIdsForDivision(divisionId: String?): Set<String> {
     val normalizedDivisionId = divisionId
         ?.normalizeDivisionIdentifier()
@@ -590,7 +656,7 @@ internal fun buildWeeklySessionOptions(
         return emptyList()
     }
 
-    val timeZone = TimeZone.currentSystemDefault()
+    val timeZone = event.resolvedTimeZone()
     val today = Clock.System.now().toLocalDateTime(timeZone).date
     val fallbackDivisionIds = event.divisions
         .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
@@ -600,6 +666,7 @@ internal fun buildWeeklySessionOptions(
     val safeWeekCount = 3
 
     timeSlots.forEach { slot ->
+        val slotTimeZone = slot.resolvedTimeZone(timeZone)
         val normalizedDays = slot.normalizedDaysOfWeek()
         val startMinutes = slot.startTimeMinutes
         val endMinutes = slot.endTimeMinutes
@@ -607,8 +674,8 @@ internal fun buildWeeklySessionOptions(
             return@forEach
         }
 
-        val slotStartDate = slot.startDate.toLocalDateTime(timeZone).date
-        val rawSlotEndDate = slot.endDate?.toLocalDateTime(timeZone)?.date
+        val slotStartDate = slot.startDate.toLocalDateTime(slotTimeZone).date
+        val rawSlotEndDate = slot.endDate?.toLocalDateTime(slotTimeZone)?.date
         val slotEndDate = rawSlotEndDate?.takeIf { endDate ->
             endDate > slotStartDate
         }
@@ -642,7 +709,7 @@ internal fun buildWeeklySessionOptions(
                     return@forEach
                 }
 
-                val baseInstant = occurrenceDate.atStartOfDayIn(timeZone)
+                val baseInstant = occurrenceDate.atStartOfDayIn(slotTimeZone)
                 val sessionStart = baseInstant + startMinutes.minutes
                 val sessionEnd = baseInstant + endMinutes.minutes
                 if (sessionEnd <= sessionStart) {
@@ -655,7 +722,7 @@ internal fun buildWeeklySessionOptions(
                     occurrenceDate = occurrenceDate.toString(),
                     start = sessionStart,
                     end = sessionEnd,
-                    label = formatWeeklySessionLabel(sessionStart, sessionEnd, timeZone),
+                    label = formatWeeklySessionLabel(sessionStart, sessionEnd, slotTimeZone),
                     divisionLabel = divisionLabel,
                 )
             }
@@ -675,7 +742,7 @@ internal fun buildWeeklyScheduleOptions(
         return emptyList()
     }
 
-    val timeZone = TimeZone.currentSystemDefault()
+    val timeZone = event.resolvedTimeZone()
     val eventStartDate = event.start.toLocalDateTime(timeZone).date
     val fallbackScheduleWindowDays = 365
     val fallbackDivisionIds = event.divisions
@@ -685,6 +752,7 @@ internal fun buildWeeklyScheduleOptions(
     val sessions = mutableListOf<WeeklySessionOption>()
 
     timeSlots.forEach { slot ->
+        val slotTimeZone = slot.resolvedTimeZone(timeZone)
         val normalizedDays = slot.normalizedDaysOfWeek()
         val startMinutes = slot.startTimeMinutes
         val endMinutes = slot.endTimeMinutes
@@ -692,9 +760,9 @@ internal fun buildWeeklyScheduleOptions(
             return@forEach
         }
 
-        val slotStartDate = slot.startDate.toLocalDateTime(timeZone).date
+        val slotStartDate = slot.startDate.toLocalDateTime(slotTimeZone).date
         val effectiveStartDate = if (eventStartDate > slotStartDate) eventStartDate else slotStartDate
-        val slotEndDate = slot.endDate?.toLocalDateTime(timeZone)?.date
+        val slotEndDate = slot.endDate?.toLocalDateTime(slotTimeZone)?.date
             ?.takeIf { endDate -> endDate >= effectiveStartDate }
             ?: effectiveStartDate.plus(DatePeriod(days = fallbackScheduleWindowDays))
         val anchorWeekStart = startOfWeekMonday(effectiveStartDate)
@@ -730,7 +798,7 @@ internal fun buildWeeklyScheduleOptions(
                     return@forEach
                 }
 
-                val baseInstant = occurrenceDate.atStartOfDayIn(timeZone)
+                val baseInstant = occurrenceDate.atStartOfDayIn(slotTimeZone)
                 val sessionStart = baseInstant + startMinutes.minutes
                 val sessionEnd = baseInstant + endMinutes.minutes
                 if (sessionEnd <= sessionStart) {
@@ -743,7 +811,7 @@ internal fun buildWeeklyScheduleOptions(
                     occurrenceDate = occurrenceDate.toString(),
                     start = sessionStart,
                     end = sessionEnd,
-                    label = formatWeeklySessionLabel(sessionStart, sessionEnd, timeZone),
+                    label = formatWeeklySessionLabel(sessionStart, sessionEnd, slotTimeZone),
                     divisionLabel = divisionLabel,
                 )
             }
@@ -1753,11 +1821,21 @@ private fun ExpandableFloatingDock(
     expandedContent: @Composable (Modifier, () -> Unit) -> Unit,
 ) {
     val dockBoundsTransform = remember {
-        BoundsTransform { _, _ -> tween(durationMillis = 260) }
+        BoundsTransform { _, _ -> tween(durationMillis = FloatingDockExpandDurationMillis) }
+    }
+    var expandedActionsVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(expanded) {
+        if (expanded) {
+            expandedActionsVisible = false
+            delay(FloatingDockExpandDurationMillis.toLong())
+            expandedActionsVisible = true
+        } else {
+            expandedActionsVisible = false
+        }
     }
     val expandedActionsAlpha by animateFloatAsState(
-        targetValue = if (expanded) 1f else 0f,
-        animationSpec = tween(durationMillis = 260, delayMillis = if (expanded) 80 else 0),
+        targetValue = if (expandedActionsVisible) 1f else 0f,
+        animationSpec = tween(durationMillis = 180),
         label = "floatingDockActionsAlpha",
     )
     LookaheadScope {
@@ -1787,7 +1865,11 @@ private fun ExpandableFloatingDock(
                     contentAlignment = Alignment.Center,
                 ) {
                     if (expanded) {
-                        Box(modifier = Modifier.alpha(expandedActionsAlpha)) {
+                        Box(
+                            modifier = Modifier.alpha(
+                                if (expandedActionsVisible) expandedActionsAlpha else 0f,
+                            )
+                        ) {
                             expandedContent(
                                 Modifier,
                                 onCollapseClick,
@@ -4396,6 +4478,17 @@ fun EventDetailScreen(
                         ) {
                             bracketTabDivisionOptions.resolveSelectedDivisionId(preferredBracketDivisionId)
                         }
+                        val showLosersBracketSelector = remember(
+                            selectedEvent.event.doubleElimination,
+                            selectedEvent.event.divisionDetails,
+                            selectedEvent.matches,
+                            selectedBracketDivisionId,
+                        ) {
+                            selectedEvent.event.hasLosersBracketSelector(
+                                selectedDivisionId = selectedBracketDivisionId,
+                                matches = selectedEvent.matches,
+                            )
+                        }
                         val participantSections = remember(selectedEvent.event.teamSignup) {
                             if (selectedEvent.event.teamSignup) {
                                 listOf(
@@ -4455,14 +4548,78 @@ fun EventDetailScreen(
                                 selectedParticipantsSection = participantSections.first()
                             }
                         }
+                        val selectedDivisionPillLabel = remember(
+                            selectedTab,
+                            selectedDivision,
+                            selectedScheduleDivisionId,
+                            selectedSchedulePoolDivisionId,
+                            schedulePoolDivisionOptions,
+                            selectedStandingsDivisionId,
+                            selectedStandingsDataDivisionId,
+                            standingsTabDivisionOptions,
+                            standingsPoolDivisionOptions,
+                            selectedBracketDivisionId,
+                            bracketTabDivisionOptions,
+                            joinDivisionOptions,
+                            selectedEvent.event.divisionDetails,
+                        ) {
+                            val selectedDivisionForTab = when (selectedTab) {
+                                DetailTab.BRACKET -> selectedBracketDivisionId
+                                DetailTab.SCHEDULE -> selectedSchedulePoolDivisionId
+                                    ?: selectedScheduleDivisionId
+                                DetailTab.LEAGUES -> selectedStandingsDataDivisionId
+                                    ?: selectedStandingsDivisionId
+                                DetailTab.PARTICIPANTS -> selectedDivision
+                            }
+                            val divisionOptionsForTab = when (selectedTab) {
+                                DetailTab.BRACKET -> bracketTabDivisionOptions
+                                DetailTab.SCHEDULE -> if (!selectedSchedulePoolDivisionId.isNullOrBlank()) {
+                                    schedulePoolDivisionOptions
+                                } else {
+                                    joinDivisionOptions
+                                }
+                                DetailTab.LEAGUES -> if (!selectedStandingsDataDivisionId.isNullOrBlank() &&
+                                    standingsPoolDivisionOptions.any { option ->
+                                        divisionsEquivalent(option.id, selectedStandingsDataDivisionId)
+                                    }
+                                ) {
+                                    standingsPoolDivisionOptions
+                                } else {
+                                    standingsTabDivisionOptions
+                                }
+                                DetailTab.PARTICIPANTS -> joinDivisionOptions
+                            }
+                            divisionOptionsForTab.resolveDivisionLabel(selectedDivisionForTab)
+                                ?: selectedDivisionForTab
+                                    ?.normalizeDivisionIdentifier()
+                                    ?.takeIf(String::isNotBlank)
+                                    ?.toDivisionDisplayLabel(selectedEvent.event.divisionDetails)
+                        }
                         EventDetailTabStrip(
                             availableTabs = availableTabs,
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+                                .padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
                         )
+                        AnimatedVisibility(
+                            visible = !selectedDivisionPillLabel.isNullOrBlank(),
+                            enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
+                            exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 2.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                EventDetailSelectedDivisionPill(
+                                    label = selectedDivisionPillLabel.orEmpty(),
+                                    modifier = Modifier.widthIn(max = 280.dp),
+                                )
+                            }
+                        }
                         Box(Modifier.fillMaxSize()) {
                             when (selectedTab) {
                                 DetailTab.BRACKET -> {
@@ -4493,6 +4650,7 @@ fun EventDetailScreen(
                                             items = weeklyScheduleItems,
                                             fields = eventFields,
                                             showFab = { showFab = it },
+                                            timeZone = selectedEvent.event.resolvedTimeZone(),
                                             onMatchClick = {},
                                             onEventClick = { selectedOccurrenceEvent ->
                                                 weeklyScheduleOptionsById[selectedOccurrenceEvent.id]?.let { session ->
@@ -4646,6 +4804,7 @@ fun EventDetailScreen(
                                             items = scheduledMatches.map { match -> ScheduleItem.MatchEntry(match) },
                                             fields = eventFields,
                                             showFab = { showFab = it },
+                                            timeZone = selectedEvent.event.resolvedTimeZone(),
                                             trackedUserIds = scheduleTrackedUserIds,
                                             showEventOfficialNames = canEditMatches || isEventOfficial,
                                             limitOfficialsToCurrentUser = isEventOfficial && !canEditMatches,
@@ -4739,7 +4898,7 @@ fun EventDetailScreen(
                                             selectedDivisionId = selectedBracketDivisionId,
                                             divisionOptions = bracketTabDivisionOptions,
                                             onDivisionSelected = component::selectDivision,
-                                            showBracketToggle = selectedEvent.event.doubleElimination,
+                                            showBracketToggle = showLosersBracketSelector,
                                             isLosersBracket = losersBracket,
                                             onBracketToggle = component::toggleLosersBracket,
                                             showMatchEditAction = canManageMatchEditingFromDock,

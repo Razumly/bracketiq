@@ -71,6 +71,7 @@ import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.presentation.util.timeFormat
+import com.razumly.mvp.core.util.resolvedTimeZone
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
@@ -146,6 +147,7 @@ fun ScheduleView(
     showGroupingToggle: Boolean = true,
     matchGroupMode: ScheduleMatchGroupMode = ScheduleMatchGroupMode.FIELD,
     eventLabelsById: Map<String, String> = emptyMap(),
+    timeZone: TimeZone = TimeZone.currentSystemDefault(),
     onToggleLockAllMatches: ((Boolean, List<String>) -> Unit)? = null,
     onMatchClick: (MatchWithRelations) -> Unit,
     onEventClick: (Event) -> Unit = {},
@@ -174,7 +176,6 @@ fun ScheduleView(
     }
 
     val navPadding = LocalNavBarPadding.current
-    val timeZone = remember { TimeZone.currentSystemDefault() }
     val sortedItems = remember(items, timeZone) {
         items.sortedBy { it.start }
     }
@@ -853,7 +854,7 @@ private fun ScheduleEventCard(
     end: Instant,
     onClick: () -> Unit,
 ) {
-    val timeZone = remember { TimeZone.currentSystemDefault() }
+    val timeZone = remember(event.timeZone) { event.resolvedTimeZone() }
     val dateTimeLabel = remember(start, end, timeZone) {
         formatScheduleDateTimeWindow(start = start, end = end, timeZone = timeZone)
     }

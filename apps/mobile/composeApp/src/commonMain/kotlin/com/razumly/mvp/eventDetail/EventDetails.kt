@@ -151,6 +151,7 @@ import com.razumly.mvp.core.presentation.util.timeFormat
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.presentation.util.transitionSpec
 import com.razumly.mvp.core.util.LocalPopupHandler
+import com.razumly.mvp.core.util.resolvedTimeZone
 import com.razumly.mvp.eventDetail.composables.CancellationRefundOptions
 import com.razumly.mvp.eventDetail.composables.LeagueConfigurationFields
 import com.razumly.mvp.eventDetail.composables.LeaguePlayoffConfigurationFields
@@ -199,9 +200,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.format
+import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
 import mvp.composeapp.generated.resources.Res
 import mvp.composeapp.generated.resources.enter_value
@@ -234,6 +237,16 @@ private val readOnlyNameListItemHeight = 28.dp
 private val readOnlyNameListSpacing = 4.dp
 private val editableOfficialStaffListHeight = 160.dp * STAFF_LAZY_LIST_VISIBLE_COUNT
 private val editableHostStaffListHeight = 130.dp * STAFF_LAZY_LIST_VISIBLE_COUNT
+
+private fun kotlin.time.Instant.reinterpretSystemLocalSelectionIn(timeZone: TimeZone): kotlin.time.Instant {
+    val local = toLocalDateTime(TimeZone.currentSystemDefault())
+    return LocalDateTime(local.date, local.time).toInstant(timeZone)
+}
+
+private fun kotlin.time.Instant.asSystemLocalPickerInstant(timeZone: TimeZone): kotlin.time.Instant {
+    val local = toLocalDateTime(timeZone)
+    return LocalDateTime(local.date, local.time).toInstant(TimeZone.currentSystemDefault())
+}
 
 @OptIn(ExperimentalHazeApi::class, ExperimentalTime::class)
 @Suppress("UNUSED_PARAMETER")
@@ -328,6 +341,8 @@ fun EventDetails(
 ) {
     val popupHandler = LocalPopupHandler.current
     val event = eventWithRelations.event
+    val eventTimeZone = remember(event.timeZone) { event.resolvedTimeZone() }
+    val editEventTimeZone = remember(editEvent.timeZone) { editEvent.resolvedTimeZone() }
     val host = eventWithRelations.host
     var isValid by remember { mutableStateOf(false) }
     var showStartPicker by remember { mutableStateOf(false) }
@@ -1667,7 +1682,6 @@ fun EventDetails(
         }
     }
 
-    val eventTimeZone = remember { TimeZone.currentSystemDefault() }
     val startDateTime = remember(event.start, eventTimeZone) {
         event.start.toLocalDateTime(eventTimeZone)
     }
@@ -2544,9 +2558,7 @@ fun EventDetails(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
                                 StandardTextField(
-                                    value = editEvent.start.toLocalDateTime(
-                                        TimeZone.currentSystemDefault()
-                                    ).format(dateTimeFormat),
+                                    value = editEvent.start.toLocalDateTime(editEventTimeZone).format(dateTimeFormat),
                                     onValueChange = {},
                                     modifier = Modifier.weight(1f),
                                     label = "Start Date & Time",
@@ -2558,9 +2570,7 @@ fun EventDetails(
                                     },
                                 )
                                 StandardTextField(
-                                    value = editEvent.end.toLocalDateTime(
-                                        TimeZone.currentSystemDefault()
-                                    ).format(dateTimeFormat),
+                                    value = editEvent.end.toLocalDateTime(editEventTimeZone).format(dateTimeFormat),
                                     onValueChange = {},
                                     modifier = Modifier.weight(1f),
                                     label = "End Date & Time",
@@ -2576,9 +2586,7 @@ fun EventDetails(
                             }
                         } else {
                             StandardTextField(
-                                value = editEvent.start.toLocalDateTime(
-                                    TimeZone.currentSystemDefault()
-                                ).format(dateTimeFormat),
+                                value = editEvent.start.toLocalDateTime(editEventTimeZone).format(dateTimeFormat),
                                 onValueChange = {},
                                 modifier = Modifier.fillMaxWidth(),
                                 label = "Start Date & Time",
@@ -4695,6 +4703,7 @@ fun EventDetails(
                                 } else {
                                     editEvent.end.takeIf { it > editEvent.start }
                                 },
+                                eventTimeZone = editEventTimeZone,
                                 onFieldCountChange = { count ->
                                     fieldCount = count
                                     onSelectFieldCount(count)
@@ -4742,7 +4751,8 @@ fun EventDetails(
     }
     PlatformDateTimePicker(
         onDateSelected = { selectedInstant ->
-            val selected = selectedInstant ?: return@PlatformDateTimePicker
+            val selected = selectedInstant?.reinterpretSystemLocalSelectionIn(editEventTimeZone)
+                ?: return@PlatformDateTimePicker
             onEditEvent {
                 val minimumEnd = kotlin.time.Instant.fromEpochMilliseconds(
                     selected.toEpochMilliseconds() + 60L * 60L * 1000L
@@ -4758,12 +4768,13 @@ fun EventDetails(
         showPicker = showStartPicker && !scheduleTimeLocked,
         getTime = true,
         canSelectPast = false,
-        initialDate = editEvent.start,
+        initialDate = editEvent.start.asSystemLocalPickerInstant(editEventTimeZone),
     )
 
     PlatformDateTimePicker(
         onDateSelected = { selectedInstant ->
-            val selected = selectedInstant ?: return@PlatformDateTimePicker
+            val selected = selectedInstant?.reinterpretSystemLocalSelectionIn(editEventTimeZone)
+                ?: return@PlatformDateTimePicker
             onEditEvent { copy(end = selected) }
             showEndPicker = false
         },
@@ -4771,7 +4782,7 @@ fun EventDetails(
         showPicker = showEndPicker && !scheduleTimeLocked && !editEvent.noFixedEndDateTime,
         getTime = true,
         canSelectPast = false,
-        initialDate = editEvent.end,
+        initialDate = editEvent.end.asSystemLocalPickerInstant(editEventTimeZone),
     )
 
     val installmentInitialDate = remember(installmentDueDatePickerIndex, editEvent.installmentDueDates) {

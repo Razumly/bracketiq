@@ -55,6 +55,7 @@ import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
+import com.razumly.mvp.core.util.resolvedTimeZone
 import com.razumly.mvp.eventDetail.resolveEventMatchRules
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import kotlinx.datetime.LocalDate
@@ -152,7 +153,8 @@ fun MatchCard(
                         matches = matches,
                     )
                 }
-                val matchDateTimeLabel = formatMatchDateTimeLabel(match.match.start)
+                val matchTimeZone = selectedEvent.resolvedTimeZone()
+                val matchDateTimeLabel = formatMatchDateTimeLabel(match.match.start, matchTimeZone)
                 val eventOfficialSummary = resolveEventOfficialSummary(
                     match = match.match,
                     positions = selectedEvent.officialPositions,
@@ -1500,16 +1502,23 @@ internal fun formatOrdinalPlacement(position: Int): String {
     return "$value$suffix"
 }
 
-private fun formatMatchDateTimeLabel(start: Instant?): String {
-    val today = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date
-    return formatMatchDateTimeLabel(start = start, today = today)
+private fun formatMatchDateTimeLabel(
+    start: Instant?,
+    timeZone: TimeZone = TimeZone.currentSystemDefault(),
+): String {
+    val today = Clock.System.now().toLocalDateTime(timeZone).date
+    return formatMatchDateTimeLabel(start = start, today = today, timeZone = timeZone)
 }
 
-internal fun formatMatchDateTimeLabel(start: Instant?, today: LocalDate): String {
+internal fun formatMatchDateTimeLabel(
+    start: Instant?,
+    today: LocalDate,
+    timeZone: TimeZone = TimeZone.currentSystemDefault(),
+): String {
     if (start == null) {
         return "TBD"
     }
-    val localDateTime = start.toLocalDateTime(TimeZone.currentSystemDefault())
+    val localDateTime = start.toLocalDateTime(timeZone)
     val hour24 = localDateTime.time.hour
     val minute = localDateTime.time.minute.toString().padStart(2, '0')
     val amPm = if (hour24 >= 12) "P.M." else "A.M."

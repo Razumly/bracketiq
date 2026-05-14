@@ -77,6 +77,7 @@ import com.razumly.mvp.eventSearch.isRangeCoveredByRentalAvailability
 import com.razumly.mvp.eventSearch.rangeOverlapsBusyBlockOnDate
 import com.razumly.mvp.eventSearch.rangesOverlap
 import com.razumly.mvp.eventSearch.resolveRentalSelection
+import com.razumly.mvp.eventSearch.resolvedRentalTimeZone
 import com.razumly.mvp.icons.Indoor
 import com.razumly.mvp.icons.MVPIcons
 import com.razumly.mvp.icons.ProfileActionDetails
@@ -136,7 +137,10 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     )
     val selectedTeamForDialog = selectedTeamResult.getOrNull()?.firstOrNull() ?: selectedTeam
 
-    val timeZone = remember { TimeZone.currentSystemDefault() }
+    val fallbackTimeZone = remember { TimeZone.currentSystemDefault() }
+    val timeZone = remember(rentalFieldOptions, fallbackTimeZone) {
+        rentalFieldOptions.firstOrNull()?.resolvedRentalTimeZone(fallbackTimeZone) ?: fallbackTimeZone
+    }
     val today = remember(timeZone) { Clock.System.now().toLocalDateTime(timeZone).date }
     var selectedRentalDate by remember { mutableStateOf(today) }
     var rentalSelections by remember { mutableStateOf<List<RentalSelectionDraft>>(emptyList()) }
@@ -422,6 +426,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                                 val fieldOption = rentalFieldOptions.firstOrNull { option ->
                                     option.field.id == fieldId
                                 }
+                                val fieldTimeZone = fieldOption?.resolvedRentalTimeZone(timeZone) ?: timeZone
                                 val overlapsSelection = rentalSelections.any { selection ->
                                     selection.fieldId == fieldId &&
                                         selection.date == selectedRentalDate &&
@@ -439,7 +444,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                                             date = selectedRentalDate,
                                             startMinutes = startMinutes,
                                             endMinutes = endMinutes,
-                                            timeZone = timeZone,
+                                            timeZone = fieldTimeZone,
                                         )
                                 }
                                 val isWithinRentalAvailability = fieldOption != null &&
@@ -448,7 +453,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                                         date = selectedRentalDate,
                                         startMinutes = startMinutes,
                                         endMinutes = endMinutes,
-                                        timeZone = timeZone,
+                                        timeZone = fieldTimeZone,
                                     )
 
                                 if (!overlapsSelection && !overlapsBusyBlock && isWithinRentalAvailability) {
