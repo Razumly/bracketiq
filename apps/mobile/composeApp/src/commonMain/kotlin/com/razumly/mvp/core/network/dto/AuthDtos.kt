@@ -2,6 +2,9 @@ package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.NotificationSettings
+import com.razumly.mvp.core.data.dataTypes.defaultNotificationSettings
+import com.razumly.mvp.core.data.dataTypes.normalizeNotificationSettings
 import com.razumly.mvp.core.presentation.util.toNameCase
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -120,6 +123,7 @@ data class UserProfileDto(
     val isIdentityHidden: Boolean? = null,
     val chatTermsAcceptedAt: String? = null,
     val chatTermsVersion: String? = null,
+    val notificationSettings: NotificationSettings? = null,
     // Server includes fields not present in app UserData; we keep them here only to avoid decode failures.
     val dateOfBirth: String? = null,
     val createdAt: String? = null,
@@ -182,6 +186,7 @@ data class UserUpdateDto(
     val hasStripeAccount: Boolean? = null,
     val uploadedImages: List<String>? = null,
     val profileImageId: String? = null,
+    val notificationSettings: NotificationSettings? = null,
 )
 
 fun AuthUserDto.toAuthAccountOrNull(): AuthAccount? {
@@ -211,6 +216,7 @@ fun UserProfileDto.toUserDataOrNull(): UserData? {
         isIdentityHidden = isIdentityHidden ?: false,
         chatTermsAcceptedAt = chatTermsAcceptedAt,
         chatTermsVersion = chatTermsVersion,
+        notificationSettings = normalizeNotificationSettings(notificationSettings ?: defaultNotificationSettings()),
         id = resolvedId,
     )
 }

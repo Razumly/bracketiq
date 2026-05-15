@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
@@ -101,6 +102,14 @@ fun ProfileHomeScreen(component: ProfileComponent) {
                     description = "Events and matches I attend",
                     icon = Icons.Default.DateRange,
                     onClick = component::navigateToMySchedule,
+                ),
+            )
+            add(
+                ProfileAction(
+                    title = "Notifications",
+                    description = "Email and push preferences",
+                    icon = Icons.Default.Notifications,
+                    onClick = component::navigateToNotifications,
                 ),
             )
             add(

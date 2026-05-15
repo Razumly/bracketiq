@@ -1169,6 +1169,7 @@ class UserRepository(
                 hasStripeAccount = normalizedUser.hasStripeAccount,
                 uploadedImages = normalizedUser.uploadedImages,
                 profileImageId = normalizedUser.profileImageId,
+                notificationSettings = normalizedUser.notificationSettings,
             )
         )
 
@@ -1190,6 +1191,7 @@ class UserRepository(
             hasStripeAccount = responseUser.hasStripeAccount ?: normalizedUser.hasStripeAccount,
             uploadedImages = responseUser.uploadedImages ?: normalizedUser.uploadedImages,
             profileImageId = responseUser.profileImageId ?: normalizedUser.profileImageId,
+            notificationSettings = responseUser.notificationSettings ?: normalizedUser.notificationSettings,
         ) ?: normalizedUser
         databaseService.getUserDataDao.upsertUserWithRelations(updated)
 

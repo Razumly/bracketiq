@@ -18,11 +18,15 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.NotificationSettings
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Subscription
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.defaultNotificationSettings
+import com.razumly.mvp.core.data.dataTypes.normalizeNotificationSettings
+import com.razumly.mvp.core.data.dataTypes.withNotificationSetting
 import com.razumly.mvp.core.data.repositories.FamilyChild
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequest
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequestAction
@@ -193,6 +197,12 @@ data class ProfilePushTargetDebugState(
     val lastCheckedAt: String? = null,
 )
 
+data class ProfileNotificationSettingsState(
+    val settings: NotificationSettings = defaultNotificationSettings(),
+    val isSaving: Boolean = false,
+    val error: String? = null,
+)
+
 data class ProfileInvitesState(
     val isLoading: Boolean = false,
     val invites: List<Invite> = emptyList(),
@@ -239,6 +249,7 @@ interface ProfileComponent : IPaymentProcessor {
     val documentsState: StateFlow<ProfileDocumentsState>
     val myScheduleState: StateFlow<ProfileMyScheduleState>
     val pushTargetDebugState: StateFlow<ProfilePushTargetDebugState>
+    val notificationSettingsState: StateFlow<ProfileNotificationSettingsState>
     val invitesState: StateFlow<ProfileInvitesState>
     val pendingInviteCount: StateFlow<Int>
     val activeBillPaymentId: StateFlow<String?>
@@ -262,6 +273,7 @@ interface ProfileComponent : IPaymentProcessor {
     fun navigateToDocuments()
     fun navigateToMySchedule()
     fun navigateToInvites()
+    fun navigateToNotifications()
     fun editBillingAddress()
 
     fun onLogout()
@@ -269,6 +281,8 @@ interface ProfileComponent : IPaymentProcessor {
     fun manageEvents()
     fun manageRefunds()
     fun refreshPushTargetDebugStatus(syncBeforeCheck: Boolean = false)
+    fun setNotificationSetting(type: String, channel: String, enabled: Boolean)
+    fun saveNotificationSettings()
     fun refreshEventTemplates()
     fun openEventTemplate(event: Event)
     fun manageStripeAccountOnboarding()
@@ -341,6 +355,7 @@ interface ProfileComponent : IPaymentProcessor {
         data class Documents(val component: ProfileComponent) : Child()
         data class MySchedule(val component: ProfileComponent) : Child()
         data class Invites(val component: ProfileComponent) : Child()
+        data class Notifications(val component: ProfileComponent) : Child()
     }
 }
 
@@ -378,6 +393,9 @@ private sealed class ProfileConfig {
 
     @Serializable
     data object Invites : ProfileConfig()
+
+    @Serializable
+    data object Notifications : ProfileConfig()
 
 }
 
@@ -424,6 +442,9 @@ class DefaultProfileComponent(
 
     private val _pushTargetDebugState = MutableStateFlow(ProfilePushTargetDebugState())
     override val pushTargetDebugState = _pushTargetDebugState.asStateFlow()
+
+    private val _notificationSettingsState = MutableStateFlow(ProfileNotificationSettingsState())
+    override val notificationSettingsState = _notificationSettingsState.asStateFlow()
 
     private val _invitesState = MutableStateFlow(ProfileInvitesState())
     override val invitesState = _invitesState.asStateFlow()
@@ -473,12 +494,20 @@ class DefaultProfileComponent(
                 if (currentUser == null) {
                     childrenTabVisibilityUserId = null
                     _showChildrenTab.value = true
+                    _notificationSettingsState.value = ProfileNotificationSettingsState()
                     updatePendingInviteCount(0)
                     _invitesState.value = ProfileInvitesState()
                 } else if (childrenTabVisibilityUserId != currentUser.id) {
                     childrenTabVisibilityUserId = currentUser.id
+                    _notificationSettingsState.value = ProfileNotificationSettingsState(
+                        settings = normalizeNotificationSettings(currentUser.notificationSettings),
+                    )
                     resolveChildrenTabVisibility()
                     refreshInviteCount()
+                } else {
+                    _notificationSettingsState.value = _notificationSettingsState.value.copy(
+                        settings = normalizeNotificationSettings(currentUser.notificationSettings),
+                    )
                 }
             }
         }
@@ -559,6 +588,10 @@ class DefaultProfileComponent(
         push(ProfileConfig.Invites)
     }
 
+    override fun navigateToNotifications() {
+        push(ProfileConfig.Notifications)
+    }
+
     override fun editBillingAddress() {
         scope.launch {
             loadingHandler?.showLoading("Loading billing address...")
@@ -619,7 +652,51 @@ class DefaultProfileComponent(
                         error = throwable.userMessage("Failed to load push target debug status."),
                         lastCheckedAt = Clock.System.now().toString(),
                     )
-                }
+            }
+        }
+    }
+
+    override fun setNotificationSetting(type: String, channel: String, enabled: Boolean) {
+        _notificationSettingsState.value = _notificationSettingsState.value.copy(
+            settings = _notificationSettingsState.value.settings.withNotificationSetting(
+                type = type,
+                channel = channel,
+                enabled = enabled,
+            ),
+            error = null,
+        )
+    }
+
+    override fun saveNotificationSettings() {
+        val currentUser = userRepository.currentUser.value.getOrNull()
+        if (currentUser == null) {
+            _notificationSettingsState.value = _notificationSettingsState.value.copy(
+                error = "Unable to save notification settings for the current user.",
+            )
+            return
+        }
+
+        scope.launch {
+            val currentState = _notificationSettingsState.value
+            val normalizedSettings = normalizeNotificationSettings(currentState.settings)
+            _notificationSettingsState.value = currentState.copy(
+                settings = normalizedSettings,
+                isSaving = true,
+                error = null,
+            )
+
+            userRepository.updateUser(
+                currentUser.copy(notificationSettings = normalizedSettings),
+            ).onSuccess { updatedUser ->
+                _notificationSettingsState.value = ProfileNotificationSettingsState(
+                    settings = normalizeNotificationSettings(updatedUser.notificationSettings),
+                )
+            }.onFailure { throwable ->
+                _notificationSettingsState.value = _notificationSettingsState.value.copy(
+                    isSaving = false,
+                    error = throwable.userMessage("Failed to save notification settings."),
+                )
+            }
         }
     }
 
@@ -1934,6 +2011,7 @@ class DefaultProfileComponent(
         ProfileConfig.Documents -> ProfileComponent.Child.Documents(this@DefaultProfileComponent)
         ProfileConfig.MySchedule -> ProfileComponent.Child.MySchedule(this@DefaultProfileComponent)
         ProfileConfig.Invites -> ProfileComponent.Child.Invites(this@DefaultProfileComponent)
+        ProfileConfig.Notifications -> ProfileComponent.Child.Notifications(this@DefaultProfileComponent)
     }
 }
 

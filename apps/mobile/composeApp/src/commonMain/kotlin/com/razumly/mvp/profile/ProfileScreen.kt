@@ -90,6 +90,10 @@ fun ProfileScreen(component: ProfileComponent) {
             is ProfileComponent.Child.Invites -> {
                 ProfileInvitesScreen(component = instance.component)
             }
+
+            is ProfileComponent.Child.Notifications -> {
+                ProfileNotificationsScreen(component = instance.component)
+            }
         }
     }
 

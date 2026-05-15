@@ -41,9 +41,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.NotificationSettings
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.inferTeamInviteRole
+import com.razumly.mvp.core.data.dataTypes.isNotificationChannelSupported
 import com.razumly.mvp.core.data.dataTypes.label
+import com.razumly.mvp.core.data.dataTypes.normalizeNotificationSettings
+import com.razumly.mvp.core.data.dataTypes.notificationChannels
+import com.razumly.mvp.core.data.dataTypes.notificationSettingOptions
 import com.razumly.mvp.core.data.dataTypes.staffInviteRoleLabel
 import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
 import com.razumly.mvp.core.data.repositories.ProfileDocumentType
@@ -81,6 +86,39 @@ fun ProfilePaymentsScreen(component: ProfileComponent) {
             Text(if (hasStripeAccount) "Manage Stripe Account" else "Connect Stripe Account")
         }
 
+    }
+}
+
+@Composable
+fun ProfileNotificationsScreen(component: ProfileComponent) {
+    val state by component.notificationSettingsState.collectAsState()
+
+    ProfileSectionScaffold(
+        title = "Notifications",
+        description = "Choose which optional updates you receive by email or push.",
+        onBack = component::onBackClicked,
+    ) {
+        state.error?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        NotificationSettingsCard(
+            settings = state.settings,
+            enabled = !state.isSaving,
+            onSettingChanged = component::setNotificationSetting,
+        )
+
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !state.isSaving,
+            onClick = component::saveNotificationSettings,
+        ) {
+            Text(if (state.isSaving) "Saving..." else "Save settings")
+        }
     }
 }
 
@@ -1699,6 +1737,98 @@ private fun SectionHeaderRow(
             text = title,
             style = MaterialTheme.typography.titleMedium,
         )
+    }
+}
+
+@Composable
+private fun NotificationSettingsCard(
+    settings: NotificationSettings,
+    enabled: Boolean,
+    onSettingChanged: (type: String, channel: String, enabled: Boolean) -> Unit,
+) {
+    val normalizedSettings = normalizeNotificationSettings(settings)
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = "Notification",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                notificationChannels.forEach { channel ->
+                    Text(
+                        text = channel.replaceFirstChar { char ->
+                            if (char.isLowerCase()) char.titlecase() else char.toString()
+                        },
+                        modifier = Modifier.weight(0.42f),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+            }
+
+            notificationSettingOptions.forEach { option ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            text = option.label,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = option.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    notificationChannels.forEach { channel ->
+                        val supported = isNotificationChannelSupported(option.id, channel)
+                        Box(
+                            modifier = Modifier.weight(0.42f),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (supported) {
+                                Checkbox(
+                                    checked = normalizedSettings[option.id]?.get(channel) == true,
+                                    enabled = enabled,
+                                    onCheckedChange = { checked ->
+                                        onSettingChanged(option.id, channel, checked)
+                                    },
+                                )
+                            } else {
+                                Text(
+                                    text = "N/A",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

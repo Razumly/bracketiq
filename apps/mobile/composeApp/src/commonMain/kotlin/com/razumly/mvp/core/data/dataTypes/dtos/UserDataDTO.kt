@@ -1,6 +1,9 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.NotificationSettings
+import com.razumly.mvp.core.data.dataTypes.defaultNotificationSettings
+import com.razumly.mvp.core.data.dataTypes.normalizeNotificationSettings
 import com.razumly.mvp.core.presentation.util.toNameCase
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -25,6 +28,7 @@ data class UserDataDTO(
     val isIdentityHidden: Boolean = false,
     val chatTermsAcceptedAt: String? = null,
     val chatTermsVersion: String? = null,
+    val notificationSettings: NotificationSettings = defaultNotificationSettings(),
     @Transient val id: String = "",
 ) {
     companion object {
@@ -50,6 +54,7 @@ data class UserDataDTO(
                 isIdentityHidden = false,
                 chatTermsAcceptedAt = null,
                 chatTermsVersion = null,
+                notificationSettings = defaultNotificationSettings(),
                 id = userId,
             )
         }
@@ -76,6 +81,7 @@ suspend fun UserDataDTO.toUserData(id: String): UserData {
         isIdentityHidden = isIdentityHidden,
         chatTermsAcceptedAt = chatTermsAcceptedAt,
         chatTermsVersion = chatTermsVersion,
+        notificationSettings = normalizeNotificationSettings(notificationSettings),
         id = id
     )
 }

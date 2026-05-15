@@ -27,6 +27,7 @@ data class UserData(
     val isIdentityHidden: Boolean = false,
     val chatTermsAcceptedAt: String? = null,
     val chatTermsVersion: String? = null,
+    val notificationSettings: NotificationSettings = defaultNotificationSettings(),
     @PrimaryKey override val id: String,
 ) : MVPDocument, DisplayableEntity {
     override val displayName: String get() = fullName
@@ -55,6 +56,7 @@ data class UserData(
                 isIdentityHidden = false,
                 chatTermsAcceptedAt = null,
                 chatTermsVersion = null,
+                notificationSettings = defaultNotificationSettings(),
                 id = ""
             )
         }
@@ -110,6 +112,7 @@ data class UserData(
             isIdentityHidden = isIdentityHidden,
             chatTermsAcceptedAt = chatTermsAcceptedAt,
             chatTermsVersion = chatTermsVersion,
+            notificationSettings = notificationSettings,
             id = id,
         )
     }

@@ -8,6 +8,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
 import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
+import com.razumly.mvp.core.data.dataTypes.NotificationSettings
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
@@ -32,6 +33,17 @@ class Converters {
     @TypeConverter
     fun toStringList(value: String): List<String> {
         return Json.decodeFromString(value)
+    }
+
+    @TypeConverter
+    fun fromNotificationSettings(value: NotificationSettings): String {
+        return Json.encodeToString(value)
+    }
+
+    @TypeConverter
+    fun toNotificationSettings(value: String): NotificationSettings {
+        return runCatching { Json.decodeFromString<NotificationSettings>(value) }
+            .getOrDefault(emptyMap())
     }
 
     // List<Int> converter
