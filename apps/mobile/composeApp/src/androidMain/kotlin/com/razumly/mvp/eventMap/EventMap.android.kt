@@ -186,11 +186,10 @@ actual fun EventMap(
     var armedPlaceId by remember { mutableStateOf<String?>(null) }
     var armedSearchedPlaceId by remember { mutableStateOf<String?>(null) }
     var armedPoiPlaceId by remember { mutableStateOf<String?>(null) }
-    var lastUserCameraLocation by remember { mutableStateOf<LatLng?>(null) }
+    var hasAppliedInitialUserCameraFocus by remember { mutableStateOf(false) }
     var mapTopLeftInWindow by remember { mutableStateOf(Offset.Zero) }
     val placeSelectionHint = "Click to select"
     val userLocationMatchThresholdMeters = 10f
-    val userRecenterThresholdMeters = 1000f
 
     fun coordinatesMatch(
         firstLatitude: Double,
@@ -449,20 +448,17 @@ actual fun EventMap(
 
     LaunchedEffect(initCameraState, focusedIsCurrentUserLocation) {
         if (focusedIsCurrentUserLocation) {
-            val shouldRecenterOnUser = lastUserCameraLocation?.let { lastLocation ->
-                distanceBetweenMeters(lastLocation, initCameraState) >= userRecenterThresholdMeters
-            } ?: true
-
-            if (shouldRecenterOnUser) {
+            if (!hasAppliedInitialUserCameraFocus) {
                 val update = if (cameraPositionState.position.zoom > 0f) {
                     CameraUpdateFactory.newLatLng(initCameraState)
                 } else {
                     CameraUpdateFactory.newLatLngZoom(initCameraState, defaultZoom)
                 }
                 cameraPositionState.move(update)
-                lastUserCameraLocation = initCameraState
+                hasAppliedInitialUserCameraFocus = true
             }
         } else {
+            hasAppliedInitialUserCameraFocus = false
             cameraPositionState.move(
                 CameraUpdateFactory.newLatLngZoom(initCameraState, defaultZoom),
             )
@@ -972,7 +968,7 @@ actual fun EventMap(
                             CameraUpdateFactory.newLatLngZoom(userLocation, defaultZoom)
                         }
                         cameraPositionState.animate(update, defaultDurationMs)
-                        lastUserCameraLocation = userLocation
+                        hasAppliedInitialUserCameraFocus = true
                     }
                 },
                 modifier = Modifier
@@ -998,7 +994,7 @@ actual fun EventMap(
                                 CameraUpdateFactory.newLatLngZoom(userLocation, defaultZoom)
                             }
                             cameraPositionState.animate(update, defaultDurationMs)
-                            lastUserCameraLocation = userLocation
+                            hasAppliedInitialUserCameraFocus = true
                         }
                     }
                 },

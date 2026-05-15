@@ -491,10 +491,7 @@ struct GoogleMapView: UIViewRepresentable {
         context.coordinator.updateCameraViewport(mapView)
 
         if isFocusedOnUserLocation, let focusedLocation {
-            context.coordinator.lastUserCameraLocation = CLLocation(
-                latitude: focusedLocation.latitude,
-                longitude: focusedLocation.longitude
-            )
+            context.coordinator.markInitialUserCameraFocusApplied()
         } else if let focusedLocation {
             context.coordinator.recordExplicitFocus(
                 CLLocationCoordinate2D(
@@ -536,22 +533,20 @@ struct GoogleMapView: UIViewRepresentable {
         var markerToReselect: GMSMarker?
 
         if isFocusedOnUserLocation, let focusedLocation {
-            let focusedCoordinate = CLLocationCoordinate2D(
-                latitude: focusedLocation.latitude,
-                longitude: focusedLocation.longitude
-            )
-            if context.coordinator.shouldRecenterOnUserLocation(
-                focusedCoordinate,
-                thresholdMeters: 1000
-            ) {
+            if context.coordinator.shouldApplyInitialUserCameraFocus() {
+                let focusedCoordinate = CLLocationCoordinate2D(
+                    latitude: focusedLocation.latitude,
+                    longitude: focusedLocation.longitude
+                )
                 mapView.animate(with: GMSCameraUpdate.setTarget(focusedCoordinate))
-                context.coordinator.recordUserCameraLocation(focusedCoordinate)
+                context.coordinator.markInitialUserCameraFocusApplied()
             }
         } else if let focusedLocation, !(selectionRequiresConfirmation && selectedPlace != nil) {
             let focusedCoordinate = CLLocationCoordinate2D(
                 latitude: focusedLocation.latitude,
                 longitude: focusedLocation.longitude
             )
+            context.coordinator.resetInitialUserCameraFocus()
             if context.coordinator.shouldRecenterOnExplicitFocus(
                 focusedCoordinate,
                 thresholdMeters: 1
@@ -770,11 +765,11 @@ class Coordinator: NSObject, GMSMapViewDelegate {
     
     var placeMarkers: [GMSMarker] = []
     var currentPOIMarker: GMSMarker?
-    var lastUserCameraLocation: CLLocation?
     var lastExplicitFocusLocation: CLLocation?
     fileprivate var lastConfirmedSelectionKey: MarkerSelectionKey?
     var lastHandledRecenterRequestToken: Int = 0
     var currentLocation: LatLng?
+    private var hasAppliedInitialUserCameraFocus = false
     private weak var mapView: GMSMapView?
     
     init(parent: GoogleMapView) {
@@ -803,17 +798,16 @@ class Coordinator: NSObject, GMSMapViewDelegate {
         return nil
     }
 
-    func shouldRecenterOnUserLocation(
-        _ coordinate: CLLocationCoordinate2D,
-        thresholdMeters: CLLocationDistance
-    ) -> Bool {
-        guard let lastUserCameraLocation else { return true }
-        let nextLocation = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-        return nextLocation.distance(from: lastUserCameraLocation) >= thresholdMeters
+    func shouldApplyInitialUserCameraFocus() -> Bool {
+        !hasAppliedInitialUserCameraFocus
     }
 
-    func recordUserCameraLocation(_ coordinate: CLLocationCoordinate2D) {
-        lastUserCameraLocation = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+    func markInitialUserCameraFocusApplied() {
+        hasAppliedInitialUserCameraFocus = true
+    }
+
+    func resetInitialUserCameraFocus() {
+        hasAppliedInitialUserCameraFocus = false
     }
 
     func shouldRecenterOnExplicitFocus(
@@ -849,7 +843,7 @@ class Coordinator: NSObject, GMSMapViewDelegate {
         )
         let zoom = mapView.camera.zoom > 0 ? mapView.camera.zoom : 12
         mapView.animate(to: GMSCameraPosition.camera(withTarget: coordinate, zoom: zoom))
-        recordUserCameraLocation(coordinate)
+        markInitialUserCameraFocusApplied()
     }
 
     func updateCameraCenter(_ coordinate: CLLocationCoordinate2D) {
