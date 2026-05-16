@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.BoundsTransform
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateBounds
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -12,8 +13,11 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -99,6 +103,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -117,6 +122,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
@@ -259,6 +265,7 @@ private data class EventDetailTabIconStyle(
 private val FloatingDockShape = RoundedCornerShape(20.dp)
 private val FloatingDockMinHeight = 60.dp
 private val FloatingDockShadowPadding = 8.dp
+private val DivisionPillContentTopOffset = 40.dp
 private const val FloatingDockExpandDurationMillis = 260
 
 @Composable
@@ -403,25 +410,139 @@ private fun EventDetailTabStrip(
 @Composable
 private fun EventDetailSelectedDivisionPill(
     label: String,
+    selectedDivisionId: String?,
+    divisionOptions: List<BracketDivisionOption>,
+    onDivisionSelected: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        modifier = modifier,
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        tonalElevation = 1.dp,
-    ) {
-        Text(
-            text = "Division: $label",
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+    var expanded by remember { mutableStateOf(false) }
+    val canOpen = divisionOptions.size > 1
+    val arrowRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(durationMillis = 180),
+        label = "divisionPillArrowRotation",
+    )
+
+    Box(modifier = modifier) {
+        Surface(
+            modifier = Modifier.clickable(
+                enabled = canOpen,
+                onClick = { expanded = !expanded },
+            ),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            tonalElevation = 1.dp,
+            shadowElevation = 1.dp,
+        ) {
+            Row(
+                modifier = Modifier.padding(
+                    start = 14.dp,
+                    end = if (canOpen) 8.dp else 14.dp,
+                    top = 7.dp,
+                    bottom = 7.dp,
+                ),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = "Division: $label",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (canOpen) {
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .rotate(arrowRotation),
+                    )
+                }
+            }
+        }
+        DropdownMenu(
+            expanded = canOpen && expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            divisionOptions.forEach { option ->
+                val selected = divisionsEquivalent(option.id, selectedDivisionId)
+                DropdownMenuItem(
+                    text = { Text(option.label) },
+                    onClick = {
+                        expanded = false
+                        onDivisionSelected(option.id)
+                    },
+                    trailingIcon = if (selected) {
+                        {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    } else {
+                        null
+                    },
+                    colors = MenuDefaults.itemColors(
+                        textColor = if (selected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                    ),
+                )
+            }
+        }
     }
 }
+
+private fun List<BracketDivisionOption>.selectedDivisionLabel(
+    divisionId: String?,
+    divisionDetails: List<DivisionDetail>,
+): String? =
+    resolveDivisionLabel(divisionId)
+        ?: divisionId
+            ?.normalizeDivisionIdentifier()
+            ?.takeIf(String::isNotBlank)
+            ?.toDivisionDisplayLabel(divisionDetails)
+
+private fun List<BracketDivisionOption>.selectedDivisionIdOrRaw(divisionId: String?): String? {
+    if (isEmpty()) {
+        return divisionId
+            ?.normalizeDivisionIdentifier()
+            ?.takeIf(String::isNotBlank)
+    }
+    return resolveSelectedDivisionId(divisionId)
+}
+
+private data class SelectedDivisionPillState(
+    val selectedDivisionId: String?,
+    val label: String,
+    val options: List<BracketDivisionOption>,
+)
+
+private fun buildSelectedDivisionPillState(
+    selectedDivisionId: String?,
+    options: List<BracketDivisionOption>,
+    divisionDetails: List<DivisionDetail>,
+    singleDivision: Boolean,
+): SelectedDivisionPillState? {
+    if (singleDivision || options.size <= 1) return null
+    val resolvedDivisionId = options.selectedDivisionIdOrRaw(selectedDivisionId)
+    val label = options.selectedDivisionLabel(resolvedDivisionId, divisionDetails)
+        ?: return null
+    return SelectedDivisionPillState(
+        selectedDivisionId = resolvedDivisionId,
+        label = label,
+        options = options,
+    )
+}
+
+private fun List<BracketDivisionOption>.distinctById(): List<BracketDivisionOption> =
+    distinctBy { option -> option.id }
 
 private fun List<BracketDivisionOption>.resolveDivisionLabel(divisionId: String?): String? {
     val normalizedDivisionId = divisionId
@@ -1564,9 +1685,6 @@ private fun StickyActionBar(
 
 @Composable
 private fun BracketFloatingBar(
-    selectedDivisionId: String?,
-    divisionOptions: List<BracketDivisionOption>,
-    onDivisionSelected: (String) -> Unit,
     selectedPoolDivisionId: String? = null,
     poolOptions: List<BracketDivisionOption> = emptyList(),
     onPoolSelected: ((String?) -> Unit)? = null,
@@ -1596,7 +1714,6 @@ private fun BracketFloatingBar(
     onShowDetailsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var isDivisionMenuExpanded by remember { mutableStateOf(false) }
     var isPoolMenuExpanded by remember { mutableStateOf(false) }
     val content: @Composable () -> Unit = {
         FloatingDockActionsLayout(
@@ -1636,38 +1753,6 @@ private fun BracketFloatingBar(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                }
-            }
-            if (divisionOptions.isNotEmpty()) {
-                Box(modifier = Modifier.floatingDockActionWidth()) {
-                    Button(
-                        onClick = { isDivisionMenuExpanded = true },
-                        modifier = Modifier.floatingDockActionWidth(minWidth = 120.dp),
-                    ) {
-                        Text(text = "Division")
-                    }
-                    DropdownMenu(
-                        expanded = isDivisionMenuExpanded,
-                        onDismissRequest = { isDivisionMenuExpanded = false }
-                    ) {
-                        divisionOptions.forEach { option ->
-                            DropdownMenuItem(
-                                text = { Text(option.label) },
-                                onClick = {
-                                    isDivisionMenuExpanded = false
-                                    onDivisionSelected(option.id)
-                                },
-                                leadingIcon = {
-                                    if (option.id == selectedDivisionId) {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = null
-                                        )
-                                    }
-                                }
-                            )
-                        }
-                    }
                 }
             }
             if (poolOptions.isNotEmpty() && onPoolSelected != null) {
@@ -4509,6 +4594,20 @@ fun EventDetailScreen(
                                 }
                             )
                         }
+                        val selectedParticipantsDivisionId = remember(
+                            selectedDivision,
+                            registrationDivisionOptions,
+                            selectedJoinDivisionId,
+                        ) {
+                            registrationDivisionOptions.resolveSelectedEventDivisionId(selectedDivision)
+                                ?: selectedJoinDivisionId
+                        }
+                        val participantsTabDivisionOptions = remember(
+                            registrationJoinDivisionOptions,
+                            joinDivisionOptions,
+                        ) {
+                            registrationJoinDivisionOptions.ifEmpty { joinDivisionOptions }.distinctById()
+                        }
                         var isDetailDockExpanded by rememberSaveable { mutableStateOf(false) }
                         LaunchedEffect(availableTabs) {
                             if (selectedTab !in availableTabs) {
@@ -4548,9 +4647,11 @@ fun EventDetailScreen(
                                 selectedParticipantsSection = participantSections.first()
                             }
                         }
-                        val selectedDivisionPillLabel = remember(
+                        val selectedDivisionPillState = remember(
                             selectedTab,
                             selectedDivision,
+                            selectedParticipantsDivisionId,
+                            participantsTabDivisionOptions,
                             selectedScheduleDivisionId,
                             selectedSchedulePoolDivisionId,
                             schedulePoolDivisionOptions,
@@ -4561,6 +4662,7 @@ fun EventDetailScreen(
                             selectedBracketDivisionId,
                             bracketTabDivisionOptions,
                             joinDivisionOptions,
+                            selectedEvent.event.singleDivision,
                             selectedEvent.event.divisionDetails,
                         ) {
                             val selectedDivisionForTab = when (selectedTab) {
@@ -4569,7 +4671,8 @@ fun EventDetailScreen(
                                     ?: selectedScheduleDivisionId
                                 DetailTab.LEAGUES -> selectedStandingsDataDivisionId
                                     ?: selectedStandingsDivisionId
-                                DetailTab.PARTICIPANTS -> selectedDivision
+                                DetailTab.PARTICIPANTS -> selectedParticipantsDivisionId
+                                    ?: selectedDivision
                             }
                             val divisionOptionsForTab = when (selectedTab) {
                                 DetailTab.BRACKET -> bracketTabDivisionOptions
@@ -4587,13 +4690,19 @@ fun EventDetailScreen(
                                 } else {
                                     standingsTabDivisionOptions
                                 }
-                                DetailTab.PARTICIPANTS -> joinDivisionOptions
-                            }
-                            divisionOptionsForTab.resolveDivisionLabel(selectedDivisionForTab)
-                                ?: selectedDivisionForTab
-                                    ?.normalizeDivisionIdentifier()
-                                    ?.takeIf(String::isNotBlank)
-                                    ?.toDivisionDisplayLabel(selectedEvent.event.divisionDetails)
+                                DetailTab.PARTICIPANTS -> participantsTabDivisionOptions
+                            }.distinctById()
+                            buildSelectedDivisionPillState(
+                                selectedDivisionId = selectedDivisionForTab,
+                                options = divisionOptionsForTab,
+                                divisionDetails = selectedEvent.event.divisionDetails,
+                                singleDivision = selectedEvent.event.singleDivision,
+                            )
+                        }
+                        val tabContentTopOffset = if (selectedDivisionPillState != null) {
+                            DivisionPillContentTopOffset
+                        } else {
+                            0.dp
                         }
                         EventDetailTabStrip(
                             availableTabs = availableTabs,
@@ -4603,28 +4712,12 @@ fun EventDetailScreen(
                                 .fillMaxWidth()
                                 .padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
                         )
-                        AnimatedVisibility(
-                            visible = !selectedDivisionPillLabel.isNullOrBlank(),
-                            enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-                            exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 2.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                EventDetailSelectedDivisionPill(
-                                    label = selectedDivisionPillLabel.orEmpty(),
-                                    modifier = Modifier.widthIn(max = 280.dp),
-                                )
-                            }
-                        }
                         Box(Modifier.fillMaxSize()) {
                             when (selectedTab) {
                                 DetailTab.BRACKET -> {
                                     TournamentBracketView(
                                         showFab = { showFab = it },
+                                        topContentPadding = tabContentTopOffset,
                                         onMatchClick = { match ->
                                             if (!canEditMatches) {
                                                 component.matchSelected(match)
@@ -4650,6 +4743,7 @@ fun EventDetailScreen(
                                             items = weeklyScheduleItems,
                                             fields = eventFields,
                                             showFab = { showFab = it },
+                                            topContentPadding = tabContentTopOffset,
                                             timeZone = selectedEvent.event.resolvedTimeZone(),
                                             onMatchClick = {},
                                             onEventClick = { selectedOccurrenceEvent ->
@@ -4804,6 +4898,7 @@ fun EventDetailScreen(
                                             items = scheduledMatches.map { match -> ScheduleItem.MatchEntry(match) },
                                             fields = eventFields,
                                             showFab = { showFab = it },
+                                            topContentPadding = tabContentTopOffset,
                                             timeZone = selectedEvent.event.resolvedTimeZone(),
                                             trackedUserIds = scheduleTrackedUserIds,
                                             showEventOfficialNames = canEditMatches || isEventOfficial,
@@ -4832,11 +4927,19 @@ fun EventDetailScreen(
                                     }
                                     LeagueStandingsTab(
                                         standings = leagueStandings,
+                                        standingsDivisionKey = selectedStandingsDataDivisionId
+                                            ?.trim()
+                                            ?.takeIf(String::isNotBlank)
+                                            ?: selectedStandingsDivisionId
+                                                ?.trim()
+                                                ?.takeIf(String::isNotBlank)
+                                            ?: "all",
                                         showDrawColumn = showStandingsDrawColumn,
+                                        topContentPadding = tabContentTopOffset,
                                         showFab = { showFab = it },
                                         standingsConfirmedAt = selectedLeagueDivisionStandings?.standingsConfirmedAt,
                                         validationMessages = selectedLeagueDivisionStandings?.validationMessages.orEmpty(),
-                                        isLoading = leagueDivisionStandingsLoading,
+                                        isLoading = false,
                                         isConfirming = leagueStandingsConfirming,
                                         canConfirmStandings = canManageLeagueStandings,
                                     )
@@ -4868,15 +4971,69 @@ fun EventDetailScreen(
                                             onNavigateToChat = component::onNavigateToChat,
                                             manageMode = isManagingParticipants,
                                             canManageParticipants = canManageParticipantsFromDock,
-                                            selectedDivisionId = selectedDivision,
-                                            divisionOptions = if (isManagingParticipants) {
-                                                splitRegistrationDivisionOptions
-                                            } else {
-                                                emptyList()
-                                            },
+                                            topContentPadding = tabContentTopOffset,
+                                            selectedDivisionId = selectedParticipantsDivisionId
+                                                ?: selectedDivision,
+                                            divisionOptions = registrationDivisionOptions,
                                             onTeamDivisionSelected = component::moveTeamParticipantDivision,
                                         )
                                     }
+                                }
+                            }
+                            @Suppress("RedundantQualifierName")
+                            androidx.compose.animation.AnimatedVisibility(
+                                visible = selectedDivisionPillState != null,
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .padding(top = 4.dp)
+                                    .zIndex(2f),
+                                enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
+                                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
+                            ) {
+                                selectedDivisionPillState?.let { pillState ->
+                                    EventDetailSelectedDivisionPill(
+                                        label = pillState.label,
+                                        selectedDivisionId = pillState.selectedDivisionId,
+                                        divisionOptions = pillState.options,
+                                        onDivisionSelected = { divisionId ->
+                                            when (selectedTab) {
+                                                DetailTab.BRACKET -> {
+                                                    component.selectDivision(divisionId)
+                                                }
+                                                DetailTab.SCHEDULE -> {
+                                                    if (!selectedSchedulePoolDivisionId.isNullOrBlank() &&
+                                                        schedulePoolDivisionOptions.any { option ->
+                                                            divisionsEquivalent(option.id, divisionId)
+                                                        }
+                                                    ) {
+                                                        selectedSchedulePoolDivisionId = divisionId
+                                                    } else {
+                                                        selectedSchedulePoolDivisionId = null
+                                                        component.selectDivision(divisionId)
+                                                    }
+                                                }
+                                                DetailTab.LEAGUES -> {
+                                                    if (!selectedStandingsDataDivisionId.isNullOrBlank() &&
+                                                        standingsPoolDivisionOptions.any { option ->
+                                                            divisionsEquivalent(option.id, divisionId)
+                                                        }
+                                                    ) {
+                                                        selectedStandingsPoolDivisionId = divisionId
+                                                        component.selectDivision(divisionId)
+                                                    } else {
+                                                        selectedStandingsPoolDivisionId = null
+                                                        component.selectDivision(divisionId)
+                                                    }
+                                                }
+                                                DetailTab.PARTICIPANTS -> {
+                                                    component.selectDivision(divisionId)
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .padding(horizontal = 12.dp)
+                                            .widthIn(max = 280.dp),
+                                    )
                                 }
                             }
                             @Suppress("RedundantQualifierName")
@@ -4895,9 +5052,6 @@ fun EventDetailScreen(
                                         onCollapseClick = { isDetailDockExpanded = false },
                                     ) { dockModifier, onCloseClick ->
                                         BracketFloatingBar(
-                                            selectedDivisionId = selectedBracketDivisionId,
-                                            divisionOptions = bracketTabDivisionOptions,
-                                            onDivisionSelected = component::selectDivision,
                                             showBracketToggle = showLosersBracketSelector,
                                             isLosersBracket = losersBracket,
                                             onBracketToggle = component::toggleLosersBracket,
@@ -4946,22 +5100,6 @@ fun EventDetailScreen(
                                         onCollapseClick = { isDetailDockExpanded = false },
                                     ) { dockModifier, onCloseClick ->
                                         BracketFloatingBar(
-                                            selectedDivisionId = if (tournamentPoolPlayEnabled) {
-                                                selectedScheduleDivisionId
-                                            } else {
-                                                selectedJoinDivisionId
-                                            },
-                                            divisionOptions = if (isWeeklyParentEvent) {
-                                                emptyList()
-                                            } else if (tournamentPoolPlayEnabled && tournamentBracketDivisionOptions.isNotEmpty()) {
-                                                tournamentBracketDivisionOptions
-                                            } else {
-                                                joinDivisionOptions
-                                            },
-                                            onDivisionSelected = { divisionId ->
-                                                selectedSchedulePoolDivisionId = null
-                                                component.selectDivision(divisionId)
-                                            },
                                             selectedPoolDivisionId = selectedSchedulePoolDivisionId,
                                             poolOptions = if (tournamentPoolPlayEnabled) {
                                                 schedulePoolDivisionOptions
@@ -5018,12 +5156,6 @@ fun EventDetailScreen(
                                         onCollapseClick = { isDetailDockExpanded = false },
                                     ) { dockModifier, onCloseClick ->
                                         BracketFloatingBar(
-                                            selectedDivisionId = selectedStandingsDivisionId,
-                                            divisionOptions = standingsTabDivisionOptions,
-                                            onDivisionSelected = { divisionId ->
-                                                selectedStandingsPoolDivisionId = null
-                                                component.selectDivision(divisionId)
-                                            },
                                             selectedPoolDivisionId = selectedStandingsDataDivisionId,
                                             poolOptions = if (tournamentPoolPlayEnabled) {
                                                 standingsPoolDivisionOptions
@@ -5772,7 +5904,9 @@ private fun WithdrawTargetDialog(
 @Composable
 private fun LeagueStandingsTab(
     standings: List<TeamStanding>,
+    standingsDivisionKey: String,
     showDrawColumn: Boolean,
+    topContentPadding: Dp = 0.dp,
     standingsConfirmedAt: Instant?,
     validationMessages: List<String>,
     isLoading: Boolean,
@@ -5788,6 +5922,14 @@ private fun LeagueStandingsTab(
     showFab(if (standings.isEmpty()) true else isScrollingUp)
     val visibleValidationMessages = if (canConfirmStandings) validationMessages else emptyList()
     val confirmedLabel = standingsConfirmedAt?.let(::formatStandingsConfirmedAt)
+    val normalizedStandingsDivisionKey = standingsDivisionKey.trim().ifBlank { "all" }
+    var previousStandingsRowCount by remember { mutableStateOf(standings.size) }
+    val standingsRowSlotCount = maxOf(standings.size, previousStandingsRowCount)
+
+    LaunchedEffect(normalizedStandingsDivisionKey, standings.size) {
+        delay(StandingsRowTransitionRetainMillis.toLong())
+        previousStandingsRowCount = standings.size
+    }
 
     Column(
         modifier = Modifier
@@ -5819,35 +5961,110 @@ private fun LeagueStandingsTab(
             }
         }
 
-        if (standings.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    "Standings will appear once scores are reported.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            return@Column
-        }
-
-        LeagueStandingsHeader(columns = standingsColumns)
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize(),
             state = standingsListState,
         ) {
-            items(standings, key = { it.teamId }) { standing ->
-                LeagueStandingRow(
-                    standing = standing,
-                    columns = standingsColumns,
-                )
+            if (topContentPadding > 0.dp) {
+                item(key = "division-pill-spacer") {
+                    Spacer(modifier = Modifier.height(topContentPadding))
+                }
+            }
+            if (standingsRowSlotCount == 0) {
+                item(key = "standings-empty") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 320.dp)
+                            .padding(horizontal = 24.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "Standings will appear once scores are reported.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+            } else {
+                item(key = "standings-header") {
+                    LeagueStandingsHeader(columns = standingsColumns)
+                }
+                items(
+                    count = standingsRowSlotCount,
+                    key = { index -> "standings-row-$index" },
+                ) { index ->
+                    val rowDelay = standingsWaveDelay(index)
+                    AnimatedContent(
+                        targetState = LeagueStandingsRowAnimationState(
+                            divisionKey = normalizedStandingsDivisionKey,
+                            index = index,
+                            standing = standings.getOrNull(index),
+                        ),
+                        contentKey = { target -> "${target.divisionKey}-${target.index}" },
+                        transitionSpec = {
+                            ((
+                                slideInHorizontally(
+                                    animationSpec = tween(
+                                        durationMillis = StandingsRowSlideInMillis,
+                                        delayMillis = rowDelay,
+                                    ),
+                                    initialOffsetX = { fullWidth -> -fullWidth / 4 },
+                                ) + fadeIn(
+                                    animationSpec = tween(
+                                        durationMillis = StandingsRowFadeInMillis,
+                                        delayMillis = StandingsRowFadeInDelayMillis + rowDelay,
+                                    ),
+                                )
+                                ) togetherWith (
+                                slideOutHorizontally(
+                                    animationSpec = tween(
+                                        durationMillis = StandingsRowSlideOutMillis,
+                                        delayMillis = rowDelay,
+                                    ),
+                                    targetOffsetX = { fullWidth -> fullWidth / 3 },
+                                ) + fadeOut(
+                                    animationSpec = tween(
+                                        durationMillis = StandingsRowFadeOutMillis,
+                                        delayMillis = rowDelay,
+                                    ),
+                                )
+                                )).using(SizeTransform(clip = false))
+                        },
+                        label = "standingsDivisionTeamRow",
+                    ) { target ->
+                        target.standing?.let { standing ->
+                            LeagueStandingRow(
+                                standing = standing,
+                                columns = standingsColumns,
+                            )
+                        } ?: Spacer(modifier = Modifier.height(0.dp))
+                    }
+                }
             }
         }
     }
 }
+
+private data class LeagueStandingsRowAnimationState(
+    val divisionKey: String,
+    val index: Int,
+    val standing: TeamStanding?,
+)
+
+private fun standingsWaveDelay(index: Int): Int =
+    (index * StandingsRowWaveDelayMillis).coerceAtMost(StandingsRowWaveMaxDelayMillis)
+
+private const val StandingsRowSlideInMillis = 220
+private const val StandingsRowFadeInMillis = 180
+private const val StandingsRowFadeInDelayMillis = 60
+private const val StandingsRowSlideOutMillis = 180
+private const val StandingsRowFadeOutMillis = 150
+private const val StandingsRowWaveDelayMillis = 22
+private const val StandingsRowWaveMaxDelayMillis = 154
+private const val StandingsRowTransitionRetainMillis = 420
 
 @Composable
 private fun StandingsConfirmedMessage(

@@ -53,6 +53,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -140,6 +141,7 @@ fun ScheduleView(
     items: List<ScheduleItem>,
     fields: List<FieldWithMatches>,
     showFab: (Boolean) -> Unit,
+    topContentPadding: Dp = 0.dp,
     trackedUserIds: Set<String> = emptySet(),
     showEventOfficialNames: Boolean = true,
     limitOfficialsToCurrentUser: Boolean = false,
@@ -322,6 +324,11 @@ fun ScheduleView(
             verticalArrangement = Arrangement.spacedBy(0.dp),
             contentPadding = navPadding
         ) {
+            if (topContentPadding > 0.dp) {
+                item(key = "division_pill_spacer") {
+                    Spacer(modifier = Modifier.height(topContentPadding))
+                }
+            }
             item(key = "schedule_calendar") {
                 HorizontalCalendar(
                     state = calendarState,

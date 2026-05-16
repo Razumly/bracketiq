@@ -66,6 +66,7 @@ private const val BRACKET_LAYOUT_ANIMATION_MS = 300
 @Composable
 fun TournamentBracketView(
     showFab: (Boolean) -> Unit,
+    topContentPadding: Dp = 0.dp,
     onMatchClick: (MatchWithRelations) -> Unit = {},
     isEditingMatches: Boolean = false,
     editableMatches: List<MatchWithRelations> = emptyList(),
@@ -308,6 +309,9 @@ fun TournamentBracketView(
             .background(MaterialTheme.colorScheme.background)
     ) {
         Column(Modifier.fillMaxWidth()) {
+            if (topContentPadding > 0.dp) {
+                Spacer(modifier = Modifier.height(topContentPadding))
+            }
             LazyRow(
                 state = lazyRowState,
                 modifier = Modifier.height(animatedBoxHeight).fillMaxWidth(),

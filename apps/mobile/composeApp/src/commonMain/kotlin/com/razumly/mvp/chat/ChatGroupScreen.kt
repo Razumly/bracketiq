@@ -261,7 +261,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                             start = 16.dp,
                             top = 8.dp,
                             end = 16.dp,
-                            bottom = 20.dp,
+                            bottom = 32.dp,
                         ),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)

@@ -2,6 +2,8 @@ package com.razumly.mvp.eventDetail.composables
 
 import coil3.compose.AsyncImage
 import com.razumly.mvp.core.network.userMessage
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -10,8 +12,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -40,9 +45,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -84,6 +91,7 @@ import com.razumly.mvp.eventDetail.matchesDivisionIdentifier
 import com.razumly.mvp.eventDetail.resolveSelectedEventDivisionId
 import com.razumly.mvp.eventDetail.visibleTeams
 import kotlin.math.round
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import org.koin.core.parameter.parametersOf
@@ -102,10 +110,137 @@ internal fun visibleParticipantTeams(
     teams: Iterable<TeamWithPlayers>,
 ): List<TeamWithPlayers> = event.visibleTeams(teams.toList())
 
+internal fun visibleParticipantTeamsForDivision(
+    event: Event,
+    teams: Iterable<TeamWithPlayers>,
+    divisionOptions: List<EventDetailDivisionOption>,
+    selectedDivisionId: String?,
+): List<TeamWithPlayers> {
+    val visibleTeams = visibleParticipantTeams(event, teams)
+    val selectedOption = selectedParticipantDivisionOption(event, divisionOptions, selectedDivisionId)
+        ?: return visibleTeams
+    return visibleTeams.filter { team -> team.matchesParticipantDivision(selectedOption) }
+}
+
+internal fun hasParticipantDivisionFilter(
+    event: Event,
+    divisionOptions: List<EventDetailDivisionOption>,
+    selectedDivisionId: String?,
+): Boolean = selectedParticipantDivisionOption(event, divisionOptions, selectedDivisionId) != null
+
+private fun selectedParticipantDivisionOption(
+    event: Event,
+    divisionOptions: List<EventDetailDivisionOption>,
+    selectedDivisionId: String?,
+): EventDetailDivisionOption? {
+    if (event.singleDivision) return null
+    if (divisionOptions.size <= 1) return null
+    val resolvedDivisionId = divisionOptions.resolveSelectedEventDivisionId(selectedDivisionId)
+        ?: return null
+    return divisionOptions.firstOrNull { option -> option.matchesDivisionIdentifier(resolvedDivisionId) }
+}
+
+private fun TeamWithPlayers.matchesParticipantDivision(
+    selectedOption: EventDetailDivisionOption,
+): Boolean {
+    val teamDivision = team.division.trim().takeIf(String::isNotBlank)
+    val teamDivisionTypeId = team.divisionTypeId?.trim()?.takeIf(String::isNotBlank)
+    return selectedOption.matchesDivisionIdentifier(teamDivision) ||
+        selectedOption.matchesDivisionIdentifier(teamDivisionTypeId)
+}
+
+private fun participantUserIdsForTeams(teams: Iterable<TeamWithPlayers>): Set<String> =
+    teams.flatMap { teamWithPlayers ->
+        val syncedTeam = teamWithPlayers.team.withSynchronizedMembership()
+        buildList {
+            addAll(syncedTeam.activePlayerRegistrations().map { registration -> registration.userId })
+            addAll(syncedTeam.playerIds)
+            addAll(teamWithPlayers.players.map { player -> player.id })
+        }
+    }
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .toSet()
+
 private enum class ParticipantCardType {
     TEAM,
     USER,
 }
+
+private sealed class ParticipantAnimatedCard {
+    abstract val stableId: String
+
+    data class TeamEntry(
+        val team: TeamWithPlayers,
+    ) : ParticipantAnimatedCard() {
+        override val stableId: String = "team:${team.team.id}"
+    }
+
+    data class UserEntry(
+        val user: UserData,
+        val section: ParticipantsSection,
+    ) : ParticipantAnimatedCard() {
+        override val stableId: String = "${section.name}:${user.id}"
+    }
+}
+
+private enum class ParticipantCardWavePhase {
+    VISIBLE,
+    ENTERING,
+    EXITING,
+}
+
+private data class ParticipantCardWaveSlot(
+    val index: Int,
+    val outgoing: ParticipantAnimatedCard?,
+    val incoming: ParticipantAnimatedCard?,
+    val transitioning: Boolean,
+)
+
+private fun List<ParticipantAnimatedCard>.toParticipantVisibleSlots(): List<ParticipantCardWaveSlot> =
+    mapIndexed { index, card ->
+        ParticipantCardWaveSlot(
+            index = index,
+            outgoing = null,
+            incoming = card,
+            transitioning = false,
+        )
+    }
+
+private fun buildParticipantWaveSlots(
+    outgoingCards: List<ParticipantAnimatedCard>,
+    incomingCards: List<ParticipantAnimatedCard>,
+): List<ParticipantCardWaveSlot> {
+    val slotCount = maxOf(outgoingCards.size, incomingCards.size)
+    return List(slotCount) { index ->
+        ParticipantCardWaveSlot(
+            index = index,
+            outgoing = outgoingCards.getOrNull(index),
+            incoming = incomingCards.getOrNull(index),
+            transitioning = true,
+        )
+    }
+}
+
+private fun participantWaveDelay(index: Int): Int =
+    (index * ParticipantCardWaveDelayMillis).coerceAtMost(ParticipantCardWaveMaxDelayMillis)
+
+private const val ParticipantCardSlideInMillis = 220
+private const val ParticipantCardFadeInMillis = 180
+private const val ParticipantCardFadeInDelayMillis = 60
+private const val ParticipantCardSlideOutMillis = 180
+private const val ParticipantCardFadeOutMillis = 150
+private const val ParticipantCardWaveDelayMillis = 22
+private const val ParticipantCardWaveMaxDelayMillis = 154
+private const val ParticipantCardTransitionRetainMillis = 420
+
+private data class ParticipantCardListState(
+    val animationKey: String,
+    val cards: List<ParticipantAnimatedCard>,
+    val emptyMessage: String,
+    val showLoading: Boolean = false,
+    val loadingMessage: String? = null,
+)
 
 private data class ParticipantBillingContext(
     val billingTeamId: String,
@@ -193,6 +328,7 @@ fun ParticipantsView(
     onNavigateToChat: (UserData) -> Unit,
     manageMode: Boolean = false,
     canManageParticipants: Boolean = false,
+    topContentPadding: Dp = 0.dp,
     selectedDivisionId: String? = null,
     divisionOptions: List<EventDetailDivisionOption> = emptyList(),
     onTeamDivisionSelected: (TeamWithPlayers, String) -> Unit = { _, _ -> },
@@ -211,8 +347,25 @@ fun ParticipantsView(
     val eventTeams = remember(selectedEvent.event.eventType, teamSignup, selectedEvent.teams) {
         visibleParticipantTeams(selectedEvent.event, selectedEvent.teams)
     }
-    val visibleDivisionTeams = remember(selectedEvent.event.eventType, teamSignup, divisionTeams) {
-        visibleParticipantTeams(selectedEvent.event, divisionTeams.values)
+    val visibleDivisionTeams = remember(
+        selectedEvent.event.eventType,
+        teamSignup,
+        divisionTeams,
+        divisionOptions,
+        selectedDivisionId,
+    ) {
+        visibleParticipantTeamsForDivision(
+            event = selectedEvent.event,
+            teams = divisionTeams.values,
+            divisionOptions = divisionOptions,
+            selectedDivisionId = selectedDivisionId,
+        )
+    }
+    val filtersByDivision = remember(selectedEvent.event.singleDivision, divisionOptions, selectedDivisionId) {
+        hasParticipantDivisionFilter(selectedEvent.event, divisionOptions, selectedDivisionId)
+    }
+    val participantTeams = remember(eventTeams, visibleDivisionTeams, filtersByDivision) {
+        if (filtersByDivision) visibleDivisionTeams else eventTeams
     }
     val participantIds = remember(selectedEvent.event.playerIds) {
         selectedEvent.event.playerIds
@@ -234,13 +387,113 @@ fun ParticipantsView(
         val playersById = selectedEvent.players.associateBy(UserData::id)
         freeAgentIds.mapNotNull(playersById::get)
     }
-    val participantUsers = remember(selectedEvent.players, eventTeams, freeAgentUsers) {
-        val teamPlayers = eventTeams.flatMap { team -> team.players }
-        (teamPlayers + selectedEvent.players + freeAgentUsers).distinctBy(UserData::id)
+    val participantUsers = remember(selectedEvent.players, participantTeams, freeAgentUsers, filtersByDivision) {
+        val usersById = (selectedEvent.players + participantTeams.flatMap { team -> team.players })
+            .distinctBy(UserData::id)
+            .associateBy(UserData::id)
+        val teamUserIds = participantUserIdsForTeams(participantTeams)
+        val teamPlayers = if (teamUserIds.isEmpty()) {
+            participantTeams.flatMap { team -> team.players }
+        } else {
+            teamUserIds.mapNotNull(usersById::get)
+        }
+        val unassignedUsers = if (filtersByDivision) emptyList() else freeAgentUsers
+        (teamPlayers + unassignedUsers).distinctBy(UserData::id)
     }
-    val participantsTeamsByUserId = remember(eventTeams) {
+    val visibleParticipants = remember(teamSignup, participantUsers, participantUsersFromEvent, participants) {
+        if (teamSignup) {
+            participantUsers
+        } else {
+            participantUsersFromEvent.ifEmpty { participants }
+        }
+    }
+    val participantCardsDivisionKey = remember(filtersByDivision, divisionOptions, selectedDivisionId) {
+        if (!filtersByDivision) {
+            "all"
+        } else {
+            divisionOptions.resolveSelectedEventDivisionId(selectedDivisionId)
+                ?: selectedDivisionId?.trim().orEmpty()
+        }
+    }
+    val participantCardListState = remember(
+        section,
+        participantCardsDivisionKey,
+        teamSignup,
+        visibleDivisionTeams,
+        freeAgentUsers,
+        visibleParticipants,
+        manageMode,
+        canManageParticipants,
+        participantManagementLoading,
+        participantComplianceLoading,
+    ) {
+        when (section) {
+            ParticipantsSection.TEAMS -> ParticipantCardListState(
+                animationKey = "${section.name}:$participantCardsDivisionKey",
+                cards = if (teamSignup) {
+                    visibleDivisionTeams.map { team ->
+                        ParticipantAnimatedCard.TeamEntry(team)
+                    }
+                } else {
+                    emptyList()
+                },
+                emptyMessage = "No teams yet.",
+            )
+            ParticipantsSection.FREE_AGENTS -> ParticipantCardListState(
+                animationKey = "${section.name}:$participantCardsDivisionKey",
+                cards = if (teamSignup) {
+                    freeAgentUsers.map { user ->
+                        ParticipantAnimatedCard.UserEntry(
+                            user = user,
+                            section = section,
+                        )
+                    }
+                } else {
+                    emptyList()
+                },
+                emptyMessage = "No free agents yet.",
+            )
+            ParticipantsSection.PARTICIPANTS -> ParticipantCardListState(
+                animationKey = "${section.name}:$participantCardsDivisionKey",
+                cards = visibleParticipants.map { user ->
+                    ParticipantAnimatedCard.UserEntry(
+                        user = user,
+                        section = section,
+                    )
+                },
+                emptyMessage = "No participants yet.",
+                showLoading = manageMode &&
+                    canManageParticipants &&
+                    (participantManagementLoading || participantComplianceLoading),
+                loadingMessage = "Loading registration details...",
+            )
+        }
+    }
+    var displayedParticipantAnimationKey by remember {
+        mutableStateOf(participantCardListState.animationKey)
+    }
+    var displayedParticipantSlots by remember {
+        mutableStateOf(participantCardListState.cards.toParticipantVisibleSlots())
+    }
+    LaunchedEffect(participantCardListState.animationKey, participantCardListState.cards) {
+        if (displayedParticipantAnimationKey == participantCardListState.animationKey) {
+            displayedParticipantSlots = participantCardListState.cards.toParticipantVisibleSlots()
+            return@LaunchedEffect
+        }
+        val outgoingCards = displayedParticipantSlots.mapNotNull { slot ->
+            slot.incoming ?: slot.outgoing
+        }
+        displayedParticipantAnimationKey = participantCardListState.animationKey
+        displayedParticipantSlots = buildParticipantWaveSlots(
+            outgoingCards = outgoingCards,
+            incomingCards = participantCardListState.cards,
+        )
+        delay(ParticipantCardTransitionRetainMillis.toLong())
+        displayedParticipantSlots = participantCardListState.cards.toParticipantVisibleSlots()
+    }
+    val participantsTeamsByUserId = remember(participantTeams) {
         mutableMapOf<String, TeamWithPlayers>().apply {
-            eventTeams.forEach { teamWithPlayers: TeamWithPlayers ->
+            participantTeams.forEach { teamWithPlayers: TeamWithPlayers ->
                 val team = teamWithPlayers.team.withSynchronizedMembership()
                 val memberIds = buildSet {
                     addAll(team.activePlayerRegistrations().map { it.userId })
@@ -652,6 +905,135 @@ fun ParticipantsView(
         }
     }
 
+    @Composable
+    fun ParticipantWaveCard(
+        card: ParticipantAnimatedCard,
+        phase: ParticipantCardWavePhase,
+        index: Int,
+        content: @Composable (ParticipantAnimatedCard) -> Unit,
+    ) {
+        val screenWidth = getScreenWidth()
+        var enterReady by remember(card.stableId, phase) {
+            mutableStateOf(phase != ParticipantCardWavePhase.ENTERING)
+        }
+        LaunchedEffect(card.stableId, phase) {
+            if (phase == ParticipantCardWavePhase.ENTERING) {
+                enterReady = true
+            }
+        }
+        val rowDelay = participantWaveDelay(index)
+        val targetOffset = when (phase) {
+            ParticipantCardWavePhase.VISIBLE -> 0f
+            ParticipantCardWavePhase.ENTERING -> if (enterReady) 0f else -screenWidth / 4f
+            ParticipantCardWavePhase.EXITING -> screenWidth / 3f
+        }
+        val targetAlpha = when (phase) {
+            ParticipantCardWavePhase.VISIBLE -> 1f
+            ParticipantCardWavePhase.ENTERING -> if (enterReady) 1f else 0f
+            ParticipantCardWavePhase.EXITING -> 0f
+        }
+        val slideDuration = when (phase) {
+            ParticipantCardWavePhase.EXITING -> ParticipantCardSlideOutMillis
+            else -> ParticipantCardSlideInMillis
+        }
+        val fadeDuration = when (phase) {
+            ParticipantCardWavePhase.EXITING -> ParticipantCardFadeOutMillis
+            else -> ParticipantCardFadeInMillis
+        }
+        val fadeDelay = when (phase) {
+            ParticipantCardWavePhase.ENTERING -> ParticipantCardFadeInDelayMillis + rowDelay
+            ParticipantCardWavePhase.EXITING -> rowDelay
+            ParticipantCardWavePhase.VISIBLE -> 0
+        }
+        val animatedOffset by animateFloatAsState(
+            targetValue = targetOffset,
+            animationSpec = tween(
+                durationMillis = slideDuration,
+                delayMillis = if (phase == ParticipantCardWavePhase.VISIBLE) 0 else rowDelay,
+            ),
+            label = "participantCardWaveOffset",
+        )
+        val animatedAlpha by animateFloatAsState(
+            targetValue = targetAlpha,
+            animationSpec = tween(
+                durationMillis = fadeDuration,
+                delayMillis = fadeDelay,
+            ),
+            label = "participantCardWaveAlpha",
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset(x = animatedOffset.dp)
+                .alpha(animatedAlpha)
+                .padding(horizontal = 12.dp),
+        ) {
+            content(card)
+        }
+    }
+
+    @Composable
+    fun ParticipantCardContent(card: ParticipantAnimatedCard) {
+        when (card) {
+            is ParticipantAnimatedCard.TeamEntry -> {
+                TeamCard(
+                    team = card.team,
+                    modifier = Modifier.clickable {
+                        if (manageMode && canManageParticipants) {
+                            managementTarget = teamManagementTarget(card.team)
+                        } else {
+                            selectedTeam = card.team
+                            showTeamDialog = true
+                        }
+                    },
+                )
+            }
+            is ParticipantAnimatedCard.UserEntry -> {
+                if (
+                    card.section == ParticipantsSection.PARTICIPANTS &&
+                    manageMode &&
+                    canManageParticipants
+                ) {
+                    PlayerCard(
+                        player = card.user,
+                        modifier = Modifier.clickable {
+                            managementTarget = userManagementTarget(card.user)
+                        },
+                    )
+                } else {
+                    PlayerCardWithActions(
+                        player = card.user,
+                        currentUser = currentUser,
+                        onMessage = { user ->
+                            onNavigateToChat(user)
+                        },
+                        onSendFriendRequest = { user ->
+                            playerInteractionComponent.sendFriendRequest(user)
+                        },
+                        onFollow = { user ->
+                            playerInteractionComponent.followUser(user)
+                        },
+                        onUnfollow = { user ->
+                            playerInteractionComponent.unfollowUser(user)
+                        },
+                        onBlock = { user, leaveSharedChats ->
+                            playerInteractionComponent.blockUser(user, leaveSharedChats)
+                        },
+                        onUnblock = { user ->
+                            playerInteractionComponent.unblockUser(user)
+                        },
+                        onInviteToTeam = if (card.section == ParticipantsSection.FREE_AGENTS && canInviteToTeam) {
+                            { user -> component.inviteFreeAgentToTeam(user.id) }
+                        } else {
+                            null
+                        },
+                    )
+                }
+            }
+        }
+    }
+
     LazyColumn(
         Modifier
             .background(MaterialTheme.colorScheme.background)
@@ -661,6 +1043,11 @@ fun ParticipantsView(
         verticalArrangement = Arrangement.spacedBy(16.dp),
         contentPadding = navPadding,
     ) {
+        if (topContentPadding > 0.dp) {
+            item(key = "division-pill-spacer") {
+                Spacer(modifier = Modifier.height(topContentPadding))
+            }
+        }
         if (showParticipantsTitle) {
             item(key = "header") {
                 Text("Participants", style = MaterialTheme.typography.titleLarge)
@@ -671,143 +1058,52 @@ fun ParticipantsView(
             Text(section.label, style = MaterialTheme.typography.titleLarge)
         }
 
-        when (section) {
-            ParticipantsSection.TEAMS -> {
-                if (!teamSignup || visibleDivisionTeams.isEmpty()) {
-                    item(key = "teams-empty") {
-                        Text(
-                            "No teams yet.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                } else {
-                    items(
-                        visibleDivisionTeams,
-                        key = { it.team.id },
-                    ) { team ->
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            TeamCard(
-                                team = team,
-                                modifier = Modifier.clickable {
-                                    if (manageMode && canManageParticipants) {
-                                        managementTarget = teamManagementTarget(team)
-                                    } else {
-                                        selectedTeam = team
-                                        showTeamDialog = true
-                                    }
-                                },
-                            )
+        if (participantCardListState.showLoading && participantCardListState.loadingMessage != null) {
+            item(key = "participant-card-loading") {
+                Text(
+                    participantCardListState.loadingMessage,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (displayedParticipantSlots.isEmpty()) {
+            item(key = "participant-card-empty") {
+                Text(
+                    participantCardListState.emptyMessage,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            items(
+                displayedParticipantSlots,
+                key = { slot -> "participant-card-wave-slot-${slot.index}" },
+            ) { slot ->
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.TopCenter,
+                ) {
+                    slot.outgoing?.let { card ->
+                        ParticipantWaveCard(
+                            card = card,
+                            phase = ParticipantCardWavePhase.EXITING,
+                            index = slot.index,
+                        ) { animatedCard ->
+                            ParticipantCardContent(animatedCard)
                         }
                     }
-                }
-            }
-
-            ParticipantsSection.FREE_AGENTS -> {
-                if (!teamSignup || freeAgentUsers.isEmpty()) {
-                    item(key = "free-agents-empty") {
-                        Text(
-                            "No free agents yet.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                } else {
-                    items(freeAgentUsers, key = { it.id }) { freeAgent ->
-                        PlayerCardWithActions(
-                            player = freeAgent,
-                            currentUser = currentUser,
-                            onMessage = { user ->
-                                onNavigateToChat(user)
-                            },
-                            onSendFriendRequest = { user ->
-                                playerInteractionComponent.sendFriendRequest(user)
-                            },
-                            onFollow = { user ->
-                                playerInteractionComponent.followUser(user)
-                            },
-                            onUnfollow = { user ->
-                                playerInteractionComponent.unfollowUser(user)
-                            },
-                            onBlock = { user, leaveSharedChats ->
-                                playerInteractionComponent.blockUser(user, leaveSharedChats)
-                            },
-                            onUnblock = { user ->
-                                playerInteractionComponent.unblockUser(user)
-                            },
-                            onInviteToTeam = if (canInviteToTeam) {
-                                { user -> component.inviteFreeAgentToTeam(user.id) }
+                    slot.incoming?.let { card ->
+                        ParticipantWaveCard(
+                            card = card,
+                            phase = if (slot.transitioning) {
+                                ParticipantCardWavePhase.ENTERING
                             } else {
-                                null
-                            }
-                        )
-                    }
-                }
-            }
-
-            ParticipantsSection.PARTICIPANTS -> {
-                val visibleParticipants = if (teamSignup) {
-                    participantUsers
-                } else {
-                    participantUsersFromEvent.ifEmpty { participants }
-                }
-                if (manageMode && canManageParticipants && (participantManagementLoading || participantComplianceLoading)) {
-                    item(key = "participants-manage-loading") {
-                        Text(
-                            "Loading registration details...",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                if (visibleParticipants.isEmpty()) {
-                    item(key = "participants-empty") {
-                        Text(
-                            "No participants yet.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                } else {
-                    items(visibleParticipants, key = { it.id }) { participant ->
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            if (manageMode && canManageParticipants) {
-                                PlayerCard(
-                                    player = participant,
-                                    modifier = Modifier.clickable {
-                                        managementTarget = userManagementTarget(participant)
-                                    },
-                                )
-                            } else {
-                                PlayerCardWithActions(
-                                    player = participant,
-                                    currentUser = currentUser,
-                                    onMessage = { user ->
-                                        onNavigateToChat(user)
-                                    },
-                                    onSendFriendRequest = { user ->
-                                        playerInteractionComponent.sendFriendRequest(user)
-                                    },
-                                    onFollow = { user ->
-                                        playerInteractionComponent.followUser(user)
-                                    },
-                                    onUnfollow = { user ->
-                                        playerInteractionComponent.unfollowUser(user)
-                                    },
-                                    onBlock = { user, leaveSharedChats ->
-                                        playerInteractionComponent.blockUser(user, leaveSharedChats)
-                                    },
-                                    onUnblock = { user ->
-                                        playerInteractionComponent.unblockUser(user)
-                                    },
-                                )
-                            }
+                                ParticipantCardWavePhase.VISIBLE
+                            },
+                            index = slot.index,
+                        ) { animatedCard ->
+                            ParticipantCardContent(animatedCard)
                         }
                     }
                 }
@@ -886,7 +1182,6 @@ fun ParticipantsView(
             },
         )
     }
-
     removeTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { removeTarget = null },
