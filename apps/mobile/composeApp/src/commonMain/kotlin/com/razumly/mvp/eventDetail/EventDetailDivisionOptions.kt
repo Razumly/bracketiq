@@ -155,8 +155,29 @@ private fun buildSyntheticTournamentBracketRegistrationDetails(event: Event): Li
 
 internal fun List<EventDetailDivisionOption>.resolveSelectedEventDivisionId(preferredId: String?): String? {
     if (isEmpty()) return null
-    return firstOrNull { option -> option.matchesDivisionIdentifier(preferredId) }?.id
+    return findEventDivisionOption(preferredId)?.id
         ?: first().id
+}
+
+internal fun List<EventDetailDivisionOption>.findEventDivisionOption(
+    value: String?,
+    allowDivisionTypeFallback: Boolean = true,
+): EventDetailDivisionOption? {
+    val normalizedValue = value
+        ?.normalizeDivisionIdentifier()
+        .orEmpty()
+    if (normalizedValue.isEmpty()) return null
+
+    firstOrNull { option -> option.id == normalizedValue }
+        ?.let { option -> return option }
+
+    val keyMatches = filter { option -> option.key == normalizedValue }
+    if (keyMatches.size == 1) return keyMatches.single()
+
+    if (!allowDivisionTypeFallback) return null
+
+    val divisionTypeMatches = filter { option -> option.matchesDivisionTypeIdentifier(normalizedValue) }
+    return divisionTypeMatches.singleOrNull()
 }
 
 internal fun EventDetailDivisionOption.matchesDivisionIdentifier(value: String?): Boolean {
@@ -165,6 +186,13 @@ internal fun EventDetailDivisionOption.matchesDivisionIdentifier(value: String?)
         .orEmpty()
     if (normalizedValue.isEmpty()) return false
     return normalizedValue == id ||
-        normalizedValue == key ||
-        normalizedValue == divisionTypeId
+        normalizedValue == key
+}
+
+private fun EventDetailDivisionOption.matchesDivisionTypeIdentifier(value: String?): Boolean {
+    val normalizedValue = value
+        ?.normalizeDivisionIdentifier()
+        .orEmpty()
+    if (normalizedValue.isEmpty()) return false
+    return normalizedValue == divisionTypeId
 }

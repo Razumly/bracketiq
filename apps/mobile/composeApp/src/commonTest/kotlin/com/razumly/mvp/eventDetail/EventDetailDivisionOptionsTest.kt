@@ -5,6 +5,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 
 class EventDetailDivisionOptionsTest {
     @Test
@@ -124,5 +125,39 @@ class EventDetailDivisionOptionsTest {
         val options = buildRegistrationDivisionOptions(event)
 
         assertEquals(listOf("league_open"), options.map { option -> option.id })
+    }
+
+    @Test
+    fun buildRegistrationDivisionOptions_keeps_duplicate_type_divisions_separate() {
+        val firstDivisionId = "event-dup__division__m_skill_open_age_18plus"
+        val secondDivisionId = "event-dup_2__division__m_skill_open_age_18plus"
+        val event = Event(
+            id = "event-dup",
+            eventType = EventType.LEAGUE,
+            singleDivision = false,
+            divisions = listOf(firstDivisionId, secondDivisionId),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = firstDivisionId,
+                    key = "m_skill_open_age_18plus",
+                    name = "Mens Open 18+ - A",
+                    divisionTypeId = "skill_open_age_18plus",
+                ),
+                DivisionDetail(
+                    id = secondDivisionId,
+                    key = "m_skill_open_age_18plus",
+                    name = "Mens Open 18+ - B",
+                    divisionTypeId = "skill_open_age_18plus",
+                ),
+            ),
+        )
+
+        val options = buildRegistrationDivisionOptions(event)
+
+        assertEquals(listOf(firstDivisionId, secondDivisionId), options.map { option -> option.id })
+        assertEquals(listOf("Mens Open 18+ - A", "Mens Open 18+ - B"), options.map { option -> option.label })
+        assertEquals(secondDivisionId, options.resolveSelectedEventDivisionId(secondDivisionId))
+        assertNull(options.findEventDivisionOption("skill_open_age_18plus"))
+        assertNull(options.findEventDivisionOption("m_skill_open_age_18plus"))
     }
 }

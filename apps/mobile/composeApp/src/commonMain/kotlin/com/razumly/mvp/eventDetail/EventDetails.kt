@@ -230,9 +230,6 @@ private const val STAFF_LAZY_LIST_THRESHOLD = 4
 private const val STAFF_LAZY_LIST_VISIBLE_COUNT = 4
 private const val DEFAULT_MVP_FEE_PERCENTAGE = 0.01
 private const val LEAGUE_OR_TOURNAMENT_MVP_FEE_PERCENTAGE = 0.03
-private const val STRIPE_FIXED_FEE_CENTS = 30
-private const val STRIPE_PERCENT_FEE = 0.029
-private const val DEFAULT_STRIPE_TAX_SERVICE_FEE_CENTS = 50
 private val readOnlyNameListItemHeight = 28.dp
 private val readOnlyNameListSpacing = 4.dp
 private val editableOfficialStaffListHeight = 160.dp * STAFF_LAZY_LIST_VISIBLE_COUNT
@@ -4952,17 +4949,17 @@ private data class PricePreviewBreakdown(
     val baseLabel: String,
     val amountCents: Int,
     val mvpFeeCents: Int,
-    val stripeFeeCents: Int,
-    val stripeTaxServiceFeeCents: Int,
-    val totalChargeCents: Int,
+    val subtotalBeforeStripeFeesCents: Int,
     val mvpFeePercentage: Double,
     val taxable: Boolean,
 ) {
     val totalDisplayValue: String
-        get() = if (taxable) {
-            "${totalChargeCents.formatCents()} + Taxes"
+        get() = if (amountCents <= 0) {
+            subtotalBeforeStripeFeesCents.formatCents()
+        } else if (taxable) {
+            "${subtotalBeforeStripeFeesCents.formatCents()} + Taxes + Stripe fees"
         } else {
-            totalChargeCents.formatCents()
+            "${subtotalBeforeStripeFeesCents.formatCents()} + Stripe fees"
         }
 }
 
@@ -5022,12 +5019,11 @@ private fun PriceWithFeesPreviewDialog(
                     "BracketIQ fee (${breakdown.mvpFeePercentage.formatFeePercentage()})",
                     breakdown.mvpFeeCents.formatCents(),
                 )
-                FeePreviewRow(
-                    "Stripe fee",
-                    (breakdown.stripeFeeCents + breakdown.stripeTaxServiceFeeCents).formatCents(),
-                )
                 if (breakdown.taxable) {
                     FeePreviewRow("Taxes", "Calculated at checkout")
+                }
+                if (breakdown.amountCents > 0) {
+                    FeePreviewRow("Stripe fees", "Vary by payment method")
                 }
                 HorizontalDivider()
                 FeePreviewRow("Total charged", breakdown.totalDisplayValue, isTotal = true)
@@ -5049,18 +5045,21 @@ private fun FeePreviewRow(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = label,
+            modifier = Modifier.weight(1f),
             style = if (isTotal) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall,
             fontWeight = if (isTotal) FontWeight.SemiBold else FontWeight.Normal,
         )
         Text(
             text = value,
+            modifier = Modifier.weight(1f),
             style = if (isTotal) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall,
             fontWeight = if (isTotal) FontWeight.SemiBold else FontWeight.Medium,
+            textAlign = TextAlign.End,
         )
     }
 }
@@ -5073,44 +5072,28 @@ private fun calculatePricePreviewBreakdown(
 ): PricePreviewBreakdown {
     val normalizedAmountCents = amountCents.coerceAtLeast(0)
     val mvpFeePercentage = resolveMvpFeePercentage(eventType)
-    val stripeTaxServiceFeeCents = if (taxable && normalizedAmountCents > 0) {
-        DEFAULT_STRIPE_TAX_SERVICE_FEE_CENTS
-    } else {
-        0
-    }
 
     if (normalizedAmountCents == 0) {
         return PricePreviewBreakdown(
             baseLabel = baseLabel,
             amountCents = 0,
             mvpFeeCents = 0,
-            stripeFeeCents = 0,
-            stripeTaxServiceFeeCents = stripeTaxServiceFeeCents,
-            totalChargeCents = stripeTaxServiceFeeCents,
+            subtotalBeforeStripeFeesCents = 0,
             mvpFeePercentage = mvpFeePercentage,
             taxable = taxable,
         )
     }
 
     val mvpFeeCents = (normalizedAmountCents * mvpFeePercentage).roundToInt()
-    val goalAmountCents = normalizedAmountCents + mvpFeeCents + stripeTaxServiceFeeCents
-    val totalChargeCents = calculateChargeAmount(goalAmountCents)
-    val stripeFeeCents = (totalChargeCents - goalAmountCents).coerceAtLeast(0)
 
     return PricePreviewBreakdown(
         baseLabel = baseLabel,
         amountCents = normalizedAmountCents,
         mvpFeeCents = mvpFeeCents,
-        stripeFeeCents = stripeFeeCents,
-        stripeTaxServiceFeeCents = stripeTaxServiceFeeCents,
-        totalChargeCents = totalChargeCents,
+        subtotalBeforeStripeFeesCents = normalizedAmountCents + mvpFeeCents,
         mvpFeePercentage = mvpFeePercentage,
         taxable = taxable,
     )
-}
-
-private fun calculateChargeAmount(goalAmountCents: Int): Int {
-    return ((goalAmountCents + STRIPE_FIXED_FEE_CENTS) / (1 - STRIPE_PERCENT_FEE)).roundToInt()
 }
 
 private fun resolveMvpFeePercentage(eventType: EventType): Double {

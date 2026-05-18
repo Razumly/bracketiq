@@ -21,7 +21,7 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
-import com.razumly.mvp.core.data.util.divisionsEquivalent
+import com.razumly.mvp.core.data.util.findDivisionDetailByIdentifier
 import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
@@ -176,9 +176,15 @@ interface IEventRepository : IMVPRepository {
         eventId: String,
         occurrence: EventOccurrenceSelection? = null,
     ): Result<EventParticipantManagementSnapshot> = Result.success(EventParticipantManagementSnapshot())
-    suspend fun getEventTeamCompliance(eventId: String): Result<List<EventTeamComplianceSummary>> =
+    suspend fun getEventTeamCompliance(
+        eventId: String,
+        occurrence: EventOccurrenceSelection? = null,
+    ): Result<List<EventTeamComplianceSummary>> =
         Result.failure(NotImplementedError("Event team compliance is not implemented."))
-    suspend fun getEventUserCompliance(eventId: String): Result<List<EventComplianceUserSummary>> =
+    suspend fun getEventUserCompliance(
+        eventId: String,
+        occurrence: EventOccurrenceSelection? = null,
+    ): Result<List<EventComplianceUserSummary>> =
         Result.failure(NotImplementedError("Event user compliance is not implemented."))
     suspend fun getLeagueDivisionStandings(eventId: String, divisionId: String): Result<LeagueDivisionStandings>
     suspend fun confirmLeagueDivisionStandings(
@@ -269,6 +275,7 @@ data class EventCompliancePaymentSummary(
     val paidAmountCents: Int = 0,
     val status: String? = null,
     val isPaidInFull: Boolean = false,
+    val paymentPending: Boolean = false,
     val inheritedFromTeamBill: Boolean = false,
 )
 
@@ -378,6 +385,7 @@ private fun EventCompliancePaymentSummaryDto?.toCompliancePaymentSummary(): Even
         paidAmountCents = paidAmountCents ?: 0,
         status = status?.trim()?.takeIf(String::isNotBlank),
         isPaidInFull = isPaidInFull == true,
+        paymentPending = paymentPending == true,
         inheritedFromTeamBill = inheritedFromTeamBill == true,
     )
 }
@@ -852,19 +860,31 @@ class EventRepository(
         snapshot.registrations.toManagementSnapshot()
     }
 
-    override suspend fun getEventTeamCompliance(eventId: String): Result<List<EventTeamComplianceSummary>> = runCatching {
+    override suspend fun getEventTeamCompliance(
+        eventId: String,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<List<EventTeamComplianceSummary>> = runCatching {
         val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
             ?: error("Event id is required.")
         api.get<EventTeamComplianceResponseDto>(
-            path = "api/events/$normalizedEventId/teams/compliance",
+            path = appendOccurrenceQuery(
+                basePath = "api/events/$normalizedEventId/teams/compliance",
+                occurrence = occurrence,
+            ),
         ).teams.mapNotNull(EventTeamComplianceSummaryDto::toTeamComplianceSummaryOrNull)
     }
 
-    override suspend fun getEventUserCompliance(eventId: String): Result<List<EventComplianceUserSummary>> = runCatching {
+    override suspend fun getEventUserCompliance(
+        eventId: String,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<List<EventComplianceUserSummary>> = runCatching {
         val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
             ?: error("Event id is required.")
         api.get<EventUserComplianceResponseDto>(
-            path = "api/events/$normalizedEventId/users/compliance",
+            path = appendOccurrenceQuery(
+                basePath = "api/events/$normalizedEventId/users/compliance",
+                occurrence = occurrence,
+            ),
         ).users.mapNotNull(EventComplianceUserSummaryDto::toComplianceUserSummaryOrNull)
     }
 
@@ -1745,10 +1765,8 @@ class EventRepository(
         }
 
         return if (!normalizedPreferredDivision.isNullOrBlank()) {
-            divisionDetails.firstOrNull { detail ->
-                divisionsEquivalent(detail.id, normalizedPreferredDivision) ||
-                    divisionsEquivalent(detail.key, normalizedPreferredDivision)
-            } ?: divisionDetails.firstOrNull()
+            divisionDetails.findDivisionDetailByIdentifier(normalizedPreferredDivision)
+                ?: divisionDetails.firstOrNull()
         } else {
             divisionDetails.firstOrNull()
         }
@@ -1819,10 +1837,11 @@ class EventRepository(
                 val shouldFilterDivision = event.divisions.isNotEmpty() && (divisionId != null || divisionKey != null)
                 teams.count { teamWithPlayers ->
                     val team = teamWithPlayers.team
+                    val teamDivision = team.division.normalizeDivisionIdentifier()
                     !team.isPlaceholderSlot(event.eventType) && (
                         !shouldFilterDivision ||
-                            (divisionId != null && divisionsEquivalent(team.division, divisionId)) ||
-                            (divisionKey != null && divisionsEquivalent(team.division, divisionKey))
+                            (divisionId != null && teamDivision == divisionId) ||
+                            (divisionKey != null && teamDivision == divisionKey)
                     )
                 }
             }

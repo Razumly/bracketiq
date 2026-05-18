@@ -3,6 +3,8 @@ package com.razumly.mvp.core.data.util
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class DivisionFormatterDisplayLabelTest {
 
@@ -80,5 +82,14 @@ class DivisionFormatterDisplayLabelTest {
         val divisionId = buildEventDivisionId("event-1", "c_skill_open_age_18plus")
 
         assertEquals("CoEd Open 18+", divisionId.toDivisionDisplayLabel())
+    }
+
+    @Test
+    fun divisions_equivalent_does_not_merge_distinct_event_division_ids_with_same_type_token() {
+        val firstDivisionId = "event-dup__division__m_skill_open_age_18plus"
+        val secondDivisionId = "event-dup_2__division__m_skill_open_age_18plus"
+
+        assertFalse(divisionsEquivalent(firstDivisionId, secondDivisionId))
+        assertTrue(divisionsEquivalent(firstDivisionId, "m_skill_open_age_18plus"))
     }
 }

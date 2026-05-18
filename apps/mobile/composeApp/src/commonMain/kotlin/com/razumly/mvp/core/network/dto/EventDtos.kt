@@ -18,6 +18,7 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.requiresTeamOfficials
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionDetails
+import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.presentation.Primary
 import kotlinx.serialization.SerialName
@@ -152,12 +153,13 @@ data class EventApiDto(
             .normalizeDivisionDetails(resolvedId)
         val allNormalizedDetails = (normalizedDetails + normalizedPlayoffDetails)
             .fold(mutableListOf<DivisionDetail>()) { acc, detail ->
-                val normalizedId = detail.id.ifBlank { detail.key }
+                val normalizedId = detail.id.normalizeDivisionIdentifier().ifBlank {
+                    detail.key.normalizeDivisionIdentifier()
+                }
                 val alreadyAdded = acc.any { existing ->
-                    existing.id == normalizedId ||
-                        existing.key == normalizedId ||
-                        existing.id == detail.id ||
-                        existing.key == detail.key
+                    existing.id.normalizeDivisionIdentifier().ifBlank {
+                        existing.key.normalizeDivisionIdentifier()
+                    } == normalizedId
                 }
                 if (!alreadyAdded) {
                     acc += detail
@@ -521,6 +523,7 @@ data class EventCompliancePaymentSummaryDto(
     val paidAmountCents: Int? = null,
     val status: String? = null,
     val isPaidInFull: Boolean? = null,
+    val paymentPending: Boolean? = null,
     val inheritedFromTeamBill: Boolean? = null,
 )
 

@@ -151,9 +151,12 @@ data class TeamInviteFreeAgentContext(
     val freeAgentEventTeamIdsByUserId: Map<String, List<String>> = emptyMap(),
 )
 
+private fun String?.isJoinedTeamRegistrationStatus(): Boolean =
+    equals("ACTIVE", ignoreCase = true) || equals("PENDING", ignoreCase = true)
+
 fun TeamRegistrationResult.isActive(): Boolean =
-    registrationStatus.equals("ACTIVE", ignoreCase = true) ||
-        registration?.status.equals("ACTIVE", ignoreCase = true)
+    registrationStatus.isJoinedTeamRegistrationStatus() ||
+        registration?.status.isJoinedTeamRegistrationStatus()
 
 fun TeamRegistrationResult.requiresAdditionalSigning(): Boolean =
     consent != null && !consent.status.equals("completed", ignoreCase = true)

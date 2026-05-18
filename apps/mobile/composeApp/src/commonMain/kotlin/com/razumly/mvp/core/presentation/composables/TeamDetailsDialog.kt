@@ -28,6 +28,7 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
 import com.razumly.mvp.core.data.dataTypes.countsTowardTeamCapacity
 import com.razumly.mvp.core.data.dataTypes.isActive
+import com.razumly.mvp.core.data.dataTypes.isPaymentPending
 import com.razumly.mvp.core.data.dataTypes.isStarted
 import com.razumly.mvp.core.data.dataTypes.normalizedRole
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
@@ -102,8 +103,10 @@ fun TeamDetailsDialog(
                     .associateBy(TeamPlayerRegistration::userId)
                 val currentUserRegistration = syncedTeam.playerRegistrations
                     .firstOrNull { registration -> registration.userId == currentUser.id }
+                val isCurrentUserPaymentPending = currentUserRegistration?.isPaymentPending() == true
                 val isCurrentUserActive = currentUserRegistration?.isActive() == true ||
-                    syncedTeam.playerIds.contains(currentUser.id)
+                    (syncedTeam.playerIds.contains(currentUser.id) && !isCurrentUserPaymentPending)
+                val isCurrentUserJoined = isCurrentUserActive || isCurrentUserPaymentPending
                 val isCurrentUserPending = currentUserRegistration?.isStarted() == true
                 val reservedOrActiveCount = syncedTeam.playerRegistrations
                     .filter(TeamPlayerRegistration::countsTowardTeamCapacity)
@@ -115,7 +118,7 @@ fun TeamDetailsDialog(
                 val teamHasCapacity = syncedTeam.teamSize <= 0 || reservedOrActiveCount < syncedTeam.teamSize
                 val canRegister = canRegisterForTeam(
                     openRegistration = syncedTeam.openRegistration,
-                    isCurrentUserActive = isCurrentUserActive,
+                    isCurrentUserActive = isCurrentUserJoined,
                     isCurrentUserPending = isCurrentUserPending,
                     teamHasCapacity = teamHasCapacity,
                     hasRegisterAction = onRegisterForTeam != null,
@@ -150,6 +153,13 @@ fun TeamDetailsDialog(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (isCurrentUserPaymentPending) {
+                    Text(
+                        text = "Payment pending",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -256,7 +266,7 @@ fun TeamDetailsDialog(
                     } else if (
                         shouldShowTeamRegistrationButton(
                             openRegistration = syncedTeam.openRegistration,
-                            isCurrentUserActive = isCurrentUserActive,
+                            isCurrentUserActive = isCurrentUserJoined,
                             isCurrentUserPending = isCurrentUserPending,
                         )
                     ) {

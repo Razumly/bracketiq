@@ -87,6 +87,7 @@ import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import com.razumly.mvp.eventDetail.EventDetailDivisionOption
+import com.razumly.mvp.eventDetail.findEventDivisionOption
 import com.razumly.mvp.eventDetail.matchesDivisionIdentifier
 import com.razumly.mvp.eventDetail.resolveSelectedEventDivisionId
 import com.razumly.mvp.eventDetail.visibleTeams
@@ -119,7 +120,12 @@ internal fun visibleParticipantTeamsForDivision(
     val visibleTeams = visibleParticipantTeams(event, teams)
     val selectedOption = selectedParticipantDivisionOption(event, divisionOptions, selectedDivisionId)
         ?: return visibleTeams
-    return visibleTeams.filter { team -> team.matchesParticipantDivision(selectedOption) }
+    return visibleTeams.filter { team ->
+        team.matchesParticipantDivision(
+            selectedOption = selectedOption,
+            divisionOptions = divisionOptions,
+        )
+    }
 }
 
 internal fun hasParticipantDivisionFilter(
@@ -142,11 +148,9 @@ private fun selectedParticipantDivisionOption(
 
 private fun TeamWithPlayers.matchesParticipantDivision(
     selectedOption: EventDetailDivisionOption,
+    divisionOptions: List<EventDetailDivisionOption>,
 ): Boolean {
-    val teamDivision = team.division.trim().takeIf(String::isNotBlank)
-    val teamDivisionTypeId = team.divisionTypeId?.trim()?.takeIf(String::isNotBlank)
-    return selectedOption.matchesDivisionIdentifier(teamDivision) ||
-        selectedOption.matchesDivisionIdentifier(teamDivisionTypeId)
+    return resolveParticipantDivisionOption(divisionOptions)?.id == selectedOption.id
 }
 
 private fun participantUserIdsForTeams(teams: Iterable<TeamWithPlayers>): Set<String> =
@@ -275,6 +279,9 @@ private data class ParticipantPaymentQrState(
 )
 
 private fun EventCompliancePaymentSummary.paymentStatusText(cardType: ParticipantCardType): String {
+    if (paymentPending) {
+        return "Payment pending"
+    }
     if (!hasBill) {
         return if (cardType == ParticipantCardType.TEAM) "No team bill yet" else "No bill yet"
     }
@@ -297,7 +304,7 @@ private fun EventComplianceDocumentCounts.needsAttention(): Boolean {
 }
 
 private fun EventCompliancePaymentSummary.needsAttention(): Boolean {
-    return hasBill && !isPaidInFull && totalAmountCents > 0
+    return paymentPending || (hasBill && !isPaidInFull && totalAmountCents > 0)
 }
 
 private fun EventComplianceUserSummary.registrationLabel(): String {
@@ -313,12 +320,19 @@ private fun TeamWithPlayers.resolveParticipantDivisionId(
     fallbackDivisionId: String?,
 ): String? {
     if (divisionOptions.isEmpty()) return null
+    return resolveParticipantDivisionOption(divisionOptions)?.id
+        ?: divisionOptions.resolveSelectedEventDivisionId(fallbackDivisionId)
+}
+
+private fun TeamWithPlayers.resolveParticipantDivisionOption(
+    divisionOptions: List<EventDetailDivisionOption>,
+): EventDetailDivisionOption? {
     val teamDivision = team.division.trim().takeIf(String::isNotBlank)
     val teamDivisionTypeId = team.divisionTypeId?.trim()?.takeIf(String::isNotBlank)
-    return divisionOptions.firstOrNull { option ->
-        option.matchesDivisionIdentifier(teamDivision) ||
-            option.matchesDivisionIdentifier(teamDivisionTypeId)
-    }?.id ?: divisionOptions.resolveSelectedEventDivisionId(fallbackDivisionId)
+    return divisionOptions.findEventDivisionOption(
+        value = teamDivision,
+        allowDivisionTypeFallback = false,
+    ) ?: divisionOptions.findEventDivisionOption(teamDivisionTypeId)
 }
 
 @Composable

@@ -60,6 +60,53 @@ class EventDtosTest {
     }
 
     @Test
+    fun event_api_dto_preserves_divisions_with_duplicate_type_ids() {
+        val firstDivisionId = "event-dup__division__m_skill_open_age_18plus"
+        val secondDivisionId = "event-dup_2__division__m_skill_open_age_18plus"
+
+        val event = EventApiDto(
+            id = "event-dup",
+            name = "Example League",
+            hostId = "host-1",
+            eventType = "LEAGUE",
+            start = "2026-06-01T08:00:00Z",
+            end = "2026-06-01T09:00:00Z",
+            singleDivision = false,
+            divisions = listOf(firstDivisionId, secondDivisionId),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = firstDivisionId,
+                    key = "m_skill_open_age_18plus",
+                    name = "Mens Open 18+ - A",
+                    divisionTypeId = "skill_open_age_18plus",
+                    gender = "M",
+                    ratingType = "SKILL",
+                    maxParticipants = 8,
+                    price = 1000,
+                ),
+                DivisionDetail(
+                    id = secondDivisionId,
+                    key = "m_skill_open_age_18plus",
+                    name = "Mens Open 18+ - B",
+                    divisionTypeId = "skill_open_age_18plus",
+                    gender = "M",
+                    ratingType = "SKILL",
+                    maxParticipants = 8,
+                    price = 2000,
+                ),
+            ),
+        ).toEventOrNull()
+
+        assertNotNull(event)
+        assertEquals(listOf(firstDivisionId, secondDivisionId), event.divisions)
+        assertEquals(
+            listOf("Mens Open 18+ - A", "Mens Open 18+ - B"),
+            event.divisionDetails.map { detail -> detail.name },
+        )
+        assertEquals(2000, event.resolvedDivisionPriceCents(secondDivisionId))
+    }
+
+    @Test
     fun to_update_dto_trims_and_deduplicates_required_template_ids() {
         val event = Event(
             name = "League Event",

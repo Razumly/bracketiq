@@ -9,6 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Product
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.isPaymentPending
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
@@ -219,8 +220,23 @@ class DefaultOrganizationDetailComponent(
                             pendingProductPurchase = null
                         }
                         if (pendingTeam != null) {
-                            _message.value = "Registration completed for ${pendingTeam.team.name}."
-                            refreshTeams(force = true)
+                            val refreshedTeams = teamRepository.getTeamsByOrganization(organizationId).getOrNull()
+                            if (refreshedTeams != null) {
+                                _teams.value = refreshedTeams
+                                teamsLoaded = true
+                            }
+                            val paymentPending = refreshedTeams
+                                ?.firstOrNull { team -> team.team.id == pendingTeam.team.id }
+                                ?.team
+                                ?.playerRegistrations
+                                ?.any { registration ->
+                                    registration.userId == currentUser.value.id && registration.isPaymentPending()
+                                } == true
+                            _message.value = if (paymentPending) {
+                                "Payment submitted for ${pendingTeam.team.name}. Registration is pending until the bank payment clears."
+                            } else {
+                                "Registration completed for ${pendingTeam.team.name}."
+                            }
                             pendingTeamRegistration = null
                         }
                     }

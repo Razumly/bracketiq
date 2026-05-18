@@ -10,7 +10,7 @@ import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.DivisionConverters
 import com.razumly.mvp.core.data.util.DivisionDetailConverters
-import com.razumly.mvp.core.data.util.divisionsEquivalent
+import com.razumly.mvp.core.data.util.findDivisionDetailByIdentifier
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
@@ -135,10 +135,8 @@ private fun Event.findDivisionDetailForPricing(preferredDivisionId: String?): Di
         ?.ifEmpty { null }
 
     if (!normalizedPreferredDivision.isNullOrBlank()) {
-        divisionDetails.firstOrNull { detail ->
-            divisionsEquivalent(detail.id, normalizedPreferredDivision) ||
-                divisionsEquivalent(detail.key, normalizedPreferredDivision)
-        }?.let { detail -> return detail }
+        divisionDetails.findDivisionDetailByIdentifier(normalizedPreferredDivision)
+            ?.let { detail -> return detail }
     }
 
     val mergedDetails = mergedDivisionDetailsForPricing()
@@ -147,10 +145,8 @@ private fun Event.findDivisionDetailForPricing(preferredDivisionId: String?): Di
     }
 
     return if (!normalizedPreferredDivision.isNullOrBlank()) {
-        mergedDetails.firstOrNull { detail ->
-            divisionsEquivalent(detail.id, normalizedPreferredDivision) ||
-                divisionsEquivalent(detail.key, normalizedPreferredDivision)
-        } ?: mergedDetails.firstOrNull()
+        mergedDetails.findDivisionDetailByIdentifier(normalizedPreferredDivision)
+            ?: mergedDetails.firstOrNull()
     } else {
         mergedDetails.firstOrNull()
     }

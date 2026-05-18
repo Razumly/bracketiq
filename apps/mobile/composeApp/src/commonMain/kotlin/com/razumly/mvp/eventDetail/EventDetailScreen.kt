@@ -154,6 +154,7 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.util.divisionsEquivalent
+import com.razumly.mvp.core.data.util.findDivisionDetailByIdentifier
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
@@ -468,7 +469,8 @@ private fun EventDetailSelectedDivisionPill(
             onDismissRequest = { expanded = false },
         ) {
             divisionOptions.forEach { option ->
-                val selected = divisionsEquivalent(option.id, selectedDivisionId)
+                val selected = option.id.normalizeDivisionIdentifier() ==
+                    selectedDivisionId?.normalizeDivisionIdentifier().orEmpty()
                 DropdownMenuItem(
                     text = { Text(option.label) },
                     onClick = {
@@ -550,7 +552,7 @@ private fun List<BracketDivisionOption>.resolveDivisionLabel(divisionId: String?
         .orEmpty()
     if (normalizedDivisionId.isBlank()) return null
 
-    return firstOrNull { option -> divisionsEquivalent(option.id, normalizedDivisionId) }
+    return findBracketDivisionOption(normalizedDivisionId)
         ?.label
         ?.takeIf(String::isNotBlank)
 }
@@ -597,8 +599,22 @@ private fun List<BracketDivisionOption>.resolveSelectedDivisionId(preferredId: S
     val normalizedPreferred = preferredId
         ?.normalizeDivisionIdentifier()
         .orEmpty()
-    return firstOrNull { option -> divisionsEquivalent(option.id, normalizedPreferred) }?.id
+    return findBracketDivisionOption(normalizedPreferred)?.id
         ?: first().id
+}
+
+private fun List<BracketDivisionOption>.findBracketDivisionOption(divisionId: String?): BracketDivisionOption? {
+    val normalizedDivisionId = divisionId
+        ?.normalizeDivisionIdentifier()
+        .orEmpty()
+    if (normalizedDivisionId.isBlank()) return null
+    firstOrNull { option ->
+        option.id.normalizeDivisionIdentifier() == normalizedDivisionId
+    }?.let { option -> return option }
+    val equivalentMatches = filter { option ->
+        divisionsEquivalent(option.id, normalizedDivisionId)
+    }
+    return equivalentMatches.singleOrNull()
 }
 
 private fun List<EventDetailDivisionOption>.toJoinDivisionOptions(): List<BracketDivisionOption> =
@@ -669,10 +685,8 @@ private fun Event.tournamentBracketDivisionOptions(
         if (normalizedId.isBlank() || optionsById.containsKey(normalizedId)) return
         optionsById[normalizedId] = explicitLabel
             ?.takeIf { it.isNotBlank() }
-            ?: fallbackOptions.firstOrNull { option -> divisionsEquivalent(option.id, normalizedId) }?.label
-            ?: divisionDetails.firstOrNull { detail ->
-                divisionsEquivalent(detail.id, normalizedId) || divisionsEquivalent(detail.key, normalizedId)
-            }?.name?.takeIf { it.isNotBlank() }
+            ?: fallbackOptions.findBracketDivisionOption(normalizedId)?.label
+            ?: divisionDetails.findDivisionDetailByIdentifier(normalizedId)?.name?.takeIf { it.isNotBlank() }
             ?: sourcePool?.name?.stripTournamentPoolSuffix()?.takeIf { it.isNotBlank() }
             ?: normalizedId.toDivisionDisplayLabel(divisionDetails)
     }
@@ -3034,6 +3048,7 @@ fun EventDetailScreen(
     val isEditing by component.isEditing.collectAsState()
     val isEventFull by component.isEventFull.collectAsState()
     val isUserInEvent by component.isUserInEvent.collectAsState()
+    val isRegistrationPaymentPending by component.isRegistrationPaymentPending.collectAsState()
     val isFreeAgent by component.isUserFreeAgent.collectAsState()
     val isWaitListed by component.isUserInWaitlist.collectAsState()
     val isCaptain by component.isUserCaptain.collectAsState()
@@ -4682,9 +4697,9 @@ fun EventDetailScreen(
                                     joinDivisionOptions
                                 }
                                 DetailTab.LEAGUES -> if (!selectedStandingsDataDivisionId.isNullOrBlank() &&
-                                    standingsPoolDivisionOptions.any { option ->
-                                        divisionsEquivalent(option.id, selectedStandingsDataDivisionId)
-                                    }
+                                    standingsPoolDivisionOptions.findBracketDivisionOption(
+                                        selectedStandingsDataDivisionId,
+                                    ) != null
                                 ) {
                                     standingsPoolDivisionOptions
                                 } else {
@@ -5002,9 +5017,9 @@ fun EventDetailScreen(
                                                 }
                                                 DetailTab.SCHEDULE -> {
                                                     if (!selectedSchedulePoolDivisionId.isNullOrBlank() &&
-                                                        schedulePoolDivisionOptions.any { option ->
-                                                            divisionsEquivalent(option.id, divisionId)
-                                                        }
+                                                        schedulePoolDivisionOptions.findBracketDivisionOption(
+                                                            divisionId,
+                                                        ) != null
                                                     ) {
                                                         selectedSchedulePoolDivisionId = divisionId
                                                     } else {
@@ -5014,9 +5029,9 @@ fun EventDetailScreen(
                                                 }
                                                 DetailTab.LEAGUES -> {
                                                     if (!selectedStandingsDataDivisionId.isNullOrBlank() &&
-                                                        standingsPoolDivisionOptions.any { option ->
-                                                            divisionsEquivalent(option.id, divisionId)
-                                                        }
+                                                        standingsPoolDivisionOptions.findBracketDivisionOption(
+                                                            divisionId,
+                                                        ) != null
                                                     ) {
                                                         selectedStandingsPoolDivisionId = divisionId
                                                         component.selectDivision(divisionId)
@@ -5266,6 +5281,7 @@ fun EventDetailScreen(
             ) {
                 StickyActionBar(
                     primaryLabel = when {
+                        isRegistrationPaymentPending -> "Payment pending"
                         isWeeklyParentEvent && !joinBlockedByStart -> "Join Event"
                         shouldShowViewSchedulePrimaryAction -> "View Schedule and Participants"
                         !isUserInEvent && !joinBlockedByStart -> "Join options"
@@ -5274,12 +5290,14 @@ fun EventDetailScreen(
                         else -> "Joined with Team"
                     },
                     primaryEnabled = if (isWeeklyParentEvent) {
-                        !joinBlockedByStart
+                        !isRegistrationPaymentPending && !joinBlockedByStart
                     } else {
-                        shouldShowViewSchedulePrimaryAction || (!isUserInEvent && !joinBlockedByStart)
+                        !isRegistrationPaymentPending &&
+                            (shouldShowViewSchedulePrimaryAction || (!isUserInEvent && !joinBlockedByStart))
                     },
                     onPrimaryClick = {
                         when {
+                            isRegistrationPaymentPending -> Unit
                             isWeeklyParentEvent && !joinBlockedByStart -> showJoinOptionsSheet = true
                             shouldShowViewSchedulePrimaryAction -> component.viewEvent()
                             !isUserInEvent && !joinBlockedByStart -> showJoinOptionsSheet = true
@@ -6302,6 +6320,11 @@ private fun Int.centsToDollars(): String {
 fun FeeBreakdownDialog(
     feeBreakdown: FeeBreakdown, onConfirm: () -> Unit, onCancel: () -> Unit
 ) {
+    val totalBeforeStripeFees = feeBreakdown.eventPrice +
+        feeBreakdown.processingFee +
+        (feeBreakdown.taxAmount ?: 0)
+    val totalDisplayValue = "$${totalBeforeStripeFees.centsToDollars()} + Stripe fees"
+
     AlertDialog(onDismissRequest = onCancel, title = { Text("Payment Breakdown") }, text = {
         Column(
             verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -6314,7 +6337,7 @@ fun FeeBreakdownDialog(
 
             FeeRow("Event Price", "$${feeBreakdown.eventPrice.centsToDollars()}")
             FeeRow("BracketIQ Fee", "$${feeBreakdown.processingFee.centsToDollars()}")
-            FeeRow("Stripe Fee", "$${feeBreakdown.stripeFee.centsToDollars()}")
+            FeeRow("Stripe Fees", "Vary by payment method")
             feeBreakdown.taxAmount?.let { taxAmount ->
                 FeeRow("Tax", "$${taxAmount.centsToDollars()}")
             }
@@ -6322,7 +6345,13 @@ fun FeeBreakdownDialog(
             HorizontalDivider()
 
             FeeRow(
-                "Total Charge", "$${feeBreakdown.totalCharge.centsToDollars()}", isTotal = true
+                "Total Charge", totalDisplayValue, isTotal = true
+            )
+
+            Text(
+                "Exact Stripe fees and total update after you choose a payment method.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             Text(
@@ -6506,17 +6535,22 @@ private fun FeeRow(
     label: String, amount: String, isTotal: Boolean = false
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = label,
+            modifier = Modifier.weight(1f),
             style = if (isTotal) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
             fontWeight = if (isTotal) FontWeight.Bold else FontWeight.Normal
         )
         Text(
             text = amount,
+            modifier = Modifier.weight(1f),
             style = if (isTotal) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
-            fontWeight = if (isTotal) FontWeight.Bold else FontWeight.Normal
+            fontWeight = if (isTotal) FontWeight.Bold else FontWeight.Normal,
+            textAlign = TextAlign.End,
         )
     }
 }

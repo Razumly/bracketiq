@@ -429,9 +429,32 @@ fun divisionsEquivalent(left: String?, right: String?): Boolean {
     val normalizedLeft = left.normalizeDivisionIdentifier()
     val normalizedRight = right.normalizeDivisionIdentifier()
     if (normalizedLeft == normalizedRight) return true
-    val leftToken = left.extractDivisionTokenFromId() ?: normalizedLeft
-    val rightToken = right.extractDivisionTokenFromId() ?: normalizedRight
-    return leftToken == rightToken
+    val leftToken = left.extractDivisionTokenFromId()
+    val rightToken = right.extractDivisionTokenFromId()
+    if (leftToken != null && rightToken != null) return false
+    return (leftToken ?: normalizedLeft) == (rightToken ?: normalizedRight)
+}
+
+fun List<DivisionDetail>.findDivisionDetailByIdentifier(identifier: String?): DivisionDetail? {
+    val normalizedIdentifier = identifier
+        ?.normalizeDivisionIdentifier()
+        .orEmpty()
+    if (normalizedIdentifier.isEmpty()) return null
+
+    firstOrNull { detail ->
+        detail.id.normalizeDivisionIdentifier() == normalizedIdentifier
+    }?.let { detail -> return detail }
+
+    val keyMatches = filter { detail ->
+        detail.key.normalizeDivisionIdentifier() == normalizedIdentifier
+    }
+    if (keyMatches.size == 1) return keyMatches.single()
+
+    val equivalentMatches = filter { detail ->
+        divisionsEquivalent(detail.id, normalizedIdentifier) ||
+            divisionsEquivalent(detail.key, normalizedIdentifier)
+    }
+    return equivalentMatches.singleOrNull()
 }
 
 fun String.toDivisionDisplayLabel(
@@ -440,9 +463,7 @@ fun String.toDivisionDisplayLabel(
     val normalized = normalizeDivisionIdentifier()
     if (normalized.isEmpty()) return ""
     if (divisionDetails.isNotEmpty()) {
-        val detail = divisionDetails.firstOrNull { detail ->
-            divisionsEquivalent(detail.id, normalized) || divisionsEquivalent(detail.key, normalized)
-        }
+        val detail = divisionDetails.findDivisionDetailByIdentifier(normalized)
         val poolLabel = detail
             ?.takeIf { poolDetail ->
                 poolDetail.playoffPlacementDivisionIds.any { placementId -> placementId.isNotBlank() }
@@ -723,8 +744,7 @@ fun mergeDivisionDetailsForDivisions(
     val normalizedDetails = existingDetails.normalizeDivisionDetails(eventId)
 
     return normalizedDivisions.map { divisionId ->
-        normalizedDetails.firstOrNull { detail ->
-            divisionsEquivalent(detail.id, divisionId) || divisionsEquivalent(detail.key, divisionId)
-        } ?: inferDivisionDetail(divisionId, eventId)
+        normalizedDetails.findDivisionDetailByIdentifier(divisionId)
+            ?: inferDivisionDetail(divisionId, eventId)
     }
 }

@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 private const val TEAM_MEMBERSHIP_STATUS_ACTIVE = "ACTIVE"
 private const val TEAM_MEMBERSHIP_STATUS_INVITED = "INVITED"
 private const val TEAM_MEMBERSHIP_STATUS_STARTED = "STARTED"
+private const val TEAM_MEMBERSHIP_STATUS_PENDING = "PENDING"
 private const val TEAM_MEMBERSHIP_STATUS_LEFT = "LEFT"
 private const val TEAM_MEMBERSHIP_STATUS_REMOVED = "REMOVED"
 private const val TEAM_REGISTRANT_TYPE_SELF = "SELF"
@@ -52,6 +53,7 @@ private fun normalizeTeamMembershipStatus(value: String?): String =
     when (value?.trim()?.uppercase()) {
         TEAM_MEMBERSHIP_STATUS_INVITED -> TEAM_MEMBERSHIP_STATUS_INVITED
         TEAM_MEMBERSHIP_STATUS_STARTED -> TEAM_MEMBERSHIP_STATUS_STARTED
+        TEAM_MEMBERSHIP_STATUS_PENDING -> TEAM_MEMBERSHIP_STATUS_PENDING
         TEAM_MEMBERSHIP_STATUS_LEFT -> TEAM_MEMBERSHIP_STATUS_LEFT
         TEAM_MEMBERSHIP_STATUS_REMOVED -> TEAM_MEMBERSHIP_STATUS_REMOVED
         else -> TEAM_MEMBERSHIP_STATUS_ACTIVE
@@ -85,11 +87,14 @@ fun TeamPlayerRegistration.isInvited(): Boolean = normalizedStatus() == TEAM_MEM
 
 fun TeamPlayerRegistration.isStarted(): Boolean = normalizedStatus() == TEAM_MEMBERSHIP_STATUS_STARTED
 
+fun TeamPlayerRegistration.isPaymentPending(): Boolean = normalizedStatus() == TEAM_MEMBERSHIP_STATUS_PENDING
+
 fun TeamPlayerRegistration.countsTowardTeamCapacity(): Boolean =
     when (normalizedStatus()) {
         TEAM_MEMBERSHIP_STATUS_ACTIVE,
         TEAM_MEMBERSHIP_STATUS_INVITED,
-        TEAM_MEMBERSHIP_STATUS_STARTED -> true
+        TEAM_MEMBERSHIP_STATUS_STARTED,
+        TEAM_MEMBERSHIP_STATUS_PENDING -> true
         else -> false
     }
 
@@ -108,7 +113,9 @@ fun Team.isCaptainOrManager(userId: String): Boolean {
 }
 
 fun Team.activePlayerRegistrations(): List<TeamPlayerRegistration> =
-    withSynchronizedMembership().playerRegistrations.filter(TeamPlayerRegistration::isActive)
+    withSynchronizedMembership().playerRegistrations.filter { registration ->
+        registration.isActive() || registration.isPaymentPending()
+    }
 
 fun Team.invitedPlayerRegistrations(): List<TeamPlayerRegistration> =
     withSynchronizedMembership().playerRegistrations.filter(TeamPlayerRegistration::isInvited)
