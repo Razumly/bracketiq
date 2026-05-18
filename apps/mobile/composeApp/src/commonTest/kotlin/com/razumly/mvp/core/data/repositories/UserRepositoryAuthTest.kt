@@ -615,7 +615,7 @@ class UserRepositoryAuthTest {
     }
 
     @Test
-    fun createNewUser_returns_verification_required_exception_when_signup_requires_email_verification() = runTest {
+    fun createNewUser_accepts_authenticated_email_verification_response() = runTest {
         val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
         val userDao = FakeUserDataDao()
         val db = UserRepositoryAuth_FakeDatabaseService(userDao)
@@ -639,6 +639,8 @@ class UserRepositoryAuthTest {
                           "requiresEmailVerification":true,
                           "verificationEmailSent":true,
                           "user": { "id":"u_signup", "email":"signup@example.com", "name":"Signup User" },
+                          "session": { "userId":"u_signup", "isAdmin":false },
+                          "token":"signup_token",
                           "profile": {
                             "id":"u_signup",
                             "firstName":"Sign",
@@ -677,12 +679,10 @@ class UserRepositoryAuthTest {
             dateOfBirth = "2008-05-02",
         )
 
-        assertTrue(result.isFailure)
-        val verificationException = assertIs<EmailVerificationRequiredException>(result.exceptionOrNull())
-        assertEquals("signup@example.com", verificationException.email)
-        assertEquals("Email not verified. We sent a verification link to your email.", verificationException.message)
-        assertEquals("", tokenStore.get())
-        assertEquals("", currentUserDataSource.getUserId().first())
+        val created = result.getOrThrow()
+        assertEquals("u_signup", created.id)
+        assertEquals("signup_token", tokenStore.get())
+        assertEquals("u_signup", currentUserDataSource.getUserId().first())
     }
 
     @Test

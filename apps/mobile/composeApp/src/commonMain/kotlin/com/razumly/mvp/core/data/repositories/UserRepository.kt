@@ -507,8 +507,12 @@ class UserRepository(
             throw apiException
         }
 
-        if (res.requiresEmailVerification == true ||
-            res.code?.equals(EMAIL_NOT_VERIFIED_CODE, ignoreCase = true) == true
+        val hasAuthenticatedVerificationResponse = !res.token.isNullOrBlank() &&
+            res.user != null &&
+            res.profile != null
+        if ((res.requiresEmailVerification == true ||
+                res.code?.equals(EMAIL_NOT_VERIFIED_CODE, ignoreCase = true) == true
+            ) && !hasAuthenticatedVerificationResponse
         ) {
             val verificationEmail = res.email?.trim()?.takeIf(String::isNotBlank) ?: normalizedEmail
             val verificationMessage = res.error?.trim()?.takeIf(String::isNotBlank)
