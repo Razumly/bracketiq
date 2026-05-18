@@ -1,19 +1,26 @@
 package com.razumly.mvp.eventSearch.tabs.events
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,6 +33,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.presentation.composables.EventCard
@@ -43,7 +51,8 @@ fun EventList(
     hasMoreEvents: Boolean = true,
     onLoadMore: () -> Unit,
     onMapClick: (Offset, Event) -> Unit,
-    onEventClick: (Event) -> Unit
+    onCreateEventClick: (() -> Unit)? = null,
+    onEventClick: (Event) -> Unit,
 ) {
     var lastLoadRequestKey by remember { mutableStateOf<String?>(null) }
     val hasTrailingStatusItem = events.isNotEmpty() && (isLoadingMore || !hasMoreEvents)
@@ -84,6 +93,19 @@ fun EventList(
                     shape = RoundedCornerShape(12.dp),
                 ) {
                     EventCardPlaceholder(navPadding = PaddingValues(bottom = 16.dp))
+                }
+            }
+        } else if (events.isEmpty() && onCreateEventClick != null) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillParentMaxSize()
+                        .padding(firstElementPadding)
+                        .padding(lastElementPadding)
+                        .padding(horizontal = 24.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    EmptyEventsCallToAction(onClick = onCreateEventClick)
                 }
             }
         } else {
@@ -150,6 +172,34 @@ fun EventList(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun EmptyEventsCallToAction(
+    onClick: () -> Unit,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(24.dp),
+    ) {
+        Text(
+            text = "No upcoming events in your area. Be the first to create one.",
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center,
+        )
+        FloatingActionButton(
+            onClick = onClick,
+            modifier = Modifier.size(112.dp),
+            shape = MaterialTheme.shapes.extraLarge,
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "Create Event",
+                modifier = Modifier.size(52.dp),
+            )
         }
     }
 }

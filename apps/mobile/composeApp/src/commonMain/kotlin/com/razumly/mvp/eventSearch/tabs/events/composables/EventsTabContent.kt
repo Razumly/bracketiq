@@ -18,6 +18,7 @@ fun EventsTabContent(
     onLoadMore: () -> Unit,
     onMapClick: (Offset, Event) -> Unit,
     onEventClick: (Event) -> Unit,
+    onCreateEventClick: () -> Unit,
 ) {
     EventList(
         events = events,
@@ -29,5 +30,6 @@ fun EventsTabContent(
         onLoadMore = onLoadMore,
         onMapClick = onMapClick,
         onEventClick = onEventClick,
+        onCreateEventClick = onCreateEventClick,
     )
 }

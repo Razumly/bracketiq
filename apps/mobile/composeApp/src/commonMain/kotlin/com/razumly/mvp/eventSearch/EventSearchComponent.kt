@@ -69,6 +69,7 @@ interface EventSearchComponent {
     fun onMapClick(event: Event? = null)
     fun viewEvent(event: Event)
     fun viewOrganization(organization: Organization, initialTab: OrganizationDetailTab = OrganizationDetailTab.OVERVIEW)
+    fun startEventCreate()
     fun startRentalCreate(context: RentalCreateContext)
     fun suggestEvents(searchQuery: String)
     fun suggestOrganizations(searchQuery: String, rentalsOnly: Boolean = false)
@@ -272,6 +273,10 @@ class DefaultEventSearchComponent(
 
     override fun viewOrganization(organization: Organization, initialTab: OrganizationDetailTab) {
         navigationHandler.navigateToOrganization(organization.id, initialTab)
+    }
+
+    override fun startEventCreate() {
+        navigationHandler.navigateToCreate()
     }
 
     override fun startRentalCreate(context: RentalCreateContext) {

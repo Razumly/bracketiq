@@ -505,7 +505,8 @@ fun EventSearchScreen(
                                         },
                                         onEventClick = { event ->
                                             component.viewEvent(event)
-                                        }
+                                        },
+                                        onCreateEventClick = component::startEventCreate,
                                     )
                                 }
 
