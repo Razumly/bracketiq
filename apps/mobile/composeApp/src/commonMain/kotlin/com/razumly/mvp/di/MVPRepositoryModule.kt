@@ -7,6 +7,8 @@ import com.razumly.mvp.chat.data.MessageRepository
 import com.razumly.mvp.core.data.repositories.BillingRepository
 import com.razumly.mvp.core.data.repositories.EventRepository
 import com.razumly.mvp.core.data.repositories.FieldRepository
+import com.razumly.mvp.core.data.repositories.AppUpdateRepository
+import com.razumly.mvp.core.data.repositories.IAppUpdateRepository
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
@@ -61,4 +63,7 @@ val MVPRepositoryModule = module {
     single {
         SportsRepository(get())
     } bind ISportsRepository::class
+    single {
+        AppUpdateRepository(get(), get())
+    } bind IAppUpdateRepository::class
 }

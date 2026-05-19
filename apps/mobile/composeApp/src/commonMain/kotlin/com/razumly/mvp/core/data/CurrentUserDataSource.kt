@@ -16,6 +16,7 @@ class CurrentUserDataSource(private val dataStore: DataStore<Preferences>) {
     private val mutedChatIds = stringPreferencesKey("muted_chat_ids")
     private val registrationSyncStartedAt = stringPreferencesKey("registration_sync_started_at")
     private val registrationSyncUserId = stringPreferencesKey("registration_sync_user_id")
+    private val dismissedAppReleaseKey = stringPreferencesKey("dismissed_app_release_key")
 
     suspend fun saveUserId(userId: String) {
         dataStore.edit { dataStore ->
@@ -109,6 +110,17 @@ class CurrentUserDataSource(private val dataStore: DataStore<Preferences>) {
             preferences.remove(registrationSyncStartedAt)
         }
     }
+
+    suspend fun saveDismissedAppReleaseKey(releaseKey: String) {
+        val normalizedReleaseKey = releaseKey.trim()
+        if (normalizedReleaseKey.isBlank()) return
+        dataStore.edit { preferences ->
+            preferences[dismissedAppReleaseKey] = normalizedReleaseKey
+        }
+    }
+
+    suspend fun getDismissedAppReleaseKeyNow(): String =
+        dataStore.data.first()[dismissedAppReleaseKey].orEmpty()
 
     private fun parseIdSet(raw: String?): MutableSet<String> {
         if (raw.isNullOrBlank()) return mutableSetOf()

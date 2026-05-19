@@ -9,4 +9,6 @@ actual object Platform {
     actual val isDebugBuild: Boolean = BuildConfig.DEBUG
     actual val isNonReleaseBuild: Boolean =
         !BuildConfig.BUILD_TYPE.equals("release", ignoreCase = true)
+    actual val appVersionName: String = BuildConfig.VERSION_NAME
+    actual val appBuildNumber: Int? = BuildConfig.VERSION_CODE
 }

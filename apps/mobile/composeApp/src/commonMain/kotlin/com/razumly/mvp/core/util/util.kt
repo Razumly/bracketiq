@@ -86,4 +86,6 @@ expect object Platform {
     val isIOS: Boolean
     val isDebugBuild: Boolean
     val isNonReleaseBuild: Boolean
+    val appVersionName: String
+    val appBuildNumber: Int?
 }

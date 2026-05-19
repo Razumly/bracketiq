@@ -33,6 +33,7 @@ import com.arkivanov.essenty.backhandler.BackDispatcher
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
+import com.razumly.mvp.core.data.repositories.IAppUpdateRepository
 import com.razumly.mvp.core.presentation.composables.NativeViewFactory
 import com.razumly.mvp.chat.data.IChatGroupRepository
 
@@ -81,6 +82,7 @@ fun MainViewController(
                         eventRepository = getKoin().get<IEventRepository>(),
                         pushNotificationsRepository = getKoin().get<IPushNotificationsRepository>(),
                         chatGroupRepository = getKoin().get<IChatGroupRepository>(),
+                        appUpdateRepository = getKoin().get<IAppUpdateRepository>(),
                     )
                 } catch (e: Exception) {
                     Napier.e(tag = "Root", throwable = e) { "Component creation failed" }

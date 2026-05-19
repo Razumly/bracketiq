@@ -7,12 +7,24 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProgressIndicatorDefaults
 import androidx.compose.material3.Scaffold
@@ -38,12 +50,15 @@ import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.arkivanov.decompose.ExperimentalDecomposeApi
 import com.arkivanov.decompose.extensions.compose.experimental.stack.ChildStack
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.arkivanov.decompose.router.stack.ChildStack
 import com.razumly.mvp.chat.ChatGroupScreen
 import com.razumly.mvp.chat.ChatListScreen
+import com.razumly.mvp.core.data.repositories.AppUpdatePrompt
 import com.razumly.mvp.core.presentation.composables.MVPBottomNavBar
 import com.razumly.mvp.core.presentation.composables.PlatformFocusManager
 import com.razumly.mvp.core.presentation.util.backAnimation
@@ -80,6 +95,7 @@ fun App(root: RootComponent) {
     val selectedPage by root.selectedPage.collectAsState()
     val unreadChatMessageCount by root.unreadChatMessageCount.collectAsState()
     val pendingInviteCount by root.pendingInviteCount.collectAsState()
+    val appUpdatePrompt by root.appUpdatePrompt.collectAsState()
 
     val popupHandler = remember { PopupHandlerImpl() }
     val loadingHandler = remember { LoadingHandlerImpl() }
@@ -174,6 +190,108 @@ fun App(root: RootComponent) {
                         progress = loadingState.progress,
                         modifier = Modifier.fillMaxSize()
                     )
+                }
+
+                appUpdatePrompt?.let { prompt ->
+                    AppUpdateDialog(
+                        prompt = prompt,
+                        onUpdateNow = root::openAppUpdate,
+                        onDismiss = root::dismissAppUpdatePrompt,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppUpdateDialog(
+    prompt: AppUpdatePrompt,
+    onUpdateNow: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = {
+            if (!prompt.updateRequired) onDismiss()
+        },
+        properties = DialogProperties(
+            dismissOnBackPress = !prompt.updateRequired,
+            dismissOnClickOutside = !prompt.updateRequired,
+        ),
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 420.dp),
+            shape = RoundedCornerShape(8.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            text = if (prompt.updateRequired) "Update required" else "Update available",
+                            style = MaterialTheme.typography.titleLarge,
+                        )
+                        Text(
+                            text = "Version ${prompt.versionName} is ready.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (!prompt.updateRequired) {
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.size(40.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close",
+                            )
+                        }
+                    }
+                }
+
+                if (prompt.updateRequired) {
+                    Text(
+                        text = "This update is required to keep using Bracket IQ.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 220.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    prompt.changes.forEach { change ->
+                        Text(
+                            text = "- $change",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+
+                Button(
+                    onClick = onUpdateNow,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Update now")
                 }
             }
         }

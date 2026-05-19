@@ -52,6 +52,7 @@ val componentModule = module {
             eventRepository = get(),
             pushNotificationsRepository = get(),
             chatGroupRepository = get(),
+            appUpdateRepository = get(),
         )
     }
 

@@ -17,6 +17,8 @@ import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.repositories.AppUpdatePrompt
+import com.razumly.mvp.core.data.repositories.IAppUpdateRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.StartupAuthState
@@ -64,6 +66,7 @@ class RootComponent(
     private val eventRepository: IEventRepository,
     private val pushNotificationsRepository: IPushNotificationsRepository,
     private val chatGroupRepository: IChatGroupRepository,
+    private val appUpdateRepository: IAppUpdateRepository,
 ) : ComponentContext by componentContext, INavigationHandler {
     companion object {
         private const val STARTUP_AUTH_TIMEOUT_MS = 3_000L
@@ -122,6 +125,8 @@ class RootComponent(
     val isStartupInProgress: StateFlow<Boolean> = _isStartupInProgress.asStateFlow()
     private val _startupNotice = MutableStateFlow<String?>(null)
     val startupNotice: StateFlow<String?> = _startupNotice.asStateFlow()
+    private val _appUpdatePrompt = MutableStateFlow<AppUpdatePrompt?>(null)
+    val appUpdatePrompt: StateFlow<AppUpdatePrompt?> = _appUpdatePrompt.asStateFlow()
 
     val childStack: Value<ChildStack<AppConfig, Child>> = childStack(
         source = navigation,
@@ -132,6 +137,8 @@ class RootComponent(
     )
 
     init {
+        checkForAppUpdate()
+
         scope.launch {
             userRepository.startupAuthState.collect { state ->
                 val currentConfig = childStack.value.active.configuration
@@ -260,6 +267,39 @@ class RootComponent(
 
     fun onStartupNoticeShown() {
         _startupNotice.value = null
+    }
+
+    fun dismissAppUpdatePrompt() {
+        val prompt = _appUpdatePrompt.value ?: return
+        if (prompt.updateRequired) return
+
+        scope.launch(Dispatchers.Default) {
+            appUpdateRepository.dismiss(prompt)
+            _appUpdatePrompt.value = null
+        }
+    }
+
+    fun openAppUpdate() {
+        val prompt = _appUpdatePrompt.value ?: return
+
+        scope.launch(Dispatchers.Default) {
+            appUpdateRepository.openUpdate(prompt).onFailure { throwable ->
+                Napier.w("Failed to open app update URL: ${throwable.message}")
+                _startupNotice.value = "Couldn't open the app store. Please update Bracket IQ from the store."
+            }
+        }
+    }
+
+    private fun checkForAppUpdate() {
+        scope.launch(Dispatchers.Default) {
+            appUpdateRepository.checkForUpdate()
+                .onSuccess { prompt ->
+                    _appUpdatePrompt.value = prompt
+                }
+                .onFailure { throwable ->
+                    Napier.w("App update check failed: ${throwable.message}")
+                }
+        }
     }
 
     private fun navigateToRequiredProfileCompletion() {
