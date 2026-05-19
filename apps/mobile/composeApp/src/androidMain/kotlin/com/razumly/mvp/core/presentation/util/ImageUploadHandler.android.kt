@@ -29,7 +29,8 @@ actual fun convertPhotoResultToUploadFile(photoResult: GalleryPhotoResult): MvpU
     val uri = photoResult.uri.toUri()
     val bytes = uriToByteArray(context, uri)
     val fileName = getFileNameFromUri(context, uri)
-    val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+    val detectedMimeType = photoResult.mimeType ?: context.contentResolver.getType(uri)
+    val mimeType = requireSupportedImageUploadMimeType(fileName, detectedMimeType)
 
     return MvpUploadFile(bytes = bytes, filename = fileName, mimeType = mimeType)
 }

@@ -191,11 +191,7 @@ fun ProfileDetailsScreen(
                 showUploadImagePicker = false
             },
             allowMultiple = false,
-            mimeTypes = listOf(
-                MimeType.IMAGE_JPEG,
-                MimeType.IMAGE_PNG,
-                MimeType.IMAGE_WEBP,
-            ),
+            mimeTypes = listOf(MimeType.IMAGE_ALL),
         )
     }
 

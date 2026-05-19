@@ -4866,8 +4866,7 @@ fun EventDetails(
             showUploadImagePicker = false
         }, onDismiss = {
             showUploadImagePicker = false
-        }, allowMultiple = false, mimeTypes = listOf(MimeType.IMAGE_JPEG, MimeType.IMAGE_PNG,
-                MimeType.IMAGE_WEBP)
+        }, allowMultiple = false, mimeTypes = listOf(MimeType.IMAGE_ALL)
         )
     }
 
