@@ -26,6 +26,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -171,6 +172,7 @@ fun ProfilePaymentPlansScreen(component: ProfileComponent) {
                         paymentPlan = paymentPlan,
                         isProcessing = activeBillPaymentId == paymentPlan.bill.id,
                         onPayNextInstallment = { component.payNextInstallment(paymentPlan) },
+                        onCancelPendingPayment = { component.cancelPendingBillPayment(paymentPlan) },
                     )
                 }
             }
@@ -1900,9 +1902,18 @@ private fun PaymentPlanCard(
     paymentPlan: ProfilePaymentPlan,
     isProcessing: Boolean,
     onPayNextInstallment: () -> Unit,
+    onCancelPendingPayment: () -> Unit,
 ) {
     val status = paymentPlan.bill.status ?: "OPEN"
     val billDisplayId = paymentPlan.bill.id.take(6)
+    val processingPayment = paymentPlan.processingPayment
+    val failedPayment = paymentPlan.failedPayment
+    val actionLabel = when {
+        isProcessing -> "Opening payment..."
+        processingPayment != null -> "Payment pending"
+        failedPayment != null -> "Complete payment"
+        else -> "Pay next installment"
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1943,12 +1954,38 @@ private fun PaymentPlanCard(
                 style = MaterialTheme.typography.bodySmall,
             )
 
+            when {
+                processingPayment != null -> Text(
+                    text = "Payment pending. You can cancel it if the bank payment should not continue.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                failedPayment != null -> Text(
+                    text = "Payment failed. Complete payment to try again.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+
             Button(
                 modifier = Modifier.fillMaxWidth(),
                 onClick = onPayNextInstallment,
-                enabled = !isProcessing && paymentPlan.nextPendingPayment != null && paymentPlan.nextPaymentAmountCents > 0,
+                enabled = !isProcessing &&
+                    processingPayment == null &&
+                    paymentPlan.nextPayablePayment != null &&
+                    paymentPlan.nextPaymentAmountCents > 0,
             ) {
-                Text(if (isProcessing) "Opening payment..." else "Pay next installment")
+                Text(actionLabel)
+            }
+
+            if (processingPayment != null) {
+                OutlinedButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onCancelPendingPayment,
+                    enabled = !isProcessing,
+                ) {
+                    Text("Cancel pending payment")
+                }
             }
         }
     }

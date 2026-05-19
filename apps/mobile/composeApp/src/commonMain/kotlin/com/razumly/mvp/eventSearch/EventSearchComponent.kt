@@ -7,6 +7,7 @@ import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.instancekeeper.InstanceKeeper
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
+import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.Organization
@@ -176,6 +177,7 @@ class DefaultEventSearchComponent(
     private var suggestEventsJob: Job? = null
     private var suggestOrganizationsJob: Job? = null
     private var cachedEventsSyncJob: Job? = null
+    private var isAwaitingInitialEventLocation = true
     private var eventOffset = 0
     private var organizationFieldIdsFromFieldsCache: Map<String, List<String>> = emptyMap()
 
@@ -230,6 +232,8 @@ class DefaultEventSearchComponent(
                     if (_searchCenter.value == null && (previousLocation == null ||
                             calcDistance(previousLocation, trackedLocation) > 50)
                     ) {
+                        _isLocationSearchEnabled.value = true
+                        refreshEvents(force = true)
                         refreshOrganizations(force = false)
                         refreshRentals(force = false)
                     }
@@ -242,6 +246,7 @@ class DefaultEventSearchComponent(
                 throw cancelled
             } catch (e: Exception) {
                 Napier.w("Location updates unavailable: ${e.message}")
+                handleLocationUnavailable()
             }
         }
 
@@ -301,11 +306,7 @@ class DefaultEventSearchComponent(
                 offset = 0,
             )
                 .onSuccess { (events, _) ->
-                    _suggestedEvents.value = if (_isLocationSearchEnabled.value) {
-                        events
-                    } else {
-                        events.sortedByDescending { event -> event.start }
-                    }
+                    _suggestedEvents.value = events
                 }.onFailure { e ->
                     _errorState.value = ErrorMessage("Failed to fetch events: ${e.userMessage()}")
                 }
@@ -360,8 +361,12 @@ class DefaultEventSearchComponent(
             try {
                 val activeFilter = _filter.value
                 val currentLocation = activeSearchLocation()
-                val currentBounds =
+                val includeDistanceFilter = currentLocation != null
+                val currentBounds = if (currentLocation != null) {
                     getBounds(_currentRadius.value, currentLocation.latitude, currentLocation.longitude)
+                } else {
+                    UNRESTRICTED_EVENT_SEARCH_BOUNDS
+                }
 
                 eventRepository.getEventsInBounds(
                     bounds = currentBounds,
@@ -369,7 +374,7 @@ class DefaultEventSearchComponent(
                     dateTo = activeFilter.date.second,
                     limit = EVENTS_PAGE_SIZE,
                     offset = eventOffset,
-                    includeDistanceFilter = true,
+                    includeDistanceFilter = includeDistanceFilter,
                 )
                     .onSuccess { (eventsPage, hasMore) ->
                         eventOffset += eventsPage.size
@@ -388,6 +393,15 @@ class DefaultEventSearchComponent(
 
     override fun refreshEvents(force: Boolean) {
         if (!force && _isLoadingMore.value) return
+        if (shouldWaitForLocationBeforeEventSearch()) {
+            isAwaitingInitialEventLocation = true
+            _isLoadingMore.value = true
+            return
+        }
+        if (isAwaitingInitialEventLocation) {
+            isAwaitingInitialEventLocation = false
+            _isLoadingMore.value = false
+        }
         _hasMoreEvents.value = true
         eventOffset = 0
         _rawEvents.value = emptyList()
@@ -471,12 +485,7 @@ class DefaultEventSearchComponent(
     }
 
     private fun applyEventFilter(source: List<Event>, filter: EventFilter): List<Event> {
-        val filtered = source.filter { event -> filter.filter(event) }
-        return if (_isLocationSearchEnabled.value) {
-            filtered
-        } else {
-            filtered.sortedByDescending { event -> event.start }
-        }
+        return source.filter { event -> filter.filter(event) }
     }
 
     private fun mergeEvents(existing: List<Event>, incoming: List<Event>): List<Event> {
@@ -642,11 +651,20 @@ class DefaultEventSearchComponent(
         return LatLng(latitude, longitude)
     }
 
-    private fun activeSearchLocation(): LatLng =
-        activeSearchLocationOrNull() ?: SAN_FRANCISCO_LOCATION
+    private fun activeSearchLocation(): LatLng? =
+        activeSearchLocationOrNull()
 
     private fun activeSearchLocationOrNull(): LatLng? =
-        _searchCenter.value ?: _currentLocation.value
+        if (_isLocationSearchEnabled.value) {
+            _searchCenter.value ?: _currentLocation.value
+        } else {
+            _searchCenter.value
+        }
+
+    private fun shouldWaitForLocationBeforeEventSearch(): Boolean =
+        _isLocationSearchEnabled.value &&
+            _searchCenter.value == null &&
+            _currentLocation.value == null
 
     private suspend fun startTrackingLocationSafely() {
         try {
@@ -660,18 +678,29 @@ class DefaultEventSearchComponent(
             throw cancelled
         } catch (e: Exception) {
             Napier.w("Location tracking disabled: ${e.message}")
+            handleLocationUnavailable()
         }
+    }
+
+    private fun handleLocationUnavailable() {
+        _searchCenter.value = null
+        _isLocationSearchEnabled.value = false
+        _currentLocation.value = null
+        _errorState.value = ErrorMessage("Location is unavailable. Showing upcoming events without location filtering.")
+        refreshEvents(force = true)
+        refreshOrganizations(force = true)
+        refreshRentals(force = true)
     }
 
     private fun handleLocationPermissionDenied(alwaysDenied: Boolean) {
         _searchCenter.value = null
         _isLocationSearchEnabled.value = false
-        _currentLocation.value = SAN_FRANCISCO_LOCATION
+        _currentLocation.value = null
         _errorState.value = ErrorMessage(
             if (alwaysDenied) {
-                "Location permission is turned off. Showing most recent events with San Francisco as default."
+                "Location permission is turned off. Showing upcoming events without location filtering."
             } else {
-                "Location permission denied. Showing most recent events with San Francisco as default."
+                "Location permission denied. Showing upcoming events without location filtering."
             }
         )
         refreshEvents(force = true)
@@ -687,7 +716,14 @@ class DefaultEventSearchComponent(
 
     companion object {
         const val CLEANUP_KEY = "Cleanup_Search"
-        private val SAN_FRANCISCO_LOCATION = LatLng(37.7749, -122.4194)
+        private val UNRESTRICTED_EVENT_SEARCH_BOUNDS = Bounds(
+            north = 0.0,
+            east = 0.0,
+            south = 0.0,
+            west = 0.0,
+            center = LatLng(0.0, 0.0),
+            radiusMiles = 0.0,
+        )
         private const val EVENTS_PAGE_SIZE = 50
         private const val SEARCH_MIN_QUERY_LENGTH = 2
         private const val SEARCH_SUGGESTION_LIMIT = 50

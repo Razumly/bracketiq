@@ -332,6 +332,12 @@ interface IBillingRepository : IMVPRepository {
         amountCents: Int,
     ): Result<Unit>
     suspend fun createBillingIntent(billId: String, billPaymentId: String): Result<PurchaseIntent>
+    suspend fun markBillingPaymentProcessing(
+        billId: String,
+        billPaymentId: String,
+        paymentIntent: String,
+    ): Result<Bill>
+    suspend fun cancelBillPayment(billId: String, billPaymentId: String): Result<Bill>
     suspend fun getBillingAddress(): Result<BillingAddressProfile>
     suspend fun updateBillingAddress(address: BillingAddressDraft): Result<BillingAddressProfile>
     suspend fun listSubscriptions(userId: String, limit: Int = 100): Result<List<Subscription>>
@@ -996,6 +1002,40 @@ class BillingRepository(
         response
     }
 
+    override suspend fun markBillingPaymentProcessing(
+        billId: String,
+        billPaymentId: String,
+        paymentIntent: String,
+    ): Result<Bill> = runCatching {
+        val normalizedBillId = billId.trim()
+        val normalizedPaymentId = billPaymentId.trim()
+        val normalizedPaymentIntent = paymentIntent.trim()
+        require(normalizedBillId.isNotBlank()) { "Bill id is required." }
+        require(normalizedPaymentId.isNotBlank()) { "Bill payment id is required." }
+        require(normalizedPaymentIntent.isNotBlank()) { "Payment intent is required." }
+
+        val response = api.post<MarkBillPaymentProcessingRequestDto, CreateBillResponseDto>(
+            path = "api/billing/bills/${normalizedBillId.encodeURLQueryComponent()}/payments/${normalizedPaymentId.encodeURLQueryComponent()}/processing",
+            body = MarkBillPaymentProcessingRequestDto(paymentIntent = normalizedPaymentIntent),
+        )
+        response.error?.takeIf(String::isNotBlank)?.let { throw Exception(it) }
+        response.bill?.toBillOrNull() ?: throw Exception("Payment status response is missing bill.")
+    }
+
+    override suspend fun cancelBillPayment(billId: String, billPaymentId: String): Result<Bill> = runCatching {
+        val normalizedBillId = billId.trim()
+        val normalizedPaymentId = billPaymentId.trim()
+        require(normalizedBillId.isNotBlank()) { "Bill id is required." }
+        require(normalizedPaymentId.isNotBlank()) { "Bill payment id is required." }
+
+        val response = api.post<EmptyRequestDto, CreateBillResponseDto>(
+            path = "api/billing/bills/${normalizedBillId.encodeURLQueryComponent()}/payments/${normalizedPaymentId.encodeURLQueryComponent()}/cancel",
+            body = EmptyRequestDto(),
+        )
+        response.error?.takeIf(String::isNotBlank)?.let { throw Exception(it) }
+        response.bill?.toBillOrNull() ?: throw Exception("Cancel response is missing bill.")
+    }
+
     override suspend fun getBillingAddress(): Result<BillingAddressProfile> = runCatching {
         val response = api.get<BillingAddressResponseDto>(path = "api/profile/billing-address")
         response.toBillingAddressProfile()
@@ -1530,6 +1570,11 @@ private data class CreateBillingIntentRequestDto(
     val billId: String,
     val billPaymentId: String,
     val user: BillingUserRefDto? = null,
+)
+
+@Serializable
+private data class MarkBillPaymentProcessingRequestDto(
+    val paymentIntent: String,
 )
 
 @Serializable
@@ -2135,6 +2180,8 @@ data class PurchaseIntent(
     val taxReasonCode: String? = null,
     val taxJurisdictionState: String? = null,
     val feeBreakdown: FeeBreakdown? = null,
+    val billId: String? = null,
+    val billPaymentId: String? = null,
     val boldSignUrl: String? = null,
     val boldsignUrl: String? = null,
     val documentSigningUrl: String? = null,

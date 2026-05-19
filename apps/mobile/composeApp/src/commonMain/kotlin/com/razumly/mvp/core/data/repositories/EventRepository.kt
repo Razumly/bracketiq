@@ -119,7 +119,7 @@ interface IEventRepository : IMVPRepository {
     ): Result<Pair<List<Event>, Boolean>>
     suspend fun searchEvents(
         searchQuery: String,
-        userLocation: LatLng,
+        userLocation: LatLng?,
         limit: Int = 8,
         offset: Int = 0,
     ): Result<Pair<List<Event>, Boolean>>
@@ -1229,7 +1229,7 @@ class EventRepository(
 
     override suspend fun searchEvents(
         searchQuery: String,
-        userLocation: LatLng,
+        userLocation: LatLng?,
         limit: Int,
         offset: Int,
     ): Result<Pair<List<Event>, Boolean>> {
@@ -1253,8 +1253,12 @@ class EventRepository(
             )
             databaseService.getEventDao.upsertEvents(events)
 
+            val orderedEvents = userLocation
+                ?.let { location -> events.sortedBy { calcDistance(location, LatLng(it.lat, it.long)) } }
+                ?: events
+
             Pair(
-                events.sortedBy { calcDistance(userLocation, LatLng(it.lat, it.long)) },
+                orderedEvents,
                 events.size == normalizedLimit,
             )
         }

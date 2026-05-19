@@ -3354,6 +3354,7 @@ fun EventDetailScreen(
     val isEventFull by component.isEventFull.collectAsState()
     val isUserInEvent by component.isUserInEvent.collectAsState()
     val isRegistrationPaymentPending by component.isRegistrationPaymentPending.collectAsState()
+    val isRegistrationPaymentFailed by component.isRegistrationPaymentFailed.collectAsState()
     val isFreeAgent by component.isUserFreeAgent.collectAsState()
     val isWaitListed by component.isUserInWaitlist.collectAsState()
     val isCaptain by component.isUserCaptain.collectAsState()
@@ -4169,7 +4170,7 @@ fun EventDetailScreen(
                     add(
                         JoinOption(
                             label = if (joinOptionPriceCents > 0) {
-                                "Purchase Ticket for Team"
+                                if (isRegistrationPaymentFailed) "Complete payment" else "Purchase Ticket for Team"
                             } else {
                                 "Join as Team"
                             },
@@ -4183,7 +4184,11 @@ fun EventDetailScreen(
                 } else {
                     add(
                         JoinOption(
-                            label = if (joinOptionPriceCents > 0) "Purchase Ticket" else "Join Event",
+                            label = if (joinOptionPriceCents > 0) {
+                                if (isRegistrationPaymentFailed) "Complete payment" else "Purchase Ticket"
+                            } else {
+                                "Join Event"
+                            },
                             requiresPayment = joinOptionPriceCents > 0,
                             onClick = component::joinEvent
                         )
@@ -5586,6 +5591,7 @@ fun EventDetailScreen(
                 StickyActionBar(
                     primaryLabel = when {
                         isRegistrationPaymentPending -> "Payment pending"
+                        isRegistrationPaymentFailed && !joinBlockedByStart -> "Complete payment"
                         isWeeklyParentEvent && !joinBlockedByStart -> "Join Event"
                         shouldShowViewSchedulePrimaryAction -> "View Schedule and Participants"
                         !isUserInEvent && !joinBlockedByStart -> "Join options"
@@ -5597,11 +5603,16 @@ fun EventDetailScreen(
                         !isRegistrationPaymentPending && !joinBlockedByStart
                     } else {
                         !isRegistrationPaymentPending &&
-                            (shouldShowViewSchedulePrimaryAction || (!isUserInEvent && !joinBlockedByStart))
+                            (
+                                (isRegistrationPaymentFailed && !joinBlockedByStart) ||
+                                    shouldShowViewSchedulePrimaryAction ||
+                                    (!isUserInEvent && !joinBlockedByStart)
+                                )
                     },
                     onPrimaryClick = {
                         when {
                             isRegistrationPaymentPending -> Unit
+                            isRegistrationPaymentFailed && !joinBlockedByStart -> showJoinOptionsSheet = true
                             isWeeklyParentEvent && !joinBlockedByStart -> showJoinOptionsSheet = true
                             shouldShowViewSchedulePrimaryAction -> component.viewEvent()
                             !isUserInEvent && !joinBlockedByStart -> showJoinOptionsSheet = true

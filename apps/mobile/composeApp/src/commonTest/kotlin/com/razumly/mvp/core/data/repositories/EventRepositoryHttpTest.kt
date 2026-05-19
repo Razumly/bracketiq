@@ -1116,6 +1116,8 @@ class EventRepositoryHttpTest {
         assertFalse(secondPage.second)
         assertTrue(capturedBodies.first().contains("\"limit\":2"))
         assertTrue(capturedBodies.first().contains("\"offset\":0"))
+        assertFalse(capturedBodies.first().contains("\"maxDistance\""))
+        assertFalse(capturedBodies.first().contains("\"userLocation\""))
         assertTrue(capturedBodies.last().contains("\"offset\":2"))
     }
 

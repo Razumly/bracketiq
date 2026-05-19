@@ -161,6 +161,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val isEditing: StateFlow<Boolean>
     val isUserInEvent: StateFlow<Boolean>
     val isRegistrationPaymentPending: StateFlow<Boolean>
+    val isRegistrationPaymentFailed: StateFlow<Boolean>
     val isBracketView: StateFlow<Boolean>
     val isEventFull: StateFlow<Boolean>
     val editedEvent: StateFlow<Event>
@@ -544,10 +545,15 @@ private fun EventRegistrationCacheEntry.isCancelledLike(): Boolean =
     normalizedStatus() == "CANCELLED"
 
 private fun EventRegistrationCacheEntry.isActiveForMembership(): Boolean =
-    !isCancelledLike() && normalizedStatus() != "CONSENTFAILED"
+    !isCancelledLike() &&
+        normalizedStatus() != "CONSENTFAILED" &&
+        normalizedStatus() != "PAYMENT_FAILED"
 
 private fun EventRegistrationCacheEntry.isPaymentPending(): Boolean =
     normalizedStatus() == "PENDING"
+
+private fun EventRegistrationCacheEntry.isPaymentFailed(): Boolean =
+    normalizedStatus() == "PAYMENT_FAILED"
 
 private fun EventRegistrationCacheEntry.matchesCurrentUserTeamIds(currentUserTeamIds: Set<String>): Boolean {
     if (currentUserTeamIds.isEmpty()) {
@@ -571,6 +577,7 @@ private data class CurrentUserRegistrationMembershipState(
     val waitlist: Boolean = false,
     val freeAgent: Boolean = false,
     val paymentPending: Boolean = false,
+    val paymentFailed: Boolean = false,
     val teamId: String? = null,
 )
 
@@ -1169,6 +1176,9 @@ class DefaultEventDetailComponent(
 
     private val _isRegistrationPaymentPending = MutableStateFlow(false)
     override val isRegistrationPaymentPending = _isRegistrationPaymentPending.asStateFlow()
+
+    private val _isRegistrationPaymentFailed = MutableStateFlow(false)
+    override val isRegistrationPaymentFailed = _isRegistrationPaymentFailed.asStateFlow()
 
     private val _isUserInWaitlist = MutableStateFlow(checkIsUserWaitListed(event))
     override val isUserInWaitlist = _isUserInWaitlist.asStateFlow()
@@ -5587,6 +5597,7 @@ class DefaultEventDetailComponent(
         if (weeklyParentWithoutSelection) {
             _isUserInEvent.value = false
             _isRegistrationPaymentPending.value = false
+            _isRegistrationPaymentFailed.value = false
             _isUserInWaitlist.value = false
             _isUserFreeAgent.value = false
             _isUserCaptain.value = false
@@ -5599,6 +5610,7 @@ class DefaultEventDetailComponent(
         if (cachedState != null) {
             _isUserInEvent.value = cachedState.participant || cachedState.waitlist || cachedState.freeAgent
             _isRegistrationPaymentPending.value = cachedState.paymentPending
+            _isRegistrationPaymentFailed.value = cachedState.paymentFailed
             _isUserInWaitlist.value = cachedState.waitlist
             _isUserFreeAgent.value = cachedState.freeAgent
             _usersTeam.value = cachedState.teamId
@@ -5609,6 +5621,7 @@ class DefaultEventDetailComponent(
 
         _isUserInEvent.value = checkIsUserInEvent(event)
         _isRegistrationPaymentPending.value = false
+        _isRegistrationPaymentFailed.value = false
         _isUserInWaitlist.value = checkIsUserWaitListed(event)
         _isUserFreeAgent.value = checkIsUserFreeAgent(event)
         if (_isUserInEvent.value) {
@@ -5645,9 +5658,6 @@ class DefaultEventDetailComponent(
         val currentUserId = currentUser.value.id.trim()
         val currentUserTeamIds = currentUserTeamIds()
         val matchingRegistrations = registrations.filter { registration ->
-            if (!registration.isActiveForMembership()) {
-                return@filter false
-            }
             val matchesRegistrant = when (registration.registrantType.trim().uppercase()) {
                 "SELF" -> currentUserId.isNotBlank() && registration.registrantId == currentUserId
                 "TEAM" -> registration.matchesCurrentUserTeamIds(currentUserTeamIds)
@@ -5669,19 +5679,25 @@ class DefaultEventDetailComponent(
             return CurrentUserRegistrationMembershipState()
         }
 
-        val participant = matchingRegistrations.any { registration ->
+        val activeRegistrations = matchingRegistrations.filter { registration ->
+            registration.isActiveForMembership()
+        }
+        val participant = activeRegistrations.any { registration ->
             registration.normalizedRosterRole() == "PARTICIPANT"
         }
-        val waitlist = matchingRegistrations.any { registration ->
+        val waitlist = activeRegistrations.any { registration ->
             registration.normalizedRosterRole() == "WAITLIST"
         }
-        val freeAgent = matchingRegistrations.any { registration ->
+        val freeAgent = activeRegistrations.any { registration ->
             registration.normalizedRosterRole() == "FREE_AGENT"
         }
-        val paymentPending = matchingRegistrations.any { registration ->
+        val paymentPending = activeRegistrations.any { registration ->
             registration.isPaymentPending()
         }
-        val teamId = matchingRegistrations
+        val paymentFailed = matchingRegistrations.any { registration ->
+            registration.isPaymentFailed()
+        }
+        val teamId = activeRegistrations
             .firstOrNull { registration -> registration.registrantType.trim().uppercase() == "TEAM" }
             ?.resolvedEventTeamId()
 
@@ -5690,6 +5706,7 @@ class DefaultEventDetailComponent(
             waitlist = waitlist,
             freeAgent = freeAgent,
             paymentPending = paymentPending,
+            paymentFailed = paymentFailed,
             teamId = teamId,
         )
     }

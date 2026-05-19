@@ -248,7 +248,7 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
     ): Result<Pair<List<Event>, Boolean>> = error("unused")
     override suspend fun searchEvents(
         searchQuery: String,
-        userLocation: dev.icerock.moko.geo.LatLng,
+        userLocation: dev.icerock.moko.geo.LatLng?,
         limit: Int,
         offset: Int,
     ): Result<Pair<List<Event>, Boolean>> = error("unused")
@@ -346,7 +346,7 @@ private class BillingRepositoryHttp_FakeEventRepository(
     ): Result<Pair<List<Event>, Boolean>> = error("unused")
     override suspend fun searchEvents(
         searchQuery: String,
-        userLocation: dev.icerock.moko.geo.LatLng,
+        userLocation: dev.icerock.moko.geo.LatLng?,
         limit: Int,
         offset: Int,
     ): Result<Pair<List<Event>, Boolean>> = error("unused")

@@ -422,7 +422,7 @@ internal class CreateEvent_FakeEventRepository(
 
     override suspend fun searchEvents(
         searchQuery: String,
-        userLocation: LatLng,
+        userLocation: LatLng?,
         limit: Int,
         offset: Int,
     ): Result<Pair<List<Event>, Boolean>> = Result.success(Pair(emptyList(), true))
@@ -823,6 +823,28 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
     ): Result<Unit> = Result.success(Unit)
     override suspend fun createBillingIntent(billId: String, billPaymentId: String): Result<PurchaseIntent> =
         Result.success(PurchaseIntent(paymentIntent = "pi_bill", publishableKey = "pk_bill"))
+    override suspend fun markBillingPaymentProcessing(
+        billId: String,
+        billPaymentId: String,
+        paymentIntent: String,
+    ): Result<Bill> = Result.success(
+        Bill(
+            ownerType = "USER",
+            ownerId = "user-1",
+            totalAmountCents = 0,
+            status = "PENDING",
+            id = billId,
+        )
+    )
+    override suspend fun cancelBillPayment(billId: String, billPaymentId: String): Result<Bill> = Result.success(
+        Bill(
+            ownerType = "USER",
+            ownerId = "user-1",
+            totalAmountCents = 0,
+            status = "OPEN",
+            id = billId,
+        )
+    )
     override suspend fun getBillingAddress(): Result<BillingAddressProfile> = Result.success(billingAddressProfile)
     override suspend fun updateBillingAddress(address: BillingAddressDraft): Result<BillingAddressProfile> {
         val normalizedAddress = address.normalized()

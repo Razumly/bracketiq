@@ -76,22 +76,44 @@ data class ProfilePaymentPlan(
     val remainingAmountCents: Int
         get() = (bill.totalAmountCents - paidAmountCents).coerceAtLeast(0)
 
+    val processingPayment: BillPayment?
+        get() = payments
+            .sortedBy { it.sequence }
+            .firstOrNull { it.status.equals("PROCESSING", ignoreCase = true) }
+
+    val failedPayment: BillPayment?
+        get() = payments
+            .sortedBy { it.sequence }
+            .firstOrNull { it.status.equals("FAILED", ignoreCase = true) }
+
     val nextPendingPayment: BillPayment?
         get() = payments
             .sortedBy { it.sequence }
             .firstOrNull { it.status.equals("PENDING", ignoreCase = true) }
 
+    val nextPayablePayment: BillPayment?
+        get() = failedPayment ?: nextPendingPayment
+
     val nextPaymentAmountCents: Int
-        get() = bill.nextPaymentAmountCents ?: nextPendingPayment?.amountCents ?: remainingAmountCents
+        get() = bill.nextPaymentAmountCents
+            ?: processingPayment?.amountCents
+            ?: nextPayablePayment?.amountCents
+            ?: remainingAmountCents
 
     val nextPaymentDue: String?
-        get() = bill.nextPaymentDue ?: nextPendingPayment?.dueDate
+        get() = bill.nextPaymentDue ?: processingPayment?.dueDate ?: nextPayablePayment?.dueDate
 }
 
 data class ProfilePaymentPlansState(
     val isLoading: Boolean = false,
     val plans: List<ProfilePaymentPlan> = emptyList(),
     val error: String? = null,
+)
+
+private data class ActiveBillPaymentAttempt(
+    val billId: String,
+    val billPaymentId: String,
+    val paymentIntent: String,
 )
 
 data class ProfileMembership(
@@ -289,6 +311,7 @@ interface ProfileComponent : IPaymentProcessor {
     fun manageStripeAccount()
     fun refreshPaymentPlans()
     fun payNextInstallment(paymentPlan: ProfilePaymentPlan)
+    fun cancelPendingBillPayment(paymentPlan: ProfilePaymentPlan)
     fun refreshMemberships()
     fun cancelMembership(membership: ProfileMembership)
     fun restartMembership(membership: ProfileMembership)
@@ -456,6 +479,7 @@ class DefaultProfileComponent(
 
     private val _activeBillPaymentId = MutableStateFlow<String?>(null)
     override val activeBillPaymentId = _activeBillPaymentId.asStateFlow()
+    private var activeBillPaymentAttempt: ActiveBillPaymentAttempt? = null
 
     private val _activeMembershipActionId = MutableStateFlow<String?>(null)
     override val activeMembershipActionId = _activeMembershipActionId.asStateFlow()
@@ -514,19 +538,31 @@ class DefaultProfileComponent(
 
         scope.launch {
             paymentResult.collect { payment ->
-                if (payment == null || _activeBillPaymentId.value == null) return@collect
+                val activeAttempt = activeBillPaymentAttempt
+                if (payment == null || _activeBillPaymentId.value == null || activeAttempt == null) return@collect
 
                 when (payment) {
                     PaymentResult.Canceled -> _errorState.value = ErrorMessage("Payment canceled.")
                     is PaymentResult.Failed -> _errorState.value = ErrorMessage(payment.error)
                     PaymentResult.Completed -> {
-                        _errorState.value = ErrorMessage("Payment completed.")
+                        billingRepository.markBillingPaymentProcessing(
+                            billId = activeAttempt.billId,
+                            billPaymentId = activeAttempt.billPaymentId,
+                            paymentIntent = activeAttempt.paymentIntent,
+                        ).onFailure { throwable ->
+                            Napier.w(
+                                "Unable to mark bill payment processing for ${activeAttempt.billPaymentId}",
+                                throwable,
+                            )
+                        }
+                        _errorState.value = ErrorMessage("Payment submitted.")
                         refreshPaymentPlans()
                     }
                 }
 
                 loadingHandler?.hideLoading()
                 _activeBillPaymentId.value = null
+                activeBillPaymentAttempt = null
                 clearPaymentResult()
             }
         }
@@ -1099,9 +1135,13 @@ class DefaultProfileComponent(
     }
 
     override fun payNextInstallment(paymentPlan: ProfilePaymentPlan) {
-        val nextPayment = paymentPlan.nextPendingPayment
+        val nextPayment = paymentPlan.nextPayablePayment
         if (nextPayment == null) {
-            _errorState.value = ErrorMessage("No pending installment available for this bill.")
+            _errorState.value = ErrorMessage("No payable installment available for this bill.")
+            return
+        }
+        if (paymentPlan.processingPayment != null) {
+            _errorState.value = ErrorMessage("This payment is already pending.")
             return
         }
 
@@ -1117,6 +1157,15 @@ class DefaultProfileComponent(
                 billPaymentId = nextPayment.id,
             ).onSuccess { intent ->
                 runCatching {
+                    val paymentIntent = intent.paymentIntent
+                        ?.trim()
+                        ?.takeIf(String::isNotBlank)
+                        ?: throw IllegalStateException("Payment intent is missing.")
+                    activeBillPaymentAttempt = ActiveBillPaymentAttempt(
+                        billId = intent.billId?.trim()?.takeIf(String::isNotBlank) ?: paymentPlan.bill.id,
+                        billPaymentId = intent.billPaymentId?.trim()?.takeIf(String::isNotBlank) ?: nextPayment.id,
+                        paymentIntent = paymentIntent,
+                    )
                     clearPaymentResult()
                     setPaymentIntent(intent)
                     val account = userRepository.currentAccount.value.getOrThrow()
@@ -1130,14 +1179,40 @@ class DefaultProfileComponent(
                     )
                 }.onFailure {
                     _activeBillPaymentId.value = null
+                    activeBillPaymentAttempt = null
                     loadingHandler?.hideLoading()
                     _errorState.value = ErrorMessage(it.userMessage("Unable to start payment sheet."))
                 }
             }.onFailure {
                 _activeBillPaymentId.value = null
+                activeBillPaymentAttempt = null
                 loadingHandler?.hideLoading()
                 _errorState.value = ErrorMessage(it.userMessage("Unable to create payment intent."))
             }
+        }
+    }
+
+    override fun cancelPendingBillPayment(paymentPlan: ProfilePaymentPlan) {
+        val processingPayment = paymentPlan.processingPayment
+        if (processingPayment == null) {
+            _errorState.value = ErrorMessage("No pending payment is available to cancel.")
+            return
+        }
+
+        scope.launch {
+            _activeBillPaymentId.value = paymentPlan.bill.id
+            loadingHandler?.showLoading("Cancelling payment ...")
+            billingRepository.cancelBillPayment(
+                billId = paymentPlan.bill.id,
+                billPaymentId = processingPayment.id,
+            ).onSuccess {
+                _errorState.value = ErrorMessage("Pending payment cancelled.")
+                refreshPaymentPlans()
+            }.onFailure {
+                _errorState.value = ErrorMessage(it.userMessage("Unable to cancel pending payment."))
+            }
+            loadingHandler?.hideLoading()
+            _activeBillPaymentId.value = null
         }
     }
 
