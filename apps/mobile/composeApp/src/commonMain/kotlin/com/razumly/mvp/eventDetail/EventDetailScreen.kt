@@ -245,10 +245,264 @@ internal data class WeeklySessionOption(
     val divisionLabel: String,
 )
 
-private data class BracketDivisionOption(
+internal data class BracketDivisionOption(
     val id: String,
     val label: String,
 )
+
+internal fun List<BracketDivisionOption>.sortedAlphabetically(): List<BracketDivisionOption> =
+    sortedWith(
+        compareBy<BracketDivisionOption> { option -> option.label.trim().lowercase() }
+            .thenBy { option -> option.id.trim().lowercase() },
+    )
+
+internal fun DivisionDetail.isPlayoffDivisionKind(): Boolean =
+    kind?.trim()?.equals("PLAYOFF", ignoreCase = true) == true
+
+private fun MutableMap<String, String>.addDivisionOption(
+    event: Event,
+    rawId: String?,
+    explicitLabel: String? = null,
+) {
+    val normalizedId = rawId
+        ?.normalizeDivisionIdentifier()
+        .orEmpty()
+    if (normalizedId.isBlank() || containsKey(normalizedId)) return
+
+    val label = explicitLabel
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: normalizedId.toDivisionDisplayLabel(event.divisionDetails)
+    this[normalizedId] = label.ifBlank { normalizedId }
+}
+
+private fun Map<String, String>.toBracketDivisionOptions(): List<BracketDivisionOption> =
+    map { (id, label) -> BracketDivisionOption(id = id, label = label) }
+        .sortedAlphabetically()
+
+internal fun Event.playoffDivisionIdsForSelection(): Set<String> = buildSet {
+    divisionDetails
+        .filter(DivisionDetail::isPlayoffDivisionKind)
+        .forEach { detail ->
+            listOf(detail.id, detail.key, detail.normalizedTournamentDivisionId())
+                .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
+                .filter(String::isNotBlank)
+                .forEach(::add)
+        }
+
+    divisionDetails
+        .flatMap { detail -> detail.playoffPlacementDivisionIds }
+        .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
+        .filter(String::isNotBlank)
+        .forEach(::add)
+
+    inferredTournamentBracketDivisionIds()
+        .filter(String::isNotBlank)
+        .forEach(::add)
+}
+
+private fun MatchWithRelations.isBracketMatchForDivisionSelection(): Boolean =
+    match.losersBracket ||
+        !match.previousLeftId.isNullOrBlank() ||
+        !match.previousRightId.isNullOrBlank() ||
+        !match.winnerNextMatchId.isNullOrBlank() ||
+        !match.loserNextMatchId.isNullOrBlank() ||
+        previousLeftMatch != null ||
+        previousRightMatch != null ||
+        winnerNextMatch != null ||
+        loserNextMatch != null
+
+internal fun Event.leagueDivisionOptionsForStandings(
+    fallbackOptions: List<BracketDivisionOption>,
+    matches: List<MatchWithRelations>,
+): List<BracketDivisionOption> {
+    val playoffDivisionIds = playoffDivisionIdsForSelection()
+    val options = linkedMapOf<String, String>()
+
+    divisionDetails
+        .filterNot(DivisionDetail::isPlayoffDivisionKind)
+        .forEach { detail ->
+            options.addDivisionOption(
+                event = this,
+                rawId = detail.id.ifBlank { detail.key },
+                explicitLabel = detail.name,
+            )
+        }
+
+    divisions.forEach { divisionId ->
+        val normalizedId = divisionId.normalizeDivisionIdentifier()
+        if (normalizedId !in playoffDivisionIds) {
+            options.addDivisionOption(this, divisionId)
+        }
+    }
+
+    matches
+        .filterNot(MatchWithRelations::isBracketMatchForDivisionSelection)
+        .forEach { match ->
+            val normalizedDivision = match.match.division
+                ?.normalizeDivisionIdentifier()
+                .orEmpty()
+            if (normalizedDivision !in playoffDivisionIds) {
+                options.addDivisionOption(this, match.match.division)
+            }
+        }
+
+    return options
+        .toBracketDivisionOptions()
+        .ifEmpty {
+            fallbackOptions.filter { option ->
+                option.id.normalizeDivisionIdentifier() !in playoffDivisionIds
+            }.sortedAlphabetically()
+        }
+}
+
+internal fun Event.playoffDivisionOptionsForBracket(
+    fallbackOptions: List<BracketDivisionOption>,
+    matches: List<MatchWithRelations>,
+): List<BracketDivisionOption> {
+    val playoffDivisionIds = playoffDivisionIdsForSelection()
+    val options = linkedMapOf<String, String>()
+
+    divisionDetails
+        .filter(DivisionDetail::isPlayoffDivisionKind)
+        .forEach { detail ->
+            options.addDivisionOption(
+                event = this,
+                rawId = detail.id.ifBlank { detail.key },
+                explicitLabel = detail.name,
+            )
+        }
+
+    playoffDivisionIds.forEach { divisionId ->
+        options.addDivisionOption(this, divisionId)
+    }
+
+    matches.forEach { match ->
+        val normalizedDivision = match.match.division
+            ?.normalizeDivisionIdentifier()
+            .orEmpty()
+        val matchesExplicitPlayoffDivision = playoffDivisionIds.isNotEmpty() &&
+            normalizedDivision in playoffDivisionIds
+        val matchesLegacyBracketShape = playoffDivisionIds.isEmpty() &&
+            match.isBracketMatchForDivisionSelection()
+        if (matchesExplicitPlayoffDivision || matchesLegacyBracketShape) {
+            options.addDivisionOption(this, match.match.division)
+        }
+    }
+
+    return options
+        .toBracketDivisionOptions()
+        .ifEmpty {
+            fallbackOptions.filter { option ->
+                option.id.normalizeDivisionIdentifier() in playoffDivisionIds
+            }.sortedAlphabetically()
+        }
+}
+
+private fun DivisionDetail.matchesSelectionDivision(divisionId: String?): Boolean {
+    val normalizedDivisionId = divisionId
+        ?.normalizeDivisionIdentifier()
+        .orEmpty()
+    if (normalizedDivisionId.isBlank()) return false
+    return divisionsEquivalent(id, normalizedDivisionId) ||
+        divisionsEquivalent(key, normalizedDivisionId) ||
+        divisionsEquivalent(normalizedTournamentDivisionId(), normalizedDivisionId)
+}
+
+private fun DivisionDetail.referencesPlayoffDivision(playoffDivisionId: String?): Boolean {
+    val normalizedPlayoffDivisionId = playoffDivisionId
+        ?.normalizeDivisionIdentifier()
+        .orEmpty()
+    if (normalizedPlayoffDivisionId.isBlank()) return false
+    return playoffPlacementDivisionIds.any { placementDivisionId ->
+        divisionsEquivalent(placementDivisionId, normalizedPlayoffDivisionId)
+    }
+}
+
+internal fun Event.resolvePlayoffDivisionForLeagueDivision(leagueDivisionId: String?): String? =
+    divisionDetails
+        .firstOrNull { detail ->
+            !detail.isPlayoffDivisionKind() && detail.matchesSelectionDivision(leagueDivisionId)
+        }
+        ?.playoffPlacementDivisionIds
+        ?.firstNotNullOfOrNull { divisionId ->
+            divisionId.normalizeDivisionIdentifier().takeIf(String::isNotBlank)
+        }
+
+internal fun Event.resolveLeagueDivisionForPlayoffDivision(playoffDivisionId: String?): String? =
+    divisionDetails
+        .firstOrNull { detail ->
+            !detail.isPlayoffDivisionKind() && detail.referencesPlayoffDivision(playoffDivisionId)
+        }
+        ?.let { detail ->
+            detail.id.ifBlank { detail.key }.normalizeDivisionIdentifier().takeIf(String::isNotBlank)
+        }
+
+internal fun Event.detailBracketDivisionOptions(
+    tournamentPoolPlayEnabled: Boolean,
+    tournamentBracketDivisionOptions: List<BracketDivisionOption>,
+    joinDivisionOptions: List<BracketDivisionOption>,
+    leagueDivisionOptions: List<BracketDivisionOption>,
+    playoffDivisionOptions: List<BracketDivisionOption>,
+): List<BracketDivisionOption> =
+    when {
+        tournamentPoolPlayEnabled && tournamentBracketDivisionOptions.isNotEmpty() -> {
+            tournamentBracketDivisionOptions
+        }
+
+        eventType == EventType.LEAGUE &&
+            splitLeaguePlayoffDivisions &&
+            playoffDivisionOptions.isNotEmpty() -> {
+            playoffDivisionOptions
+        }
+
+        eventType == EventType.LEAGUE -> {
+            leagueDivisionOptions
+        }
+
+        else -> {
+            joinDivisionOptions
+        }
+    }
+
+internal fun Event.preferredStandingsStageDivisionId(
+    tournamentPoolPlayEnabled: Boolean,
+    selectedDivisionId: String?,
+): String? =
+    when {
+        tournamentPoolPlayEnabled -> {
+            resolveBracketDivisionForPool(selectedDivisionId) ?: selectedDivisionId
+        }
+
+        eventType == EventType.LEAGUE && splitLeaguePlayoffDivisions -> {
+            resolveLeagueDivisionForPlayoffDivision(selectedDivisionId) ?: selectedDivisionId
+        }
+
+        else -> {
+            selectedDivisionId
+        }
+    }
+
+internal fun Event.preferredBracketStageDivisionId(
+    tournamentPoolPlayEnabled: Boolean,
+    playoffDivisionOptions: List<BracketDivisionOption>,
+    selectedDivisionId: String?,
+): String? =
+    when {
+        tournamentPoolPlayEnabled -> {
+            resolveBracketDivisionForPool(selectedDivisionId) ?: selectedDivisionId
+        }
+
+        eventType == EventType.LEAGUE &&
+            splitLeaguePlayoffDivisions &&
+            playoffDivisionOptions.isNotEmpty() -> {
+            resolvePlayoffDivisionForLeagueDivision(selectedDivisionId) ?: selectedDivisionId
+        }
+
+        else -> {
+            selectedDivisionId
+        }
+    }
 
 private data class EventDetailTabVisuals(
     val badgeContainer: Color,
@@ -468,7 +722,7 @@ private fun EventDetailSelectedDivisionPill(
             expanded = canOpen && expanded,
             onDismissRequest = { expanded = false },
         ) {
-            divisionOptions.forEach { option ->
+            divisionOptions.sortedAlphabetically().forEach { option ->
                 val selected = option.id.normalizeDivisionIdentifier() ==
                     selectedDivisionId?.normalizeDivisionIdentifier().orEmpty()
                 DropdownMenuItem(
@@ -545,6 +799,7 @@ private fun buildSelectedDivisionPillState(
 
 private fun List<BracketDivisionOption>.distinctById(): List<BracketDivisionOption> =
     distinctBy { option -> option.id }
+        .sortedAlphabetically()
 
 private fun List<BracketDivisionOption>.resolveDivisionLabel(divisionId: String?): String? {
     val normalizedDivisionId = divisionId
@@ -625,6 +880,12 @@ private fun List<EventDetailDivisionOption>.toJoinDivisionOptions(): List<Bracke
         )
     }
 
+private fun List<EventDetailDivisionOption>.sortedEventDivisionOptionsAlphabetically(): List<EventDetailDivisionOption> =
+    sortedWith(
+        compareBy<EventDetailDivisionOption> { option -> option.label.trim().lowercase() }
+            .thenBy { option -> option.id.trim().lowercase() },
+    )
+
 private fun DivisionDetail.referencesBracketDivision(bracketDivisionId: String?): Boolean {
     val normalizedBracketId = bracketDivisionId
         ?.normalizeDivisionIdentifier()
@@ -704,7 +965,7 @@ private fun Event.tournamentBracketDivisionOptions(
 
     return optionsById.map { (id, label) ->
         BracketDivisionOption(id = id, label = label.ifBlank { id })
-    }
+    }.sortedAlphabetically()
 }
 
 private fun Event.tournamentPoolDivisionOptions(
@@ -725,6 +986,7 @@ private fun Event.tournamentPoolDivisionOptions(
                 )
             }
         }
+        .sortedAlphabetically()
 
 private fun Event.resolveBracketDivisionForPool(poolDivisionId: String?): String? {
     val normalizedPoolId = poolDivisionId
@@ -1798,7 +2060,7 @@ private fun BracketFloatingBar(
                                 }
                             )
                         }
-                        poolOptions.forEach { option ->
+                        poolOptions.sortedAlphabetically().forEach { option ->
                             DropdownMenuItem(
                                 text = { Text(option.label) },
                                 onClick = {
@@ -2470,7 +2732,7 @@ internal fun EventTeamInviteDialog(
                         value = selectedDivisionLabel,
                         label = "Assign to division",
                     ) { dismiss ->
-                        divisionOptions.forEach { option ->
+                        divisionOptions.sortedEventDivisionOptionsAlphabetically().forEach { option ->
                             DropdownMenuItem(
                                 text = { Text(option.label) },
                                 onClick = {
@@ -2930,7 +3192,7 @@ private fun JoinOptionsSheet(
                                 Modifier
                             }
                         ) {
-                            divisionOptions.forEach { option ->
+                            divisionOptions.sortedAlphabetically().forEach { option ->
                                 DropdownMenuItem(
                                     text = { Text(option.label) },
                                     onClick = {
@@ -3469,46 +3731,16 @@ fun EventDetailScreen(
         addOption(selectedDivision)
         options
     }
-    val playoffDivisionIds = remember(
-        selectedEvent.event.divisions,
-        selectedEvent.event.divisionDetails,
-    ) {
-        buildSet {
-            selectedEvent.event.divisionDetails
-                .flatMap { detail -> detail.playoffPlacementDivisionIds }
-                .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
-                .filter { normalized -> normalized.isNotBlank() }
-                .forEach { normalized -> add(normalized) }
-
-            selectedEvent.event.divisionDetails
-                .filter { detail -> detail.kind?.trim()?.equals("PLAYOFF", ignoreCase = true) == true }
-                .map { detail -> detail.id.normalizeDivisionIdentifier() }
-                .filter { normalized -> normalized.isNotBlank() }
-                .forEach { normalized -> add(normalized) }
-
-            selectedEvent.event.inferredTournamentBracketDivisionIds()
-                .filter { normalized -> normalized.isNotBlank() }
-                .forEach { normalized -> add(normalized) }
-        }
-    }
-    val isLeaguePlayoffSplit = remember(
-        selectedEvent.event.includePlayoffs,
-        playoffDivisionIds,
-    ) {
-        selectedEvent.event.includePlayoffs && playoffDivisionIds.isNotEmpty()
-    }
     val leagueDivisionOptions = remember(
         joinDivisionOptions,
-        playoffDivisionIds,
-        isLeaguePlayoffSplit,
+        selectedEvent.event.divisions,
+        selectedEvent.event.divisionDetails,
+        selectedEvent.matches,
     ) {
-        if (!isLeaguePlayoffSplit) {
-            joinDivisionOptions
-        } else {
-            joinDivisionOptions
-                .filterNot { option -> option.id in playoffDivisionIds }
-                .ifEmpty { joinDivisionOptions }
-        }
+        selectedEvent.event.leagueDivisionOptionsForStandings(
+            fallbackOptions = joinDivisionOptions,
+            matches = selectedEvent.matches,
+        )
     }
     val registrationDivisionOptions = remember(
         selectedEvent.event.divisions,
@@ -3535,16 +3767,14 @@ fun EventDetailScreen(
     }
     val playoffDivisionOptions = remember(
         joinDivisionOptions,
-        playoffDivisionIds,
-        isLeaguePlayoffSplit,
+        selectedEvent.event.divisions,
+        selectedEvent.event.divisionDetails,
+        selectedEvent.matches,
     ) {
-        if (!isLeaguePlayoffSplit) {
-            joinDivisionOptions
-        } else {
-            joinDivisionOptions
-                .filter { option -> option.id in playoffDivisionIds }
-                .ifEmpty { joinDivisionOptions }
-        }
+        selectedEvent.event.playoffDivisionOptionsForBracket(
+            fallbackOptions = joinDivisionOptions,
+            matches = selectedEvent.matches,
+        )
     }
     val selectedJoinDivisionId = remember(
         selectedDivision,
@@ -3601,13 +3831,13 @@ fun EventDetailScreen(
     val standingsTabDivisionOptions = remember(
         joinDivisionOptions,
         leagueDivisionOptions,
-        isLeaguePlayoffSplit,
+        selectedEvent.event.eventType,
         tournamentPoolPlayEnabled,
         tournamentBracketDivisionOptions,
     ) {
         if (tournamentPoolPlayEnabled && tournamentBracketDivisionOptions.isNotEmpty()) {
             tournamentBracketDivisionOptions
-        } else if (isLeaguePlayoffSplit) {
+        } else if (selectedEvent.event.eventType == EventType.LEAGUE) {
             leagueDivisionOptions
         } else {
             joinDivisionOptions
@@ -3616,14 +3846,14 @@ fun EventDetailScreen(
     val preferredStandingsBracketDivisionId = remember(
         tournamentPoolPlayEnabled,
         selectedEvent.event.divisionDetails,
+        selectedEvent.event.eventType,
+        selectedEvent.event.splitLeaguePlayoffDivisions,
         selectedJoinDivisionId,
     ) {
-        if (tournamentPoolPlayEnabled) {
-            selectedEvent.event.resolveBracketDivisionForPool(selectedJoinDivisionId)
-                ?: selectedJoinDivisionId
-        } else {
-            selectedJoinDivisionId
-        }
+        selectedEvent.event.preferredStandingsStageDivisionId(
+            tournamentPoolPlayEnabled = tournamentPoolPlayEnabled,
+            selectedDivisionId = selectedJoinDivisionId,
+        )
     }
     val selectedStandingsDivisionId = remember(
         preferredStandingsBracketDivisionId,
@@ -4548,29 +4778,33 @@ fun EventDetailScreen(
                         val bracketTabDivisionOptions = remember(
                             tournamentPoolPlayEnabled,
                             tournamentBracketDivisionOptions,
+                            selectedEvent.event.eventType,
+                            selectedEvent.event.splitLeaguePlayoffDivisions,
                             joinDivisionOptions,
+                            leagueDivisionOptions,
                             playoffDivisionOptions,
-                            isLeaguePlayoffSplit,
                         ) {
-                            if (tournamentPoolPlayEnabled && tournamentBracketDivisionOptions.isNotEmpty()) {
-                                tournamentBracketDivisionOptions
-                            } else if (isLeaguePlayoffSplit) {
-                                playoffDivisionOptions
-                            } else {
-                                joinDivisionOptions
-                            }
+                            selectedEvent.event.detailBracketDivisionOptions(
+                                tournamentPoolPlayEnabled = tournamentPoolPlayEnabled,
+                                tournamentBracketDivisionOptions = tournamentBracketDivisionOptions,
+                                joinDivisionOptions = joinDivisionOptions,
+                                leagueDivisionOptions = leagueDivisionOptions,
+                                playoffDivisionOptions = playoffDivisionOptions,
+                            )
                         }
                         val preferredBracketDivisionId = remember(
                             tournamentPoolPlayEnabled,
                             selectedEvent.event.divisionDetails,
+                            selectedEvent.event.eventType,
+                            selectedEvent.event.splitLeaguePlayoffDivisions,
+                            playoffDivisionOptions,
                             selectedJoinDivisionId,
                         ) {
-                            if (tournamentPoolPlayEnabled) {
-                                selectedEvent.event.resolveBracketDivisionForPool(selectedJoinDivisionId)
-                                    ?: selectedJoinDivisionId
-                            } else {
-                                selectedJoinDivisionId
-                            }
+                            selectedEvent.event.preferredBracketStageDivisionId(
+                                tournamentPoolPlayEnabled = tournamentPoolPlayEnabled,
+                                playoffDivisionOptions = playoffDivisionOptions,
+                                selectedDivisionId = selectedJoinDivisionId,
+                            )
                         }
                         val selectedBracketDivisionId = remember(
                             preferredBracketDivisionId,
@@ -5954,31 +6188,6 @@ private fun LeagueStandingsTab(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        if (confirmedLabel != null || visibleValidationMessages.isNotEmpty() || isLoading || isConfirming) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (confirmedLabel != null) {
-                    StandingsConfirmedMessage(confirmedLabel)
-                }
-                if (visibleValidationMessages.isNotEmpty()) {
-                    visibleValidationMessages.forEach { validationMessage ->
-                        Text(
-                            text = validationMessage,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                }
-                if (isLoading || isConfirming) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-            }
-        }
-
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize(),
@@ -5987,6 +6196,32 @@ private fun LeagueStandingsTab(
             if (topContentPadding > 0.dp) {
                 item(key = "division-pill-spacer") {
                     Spacer(modifier = Modifier.height(topContentPadding))
+                }
+            }
+            if (confirmedLabel != null || visibleValidationMessages.isNotEmpty() || isLoading || isConfirming) {
+                item(key = "standings-status") {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        if (confirmedLabel != null) {
+                            StandingsConfirmedMessage(confirmedLabel)
+                        }
+                        if (visibleValidationMessages.isNotEmpty()) {
+                            visibleValidationMessages.forEach { validationMessage ->
+                                Text(
+                                    text = validationMessage,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                        }
+                        if (isLoading || isConfirming) {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
+                    }
                 }
             }
             if (standingsRowSlotCount == 0) {

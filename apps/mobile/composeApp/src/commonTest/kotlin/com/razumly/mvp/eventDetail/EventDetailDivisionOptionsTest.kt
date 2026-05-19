@@ -128,6 +128,201 @@ class EventDetailDivisionOptionsTest {
     }
 
     @Test
+    fun stageDivisionOptions_splitLeaguePlayoffs_separatesLeagueAndBracketDivisions() {
+        val event = Event(
+            id = "event-split",
+            eventType = EventType.LEAGUE,
+            includePlayoffs = true,
+            splitLeaguePlayoffDivisions = true,
+            singleDivision = false,
+            divisions = listOf("league_a", "league_b", "playoff_gold", "playoff_silver"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "league_a",
+                    key = "league_a",
+                    name = "League A",
+                    playoffPlacementDivisionIds = listOf("playoff_gold"),
+                ),
+                DivisionDetail(
+                    id = "league_b",
+                    key = "league_b",
+                    name = "League B",
+                    playoffPlacementDivisionIds = listOf("playoff_silver"),
+                ),
+                DivisionDetail(
+                    id = "playoff_gold",
+                    kind = "PLAYOFF",
+                    key = "playoff_gold",
+                    name = "Gold Bracket",
+                ),
+                DivisionDetail(
+                    id = "playoff_silver",
+                    kind = "PLAYOFF",
+                    key = "playoff_silver",
+                    name = "Silver Bracket",
+                ),
+            ),
+        )
+        val fallbackOptions = listOf(
+            BracketDivisionOption("league_a", "League A"),
+            BracketDivisionOption("league_b", "League B"),
+            BracketDivisionOption("playoff_gold", "Gold Bracket"),
+            BracketDivisionOption("playoff_silver", "Silver Bracket"),
+        )
+
+        val leagueOptions = event.leagueDivisionOptionsForStandings(fallbackOptions, emptyList())
+        val playoffOptions = event.playoffDivisionOptionsForBracket(fallbackOptions, emptyList())
+
+        assertEquals(listOf("league_a", "league_b"), leagueOptions.map { option -> option.id })
+        assertEquals(listOf("playoff_gold", "playoff_silver"), playoffOptions.map { option -> option.id })
+        assertEquals(
+            listOf("playoff_gold", "playoff_silver"),
+            event.detailBracketDivisionOptions(
+                tournamentPoolPlayEnabled = false,
+                tournamentBracketDivisionOptions = emptyList(),
+                joinDivisionOptions = fallbackOptions,
+                leagueDivisionOptions = leagueOptions,
+                playoffDivisionOptions = playoffOptions,
+            ).map { option -> option.id },
+        )
+        assertEquals(
+            "playoff_silver",
+            event.preferredBracketStageDivisionId(
+                tournamentPoolPlayEnabled = false,
+                playoffDivisionOptions = playoffOptions,
+                selectedDivisionId = "league_b",
+            ),
+        )
+        assertEquals(
+            "league_a",
+            event.preferredStandingsStageDivisionId(
+                tournamentPoolPlayEnabled = false,
+                selectedDivisionId = "playoff_gold",
+            ),
+        )
+    }
+
+    @Test
+    fun stageDivisionOptions_nonSplitLeaguePlayoffs_usesLeagueDivisionsForBracket() {
+        val event = Event(
+            id = "event-unified",
+            eventType = EventType.LEAGUE,
+            includePlayoffs = true,
+            splitLeaguePlayoffDivisions = false,
+            singleDivision = false,
+            divisions = listOf("league_open", "league_advanced"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "league_open",
+                    key = "league_open",
+                    name = "Open League",
+                    playoffTeamCount = 4,
+                ),
+                DivisionDetail(
+                    id = "league_advanced",
+                    key = "league_advanced",
+                    name = "Advanced League",
+                    playoffTeamCount = 4,
+                ),
+            ),
+        )
+        val fallbackOptions = listOf(
+            BracketDivisionOption("league_open", "Open League"),
+            BracketDivisionOption("league_advanced", "Advanced League"),
+        )
+
+        val leagueOptions = event.leagueDivisionOptionsForStandings(fallbackOptions, emptyList())
+        val playoffOptions = event.playoffDivisionOptionsForBracket(fallbackOptions, emptyList())
+
+        assertEquals(listOf("league_advanced", "league_open"), leagueOptions.map { option -> option.id })
+        assertEquals(emptyList(), playoffOptions)
+        assertEquals(
+            listOf("league_advanced", "league_open"),
+            event.detailBracketDivisionOptions(
+                tournamentPoolPlayEnabled = false,
+                tournamentBracketDivisionOptions = emptyList(),
+                joinDivisionOptions = fallbackOptions,
+                leagueDivisionOptions = leagueOptions,
+                playoffDivisionOptions = playoffOptions,
+            ).map { option -> option.id },
+        )
+        assertEquals(
+            "league_advanced",
+            event.preferredBracketStageDivisionId(
+                tournamentPoolPlayEnabled = false,
+                playoffDivisionOptions = playoffOptions,
+                selectedDivisionId = "league_advanced",
+            ),
+        )
+    }
+
+    @Test
+    fun stageDivisionOptions_tournamentPoolPlay_mapsPoolsToBrackets() {
+        val bracketId = "event-pool__division__open"
+        val poolAId = "${bracketId}_pool_a"
+        val poolBId = "${bracketId}_pool_b"
+        val event = Event(
+            id = "event-pool",
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            singleDivision = false,
+            divisions = listOf(poolAId, poolBId),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = bracketId,
+                    kind = "PLAYOFF",
+                    key = "open",
+                    name = "Open Bracket",
+                ),
+                DivisionDetail(
+                    id = poolAId,
+                    key = "open_pool_a",
+                    name = "Open Pool A",
+                    playoffPlacementDivisionIds = listOf(bracketId),
+                ),
+                DivisionDetail(
+                    id = poolBId,
+                    key = "open_pool_b",
+                    name = "Open Pool B",
+                    playoffPlacementDivisionIds = listOf(bracketId),
+                ),
+            ),
+        )
+        val bracketOptions = listOf(BracketDivisionOption(bracketId, "Open Bracket"))
+        val joinOptions = listOf(
+            BracketDivisionOption(poolAId, "Open Pool A"),
+            BracketDivisionOption(poolBId, "Open Pool B"),
+            BracketDivisionOption(bracketId, "Open Bracket"),
+        )
+
+        assertEquals(
+            listOf(bracketId),
+            event.detailBracketDivisionOptions(
+                tournamentPoolPlayEnabled = true,
+                tournamentBracketDivisionOptions = bracketOptions,
+                joinDivisionOptions = joinOptions,
+                leagueDivisionOptions = emptyList(),
+                playoffDivisionOptions = emptyList(),
+            ).map { option -> option.id },
+        )
+        assertEquals(
+            bracketId,
+            event.preferredBracketStageDivisionId(
+                tournamentPoolPlayEnabled = true,
+                playoffDivisionOptions = emptyList(),
+                selectedDivisionId = poolBId,
+            ),
+        )
+        assertEquals(
+            bracketId,
+            event.preferredStandingsStageDivisionId(
+                tournamentPoolPlayEnabled = true,
+                selectedDivisionId = poolAId,
+            ),
+        )
+    }
+
+    @Test
     fun buildRegistrationDivisionOptions_keeps_duplicate_type_divisions_separate() {
         val firstDivisionId = "event-dup__division__m_skill_open_age_18plus"
         val secondDivisionId = "event-dup_2__division__m_skill_open_age_18plus"
