@@ -3,7 +3,6 @@ package com.razumly.mvp.eventDetail.composables
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import com.razumly.mvp.core.data.util.DEFAULT_DIVISION_OPTIONS
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
@@ -27,9 +26,7 @@ fun MultiSelectDropdownField(
 ) {
     val normalizedSelection = selectedItems.normalizeDivisionIdentifiers()
     val mergedOptions = linkedMapOf<String, String>()
-    (options + DEFAULT_DIVISION_OPTIONS.map { division ->
-        DivisionOption(value = division, label = division.toDivisionDisplayLabel())
-    } + normalizedSelection.map { division ->
+    (options + normalizedSelection.map { division ->
         DivisionOption(value = division, label = division.toDivisionDisplayLabel())
     }).forEach { option ->
         val normalizedValue = option.value.normalizeDivisionIdentifier()
