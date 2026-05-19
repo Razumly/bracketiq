@@ -1875,7 +1875,7 @@ private fun ParticipantDivisionDropdown(
     DropdownField(
         modifier = Modifier.fillMaxWidth(),
         value = selectedLabel,
-        label = "Division",
+        label = "Team's Division",
     ) { dismiss ->
         divisionOptions.forEach { option ->
             DropdownMenuItem(
