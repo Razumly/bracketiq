@@ -153,8 +153,6 @@ import com.razumly.mvp.core.data.dataTypes.withOfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
-import com.razumly.mvp.core.data.util.divisionsEquivalent
-import com.razumly.mvp.core.data.util.findDivisionDetailByIdentifier
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
@@ -284,7 +282,7 @@ internal fun Event.playoffDivisionIdsForSelection(): Set<String> = buildSet {
     divisionDetails
         .filter(DivisionDetail::isPlayoffDivisionKind)
         .forEach { detail ->
-            listOf(detail.id, detail.key, detail.normalizedTournamentDivisionId())
+            listOf(detail.id, detail.normalizedTournamentDivisionId())
                 .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
                 .filter(String::isNotBlank)
                 .forEach(::add)
@@ -324,7 +322,7 @@ internal fun Event.leagueDivisionOptionsForStandings(
         .forEach { detail ->
             options.addDivisionOption(
                 event = this,
-                rawId = detail.id.ifBlank { detail.key },
+                rawId = detail.id,
                 explicitLabel = detail.name,
             )
         }
@@ -368,7 +366,7 @@ internal fun Event.playoffDivisionOptionsForBracket(
         .forEach { detail ->
             options.addDivisionOption(
                 event = this,
-                rawId = detail.id.ifBlank { detail.key },
+                rawId = detail.id,
                 explicitLabel = detail.name,
             )
         }
@@ -404,9 +402,8 @@ private fun DivisionDetail.matchesSelectionDivision(divisionId: String?): Boolea
         ?.normalizeDivisionIdentifier()
         .orEmpty()
     if (normalizedDivisionId.isBlank()) return false
-    return divisionsEquivalent(id, normalizedDivisionId) ||
-        divisionsEquivalent(key, normalizedDivisionId) ||
-        divisionsEquivalent(normalizedTournamentDivisionId(), normalizedDivisionId)
+    return id.normalizeDivisionIdentifier() == normalizedDivisionId ||
+        normalizedTournamentDivisionId() == normalizedDivisionId
 }
 
 private fun DivisionDetail.referencesPlayoffDivision(playoffDivisionId: String?): Boolean {
@@ -415,7 +412,7 @@ private fun DivisionDetail.referencesPlayoffDivision(playoffDivisionId: String?)
         .orEmpty()
     if (normalizedPlayoffDivisionId.isBlank()) return false
     return playoffPlacementDivisionIds.any { placementDivisionId ->
-        divisionsEquivalent(placementDivisionId, normalizedPlayoffDivisionId)
+        placementDivisionId.normalizeDivisionIdentifier() == normalizedPlayoffDivisionId
     }
 }
 
@@ -435,7 +432,7 @@ internal fun Event.resolveLeagueDivisionForPlayoffDivision(playoffDivisionId: St
             !detail.isPlayoffDivisionKind() && detail.referencesPlayoffDivision(playoffDivisionId)
         }
         ?.let { detail ->
-            detail.id.ifBlank { detail.key }.normalizeDivisionIdentifier().takeIf(String::isNotBlank)
+            detail.id.normalizeDivisionIdentifier().takeIf(String::isNotBlank)
         }
 
 internal fun Event.detailBracketDivisionOptions(
@@ -522,6 +519,7 @@ private val FloatingDockMinHeight = 60.dp
 private val FloatingDockShadowPadding = 8.dp
 private val DivisionPillContentTopOffset = 40.dp
 private const val FloatingDockExpandDurationMillis = 260
+private const val AllPoolsDivisionOptionId = "__all_pools__"
 
 @Composable
 private fun eventDetailTabVisuals(selected: Boolean): EventDetailTabVisuals {
@@ -664,6 +662,7 @@ private fun EventDetailTabStrip(
 
 @Composable
 private fun EventDetailSelectedDivisionPill(
+    prefix: String = "Division",
     label: String,
     selectedDivisionId: String?,
     divisionOptions: List<BracketDivisionOption>,
@@ -701,7 +700,7 @@ private fun EventDetailSelectedDivisionPill(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(
-                    text = "Division: $label",
+                    text = "$prefix: $label",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -755,6 +754,48 @@ private fun EventDetailSelectedDivisionPill(
     }
 }
 
+@Composable
+private fun EventDetailDivisionSelectorBar(
+    divisionState: SelectedDivisionPillState?,
+    poolState: SelectedDivisionPillState?,
+    onDivisionSelected: (String) -> Unit,
+    onPoolSelected: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        divisionState?.let { state ->
+            EventDetailSelectedDivisionPill(
+                prefix = "Division",
+                label = state.label,
+                selectedDivisionId = state.selectedDivisionId,
+                divisionOptions = state.options,
+                onDivisionSelected = onDivisionSelected,
+                modifier = Modifier.widthIn(max = if (poolState == null) 280.dp else 240.dp),
+            )
+        }
+        if (divisionState != null && poolState != null) {
+            Spacer(modifier = Modifier.width(8.dp))
+        }
+        poolState?.let { state ->
+            EventDetailSelectedDivisionPill(
+                prefix = "Pool",
+                label = state.label,
+                selectedDivisionId = state.selectedDivisionId,
+                divisionOptions = state.options,
+                onDivisionSelected = onPoolSelected,
+                modifier = Modifier.widthIn(max = 180.dp),
+            )
+        }
+    }
+}
+
 private fun List<BracketDivisionOption>.selectedDivisionLabel(
     divisionId: String?,
     divisionDetails: List<DivisionDetail>,
@@ -778,6 +819,11 @@ private data class SelectedDivisionPillState(
     val selectedDivisionId: String?,
     val label: String,
     val options: List<BracketDivisionOption>,
+)
+
+private data class SelectedDivisionSelectorState(
+    val divisionState: SelectedDivisionPillState?,
+    val poolState: SelectedDivisionPillState?,
 )
 
 private fun buildSelectedDivisionPillState(
@@ -866,10 +912,7 @@ private fun List<BracketDivisionOption>.findBracketDivisionOption(divisionId: St
     firstOrNull { option ->
         option.id.normalizeDivisionIdentifier() == normalizedDivisionId
     }?.let { option -> return option }
-    val equivalentMatches = filter { option ->
-        divisionsEquivalent(option.id, normalizedDivisionId)
-    }
-    return equivalentMatches.singleOrNull()
+    return null
 }
 
 private fun List<EventDetailDivisionOption>.toJoinDivisionOptions(): List<BracketDivisionOption> =
@@ -892,7 +935,7 @@ private fun DivisionDetail.referencesBracketDivision(bracketDivisionId: String?)
         .orEmpty()
     if (normalizedBracketId.isBlank()) return false
     return tournamentBracketDivisionId()?.let { mappedDivisionId ->
-        divisionsEquivalent(mappedDivisionId, normalizedBracketId)
+        mappedDivisionId.normalizeDivisionIdentifier() == normalizedBracketId
     } == true
 }
 
@@ -947,7 +990,9 @@ private fun Event.tournamentBracketDivisionOptions(
         optionsById[normalizedId] = explicitLabel
             ?.takeIf { it.isNotBlank() }
             ?: fallbackOptions.findBracketDivisionOption(normalizedId)?.label
-            ?: divisionDetails.findDivisionDetailByIdentifier(normalizedId)?.name?.takeIf { it.isNotBlank() }
+            ?: divisionDetails.firstOrNull { detail ->
+                detail.id.normalizeDivisionIdentifier() == normalizedId
+            }?.name?.takeIf { it.isNotBlank() }
             ?: sourcePool?.name?.stripTournamentPoolSuffix()?.takeIf { it.isNotBlank() }
             ?: normalizedId.toDivisionDisplayLabel(divisionDetails)
     }
@@ -994,7 +1039,7 @@ private fun Event.resolveBracketDivisionForPool(poolDivisionId: String?): String
         .orEmpty()
     if (normalizedPoolId.isBlank()) return null
     return tournamentPoolSourceDetails()
-        .firstOrNull { detail -> divisionsEquivalent(detail.normalizedTournamentDivisionId(), normalizedPoolId) }
+        .firstOrNull { detail -> detail.normalizedTournamentDivisionId() == normalizedPoolId }
         ?.tournamentBracketDivisionId()
         ?.takeIf(String::isNotBlank)
 }
@@ -1010,9 +1055,8 @@ private fun Event.hasLosersBracketSelector(
         .orEmpty()
     val selectedDivisionHasDoubleEliminationConfig = divisionDetails.any { detail ->
         val detailMatchesSelectedDivision = normalizedDivisionId.isBlank() ||
-            divisionsEquivalent(detail.id, normalizedDivisionId) ||
-            divisionsEquivalent(detail.key, normalizedDivisionId) ||
-            divisionsEquivalent(detail.normalizedTournamentDivisionId(), normalizedDivisionId) ||
+            detail.id.normalizeDivisionIdentifier() == normalizedDivisionId ||
+            detail.normalizedTournamentDivisionId() == normalizedDivisionId ||
             detail.referencesBracketDivision(normalizedDivisionId)
 
         detail.playoffConfig?.doubleElimination == true && detailMatchesSelectedDivision
@@ -1021,7 +1065,7 @@ private fun Event.hasLosersBracketSelector(
 
     return matches.any { match ->
         val matchInSelectedDivision = normalizedDivisionId.isBlank() ||
-            divisionsEquivalent(match.match.division, normalizedDivisionId)
+            match.match.division?.normalizeDivisionIdentifier() == normalizedDivisionId
 
         match.match.losersBracket && matchInSelectedDivision
     }
@@ -1035,8 +1079,7 @@ private fun Event.teamIdsForDivision(divisionId: String?): Set<String> {
 
     return divisionDetails
         .firstOrNull { detail ->
-            divisionsEquivalent(detail.id, normalizedDivisionId) ||
-                divisionsEquivalent(detail.key, normalizedDivisionId)
+            detail.id.normalizeDivisionIdentifier() == normalizedDivisionId
         }
         ?.teamIds
         .orEmpty()
@@ -3719,8 +3762,7 @@ fun EventDetailScreen(
             )
         }
         selectedEvent.event.divisionDetails.forEach { detail ->
-            val fallbackId = detail.id.ifBlank { detail.key }
-            addOption(fallbackId, detail.name)
+            addOption(detail.id, detail.name)
         }
         selectedEvent.event.divisions.forEach { divisionId ->
             addOption(divisionId)
@@ -3933,8 +3975,9 @@ fun EventDetailScreen(
         val standingsMatches = if (!shouldFilterStandings || selectedStandingsDataDivisionId.isNullOrBlank()) {
             selectedEvent.matches
         } else {
+            val normalizedStandingsDivisionId = selectedStandingsDataDivisionId.normalizeDivisionIdentifier()
             selectedEvent.matches.filter { match ->
-                divisionsEquivalent(match.match.division, selectedStandingsDataDivisionId)
+                match.match.division?.normalizeDivisionIdentifier() == normalizedStandingsDivisionId
             }
         }
         val matchTeamIds = standingsMatches
@@ -3951,9 +3994,10 @@ fun EventDetailScreen(
         val standingsTeams = if (!shouldFilterStandings || selectedStandingsDataDivisionId.isNullOrBlank()) {
             selectedEvent.teams
         } else {
+            val normalizedStandingsDivisionId = selectedStandingsDataDivisionId.normalizeDivisionIdentifier()
             selectedEvent.teams.filter { team ->
                 standingsTeamIds.contains(team.team.id) ||
-                    divisionsEquivalent(team.team.division, selectedStandingsDataDivisionId)
+                    team.team.division.normalizeDivisionIdentifier() == normalizedStandingsDivisionId
             }
         }
 
@@ -3974,7 +4018,8 @@ fun EventDetailScreen(
         val remoteRows = if (
             !selectedStandingsDataDivisionId.isNullOrBlank() &&
             leagueDivisionStandings?.divisionId?.let { loadedDivisionId ->
-                divisionsEquivalent(loadedDivisionId, selectedStandingsDataDivisionId)
+                loadedDivisionId.normalizeDivisionIdentifier() ==
+                    selectedStandingsDataDivisionId.normalizeDivisionIdentifier()
             } == true
         ) {
             leagueDivisionStandings?.rows.orEmpty()
@@ -3985,10 +4030,11 @@ fun EventDetailScreen(
             remoteRows
         } else {
             val explicitTeamIds = selectedEvent.event.teamIdsForDivision(selectedStandingsDataDivisionId)
+            val normalizedStandingsDivisionId = selectedStandingsDataDivisionId.normalizeDivisionIdentifier()
             val divisionTeamIds = selectedEvent.teams
                 .filter { team ->
                     explicitTeamIds.contains(team.team.id) ||
-                        divisionsEquivalent(team.team.division, selectedStandingsDataDivisionId)
+                        team.team.division.normalizeDivisionIdentifier() == normalizedStandingsDivisionId
                 }
                 .map { team -> team.team.id }
                 .filter(String::isNotBlank)
@@ -4886,7 +4932,7 @@ fun EventDetailScreen(
                                 -> null
                             }
                             if (!targetDivisionId.isNullOrBlank() &&
-                                !divisionsEquivalent(selectedDivision, targetDivisionId)
+                                selectedDivision?.normalizeDivisionIdentifier() != targetDivisionId.normalizeDivisionIdentifier()
                             ) {
                                 component.selectDivision(targetDivisionId)
                             }
@@ -4896,7 +4942,7 @@ fun EventDetailScreen(
                                 selectedParticipantsSection = participantSections.first()
                             }
                         }
-                        val selectedDivisionPillState = remember(
+                        val selectedDivisionSelectorState = remember(
                             selectedTab,
                             selectedDivision,
                             selectedParticipantsDivisionId,
@@ -4905,9 +4951,12 @@ fun EventDetailScreen(
                             selectedSchedulePoolDivisionId,
                             schedulePoolDivisionOptions,
                             selectedStandingsDivisionId,
+                            selectedStandingsPoolDivisionId,
                             selectedStandingsDataDivisionId,
                             standingsTabDivisionOptions,
                             standingsPoolDivisionOptions,
+                            tournamentPoolPlayEnabled,
+                            tournamentBracketDivisionOptions,
                             selectedBracketDivisionId,
                             bracketTabDivisionOptions,
                             joinDivisionOptions,
@@ -4916,39 +4965,75 @@ fun EventDetailScreen(
                         ) {
                             val selectedDivisionForTab = when (selectedTab) {
                                 DetailTab.BRACKET -> selectedBracketDivisionId
-                                DetailTab.SCHEDULE -> selectedSchedulePoolDivisionId
-                                    ?: selectedScheduleDivisionId
-                                DetailTab.LEAGUES -> selectedStandingsDataDivisionId
-                                    ?: selectedStandingsDivisionId
+                                DetailTab.SCHEDULE -> selectedScheduleDivisionId
+                                DetailTab.LEAGUES -> selectedStandingsDivisionId
                                 DetailTab.PARTICIPANTS -> selectedParticipantsDivisionId
                                     ?: selectedDivision
                             }
                             val divisionOptionsForTab = when (selectedTab) {
                                 DetailTab.BRACKET -> bracketTabDivisionOptions
-                                DetailTab.SCHEDULE -> if (!selectedSchedulePoolDivisionId.isNullOrBlank()) {
-                                    schedulePoolDivisionOptions
+                                DetailTab.SCHEDULE -> if (tournamentPoolPlayEnabled &&
+                                    tournamentBracketDivisionOptions.isNotEmpty()
+                                ) {
+                                    tournamentBracketDivisionOptions
                                 } else {
                                     joinDivisionOptions
                                 }
-                                DetailTab.LEAGUES -> if (!selectedStandingsDataDivisionId.isNullOrBlank() &&
-                                    standingsPoolDivisionOptions.findBracketDivisionOption(
-                                        selectedStandingsDataDivisionId,
-                                    ) != null
-                                ) {
-                                    standingsPoolDivisionOptions
-                                } else {
-                                    standingsTabDivisionOptions
-                                }
+                                DetailTab.LEAGUES -> standingsTabDivisionOptions
                                 DetailTab.PARTICIPANTS -> participantsTabDivisionOptions
                             }.distinctById()
-                            buildSelectedDivisionPillState(
+                            val divisionState = buildSelectedDivisionPillState(
                                 selectedDivisionId = selectedDivisionForTab,
                                 options = divisionOptionsForTab,
                                 divisionDetails = selectedEvent.event.divisionDetails,
                                 singleDivision = selectedEvent.event.singleDivision,
                             )
+                            val poolState = when (selectedTab) {
+                                DetailTab.SCHEDULE -> {
+                                    if (tournamentPoolPlayEnabled && schedulePoolDivisionOptions.isNotEmpty()) {
+                                        buildSelectedDivisionPillState(
+                                            selectedDivisionId = selectedSchedulePoolDivisionId
+                                                ?: AllPoolsDivisionOptionId,
+                                            options = listOf(
+                                                BracketDivisionOption(
+                                                    id = AllPoolsDivisionOptionId,
+                                                    label = "All pools",
+                                                ),
+                                            ) + schedulePoolDivisionOptions,
+                                            divisionDetails = selectedEvent.event.divisionDetails,
+                                            singleDivision = false,
+                                        )
+                                    } else {
+                                        null
+                                    }
+                                }
+                                DetailTab.LEAGUES -> {
+                                    if (tournamentPoolPlayEnabled && standingsPoolDivisionOptions.isNotEmpty()) {
+                                        buildSelectedDivisionPillState(
+                                            selectedDivisionId = selectedStandingsDataDivisionId
+                                                ?: selectedStandingsPoolDivisionId,
+                                            options = standingsPoolDivisionOptions,
+                                            divisionDetails = selectedEvent.event.divisionDetails,
+                                            singleDivision = false,
+                                        )
+                                    } else {
+                                        null
+                                    }
+                                }
+                                DetailTab.BRACKET,
+                                DetailTab.PARTICIPANTS,
+                                -> null
+                            }
+                            if (divisionState == null && poolState == null) {
+                                null
+                            } else {
+                                SelectedDivisionSelectorState(
+                                    divisionState = divisionState,
+                                    poolState = poolState,
+                                )
+                            }
                         }
-                        val tabContentTopOffset = if (selectedDivisionPillState != null) {
+                        val tabContentTopOffset = if (selectedDivisionSelectorState != null) {
                             DivisionPillContentTopOffset
                         } else {
                             0.dp
@@ -5115,17 +5200,26 @@ fun EventDetailScreen(
                                         }
                                         val scheduleMatches = when {
                                             tournamentPoolPlayEnabled && !selectedSchedulePoolDivisionId.isNullOrBlank() -> {
+                                                val selectedPoolDivisionId = selectedSchedulePoolDivisionId
+                                                val normalizedPoolDivisionId =
+                                                    selectedPoolDivisionId.orEmpty().normalizeDivisionIdentifier()
                                                 allScheduleMatches.filter { match ->
-                                                    divisionsEquivalent(match.match.division, selectedSchedulePoolDivisionId)
+                                                    match.match.division?.normalizeDivisionIdentifier() ==
+                                                        normalizedPoolDivisionId
                                                 }
                                             }
 
                                             tournamentPoolPlayEnabled && !selectedScheduleDivisionId.isNullOrBlank() -> {
                                                 val poolDivisionIds = schedulePoolDivisionOptions.map { option -> option.id }
+                                                val normalizedScheduleDivisionId =
+                                                    selectedScheduleDivisionId.normalizeDivisionIdentifier()
                                                 allScheduleMatches.filter { match ->
-                                                    divisionsEquivalent(match.match.division, selectedScheduleDivisionId) ||
+                                                    val normalizedMatchDivision =
+                                                        match.match.division?.normalizeDivisionIdentifier()
+                                                    normalizedMatchDivision == normalizedScheduleDivisionId ||
                                                         poolDivisionIds.any { poolDivisionId ->
-                                                            divisionsEquivalent(match.match.division, poolDivisionId)
+                                                            normalizedMatchDivision ==
+                                                                poolDivisionId.normalizeDivisionIdentifier()
                                                         }
                                                 }
                                             }
@@ -5135,8 +5229,12 @@ fun EventDetailScreen(
                                             }
 
                                             else -> {
+                                                val selectedScheduleFallbackDivision = selectedDivision
+                                                val normalizedSelectedDivision =
+                                                    selectedScheduleFallbackDivision.orEmpty().normalizeDivisionIdentifier()
                                                 allScheduleMatches.filter { match ->
-                                                    divisionsEquivalent(match.match.division, selectedDivision)
+                                                    match.match.division?.normalizeDivisionIdentifier() ==
+                                                        normalizedSelectedDivision
                                                 }
                                             }
                                         }
@@ -5172,7 +5270,8 @@ fun EventDetailScreen(
                                 DetailTab.LEAGUES -> {
                                     val selectedLeagueDivisionStandings = leagueDivisionStandings?.takeIf { standings ->
                                         !selectedStandingsDataDivisionId.isNullOrBlank() &&
-                                            divisionsEquivalent(standings.divisionId, selectedStandingsDataDivisionId)
+                                            standings.divisionId.normalizeDivisionIdentifier() ==
+                                                selectedStandingsDataDivisionId.normalizeDivisionIdentifier()
                                     }
                                     LeagueStandingsTab(
                                         standings = leagueStandings,
@@ -5231,7 +5330,7 @@ fun EventDetailScreen(
                             }
                             @Suppress("RedundantQualifierName")
                             androidx.compose.animation.AnimatedVisibility(
-                                visible = selectedDivisionPillState != null,
+                                visible = selectedDivisionSelectorState != null,
                                 modifier = Modifier
                                     .align(Alignment.TopCenter)
                                     .padding(top = 4.dp)
@@ -5239,49 +5338,45 @@ fun EventDetailScreen(
                                 enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
                                 exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
                             ) {
-                                selectedDivisionPillState?.let { pillState ->
-                                    EventDetailSelectedDivisionPill(
-                                        label = pillState.label,
-                                        selectedDivisionId = pillState.selectedDivisionId,
-                                        divisionOptions = pillState.options,
+                                selectedDivisionSelectorState?.let { selectorState ->
+                                    EventDetailDivisionSelectorBar(
+                                        divisionState = selectorState.divisionState,
+                                        poolState = selectorState.poolState,
                                         onDivisionSelected = { divisionId ->
                                             when (selectedTab) {
                                                 DetailTab.BRACKET -> {
                                                     component.selectDivision(divisionId)
                                                 }
                                                 DetailTab.SCHEDULE -> {
-                                                    if (!selectedSchedulePoolDivisionId.isNullOrBlank() &&
-                                                        schedulePoolDivisionOptions.findBracketDivisionOption(
-                                                            divisionId,
-                                                        ) != null
-                                                    ) {
-                                                        selectedSchedulePoolDivisionId = divisionId
-                                                    } else {
-                                                        selectedSchedulePoolDivisionId = null
-                                                        component.selectDivision(divisionId)
-                                                    }
+                                                    selectedSchedulePoolDivisionId = null
+                                                    component.selectDivision(divisionId)
                                                 }
                                                 DetailTab.LEAGUES -> {
-                                                    if (!selectedStandingsDataDivisionId.isNullOrBlank() &&
-                                                        standingsPoolDivisionOptions.findBracketDivisionOption(
-                                                            divisionId,
-                                                        ) != null
-                                                    ) {
-                                                        selectedStandingsPoolDivisionId = divisionId
-                                                        component.selectDivision(divisionId)
-                                                    } else {
-                                                        selectedStandingsPoolDivisionId = null
-                                                        component.selectDivision(divisionId)
-                                                    }
+                                                    selectedStandingsPoolDivisionId = null
+                                                    component.selectDivision(divisionId)
                                                 }
                                                 DetailTab.PARTICIPANTS -> {
                                                     component.selectDivision(divisionId)
                                                 }
                                             }
                                         },
-                                        modifier = Modifier
-                                            .padding(horizontal = 12.dp)
-                                            .widthIn(max = 280.dp),
+                                        onPoolSelected = { poolDivisionId ->
+                                            when (selectedTab) {
+                                                DetailTab.SCHEDULE -> {
+                                                    selectedSchedulePoolDivisionId =
+                                                        poolDivisionId.takeUnless { selectedId ->
+                                                            selectedId == AllPoolsDivisionOptionId
+                                                        }
+                                                }
+                                                DetailTab.LEAGUES -> {
+                                                    selectedStandingsPoolDivisionId = poolDivisionId
+                                                    component.selectDivision(poolDivisionId)
+                                                }
+                                                DetailTab.BRACKET,
+                                                DetailTab.PARTICIPANTS,
+                                                -> Unit
+                                            }
+                                        },
                                     )
                                 }
                             }
@@ -5349,17 +5444,6 @@ fun EventDetailScreen(
                                         onCollapseClick = { isDetailDockExpanded = false },
                                     ) { dockModifier, onCloseClick ->
                                         BracketFloatingBar(
-                                            selectedPoolDivisionId = selectedSchedulePoolDivisionId,
-                                            poolOptions = if (tournamentPoolPlayEnabled) {
-                                                schedulePoolDivisionOptions
-                                            } else {
-                                                emptyList()
-                                            },
-                                            onPoolSelected = if (tournamentPoolPlayEnabled) {
-                                                { poolDivisionId -> selectedSchedulePoolDivisionId = poolDivisionId }
-                                            } else {
-                                                null
-                                            },
                                             showMatchEditAction = showScheduleMatchManagement,
                                             isEditingMatches = showScheduleMatchManagement && canEditMatches,
                                             onStartMatchEdit = component::startEditingMatches,
@@ -5405,23 +5489,6 @@ fun EventDetailScreen(
                                         onCollapseClick = { isDetailDockExpanded = false },
                                     ) { dockModifier, onCloseClick ->
                                         BracketFloatingBar(
-                                            selectedPoolDivisionId = selectedStandingsDataDivisionId,
-                                            poolOptions = if (tournamentPoolPlayEnabled) {
-                                                standingsPoolDivisionOptions
-                                            } else {
-                                                emptyList()
-                                            },
-                                            onPoolSelected = if (tournamentPoolPlayEnabled) {
-                                                { poolDivisionId ->
-                                                    selectedStandingsPoolDivisionId = poolDivisionId
-                                                    if (!poolDivisionId.isNullOrBlank()) {
-                                                        component.selectDivision(poolDivisionId)
-                                                    }
-                                                }
-                                            } else {
-                                                null
-                                            },
-                                            includeAllPoolsOption = false,
                                             showMatchEditAction = canManageMatchEditingFromDock,
                                             isEditingMatches = canEditMatches,
                                             onStartMatchEdit = component::startEditingMatches,

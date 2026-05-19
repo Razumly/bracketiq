@@ -21,10 +21,9 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
-import com.razumly.mvp.core.data.util.findDivisionDetailByIdentifier
 import com.razumly.mvp.core.data.util.isPlaceholderSlot
-import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
+import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.util.calcDistance
 import dev.icerock.moko.geo.LatLng
 import com.razumly.mvp.core.network.ApiException
@@ -62,7 +61,9 @@ import com.razumly.mvp.core.network.dto.UpdateEventRequestDto
 import com.razumly.mvp.core.network.dto.toUserDataOrNull
 import com.razumly.mvp.core.network.dto.toUpdateDto
 import io.ktor.http.encodeURLQueryComponent
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -484,15 +485,16 @@ class EventRepository(
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
     private val currentUserDataSource: CurrentUserDataSource? = null,
+    coroutineDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : IEventRepository {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = CoroutineScope(SupervisorJob() + coroutineDispatcher)
     private val eventPageSize = 50
 
     init {
         scope.launch {
             databaseService.getEventDao.deleteAllEvents()
         }
-        scope.launch {
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
             var hasObservedUser = false
             var lastUserId: String? = null
             userRepository.currentUser.collect { currentUserResult ->
@@ -581,6 +583,54 @@ class EventRepository(
     private suspend fun fetchRemoteEvent(eventId: String): Event {
         val dto = fetchRemoteEventDto(eventId)
         return dto.toEventOrNull() ?: error("Event $eventId response missing required fields")
+    }
+
+    private fun List<DivisionDetail>.preservesConfiguredDivisionDetailsFrom(cached: Event): Boolean {
+        if (cached.divisionDetails.isEmpty()) return true
+        return cached.divisions.normalizeDivisionIdentifiers().all { cachedDivisionId ->
+            val cachedDetail = cached.divisionDetails.firstOrNull { detail ->
+                detail.id.normalizeDivisionIdentifier() == cachedDivisionId
+            }
+            val currentDetail = firstOrNull { detail ->
+                detail.id.normalizeDivisionIdentifier() == cachedDivisionId
+            }
+            cachedDetail == null ||
+                (
+                    currentDetail != null &&
+                        (cachedDetail.maxParticipants == null || currentDetail.maxParticipants != null)
+                    )
+        }
+    }
+
+    private fun Event.withPreservedCachedDivisionState(cached: Event?): Event {
+        val cachedDivisions = cached?.divisions?.normalizeDivisionIdentifiers().orEmpty()
+        if (cached == null || cachedDivisions.isEmpty()) return this
+
+        val currentDivisions = divisions.normalizeDivisionIdentifiers()
+        val hasAllCachedDivisions = cachedDivisions.all { cachedDivisionId ->
+            cachedDivisionId in currentDivisions
+        }
+        val preserveDivisions = !hasAllCachedDivisions
+        val preserveDivisionDetails = preserveDivisions ||
+            !divisionDetails.preservesConfiguredDivisionDetailsFrom(cached)
+
+        if (!preserveDivisions && !preserveDivisionDetails) return this
+
+        return copy(
+            divisions = if (preserveDivisions) cached.divisions else divisions,
+            divisionDetails = if (preserveDivisionDetails) cached.divisionDetails else divisionDetails,
+        )
+    }
+
+    private suspend fun preserveCachedDivisionState(event: Event): Event =
+        event.withPreservedCachedDivisionState(databaseService.getEventDao.getEventById(event.id))
+
+    private suspend fun preserveCachedDivisionState(events: List<Event>): List<Event> {
+        if (events.isEmpty()) return emptyList()
+        val cachedById = databaseService.getEventDao
+            .getEventsByIds(events.map(Event::id))
+            .associateBy(Event::id)
+        return events.map { event -> event.withPreservedCachedDivisionState(cachedById[event.id]) }
     }
 
     private suspend fun fetchRemoteEventsByHost(hostId: String): List<Event> {
@@ -767,7 +817,10 @@ class EventRepository(
         }
 
         val participantIds = snapshot.participants
-        val mergedEvent = (snapshot.event?.toEventOrNull() ?: baseEvent).copy(
+        val snapshotEvent = snapshot.event
+            ?.toEventOrNull()
+            ?.withPreservedCachedDivisionState(baseEvent)
+        val mergedEvent = (snapshotEvent ?: baseEvent).copy(
             teamIds = normalizedParticipantIds(participantIds.teamIds),
             userIds = normalizedParticipantIds(participantIds.userIds),
             waitListIds = normalizedParticipantIds(participantIds.waitListIds),
@@ -802,7 +855,7 @@ class EventRepository(
             val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
                 ?: error("Event id is required.")
             val event = try {
-                fetchRemoteEvent(normalizedEventId)
+                preserveCachedDivisionState(fetchRemoteEvent(normalizedEventId))
             } catch (throwable: Throwable) {
                 if (shouldEvictEventFromCache(throwable)) {
                     databaseService.getEventDao.deleteEventWithCrossRefs(normalizedEventId)
@@ -933,11 +986,12 @@ class EventRepository(
         event: Event,
         occurrence: EventOccurrenceSelection?,
     ) {
+        val eventWithStableDivisions = preserveCachedDivisionState(event)
         syncCurrentUserRegistrationCache().getOrNull()
-        syncEventParticipants(event, occurrence)
+        syncEventParticipants(eventWithStableDivisions, occurrence)
             .onFailure {
-                databaseService.getEventDao.upsertEvent(event)
-                persistEventRelations(event)
+                databaseService.getEventDao.upsertEvent(eventWithStableDivisions)
+                persistEventRelations(eventWithStableDivisions)
             }
     }
 
@@ -969,7 +1023,7 @@ class EventRepository(
         val ids = eventIds.map(String::trim).filter(String::isNotBlank).distinct()
         if (ids.isEmpty()) return@runCatching emptyList()
 
-        val events = fetchRemoteEventsByIds(ids)
+        val events = preserveCachedDivisionState(fetchRemoteEventsByIds(ids))
         if (events.isNotEmpty()) {
             databaseService.getEventDao.upsertEvents(events)
         }
@@ -992,7 +1046,7 @@ class EventRepository(
         }
 
         return runCatching {
-            val events = fetchRemoteEventsByOrganization(normalizedOrganizationId, limit)
+            val events = preserveCachedDivisionState(fetchRemoteEventsByOrganization(normalizedOrganizationId, limit))
             if (events.isNotEmpty()) {
                 databaseService.getEventDao.upsertEvents(events)
             }
@@ -1153,9 +1207,11 @@ class EventRepository(
                 ),
             )
 
-            val events = filterHiddenEvents(
-                res.events.mapNotNull { it.toEventOrNull() },
-                userRepository.currentUser.value.getOrNull(),
+            val events = preserveCachedDivisionState(
+                filterHiddenEvents(
+                    res.events.mapNotNull { it.toEventOrNull() },
+                    userRepository.currentUser.value.getOrNull(),
+                ),
             )
             databaseService.getEventDao.upsertEvents(events)
             val orderedEvents = if (includeDistanceFilter) {
@@ -1189,9 +1245,11 @@ class EventRepository(
                 ),
             )
 
-            val events = filterHiddenEvents(
-                res.events.mapNotNull { it.toEventOrNull() },
-                userRepository.currentUser.value.getOrNull(),
+            val events = preserveCachedDivisionState(
+                filterHiddenEvents(
+                    res.events.mapNotNull { it.toEventOrNull() },
+                    userRepository.currentUser.value.getOrNull(),
+                ),
             )
             databaseService.getEventDao.upsertEvents(events)
 
@@ -1245,7 +1303,7 @@ class EventRepository(
 
             val remoteJob = launch {
                 runCatching {
-                    val remote = fetchRemoteEventsByHost(hostId)
+                    val remote = preserveCachedDivisionState(fetchRemoteEventsByHost(hostId))
 
                     val localHostEvents = databaseService.getEventDao.getAllCachedEvents().first()
                         .filter { it.hostId == hostId }
@@ -1280,7 +1338,7 @@ class EventRepository(
 
             val remoteJob = launch {
                 runCatching {
-                    val remote = fetchRemoteEventTemplatesByHost(hostId)
+                    val remote = preserveCachedDivisionState(fetchRemoteEventTemplatesByHost(hostId))
 
                     val localTemplateEvents = databaseService.getEventDao.getAllCachedEvents().first()
                         .filter { event ->
@@ -1660,7 +1718,7 @@ class EventRepository(
 
     override suspend fun getMySchedule(): Result<UserScheduleSnapshot> = runCatching {
         val response = api.get<ProfileScheduleResponseDto>("api/profile/schedule")
-        val events = response.events.mapNotNull { it.toEventOrNull() }
+        val events = preserveCachedDivisionState(response.events.mapNotNull { it.toEventOrNull() })
         val matches = response.matches.mapNotNull { it.toMatchOrNull() }
         val teams = response.teams.mapNotNull { it.toTeamOrNull() }
         val fields = response.fields
@@ -1755,17 +1813,20 @@ class EventRepository(
             ?.normalizeDivisionIdentifier()
             ?.ifEmpty { null }
 
-        val divisionDetails = mergeDivisionDetailsForDivisions(
-            divisions = event.divisions,
-            existingDetails = event.divisionDetails,
-            eventId = event.id,
-        )
+        val normalizedDivisionIds = event.divisions.normalizeDivisionIdentifiers()
+        val divisionDetails = normalizedDivisionIds.mapNotNull { divisionId ->
+            event.divisionDetails.firstOrNull { detail ->
+                detail.id.normalizeDivisionIdentifier() == divisionId
+            }
+        }
         if (divisionDetails.isEmpty()) {
             return null
         }
 
         return if (!normalizedPreferredDivision.isNullOrBlank()) {
-            divisionDetails.findDivisionDetailByIdentifier(normalizedPreferredDivision)
+            divisionDetails.firstOrNull { detail ->
+                detail.id.normalizeDivisionIdentifier() == normalizedPreferredDivision
+            }
                 ?: divisionDetails.firstOrNull()
         } else {
             divisionDetails.firstOrNull()
@@ -1779,9 +1840,7 @@ class EventRepository(
         val selectedDivision = resolveSelectedDivisionDetail(event, preferredDivisionId)
             ?: return RegistrationDivisionPayload()
 
-        val divisionId = selectedDivision.id.normalizeDivisionIdentifier().ifEmpty {
-            selectedDivision.key.normalizeDivisionIdentifier()
-        }.ifEmpty { null }
+        val divisionId = selectedDivision.id.normalizeDivisionIdentifier().ifEmpty { null }
         val divisionTypeId = selectedDivision.divisionTypeId.normalizeDivisionIdentifier().ifEmpty { null }
         val divisionTypeKey = selectedDivision.key.normalizeDivisionIdentifier().ifEmpty { null }
 
@@ -1810,19 +1869,15 @@ class EventRepository(
         } else {
             resolveSelectedDivisionDetail(event, preferredDivisionId)
         }
-        val maxParticipants = participantSnapshot?.participantCapacity ?: if (event.divisions.isEmpty()) {
-            event.maxParticipants.takeIf { value -> value > 0 }
-        } else {
-            selectedDivision?.maxParticipants
-        } ?: throw IllegalStateException(
-            "Set ${if (event.teamSignup) "max teams" else "max participants"} for this division before joining.",
-        )
-
-        if (maxParticipants <= 0) {
-            throw IllegalStateException(
-                "Set ${if (event.teamSignup) "max teams" else "max participants"} for this division before joining.",
-            )
-        }
+        val missingCapacityMessage =
+            "Set ${if (event.teamSignup) "max teams" else "max participants"} for this division before joining."
+        val maxParticipants = participantSnapshot?.participantCapacity?.takeIf { value -> value > 0 }
+            ?: if (event.divisions.isEmpty()) {
+                event.maxParticipants.takeIf { value -> value > 0 }
+            } else {
+                selectedDivision?.maxParticipants?.takeIf { value -> value > 0 }
+            }
+            ?: throw IllegalStateException(missingCapacityMessage)
 
         val participantCount = participantSnapshot?.participantCount ?: if (event.teamSignup) {
             val teamIds = event.teamIds
@@ -1833,15 +1888,13 @@ class EventRepository(
             } else {
                 val teams = teamRepository.getTeamsWithPlayers(teamIds).getOrElse { emptyList() }
                 val divisionId = selectedDivision?.id?.normalizeDivisionIdentifier()?.takeIf(String::isNotBlank)
-                val divisionKey = selectedDivision?.key?.normalizeDivisionIdentifier()?.takeIf(String::isNotBlank)
-                val shouldFilterDivision = event.divisions.isNotEmpty() && (divisionId != null || divisionKey != null)
+                val shouldFilterDivision = event.divisions.isNotEmpty() && divisionId != null
                 teams.count { teamWithPlayers ->
                     val team = teamWithPlayers.team
                     val teamDivision = team.division.normalizeDivisionIdentifier()
                     !team.isPlaceholderSlot(event.eventType) && (
                         !shouldFilterDivision ||
-                            (divisionId != null && teamDivision == divisionId) ||
-                            (divisionKey != null && teamDivision == divisionKey)
+                            (divisionId != null && teamDivision == divisionId)
                     )
                 }
             }

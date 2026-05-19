@@ -25,6 +25,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.network.AuthTokenStore
 import com.razumly.mvp.core.network.MvpApiClient
+import com.razumly.mvp.core.network.configureMvpHttpClient
 import com.razumly.mvp.core.util.jsonMVP
 import dev.icerock.moko.geo.LatLng
 import io.ktor.client.HttpClient
@@ -38,12 +39,14 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.http.content.OutgoingContent
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -376,7 +379,13 @@ class EventRepositoryHttpTest {
             "http://localhost",
             EventRepositoryHttp_InMemoryAuthTokenStore(),
         )
-        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+        val repo = EventRepository(
+            db,
+            api,
+            EventRepositoryHttp_UnusedTeamRepository,
+            userRepo,
+            coroutineDispatcher = StandardTestDispatcher(testScheduler),
+        )
 
         val events = repo.getCachedEventsFlow().first().getOrThrow()
 
@@ -384,6 +393,7 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun getCachedEventsFlow_clears_cached_events_when_current_user_changes() = runTest {
         val eventDao = EventRepositoryHttp_FakeEventDao()
         eventDao.upsertEvents(
@@ -405,7 +415,13 @@ class EventRepositoryHttpTest {
             "http://localhost",
             EventRepositoryHttp_InMemoryAuthTokenStore(),
         )
-        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+        val repo = EventRepository(
+            db,
+            api,
+            EventRepositoryHttp_UnusedTeamRepository,
+            userRepo,
+            coroutineDispatcher = StandardTestDispatcher(testScheduler),
+        )
 
         userRepo.emitCurrentUser(makeUser("u2"))
         advanceUntilIdle()
@@ -552,7 +568,7 @@ class EventRepositoryHttpTest {
         val engine = MockEngine { request ->
             assertEquals(HttpMethod.Get, request.method)
             assertEquals("/api/events", request.url.encodedPath)
-            assertEquals("ids=e1%2Ce2&limit=2", request.url.encodedQuery)
+            assertEquals("ids=e1,e2&limit=2", request.url.encodedQuery)
             respond(
                 content = """
                     {
@@ -572,7 +588,7 @@ class EventRepositoryHttpTest {
                 headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
             )
         }
-        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val http = HttpClient(engine) { configureMvpHttpClient() }
         val api = MvpApiClient(http, "http://example.test", tokenStore)
         val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
 
@@ -603,7 +619,7 @@ class EventRepositoryHttpTest {
                 headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
             )
         }
-        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val http = HttpClient(engine) { configureMvpHttpClient() }
         val api = MvpApiClient(http, "http://example.test", tokenStore)
         val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
 
@@ -612,6 +628,93 @@ class EventRepositoryHttpTest {
         assertTrue(result.isFailure)
         assertEquals(listOf("e1"), eventDao.deleteEventWithCrossRefsCalls)
         assertEquals(null, eventDao.getEventById("e1"))
+    }
+
+    @Test
+    fun syncEventParticipants_preserves_cached_divisions_when_snapshot_event_is_partial() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val leagueADivisionId = "e1__division__m_skill_open_age_18plus"
+        val leagueBDivisionId = "e1_2__division__m_skill_open_age_18plus"
+        val cachedEvent = makeEvent(id = "e1", hostId = "h1").copy(
+            eventType = EventType.LEAGUE,
+            teamSignup = true,
+            singleDivision = false,
+            divisions = listOf(leagueADivisionId, leagueBDivisionId),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = leagueADivisionId,
+                    key = "m_skill_open_age_18plus",
+                    name = "Mens Open 18+ - A",
+                    maxParticipants = 8,
+                ),
+                DivisionDetail(
+                    id = leagueBDivisionId,
+                    key = "m_skill_open_age_18plus",
+                    name = "Mens Open 18+ - B",
+                    maxParticipants = 8,
+                ),
+            ),
+        )
+        eventDao.upsertEvent(cachedEvent)
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("/api/events/e1/participants", request.url.encodedPath)
+            respond(
+                content = """
+                    {
+                      "event": {
+                        "id": "e1",
+                        "name": "Example League",
+                        "hostId": "h1",
+                        "start": "2026-02-10T00:00:00Z",
+                        "end": "2026-02-10T01:00:00Z",
+                        "coordinates": [0, 0],
+                        "eventType": "LEAGUE",
+                        "teamSignup": true,
+                        "singleDivision": false,
+                        "divisions": ["$leagueADivisionId"],
+                        "divisionDetails": [
+                          {
+                            "id": "$leagueADivisionId",
+                            "key": "m_skill_open_age_18plus",
+                            "name": "Mens Open 18+ - A",
+                            "maxParticipants": 8
+                          }
+                        ]
+                      },
+                      "participants": {
+                        "teamIds": [],
+                        "userIds": [],
+                        "waitListIds": [],
+                        "freeAgentIds": []
+                      },
+                      "participantCount": 0,
+                      "participantCapacity": 16
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { configureMvpHttpClient() }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        repo.syncEventParticipants(cachedEvent, occurrence = null).getOrThrow()
+
+        val storedEvent = eventDao.getEventById("e1")
+        assertEquals(listOf(leagueADivisionId, leagueBDivisionId), storedEvent?.divisions)
+        assertEquals(
+            listOf(8, 8),
+            storedEvent?.divisionDetails?.map { detail -> detail.maxParticipants },
+        )
     }
 
     @Test

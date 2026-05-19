@@ -8,8 +8,6 @@ import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 data class EventDetailDivisionOption(
     val id: String,
     val label: String,
-    val key: String? = null,
-    val divisionTypeId: String? = null,
 )
 
 internal fun buildRegistrationDivisionOptions(event: Event): List<EventDetailDivisionOption> {
@@ -18,7 +16,7 @@ internal fun buildRegistrationDivisionOptions(event: Event): List<EventDetailDiv
     val playoffDivisionIds = event.divisionDetails
         .asSequence()
         .filter { detail -> detail.isTournamentPlayoffDivision() }
-        .flatMap { detail -> sequenceOf(detail.id, detail.key) }
+        .map { detail -> detail.id }
         .map { rawId -> rawId.normalizeDivisionIdentifier() }
         .filter(String::isNotBlank)
         .toSet()
@@ -26,8 +24,6 @@ internal fun buildRegistrationDivisionOptions(event: Event): List<EventDetailDiv
     fun addOption(
         rawId: String?,
         explicitLabel: String? = null,
-        key: String? = null,
-        divisionTypeId: String? = null,
         allowPlayoffDivision: Boolean = false,
     ) {
         val normalizedId = rawId
@@ -47,8 +43,6 @@ internal fun buildRegistrationDivisionOptions(event: Event): List<EventDetailDiv
         options += EventDetailDivisionOption(
             id = normalizedId,
             label = label.ifBlank { normalizedId },
-            key = key?.normalizeDivisionIdentifier()?.ifEmpty { null },
-            divisionTypeId = divisionTypeId?.normalizeDivisionIdentifier()?.ifEmpty { null },
         )
     }
 
@@ -58,20 +52,16 @@ internal fun buildRegistrationDivisionOptions(event: Event): List<EventDetailDiv
         if (bracketDetails.isNotEmpty()) {
             bracketDetails.forEach { detail ->
                 addOption(
-                    rawId = detail.id.ifBlank { detail.key },
+                    rawId = detail.id,
                     explicitLabel = detail.name,
-                    key = detail.key,
-                    divisionTypeId = detail.divisionTypeId,
                     allowPlayoffDivision = true,
                 )
             }
         } else {
             buildSyntheticTournamentBracketRegistrationDetails(event).forEach { detail ->
                 addOption(
-                    rawId = detail.id.ifBlank { detail.key },
+                    rawId = detail.id,
                     explicitLabel = detail.name,
-                    key = detail.key,
-                    divisionTypeId = detail.divisionTypeId,
                     allowPlayoffDivision = true,
                 )
             }
@@ -86,10 +76,8 @@ internal fun buildRegistrationDivisionOptions(event: Event): List<EventDetailDiv
     if (regularDetails.isNotEmpty()) {
         regularDetails.forEach { detail ->
             addOption(
-                rawId = detail.id.ifBlank { detail.key },
+                rawId = detail.id,
                 explicitLabel = detail.name,
-                key = detail.key,
-                divisionTypeId = detail.divisionTypeId,
             )
         }
     } else {
@@ -161,23 +149,13 @@ internal fun List<EventDetailDivisionOption>.resolveSelectedEventDivisionId(pref
 
 internal fun List<EventDetailDivisionOption>.findEventDivisionOption(
     value: String?,
-    allowDivisionTypeFallback: Boolean = true,
 ): EventDetailDivisionOption? {
     val normalizedValue = value
         ?.normalizeDivisionIdentifier()
         .orEmpty()
     if (normalizedValue.isEmpty()) return null
 
-    firstOrNull { option -> option.id == normalizedValue }
-        ?.let { option -> return option }
-
-    val keyMatches = filter { option -> option.key == normalizedValue }
-    if (keyMatches.size == 1) return keyMatches.single()
-
-    if (!allowDivisionTypeFallback) return null
-
-    val divisionTypeMatches = filter { option -> option.matchesDivisionTypeIdentifier(normalizedValue) }
-    return divisionTypeMatches.singleOrNull()
+    return firstOrNull { option -> option.id == normalizedValue }
 }
 
 internal fun EventDetailDivisionOption.matchesDivisionIdentifier(value: String?): Boolean {
@@ -185,14 +163,5 @@ internal fun EventDetailDivisionOption.matchesDivisionIdentifier(value: String?)
         ?.normalizeDivisionIdentifier()
         .orEmpty()
     if (normalizedValue.isEmpty()) return false
-    return normalizedValue == id ||
-        normalizedValue == key
-}
-
-private fun EventDetailDivisionOption.matchesDivisionTypeIdentifier(value: String?): Boolean {
-    val normalizedValue = value
-        ?.normalizeDivisionIdentifier()
-        .orEmpty()
-    if (normalizedValue.isEmpty()) return false
-    return normalizedValue == divisionTypeId
+    return normalizedValue == id
 }

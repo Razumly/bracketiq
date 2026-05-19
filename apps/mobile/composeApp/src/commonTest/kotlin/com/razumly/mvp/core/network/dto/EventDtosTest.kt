@@ -1037,6 +1037,47 @@ class EventDtosTest {
     }
 
     @Test
+    fun event_api_dto_does_not_add_playoff_details_to_event_divisions() {
+        val leagueDivisionId = "event-25__division__m_skill_open_age_18plus"
+        val playoffDivisionId = "event-25__division__playoff_1"
+        val dto = EventApiDto(
+            id = "event-25",
+            name = "Split League",
+            hostId = "host-25",
+            eventType = EventType.LEAGUE.name,
+            includePlayoffs = true,
+            singleDivision = false,
+            start = "2026-02-10T00:00:00Z",
+            end = "2026-02-10T01:00:00Z",
+            divisions = listOf(leagueDivisionId),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = leagueDivisionId,
+                    key = "m_skill_open_age_18plus",
+                    name = "Mens Open 18+",
+                    divisionTypeId = "skill_open_age_18plus",
+                    maxParticipants = 8,
+                ),
+                DivisionDetail(
+                    id = playoffDivisionId,
+                    key = "playoff_1",
+                    name = "Upper Division",
+                    kind = "PLAYOFF",
+                    maxParticipants = 8,
+                ),
+            ),
+        )
+
+        val event = dto.toEventOrNull()
+
+        assertEquals(listOf(leagueDivisionId), event?.divisions)
+        assertEquals(
+            listOf(leagueDivisionId, playoffDivisionId),
+            event?.divisionDetails?.map { detail -> detail.id },
+        )
+    }
+
+    @Test
     fun event_api_dto_does_not_infer_no_fixed_end_datetime_from_matching_start_and_end() {
         val dto = EventApiDto(
             id = "event-24",

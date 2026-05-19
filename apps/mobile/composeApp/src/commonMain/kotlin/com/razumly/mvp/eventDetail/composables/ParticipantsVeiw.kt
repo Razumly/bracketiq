@@ -328,11 +328,7 @@ private fun TeamWithPlayers.resolveParticipantDivisionOption(
     divisionOptions: List<EventDetailDivisionOption>,
 ): EventDetailDivisionOption? {
     val teamDivision = team.division.trim().takeIf(String::isNotBlank)
-    val teamDivisionTypeId = team.divisionTypeId?.trim()?.takeIf(String::isNotBlank)
-    return divisionOptions.findEventDivisionOption(
-        value = teamDivision,
-        allowDivisionTypeFallback = false,
-    ) ?: divisionOptions.findEventDivisionOption(teamDivisionTypeId)
+    return divisionOptions.findEventDivisionOption(teamDivision)
 }
 
 @Composable

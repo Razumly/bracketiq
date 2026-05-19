@@ -4,10 +4,8 @@ import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
-import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
-import com.razumly.mvp.core.data.util.buildGenderSkillAgeDivisionToken
-import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
+import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 
 internal data class DivisionCapacitySummary(
@@ -32,9 +30,7 @@ internal data class DivisionCapacitySummary(
 }
 
 private fun resolveDivisionIdentifier(detail: DivisionDetail): String {
-    val normalizedId = detail.id.normalizeDivisionIdentifier()
-    if (normalizedId.isNotBlank()) return normalizedId
-    return detail.key.normalizeDivisionIdentifier()
+    return detail.id.normalizeDivisionIdentifier()
 }
 
 private data class DivisionCapacityTarget(
@@ -82,7 +78,20 @@ private fun buildDivisionCapacityTargets(
     divisionDetails: List<DivisionDetail>,
 ): List<DivisionCapacityTarget> {
     if (!event.usesTournamentPoolCapacityTargets(divisionDetails)) {
-        return divisionDetails.map { detail ->
+        val eventDivisionIds = event.divisions.normalizeDivisionIdentifiers()
+        val details = if (eventDivisionIds.isNotEmpty()) {
+            eventDivisionIds.map { divisionId ->
+                divisionDetails.findCapacityDetailByDivisionId(divisionId)
+                    ?: DivisionDetail(
+                        id = divisionId,
+                        key = divisionId,
+                        name = divisionId.toDivisionDisplayLabel(divisionDetails),
+                    )
+            }
+        } else {
+            divisionDetails.filterNot(DivisionDetail::isTournamentPlayoffDivision)
+        }
+        return details.map { detail ->
             DivisionCapacityTarget(detail = detail, matchDetails = listOf(detail))
         }
     }
@@ -98,66 +107,35 @@ private fun buildDivisionCapacityTargets(
         }
 }
 
-private fun Team.divisionCandidates(): List<String> = buildList {
-    division.normalizeDivisionIdentifier().takeIf(String::isNotBlank)?.let(::add)
-    divisionTypeId?.normalizeDivisionIdentifier()?.takeIf(String::isNotBlank)?.let(::add)
+private fun List<DivisionDetail>.findCapacityDetailByDivisionId(divisionId: String): DivisionDetail? {
+    val normalizedDivisionId = divisionId.normalizeDivisionIdentifier()
+    if (normalizedDivisionId.isBlank()) return null
+    return filter { detail ->
+        detail.id.normalizeDivisionIdentifier() == normalizedDivisionId
+    }.singleOrNull()
+}
 
-    val skillDivisionId = skillDivisionTypeId
-        ?.normalizeDivisionIdentifier()
-        ?.takeIf(String::isNotBlank)
-    val ageDivisionId = ageDivisionTypeId
-        ?.normalizeDivisionIdentifier()
-        ?.takeIf(String::isNotBlank)
-    if (skillDivisionId != null && ageDivisionId != null) {
-        add(
-            buildCombinedDivisionTypeId(
-                skillDivisionTypeId = skillDivisionId,
-                ageDivisionTypeId = ageDivisionId,
-            ),
-        )
-        add(
-            buildGenderSkillAgeDivisionToken(
-                gender = divisionGender.orEmpty(),
-                skillDivisionTypeId = skillDivisionId,
-                ageDivisionTypeId = ageDivisionId,
-            ),
-        )
-    }
-}.distinct()
+private fun Team.exactDivisionIdentifier(): String =
+    division.normalizeDivisionIdentifier()
 
-private fun DivisionDetail.divisionCandidates(): List<String> = buildList {
-    id.normalizeDivisionIdentifier().takeIf(String::isNotBlank)?.let(::add)
-    key.normalizeDivisionIdentifier().takeIf(String::isNotBlank)?.let(::add)
-    divisionTypeId.normalizeDivisionIdentifier().takeIf(String::isNotBlank)?.let(::add)
+private fun DivisionDetail.exactDivisionIdentifier(): String =
+    id.normalizeDivisionIdentifier()
 
-    val skillDivisionId = skillDivisionTypeId.normalizeDivisionIdentifier().takeIf(String::isNotBlank)
-    val ageDivisionId = ageDivisionTypeId.normalizeDivisionIdentifier().takeIf(String::isNotBlank)
-    if (skillDivisionId != null && ageDivisionId != null) {
-        add(
-            buildCombinedDivisionTypeId(
-                skillDivisionTypeId = skillDivisionId,
-                ageDivisionTypeId = ageDivisionId,
-            ),
-        )
-        add(
-            buildGenderSkillAgeDivisionToken(
-                gender = gender,
-                skillDivisionTypeId = skillDivisionId,
-                ageDivisionTypeId = ageDivisionId,
-            ),
-        )
-    }
-}.distinct()
+private fun Team.matchesExactEventDivision(detail: DivisionDetail): Boolean {
+    val exactDivision = exactDivisionIdentifier()
+    val detailDivision = detail.exactDivisionIdentifier()
+    return exactDivision.isNotBlank() &&
+        detailDivision.isNotBlank() &&
+        exactDivision == detailDivision
+}
 
 internal fun Team.matchesEventDivision(detail: DivisionDetail): Boolean {
-    val teamCandidates = divisionCandidates()
-    val divisionCandidates = detail.divisionCandidates()
-    return teamCandidates.any { teamCandidate ->
-        divisionCandidates.any { divisionCandidate ->
-            divisionsEquivalent(teamCandidate, divisionCandidate)
-        }
-    }
+    return matchesExactEventDivision(detail)
 }
+
+private fun DivisionCapacityTarget.matchesExactTeamDivision(team: Team): Boolean =
+    matchDetails.any { detail -> team.matchesExactEventDivision(detail) } ||
+        team.matchesExactEventDivision(detail)
 
 internal fun buildDivisionCapacitySummaries(
     event: Event,
@@ -178,8 +156,7 @@ internal fun buildDivisionCapacitySummaries(
 
     loadedTeams.forEach { team ->
         val matchingTarget = capacityTargets.firstOrNull { target ->
-            target.matchDetails.any { detail -> team.matchesEventDivision(detail) } ||
-                team.matchesEventDivision(target.detail)
+            target.matchesExactTeamDivision(team)
         }
         if (matchingTarget == null) {
             unassignedTeamCount += 1
@@ -209,7 +186,7 @@ internal fun buildDivisionCapacitySummaries(
             filled = filled,
             capacity = capacity,
         )
-    }
+    }.sortedBy { summary -> summary.label.lowercase() }
 
     if (summaries.isEmpty()) return emptyList()
 

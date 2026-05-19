@@ -40,6 +40,34 @@ class EventCapacityTest {
     }
 
     @Test
+    fun splitLeaguePlayoffs_excludesPlayoffDivisionCapacities() {
+        val event = Event(
+            id = "evt_1",
+            singleDivision = false,
+            maxParticipants = 8,
+            divisions = listOf("evt_1__division__open", "evt_1__division__a"),
+            divisionDetails = listOf(
+                DivisionDetail(id = "evt_1__division__open", name = "Open", maxParticipants = 8),
+                DivisionDetail(id = "evt_1__division__a", name = "A", maxParticipants = 8),
+                DivisionDetail(
+                    id = "evt_1__division__playoff_1",
+                    name = "Upper Division",
+                    kind = "PLAYOFF",
+                    maxParticipants = 8,
+                ),
+                DivisionDetail(
+                    id = "evt_1__division__playoff_2",
+                    name = "Lower Division",
+                    kind = "PLAYOFF",
+                    maxParticipants = 8,
+                ),
+            ),
+        )
+
+        assertEquals(16, event.resolveParticipantCapacity())
+    }
+
+    @Test
     fun splitDivision_returnsZeroWhenDivisionCapacitiesMissing() {
         val event = Event(
             singleDivision = false,

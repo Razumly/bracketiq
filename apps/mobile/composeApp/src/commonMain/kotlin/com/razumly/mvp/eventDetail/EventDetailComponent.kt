@@ -72,7 +72,6 @@ import com.razumly.mvp.core.data.repositories.isActive
 import com.razumly.mvp.core.data.repositories.requiresAdditionalSigning
 import com.razumly.mvp.core.data.repositories.requiresChildEmail
 import com.razumly.mvp.core.data.repositories.userMessage
-import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
@@ -1037,8 +1036,7 @@ class DefaultEventDetailComponent(
                 val normalizedActiveDivision = activeDivision.normalizeDivisionIdentifier()
                 val allowedFieldIdSet = selected.divisionDetails
                     .firstOrNull { detail ->
-                        divisionsEquivalent(detail.id, normalizedActiveDivision) ||
-                            divisionsEquivalent(detail.key, normalizedActiveDivision)
+                        detail.id.normalizeDivisionIdentifier() == normalizedActiveDivision
                     }
                     ?.fieldIds
                     .orEmpty()
@@ -1463,7 +1461,10 @@ class DefaultEventDetailComponent(
                 .distinctUntilChanged()
                 .collect { divisionId ->
                     divisionId?.let { resolvedDivisionId ->
-                        if (!divisionsEquivalent(_selectedDivision.value, resolvedDivisionId)) {
+                        if (
+                            _selectedDivision.value?.normalizeDivisionIdentifier().orEmpty() !=
+                            resolvedDivisionId.normalizeDivisionIdentifier()
+                        ) {
                             selectDivision(resolvedDivisionId)
                         }
                     }
@@ -1663,8 +1664,9 @@ class DefaultEventDetailComponent(
         _divisionTeams.value = eventWithRelations.value.teams.associateBy { it.team.id }
         val divisionFilter = _selectedDivision.value
         _divisionMatches.value = if (!selectedEvent.value.singleDivision && !divisionFilter.isNullOrEmpty()) {
+            val normalizedDivisionFilter = divisionFilter.normalizeDivisionIdentifier()
             eventWithRelations.value.matches.filter {
-                divisionsEquivalent(it.match.division, divisionFilter) && !(
+                it.match.division?.normalizeDivisionIdentifier() == normalizedDivisionFilter && !(
                     it.previousRightMatch == null &&
                     it.previousLeftMatch == null &&
                     it.winnerNextMatch == null &&
@@ -4377,11 +4379,7 @@ class DefaultEventDetailComponent(
             return
         }
         val currentDivision = team.team.division.normalizeDivisionIdentifier()
-        val currentDivisionTypeId = team.team.divisionTypeId?.normalizeDivisionIdentifier().orEmpty()
-        if (
-            divisionsEquivalent(currentDivision, normalizedDivisionId) ||
-            divisionsEquivalent(currentDivisionTypeId, normalizedDivisionId)
-        ) {
+        if (currentDivision == normalizedDivisionId) {
             return
         }
 
@@ -5807,8 +5805,7 @@ class DefaultEventDetailComponent(
         }
         return if (!normalizedPreferredDivision.isNullOrBlank()) {
             divisionDetails.firstOrNull { detail ->
-                divisionsEquivalent(detail.id, normalizedPreferredDivision) ||
-                    divisionsEquivalent(detail.key, normalizedPreferredDivision)
+                detail.id.normalizeDivisionIdentifier() == normalizedPreferredDivision
             } ?: divisionDetails.firstOrNull()
         } else {
             divisionDetails.firstOrNull()
@@ -5996,8 +5993,9 @@ class DefaultEventDetailComponent(
 
         val activeDivision = selectedDivision.value
         val divisionScopedMatches = if (!selectedEvent.value.singleDivision && !activeDivision.isNullOrEmpty()) {
+            val normalizedActiveDivision = activeDivision.normalizeDivisionIdentifier()
             editable.filter { relation ->
-                divisionsEquivalent(relation.match.division, activeDivision)
+                relation.match.division?.normalizeDivisionIdentifier() == normalizedActiveDivision
             }
         } else {
             editable

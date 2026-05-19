@@ -7,7 +7,13 @@ fun Event.resolveParticipantCapacity(): Int {
         return maxParticipants.coerceAtLeast(0)
     }
 
-    return divisionDetails.sumOf { detail ->
-        detail.maxParticipants?.coerceAtLeast(0) ?: 0
+    return divisions
+        .normalizeDivisionIdentifiers()
+        .sumOf { divisionId ->
+            divisionDetails
+                .firstOrNull { detail -> detail.id.normalizeDivisionIdentifier() == divisionId }
+                ?.maxParticipants
+                ?.coerceAtLeast(0)
+                ?: 0
     }
 }

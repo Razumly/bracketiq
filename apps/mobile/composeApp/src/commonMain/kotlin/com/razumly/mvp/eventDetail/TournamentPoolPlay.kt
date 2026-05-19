@@ -3,7 +3,6 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionDetails
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
@@ -30,7 +29,7 @@ internal fun String.inferredTournamentBracketDivisionIdFromPool(): String? {
 }
 
 internal fun DivisionDetail.normalizedTournamentDivisionId(): String =
-    id.ifBlank { key }.normalizeDivisionIdentifier()
+    id.normalizeDivisionIdentifier()
 
 internal fun DivisionDetail.isTournamentPlayoffDivision(): Boolean =
     kind?.trim()?.equals("PLAYOFF", ignoreCase = true) == true
@@ -41,8 +40,6 @@ internal fun DivisionDetail.tournamentBracketDivisionId(): String? =
             divisionId.normalizeDivisionIdentifier().takeIf(String::isNotBlank)
         }
         ?: id.inferredTournamentBracketDivisionIdFromPool()
-        ?: key.inferredTournamentBracketDivisionIdFromPool()
-        ?: name.inferredTournamentBracketDivisionIdFromPool()
 
 internal fun DivisionDetail.isGeneratedTournamentPoolDivision(): Boolean =
     !isTournamentPlayoffDivision() && tournamentBracketDivisionId() != null
@@ -144,7 +141,7 @@ private fun synthesizeTournamentBracketDetailsFromPools(details: List<DivisionDe
         val poolTeamCounts = poolDetails.mapNotNull(DivisionDetail::maxParticipants).distinct()
         val advancingTeamCount = poolDetails.sumOf { pool ->
             pool.playoffTeamCount ?: pool.playoffPlacementDivisionIds.count { placementId ->
-                divisionsEquivalent(placementId, bracketDivisionId)
+                placementId.normalizeDivisionIdentifier() == bracketDivisionId
             }
         }.takeIf { count -> count > 0 }
         firstPool.copy(

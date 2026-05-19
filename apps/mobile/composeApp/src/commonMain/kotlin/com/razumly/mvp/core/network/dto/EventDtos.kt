@@ -28,6 +28,9 @@ import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
+private fun DivisionDetail.isPlayoffDivisionKind(): Boolean =
+    kind?.trim()?.equals("PLAYOFF", ignoreCase = true) == true
+
 @Serializable
 data class EventApiDto(
     val id: String? = null,
@@ -145,43 +148,49 @@ data class EventApiDto(
             resolvedNoFixedEndDateTime -> parsedStart
             else -> null
         } ?: return null
-        val normalizedDetails = (divisionDetails ?: emptyList()).normalizeDivisionDetails(resolvedId)
-        val normalizedPlayoffDetails = (playoffDivisionDetails ?: emptyList())
+        val normalizedResponseDetails = (divisionDetails ?: emptyList()).normalizeDivisionDetails(resolvedId)
+        val normalizedRegularDetails = normalizedResponseDetails.filterNot(DivisionDetail::isPlayoffDivisionKind)
+        val normalizedPlayoffDetails = (
+            normalizedResponseDetails.filter(DivisionDetail::isPlayoffDivisionKind) +
+                (playoffDivisionDetails ?: emptyList()).map { detail ->
+                    detail.copy(kind = detail.kind?.takeIf { kind -> kind.isNotBlank() } ?: "PLAYOFF")
+                }
+            )
+            .normalizeDivisionDetails(resolvedId)
             .map { detail ->
                 detail.copy(kind = detail.kind?.takeIf { kind -> kind.isNotBlank() } ?: "PLAYOFF")
             }
-            .normalizeDivisionDetails(resolvedId)
-        val allNormalizedDetails = (normalizedDetails + normalizedPlayoffDetails)
+        val allNormalizedDetails = (normalizedRegularDetails + normalizedPlayoffDetails)
             .fold(mutableListOf<DivisionDetail>()) { acc, detail ->
-                val normalizedId = detail.id.normalizeDivisionIdentifier().ifBlank {
-                    detail.key.normalizeDivisionIdentifier()
-                }
+                val normalizedId = detail.id.normalizeDivisionIdentifier()
                 val alreadyAdded = acc.any { existing ->
-                    existing.id.normalizeDivisionIdentifier().ifBlank {
-                        existing.key.normalizeDivisionIdentifier()
-                    } == normalizedId
+                    existing.id.normalizeDivisionIdentifier() == normalizedId
                 }
                 if (!alreadyAdded) {
                     acc += detail
                 }
                 acc
             }
-        val normalizedDivisions = (
-            (divisions ?: emptyList()).normalizeDivisionIdentifiers() +
-                normalizedDetails.map { detail -> detail.id }.normalizeDivisionIdentifiers()
-            ).normalizeDivisionIdentifiers()
+        val normalizedDivisions = when {
+            divisions != null -> divisions.normalizeDivisionIdentifiers()
+            normalizedRegularDetails.isNotEmpty() -> normalizedRegularDetails
+                .map { detail -> detail.id }
+                .normalizeDivisionIdentifiers()
+            else -> normalizedPlayoffDetails
+                .map { detail -> detail.id }
+                .normalizeDivisionIdentifiers()
+        }
         val mergedRegularDetails = mergeDivisionDetailsForDivisions(
             divisions = normalizedDivisions,
             existingDetails = allNormalizedDetails,
             eventId = resolvedId,
         )
         val mergedDetailIds = mergedRegularDetails
-            .flatMap { detail -> listOf(detail.id, detail.key) }
+            .map { detail -> detail.id }
             .normalizeDivisionIdentifiers()
             .toSet()
         val mergedDetails = mergedRegularDetails + normalizedPlayoffDetails.filter { detail ->
-            val detailIds = listOf(detail.id, detail.key).normalizeDivisionIdentifiers()
-            detailIds.none { detailId -> detailId in mergedDetailIds }
+            detail.id.normalizeDivisionIdentifier() !in mergedDetailIds
         }
         val resolvedFieldIds = (fieldIds ?: emptyList())
             .map { fieldId -> fieldId.trim() }

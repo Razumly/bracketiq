@@ -14,7 +14,7 @@ import kotlin.test.assertFalse
 
 class DivisionCapacitySummaryTest {
     @Test
-    fun buildDivisionCapacitySummaries_usesLoadedTeamDivisions_asSourceOfTruth() {
+    fun buildDivisionCapacitySummaries_usesExactTeamDivisionIds_withoutDivisionTypeFallback() {
         val eventId = "event-1"
         val u17DivisionId = buildEventDivisionId(eventId, "c_skill_open_age_u17")
         val u15DivisionId = buildEventDivisionId(eventId, "c_skill_open_age_u15")
@@ -66,8 +66,8 @@ class DivisionCapacitySummaryTest {
 
         val filledByDivision = summaries.associate { summary -> summary.id to summary.filled }
         assertEquals(1, filledByDivision[u17DivisionId])
-        assertEquals(1, filledByDivision[u15DivisionId])
-        assertFalse(summaries.any { summary -> summary.id == "unassigned" })
+        assertEquals(0, filledByDivision[u15DivisionId])
+        assertEquals(1, filledByDivision["unassigned"])
     }
 
     @Test
@@ -115,6 +115,95 @@ class DivisionCapacitySummaryTest {
         assertEquals(1, filledByDivision[u17DivisionId])
         assertEquals(0, filledByDivision[u15DivisionId])
         assertEquals(1, filledByDivision["unassigned"])
+    }
+
+    @Test
+    fun buildDivisionCapacitySummaries_splitLeaguePlayoffs_onlyCountsLeagueDivisionsByExactDivision() {
+        val eventId = "example-league"
+        val leagueADivisionId = buildEventDivisionId(eventId, "m_skill_open_age_18plus")
+        val leagueBDivisionId = "${eventId}_2__division__m_skill_open_age_18plus"
+        val upperPlayoffDivisionId = buildEventDivisionId(eventId, "playoff_1")
+        val lowerPlayoffDivisionId = buildEventDivisionId(eventId, "playoff_2")
+        val divisionDetails = listOf(
+            buildDivisionDetail(
+                id = leagueADivisionId,
+                token = "m_skill_open_age_18plus",
+                ageDivisionTypeId = "18plus",
+                name = "Mens Open 18+ - A",
+                teamIds = (1..8).map { index -> "team-a-$index" },
+            ),
+            buildDivisionDetail(
+                id = leagueBDivisionId,
+                token = "m_skill_open_age_18plus",
+                ageDivisionTypeId = "18plus",
+                name = "Mens Open 18+ - B",
+                teamIds = (1..8).map { index -> "team-b-$index" },
+            ),
+            buildDivisionDetail(
+                id = upperPlayoffDivisionId,
+                token = "playoff_1",
+                ageDivisionTypeId = "18plus",
+                name = "Upper Division",
+                teamIds = (1..8).map { index -> "team-a-$index" },
+                kind = "PLAYOFF",
+            ),
+            buildDivisionDetail(
+                id = lowerPlayoffDivisionId,
+                token = "playoff_2",
+                ageDivisionTypeId = "18plus",
+                name = "Lower Division",
+                teamIds = (1..8).map { index -> "team-b-$index" },
+                kind = "PLAYOFF",
+            ),
+        )
+        val event = Event(
+            id = eventId,
+            eventType = EventType.LEAGUE,
+            includePlayoffs = true,
+            splitLeaguePlayoffDivisions = true,
+            teamSignup = true,
+            singleDivision = false,
+            teamIds = (1..8).map { index -> "team-a-$index" } +
+                (1..8).map { index -> "team-b-$index" },
+            divisions = listOf(leagueADivisionId, leagueBDivisionId),
+            divisionDetails = divisionDetails,
+        )
+        val teams = (1..8).map { index ->
+            buildTeamWithPlayers(
+                teamId = "team-a-$index",
+                division = leagueADivisionId,
+                divisionTypeId = buildCombinedDivisionTypeId(
+                    skillDivisionTypeId = "open",
+                    ageDivisionTypeId = "18plus",
+                ),
+                ageDivisionTypeId = "18plus",
+                divisionGender = "M",
+            )
+        } + (1..8).map { index ->
+            buildTeamWithPlayers(
+                teamId = "team-b-$index",
+                division = leagueBDivisionId,
+                divisionTypeId = buildCombinedDivisionTypeId(
+                    skillDivisionTypeId = "open",
+                    ageDivisionTypeId = "18plus",
+                ),
+                ageDivisionTypeId = "18plus",
+                divisionGender = "M",
+            )
+        }
+
+        val summaries = buildDivisionCapacitySummaries(
+            event = event,
+            divisionDetails = divisionDetails,
+            teams = teams,
+        )
+
+        val filledByDivision = summaries.associate { summary -> summary.id to summary.filled }
+        assertEquals(listOf(leagueADivisionId, leagueBDivisionId), summaries.map { summary -> summary.id })
+        assertEquals(8, filledByDivision[leagueADivisionId])
+        assertEquals(8, filledByDivision[leagueBDivisionId])
+        assertFalse(summaries.any { summary -> summary.id == upperPlayoffDivisionId })
+        assertFalse(summaries.any { summary -> summary.id == lowerPlayoffDivisionId })
     }
 
     @Test
@@ -229,10 +318,12 @@ class DivisionCapacitySummaryTest {
         name: String = token,
         maxParticipants: Int? = 8,
         playoffPlacementDivisionIds: List<String> = emptyList(),
+        kind: String? = null,
     ): DivisionDetail = DivisionDetail(
         id = id,
         key = token,
         name = name,
+        kind = kind,
         divisionTypeId = buildCombinedDivisionTypeId(
             skillDivisionTypeId = "open",
             ageDivisionTypeId = ageDivisionTypeId,
