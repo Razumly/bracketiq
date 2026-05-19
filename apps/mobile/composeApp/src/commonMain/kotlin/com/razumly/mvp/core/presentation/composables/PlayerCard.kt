@@ -11,6 +11,7 @@ fun PlayerCard(
     modifier: Modifier = Modifier,
     jerseyNumber: String? = null,
     trailingContent: @Composable (() -> Unit)? = null,
+    showDivider: Boolean = true,
 ) {
     UnifiedCard(
         entity = player,
@@ -18,5 +19,6 @@ fun PlayerCard(
         modifier = modifier,
         avatarJerseyNumber = jerseyNumber,
         trailingContent = trailingContent,
+        showDivider = showDivider,
     )
 }

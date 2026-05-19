@@ -14,6 +14,7 @@ import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.TeamInviteFreeAgentContext
+import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.network.userMessage
@@ -49,6 +50,8 @@ interface TeamManagementComponent {
     val isCurrentTeamsLoading: StateFlow<Boolean>
     val selectedTeam: StateFlow<TeamWithPlayers?>
     val staffUsersById: StateFlow<Map<String, UserData>>
+    val teamMemberCompliance: StateFlow<Map<String, EventTeamComplianceSummary>>
+    val loadingTeamMemberComplianceId: StateFlow<String?>
     val suggestedPlayers: StateFlow<List<UserData>>
     val inviteFreeAgentContext: StateFlow<TeamInviteFreeAgentContext>
     val freeAgentsFiltered: StateFlow<List<UserData>>
@@ -62,6 +65,7 @@ interface TeamManagementComponent {
     fun updateTeam(team: Team, onResult: (Result<Unit>) -> Unit = {})
     fun leaveTeam(team: Team)
     fun requestTeamRefund(team: Team, reason: String, onResult: (Result<Unit>) -> Unit = {})
+    fun loadTeamMemberCompliance(teamId: String)
     fun deselectTeam()
     fun deleteTeam(team: TeamWithPlayers)
     fun searchPlayers(query: String)
@@ -142,6 +146,12 @@ class DefaultTeamManagementComponent(
 
     private val _staffUsersById = MutableStateFlow<Map<String, UserData>>(emptyMap())
     override val staffUsersById = _staffUsersById.asStateFlow()
+
+    private val _teamMemberCompliance = MutableStateFlow<Map<String, EventTeamComplianceSummary>>(emptyMap())
+    override val teamMemberCompliance = _teamMemberCompliance.asStateFlow()
+
+    private val _loadingTeamMemberComplianceId = MutableStateFlow<String?>(null)
+    override val loadingTeamMemberComplianceId = _loadingTeamMemberComplianceId.asStateFlow()
 
     private val _suggestedPlayers = MutableStateFlow<List<UserData>>(listOf())
     override val suggestedPlayers = _suggestedPlayers.asStateFlow()
@@ -351,6 +361,31 @@ class DefaultTeamManagementComponent(
                 }
             loadingHandler?.hideLoading()
             onResult(result)
+        }
+    }
+
+    override fun loadTeamMemberCompliance(teamId: String) {
+        val normalizedTeamId = teamId.trim()
+        if (normalizedTeamId.isBlank()) return
+        if (_teamMemberCompliance.value.containsKey(normalizedTeamId)) return
+        if (_loadingTeamMemberComplianceId.value == normalizedTeamId) return
+
+        scope.launch {
+            _loadingTeamMemberComplianceId.value = normalizedTeamId
+            try {
+                teamRepository.getTeamMemberCompliance(normalizedTeamId)
+                    .onSuccess { summary ->
+                        val summaryTeamId = summary.teamId.trim().ifBlank { normalizedTeamId }
+                        _teamMemberCompliance.value = _teamMemberCompliance.value + (summaryTeamId to summary)
+                    }
+                    .onFailure {
+                        _errorState.value = it.userMessage("Failed to load team member status.")
+                    }
+            } finally {
+                if (_loadingTeamMemberComplianceId.value == normalizedTeamId) {
+                    _loadingTeamMemberComplianceId.value = null
+                }
+            }
         }
     }
 

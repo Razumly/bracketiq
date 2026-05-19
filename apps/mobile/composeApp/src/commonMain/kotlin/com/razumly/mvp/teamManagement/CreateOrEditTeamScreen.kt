@@ -22,10 +22,12 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonColors
@@ -62,6 +64,11 @@ import com.razumly.mvp.core.data.dataTypes.normalizedRole
 import com.razumly.mvp.core.data.dataTypes.skillsForSport
 import com.razumly.mvp.core.data.dataTypes.toDropdownOptions
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
+import com.razumly.mvp.core.data.repositories.EventComplianceDocumentCounts
+import com.razumly.mvp.core.data.repositories.EventCompliancePaymentSummary
+import com.razumly.mvp.core.data.repositories.EventComplianceRequiredDocument
+import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
+import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.TeamInviteEventTeamOption
 import com.razumly.mvp.core.data.repositories.TeamInviteFreeAgentContext
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
@@ -83,6 +90,7 @@ import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.StandardTextField
+import com.razumly.mvp.core.presentation.util.MoneyInputUtils
 import kotlinx.coroutines.launch
 
 internal enum class TeamInviteTarget(val label: String, val inviteType: String?) {
@@ -97,7 +105,7 @@ private const val JerseyNumberMaxDigits = 3
 private fun normalizeJerseyNumberInput(value: String?): String =
     value.orEmpty().filter(Char::isDigit).take(JerseyNumberMaxDigits)
 
-private val TeamPlayerInlineMinWidth = 440.dp
+private val TeamPlayerInlineMinWidth = 560.dp
 private val JerseyNumberFieldWidth = 88.dp
 private val JerseyNumberFieldHeight = 56.dp
 
@@ -173,6 +181,8 @@ fun CreateOrEditTeamScreen(
     isSaving: Boolean = false,
     isRequestingRefund: Boolean = false,
     saveError: String? = null,
+    memberCompliance: EventTeamComplianceSummary? = null,
+    memberComplianceLoading: Boolean = false,
     staffUsersById: Map<String, UserData> = emptyMap(),
     onEnsureUserByEmail: (suspend (email: String) -> Result<UserData>)? = null,
     onInviteTeamRole: ((
@@ -209,6 +219,9 @@ fun CreateOrEditTeamScreen(
     var inviteError by remember { mutableStateOf<String?>(null) }
     var inviteTarget by remember { mutableStateOf(TeamInviteTarget.PLAYER) }
     var sportInput by remember(team.team.id) { mutableStateOf(team.team.sport?.trim().orEmpty()) }
+    var expandedComplianceUserIds by remember(team.team.id, memberCompliance) {
+        mutableStateOf<Set<String>>(emptySet())
+    }
     val scope = rememberCoroutineScope()
     val showEditDetails = isCaptain || isNewTeam
     val isBusy = isSaving || isRequestingRefund
@@ -247,6 +260,9 @@ fun CreateOrEditTeamScreen(
     }
     val registrationPriceCentsInput = (registrationCostInput.toIntOrNull() ?: 0)
         .coerceAtLeast(0)
+    val complianceByUserId = remember(memberCompliance) {
+        memberCompliance?.users?.associateBy(EventComplianceUserSummary::userId).orEmpty()
+    }
     val resolvedEventSportName = remember(selectedEvent?.sportId, sports) {
         val normalizedEventSportId = selectedEvent?.sportId?.trim().orEmpty()
         if (normalizedEventSportId.isBlank()) {
@@ -902,23 +918,49 @@ fun CreateOrEditTeamScreen(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 playersInTeam.forEach { player ->
                     val jerseyNumber = jerseyNumberForUser(player.id)
+                    val complianceSummary = complianceByUserId[player.id]
                     TeamPlayerRosterRow(
                         player = player,
                         jerseyNumber = jerseyNumber,
                         showEditDetails = showEditDetails,
                         canEditFields = canEditFields,
+                        complianceSummary = complianceSummary,
+                        complianceLoading = memberComplianceLoading,
+                        complianceExpanded = expandedComplianceUserIds.contains(player.id),
+                        onToggleComplianceDetails = complianceSummary?.let {
+                            {
+                                expandedComplianceUserIds = if (expandedComplianceUserIds.contains(player.id)) {
+                                    expandedComplianceUserIds - player.id
+                                } else {
+                                    expandedComplianceUserIds + player.id
+                                }
+                            }
+                        },
                         onJerseyNumberChange = { updateJerseyNumber(player.id, it) },
                         onRemove = { playersInTeam = playersInTeam - player },
                     )
                 }
                 invitedPlayers.forEach { player ->
                     val jerseyNumber = jerseyNumberForUser(player.id)
+                    val complianceSummary = complianceByUserId[player.id]
                     TeamPlayerRosterRow(
                         player = player,
                         isPending = true,
                         jerseyNumber = jerseyNumber,
                         showEditDetails = showEditDetails,
                         canEditFields = canEditFields,
+                        complianceSummary = complianceSummary,
+                        complianceLoading = memberComplianceLoading,
+                        complianceExpanded = expandedComplianceUserIds.contains(player.id),
+                        onToggleComplianceDetails = complianceSummary?.let {
+                            {
+                                expandedComplianceUserIds = if (expandedComplianceUserIds.contains(player.id)) {
+                                    expandedComplianceUserIds - player.id
+                                } else {
+                                    expandedComplianceUserIds + player.id
+                                }
+                            }
+                        },
                         onJerseyNumberChange = { updateJerseyNumber(player.id, it) },
                         onRemove = { invitedPlayers = invitedPlayers - player },
                     )
@@ -1491,53 +1533,78 @@ private fun TeamPlayerRosterRow(
     jerseyNumber: String,
     showEditDetails: Boolean,
     canEditFields: Boolean,
+    complianceSummary: EventComplianceUserSummary? = null,
+    complianceLoading: Boolean = false,
+    complianceExpanded: Boolean = false,
+    onToggleComplianceDetails: (() -> Unit)? = null,
     onJerseyNumberChange: (String) -> Unit,
     onRemove: () -> Unit,
 ) {
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val shouldStackControls = maxWidth < TeamPlayerInlineMinWidth
-        if (shouldStackControls) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                PlayerCard(
-                    player = player,
-                    isPending = isPending,
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val shouldStackControls = maxWidth < TeamPlayerInlineMinWidth
+            if (shouldStackControls) {
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    jerseyNumber = jerseyNumber,
-                )
-                TeamPlayerControlsRow(
-                    jerseyNumber = jerseyNumber,
-                    showEditDetails = showEditDetails,
-                    canEditFields = canEditFields,
-                    onJerseyNumberChange = onJerseyNumberChange,
-                    onRemove = onRemove,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    PlayerCard(
+                        player = player,
+                        isPending = isPending,
+                        modifier = Modifier.fillMaxWidth(),
+                        jerseyNumber = jerseyNumber,
+                        showDivider = false,
+                    )
+                    TeamPlayerControlsRow(
+                        jerseyNumber = jerseyNumber,
+                        showEditDetails = showEditDetails,
+                        canEditFields = canEditFields,
+                        complianceExpanded = complianceExpanded,
+                        complianceLoading = complianceLoading,
+                        onToggleComplianceDetails = onToggleComplianceDetails,
+                        onJerseyNumberChange = onJerseyNumberChange,
+                        onRemove = onRemove,
+                        modifier = Modifier.fillMaxWidth(),
+                        expandActionButtons = true,
+                    )
+                }
+            } else {
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    expandRemoveButton = true,
-                )
-            }
-        } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                PlayerCard(
-                    player = player,
-                    isPending = isPending,
-                    modifier = Modifier.weight(1f),
-                    jerseyNumber = jerseyNumber,
-                )
-                TeamPlayerControlsRow(
-                    jerseyNumber = jerseyNumber,
-                    showEditDetails = showEditDetails,
-                    canEditFields = canEditFields,
-                    onJerseyNumberChange = onJerseyNumberChange,
-                    onRemove = onRemove,
-                )
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    PlayerCard(
+                        player = player,
+                        isPending = isPending,
+                        modifier = Modifier.weight(1f),
+                        jerseyNumber = jerseyNumber,
+                        showDivider = false,
+                    )
+                    TeamPlayerControlsRow(
+                        jerseyNumber = jerseyNumber,
+                        showEditDetails = showEditDetails,
+                        canEditFields = canEditFields,
+                        complianceExpanded = complianceExpanded,
+                        complianceLoading = complianceLoading,
+                        onToggleComplianceDetails = onToggleComplianceDetails,
+                        onJerseyNumberChange = onJerseyNumberChange,
+                        onRemove = onRemove,
+                    )
+                }
             }
         }
+        if (complianceExpanded && complianceSummary != null) {
+            TeamMemberComplianceDetails(userSummary = complianceSummary)
+        }
+        HorizontalDivider(
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.outlineVariant,
+            thickness = 0.5.dp,
+        )
     }
 }
 
@@ -1546,10 +1613,13 @@ private fun TeamPlayerControlsRow(
     jerseyNumber: String,
     showEditDetails: Boolean,
     canEditFields: Boolean,
+    complianceExpanded: Boolean,
+    complianceLoading: Boolean,
+    onToggleComplianceDetails: (() -> Unit)?,
     onJerseyNumberChange: (String) -> Unit,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier,
-    expandRemoveButton: Boolean = false,
+    expandActionButtons: Boolean = false,
 ) {
     Row(
         modifier = modifier,
@@ -1562,13 +1632,132 @@ private fun TeamPlayerControlsRow(
             canEdit = canEditFields,
         )
         if (showEditDetails) {
+            onToggleComplianceDetails?.let { toggleDetails ->
+                OutlinedButton(
+                    onClick = toggleDetails,
+                    enabled = !complianceLoading,
+                    modifier = if (expandActionButtons) Modifier.weight(1f) else Modifier,
+                ) {
+                    Text(if (complianceExpanded) "Hide" else "Details")
+                }
+            }
             Button(
                 onClick = onRemove,
                 enabled = canEditFields,
-                modifier = if (expandRemoveButton) Modifier.weight(1f) else Modifier,
+                modifier = if (expandActionButtons) Modifier.weight(1f) else Modifier,
             ) {
                 Text("Remove")
             }
+        }
+    }
+}
+
+private fun EventCompliancePaymentSummary.paymentStatusText(): String {
+    return when {
+        paymentPending -> "Payment pending"
+        !hasBill -> "No bill yet"
+        isPaidInFull -> "Paid in full ($${MoneyInputUtils.centsToDisplayValue(totalAmountCents)})"
+        else -> "$${MoneyInputUtils.centsToDisplayValue(paidAmountCents)} of $${MoneyInputUtils.centsToDisplayValue(totalAmountCents)} paid"
+    }
+}
+
+private fun EventComplianceDocumentCounts.documentStatusText(): String {
+    return if (requiredCount <= 0) {
+        "No required documents"
+    } else {
+        "$signedCount/$requiredCount signed"
+    }
+}
+
+private fun EventCompliancePaymentSummary.needsAttention(): Boolean =
+    paymentPending || (hasBill && !isPaidInFull)
+
+private fun EventComplianceDocumentCounts.needsAttention(): Boolean =
+    requiredCount > 0 && signedCount < requiredCount
+
+@Composable
+private fun TeamMemberComplianceDetails(userSummary: EventComplianceUserSummary) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            ComplianceStatusLine(
+                label = "Billing",
+                value = userSummary.payment.paymentStatusText(),
+                needsAttention = userSummary.payment.needsAttention(),
+            )
+            ComplianceStatusLine(
+                label = "Documents",
+                value = userSummary.documents.documentStatusText(),
+                needsAttention = userSummary.documents.needsAttention(),
+            )
+            if (userSummary.requiredDocuments.isNotEmpty()) {
+                HorizontalDivider()
+                userSummary.requiredDocuments.forEach { document ->
+                    TeamMemberComplianceDocumentRow(document = document)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ComplianceStatusLine(
+    label: String,
+    value: String,
+    needsAttention: Boolean,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (needsAttention) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun TeamMemberComplianceDocumentRow(document: EventComplianceRequiredDocument) {
+    val signed = document.status.equals("SIGNED", ignoreCase = true) ||
+        document.status.equals("COMPLETED", ignoreCase = true)
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = document.title.ifBlank { "Required document" },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = document.signerLabel.ifBlank { "Participant" },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                text = if (signed) "Signed" else "Needs signature",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (signed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+            )
         }
     }
 }

@@ -63,6 +63,8 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val selectedEvent = component.selectedEvent
     val selectedTeam by component.selectedTeam.collectAsState()
     val staffUsersById by component.staffUsersById.collectAsState()
+    val teamMemberCompliance by component.teamMemberCompliance.collectAsState()
+    val loadingTeamMemberComplianceId by component.loadingTeamMemberComplianceId.collectAsState()
     val currentUser = component.currentUser
     val isCaptain = selectedTeam?.team?.isCaptainOrManager(currentUser.id) == true
     var createTeam by remember { mutableStateOf(false) }
@@ -84,6 +86,12 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     }
 
     selectedTeam?.let { team ->
+        val selectedTeamId = team.team.id.trim()
+        LaunchedEffect(team.team.id, createTeam, isCaptain) {
+            if (!createTeam && isCaptain) {
+                component.loadTeamMemberCompliance(selectedTeamId)
+            }
+        }
         CreateOrEditTeamScreen(
             team = team,
             sports = sports,
@@ -139,6 +147,8 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
             isSaving = isSavingTeam,
             isRequestingRefund = isRequestingRefund,
             saveError = saveError,
+            memberCompliance = teamMemberCompliance[selectedTeamId],
+            memberComplianceLoading = loadingTeamMemberComplianceId == selectedTeamId,
             staffUsersById = staffUsersById,
             onEnsureUserByEmail = { email -> component.ensureUserByEmail(email) },
             onInviteTeamRole = { teamId, userId, inviteType, eventTeamIds, email ->

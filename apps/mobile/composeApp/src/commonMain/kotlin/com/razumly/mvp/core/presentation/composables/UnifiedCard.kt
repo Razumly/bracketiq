@@ -25,7 +25,8 @@ fun UnifiedCard(
     avatarJerseyNumber: String? = null,
     leadingContent: @Composable (() -> Unit)? = null,
     trailingContent: @Composable (() -> Unit)? = null,
-    isPending: Boolean = false
+    isPending: Boolean = false,
+    showDivider: Boolean = true,
 ) {
     val userHandle = (entity as? UserData)
         ?.publicHandle
@@ -97,13 +98,14 @@ fun UnifiedCard(
             trailingContent?.invoke()
         }
 
-        // Horizontal divider
-        HorizontalDivider(
-            modifier = Modifier
-                .fillMaxWidth(0.75f)
-                .align(Alignment.CenterHorizontally),
-            color = MaterialTheme.colorScheme.outlineVariant,
-            thickness = 0.5.dp
-        )
+        if (showDivider) {
+            HorizontalDivider(
+                modifier = Modifier
+                    .fillMaxWidth(0.75f)
+                    .align(Alignment.CenterHorizontally),
+                color = MaterialTheme.colorScheme.outlineVariant,
+                thickness = 0.5.dp
+            )
+        }
     }
 }
