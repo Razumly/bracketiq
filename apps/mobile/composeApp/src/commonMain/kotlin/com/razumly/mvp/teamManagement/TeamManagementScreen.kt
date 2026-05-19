@@ -67,6 +67,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val isCaptain = selectedTeam?.team?.isCaptainOrManager(currentUser.id) == true
     var createTeam by remember { mutableStateOf(false) }
     var isSavingTeam by remember(selectedTeam?.team?.id, createTeam) { mutableStateOf(false) }
+    var isRequestingRefund by remember(selectedTeam?.team?.id, createTeam) { mutableStateOf(false) }
     var saveError by remember(selectedTeam?.team?.id, createTeam) { mutableStateOf<String?>(null) }
     val deleteEnabled by component.enableDeleteTeam.collectAsState()
 
@@ -113,6 +114,18 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                 component.leaveTeam(teamToLeave)
                 createTeam = false
             },
+            onRequestRefund = { teamToRefund, reason ->
+                if (!isRequestingRefund) {
+                    isRequestingRefund = true
+                    saveError = null
+                    component.requestTeamRefund(teamToRefund, reason) { result ->
+                        isRequestingRefund = false
+                        result
+                            .onSuccess { onCloseTeamEditor() }
+                            .onFailure { saveError = it.userMessage("Refund request failed") }
+                    }
+                }
+            },
             onDismiss = onCloseTeamEditor,
             onDelete = { teamToDelete ->
                 component.deleteTeam(teamToDelete)
@@ -124,6 +137,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
             currentUser = currentUser,
             isNewTeam = createTeam,
             isSaving = isSavingTeam,
+            isRequestingRefund = isRequestingRefund,
             saveError = saveError,
             staffUsersById = staffUsersById,
             onEnsureUserByEmail = { email -> component.ensureUserByEmail(email) },

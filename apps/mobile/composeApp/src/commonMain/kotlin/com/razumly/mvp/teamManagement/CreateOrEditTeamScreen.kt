@@ -1,6 +1,7 @@
 package com.razumly.mvp.teamManagement
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -55,6 +56,7 @@ import com.razumly.mvp.core.data.dataTypes.TeamStaffAssignment
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
+import com.razumly.mvp.core.data.dataTypes.isActive
 import com.razumly.mvp.core.data.dataTypes.isStarted
 import com.razumly.mvp.core.data.dataTypes.normalizedRole
 import com.razumly.mvp.core.data.dataTypes.skillsForSport
@@ -160,6 +162,7 @@ fun CreateOrEditTeamScreen(
     onSearch: (String) -> Unit,
     onFinish: (Team) -> Unit,
     onLeaveTeam: (Team) -> Unit = {},
+    onRequestRefund: ((Team, String) -> Unit)? = null,
     onDelete: (TeamWithPlayers) -> Unit,
     onDismiss: () -> Unit,
     deleteEnabled: Boolean,
@@ -168,6 +171,7 @@ fun CreateOrEditTeamScreen(
     currentUser: UserData,
     isNewTeam: Boolean,
     isSaving: Boolean = false,
+    isRequestingRefund: Boolean = false,
     saveError: String? = null,
     staffUsersById: Map<String, UserData> = emptyMap(),
     onEnsureUserByEmail: (suspend (email: String) -> Result<UserData>)? = null,
@@ -200,13 +204,26 @@ fun CreateOrEditTeamScreen(
     }
     var showLeaveTeamDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var showRefundRequestDialog by remember { mutableStateOf(false) }
+    var refundReasonInput by remember { mutableStateOf("") }
     var inviteError by remember { mutableStateOf<String?>(null) }
     var inviteTarget by remember { mutableStateOf(TeamInviteTarget.PLAYER) }
     var sportInput by remember(team.team.id) { mutableStateOf(team.team.sport?.trim().orEmpty()) }
     val scope = rememberCoroutineScope()
     val showEditDetails = isCaptain || isNewTeam
-    val canEditFields = showEditDetails && !isSaving
+    val isBusy = isSaving || isRequestingRefund
+    val canEditFields = showEditDetails && !isBusy
     val canChargeRegistration = currentUser.hasStripeAccount == true || team.team.registrationPriceCents > 0
+    val currentUserRegistration = remember(syncedTeam.playerRegistrations, currentUser.id) {
+        syncedTeam.playerRegistrations.firstOrNull { registration ->
+            registration.userId == currentUser.id && registration.isActive()
+        }
+    }
+    val showRefundRequestAction = !showEditDetails &&
+        onRequestRefund != null &&
+        syncedTeam.openRegistration &&
+        syncedTeam.registrationPriceCents > 0 &&
+        currentUserRegistration != null
     val parsedTeamSize = teamSizeInput.toIntOrNull()
     val isTeamSizeValid = parsedTeamSize != null && parsedTeamSize > 0
     val resolvedTeamSize = parsedTeamSize ?: team.team.teamSize
@@ -975,51 +992,71 @@ fun CreateOrEditTeamScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
             Row(
-                Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                OutlinedButton(onClick = onDismiss, enabled = !isSaving) {
-                    Text("Cancel")
-                }
-                if (showEditDetails) {
-                    Button(onClick = {
-                        onFinish(
-                            buildUpdatedTeam(
-                                activePlayers = playersInTeam,
-                                invitedPlayers = invitedPlayers,
-                                resolvedName = normalizedTeamName,
-                                resolvedSize = resolvedTeamSize,
-                            )
-                        )
-                    }, enabled = !isSaving && isTeamSizeValid && isTeamDivisionValid && isTeamNameValid) {
-                        if (isSaving) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp,
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(if (isNewTeam) "Creating..." else "Saving...")
-                        } else {
-                            Text(if (isNewTeam) "Create" else "Save")
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    when {
+                        isCaptain -> {
+                            IconButton(
+                                onClick = { showDeleteDialog = true },
+                                enabled = deleteEnabled && !isBusy,
+                                colors = IconButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.error,
+                                    contentColor = MaterialTheme.colorScheme.onError,
+                                    disabledContainerColor = MaterialTheme.colorScheme.errorContainer,
+                                    disabledContentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                ),
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete team")
+                            }
+                        }
+                        showRefundRequestAction -> {
+                            OutlinedButton(
+                                onClick = { showRefundRequestDialog = true },
+                                enabled = !isBusy,
+                            ) {
+                                Text(if (isRequestingRefund) "Requesting..." else "Request Refund")
+                            }
                         }
                     }
-                } else {
-                    Button(onClick = { showLeaveTeamDialog = true }, enabled = !isSaving) {
-                        Text("Leave Team")
-                    }
                 }
-            }
 
-            if (isCaptain) {
-                IconButton(onClick = { showDeleteDialog = true }, enabled = deleteEnabled && !isSaving,
-                    colors = IconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.error,
-                        contentColor = MaterialTheme.colorScheme.onError,
-                        disabledContainerColor = MaterialTheme.colorScheme.errorContainer,
-                        disabledContentColor = MaterialTheme.colorScheme.onErrorContainer
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.CenterEnd,
                 ) {
-                    Icon(Icons.Default.Delete, contentDescription = "Trash")
+                    if (showEditDetails) {
+                        Button(onClick = {
+                            onFinish(
+                                buildUpdatedTeam(
+                                    activePlayers = playersInTeam,
+                                    invitedPlayers = invitedPlayers,
+                                    resolvedName = normalizedTeamName,
+                                    resolvedSize = resolvedTeamSize,
+                                )
+                            )
+                        }, enabled = !isBusy && isTeamSizeValid && isTeamDivisionValid && isTeamNameValid) {
+                            if (isSaving) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(if (isNewTeam) "Creating..." else "Saving...")
+                            } else {
+                                Text(if (isNewTeam) "Create" else "Save")
+                            }
+                        }
+                    } else {
+                        Button(onClick = { showLeaveTeamDialog = true }, enabled = !isBusy) {
+                            Text("Leave Team")
+                        }
+                    }
                 }
             }
         }
@@ -1061,6 +1098,54 @@ fun CreateOrEditTeamScreen(
             },
             dismissButton = {
                 OutlinedButton(onClick = { showLeaveTeamDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
+    if (showRefundRequestDialog && onRequestRefund != null) {
+        AlertDialog(
+            onDismissRequest = {
+                showRefundRequestDialog = false
+                refundReasonInput = ""
+            },
+            title = { Text("Refund Request") },
+            text = {
+                Column {
+                    Text(
+                        "Please provide a reason for your refund request:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                    StandardTextField(
+                        value = refundReasonInput,
+                        onValueChange = { refundReasonInput = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = "Enter reason...",
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onRequestRefund(team.team, refundReasonInput)
+                        showRefundRequestDialog = false
+                        refundReasonInput = ""
+                    },
+                    enabled = refundReasonInput.isNotBlank() && !isBusy,
+                ) {
+                    Text("Submit Refund Request")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        showRefundRequestDialog = false
+                        refundReasonInput = ""
+                    },
+                    enabled = !isBusy,
+                ) {
                     Text("Cancel")
                 }
             },

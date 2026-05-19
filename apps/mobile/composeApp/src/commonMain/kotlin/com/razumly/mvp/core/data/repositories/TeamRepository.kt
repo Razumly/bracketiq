@@ -30,6 +30,8 @@ import com.razumly.mvp.core.network.dto.TeamMemberInviteResponseDto
 import com.razumly.mvp.core.network.dto.TeamMemberComplianceResponseDto
 import com.razumly.mvp.core.network.dto.TeamPlayerRegistrationApiDto
 import com.razumly.mvp.core.network.dto.TeamRegistrationResponseDto
+import com.razumly.mvp.core.network.dto.TeamRefundRequestDto
+import com.razumly.mvp.core.network.dto.TeamRefundResponseDto
 import com.razumly.mvp.core.network.dto.TeamsResponseDto
 import com.razumly.mvp.core.network.dto.UpdateTeamRequestDto
 import com.razumly.mvp.core.network.dto.toTeamPlayerRegistrationOrNull
@@ -85,6 +87,8 @@ interface ITeamRepository : IMVPRepository {
     )
     suspend fun getTeamMemberCompliance(teamId: String): Result<EventTeamComplianceSummary> =
         Result.failure(NotImplementedError("Team member compliance is not implemented."))
+    suspend fun requestTeamRegistrationRefund(teamId: String, reason: String): Result<Unit> =
+        Result.failure(NotImplementedError("Team registration refunds are not implemented."))
     suspend fun registerForTeam(teamId: String): Result<Team>
     suspend fun leaveTeam(teamId: String): Result<Team>
     suspend fun deleteTeam(team: TeamWithPlayers): Result<Unit>
@@ -651,6 +655,27 @@ class TeamRepository(
         )
         response.team?.toTeamComplianceSummaryOrNull()
             ?: error("Team compliance response missing team.")
+    }
+
+    override suspend fun requestTeamRegistrationRefund(teamId: String, reason: String): Result<Unit> = runCatching {
+        val normalizedTeamId = teamId.trim().takeIf(String::isNotBlank)
+            ?: error("Team id is required.")
+        val normalizedReason = reason.trim().takeIf(String::isNotBlank)
+            ?: error("Refund reason is required.")
+        val response = api.post<TeamRefundRequestDto, TeamRefundResponseDto>(
+            path = "api/teams/${normalizedTeamId.encodeURLQueryComponent()}/refund",
+            body = TeamRefundRequestDto(reason = normalizedReason),
+        )
+        response.error?.trim()?.takeIf(String::isNotBlank)?.let(::error)
+        if (!response.success) {
+            error("Refund request failed.")
+        }
+        val currentUserId = userRepository.currentUser.value.getOrNull()?.id
+            ?: userRepository.currentAccount.value.getOrNull()?.id
+        if (!currentUserId.isNullOrBlank()) {
+            fetchRemoteTeamsForUser(currentUserId).getOrThrow()
+            runCatching { userRepository.refreshCurrentUserProfile().getOrThrow() }
+        }
     }
 
     override suspend fun registerForTeam(teamId: String): Result<Team> =

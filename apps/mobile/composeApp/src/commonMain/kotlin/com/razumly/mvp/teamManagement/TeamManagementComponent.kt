@@ -61,6 +61,7 @@ interface TeamManagementComponent {
     fun joinTeam(team: Team)
     fun updateTeam(team: Team, onResult: (Result<Unit>) -> Unit = {})
     fun leaveTeam(team: Team)
+    fun requestTeamRefund(team: Team, reason: String, onResult: (Result<Unit>) -> Unit = {})
     fun deselectTeam()
     fun deleteTeam(team: TeamWithPlayers)
     fun searchPlayers(query: String)
@@ -335,6 +336,22 @@ class DefaultTeamManagementComponent(
             }
         }
         deselectTeam()
+    }
+
+    override fun requestTeamRefund(team: Team, reason: String, onResult: (Result<Unit>) -> Unit) {
+        scope.launch {
+            loadingHandler?.showLoading("Requesting refund...")
+            val result = teamRepository.requestTeamRegistrationRefund(team.id, reason)
+            result
+                .onSuccess {
+                    deselectTeam()
+                }
+                .onFailure {
+                    _errorState.value = it.userMessage("Refund request failed")
+                }
+            loadingHandler?.hideLoading()
+            onResult(result)
+        }
     }
 
     override fun deselectTeam() {

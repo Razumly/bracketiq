@@ -210,6 +210,19 @@ data class TeamMemberComplianceResponseDto(
 )
 
 @Serializable
+data class TeamRefundRequestDto(
+    val reason: String? = null,
+)
+
+@Serializable
+data class TeamRefundResponseDto(
+    val success: Boolean = false,
+    val refundId: String? = null,
+    val refundAlreadyPending: Boolean? = null,
+    val error: String? = null,
+)
+
+@Serializable
 data class TeamUpdateDto(
     val name: String? = null,
     val division: String? = null,
