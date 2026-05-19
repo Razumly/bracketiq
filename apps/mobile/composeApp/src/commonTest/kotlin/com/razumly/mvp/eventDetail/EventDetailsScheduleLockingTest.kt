@@ -229,10 +229,12 @@ class EventDetailsScheduleLockingTest {
     fun recurring_slot_payload_uses_event_end_date_when_fixed_end_scheduling_is_enabled() {
         val eventStart = instant(1_700_000_000_000)
         val eventEnd = instant(1_700_086_400_000)
+        val eventTimeZone = TimeZone.of("America/Los_Angeles")
         val event = Event(
             eventType = EventType.TOURNAMENT,
             start = eventStart,
             end = eventEnd,
+            timeZone = eventTimeZone.id,
             noFixedEndDateTime = false,
         )
         val slot = buildSlot(
@@ -242,8 +244,7 @@ class EventDetailsScheduleLockingTest {
             startDate = Instant.DISTANT_PAST,
             endDate = null,
         )
-        val timezone = TimeZone.currentSystemDefault()
-        val expectedEndDate = eventEnd.toLocalDateTime(timezone).date.atStartOfDayIn(timezone)
+        val expectedEndDate = eventEnd.toLocalDateTime(eventTimeZone).date.atStartOfDayIn(eventTimeZone)
 
         val bounds = resolveRecurringSlotDateBoundsForEventDraft(
             slot = slot,

@@ -40,6 +40,7 @@ import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -386,7 +387,7 @@ class UserRepository(
         val profile = res.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
             ?: error("Login response missing profile")
 
-        cacheCurrentUserProfile(profile)
+        cacheCurrentUserProfile(profile, prefetchChatTermsImmediately = true)
         _startupAuthState.value = StartupAuthState.Authenticated
         Napier.i(tag = USER_REPOSITORY_LOG_TAG) { "Email login succeeded for userId=${profile.id}" }
         profile
@@ -416,7 +417,7 @@ class UserRepository(
         val profile = res.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
             ?: error("Google login response missing profile")
 
-        cacheCurrentUserProfile(profile)
+        cacheCurrentUserProfile(profile, prefetchChatTermsImmediately = true)
         _startupAuthState.value = StartupAuthState.Authenticated
         Napier.i(tag = USER_REPOSITORY_LOG_TAG) { "Google login succeeded for userId=${profile.id}" }
         profile
@@ -461,7 +462,7 @@ class UserRepository(
         val profile = res.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
             ?: error("Apple login response missing profile")
 
-        cacheCurrentUserProfile(profile)
+        cacheCurrentUserProfile(profile, prefetchChatTermsImmediately = true)
         _startupAuthState.value = StartupAuthState.Authenticated
         Napier.i(tag = USER_REPOSITORY_LOG_TAG) { "Apple login succeeded for userId=${profile.id}" }
         profile
@@ -535,7 +536,7 @@ class UserRepository(
         val profile = res.profile?.toUserDataOrNull()
             ?: error("Register response missing profile")
 
-        cacheCurrentUserProfile(profile)
+        cacheCurrentUserProfile(profile, prefetchChatTermsImmediately = true)
         _startupAuthState.value = StartupAuthState.Authenticated
         Napier.i(tag = USER_REPOSITORY_LOG_TAG) { "Signup succeeded for userId=${profile.id}" }
         profile
@@ -574,7 +575,7 @@ class UserRepository(
     }
 
     private suspend fun cancelStartupLoadIfRunning() {
-        if (startupLoadJob.isActive) {
+        if (!startupLoadJob.isCompleted) {
             startupLoadJob.cancelAndJoin()
         }
     }
@@ -666,7 +667,11 @@ class UserRepository(
         return true
     }
 
-    private suspend fun cacheCurrentUserProfile(profile: UserData) {
+    private suspend fun cacheCurrentUserProfile(
+        profile: UserData,
+        prefetchChatTermsConsent: Boolean = true,
+        prefetchChatTermsImmediately: Boolean = false,
+    ) {
         runCatching {
             databaseService.getUserDataDao.upsertUserData(profile)
             currentUserDataSource.saveUserId(profile.id)
@@ -677,12 +682,19 @@ class UserRepository(
         }
         _currentUser.value = Result.success(profile)
         syncChatTermsConsentFromProfile(profile)
-        scheduleChatTermsConsentPrefetch()
+        if (prefetchChatTermsConsent) {
+            if (prefetchChatTermsImmediately) {
+                getChatTermsConsentState()
+            } else {
+                scheduleChatTermsConsentPrefetch()
+            }
+        }
         _startupAuthState.value = StartupAuthState.Authenticated
     }
 
     override suspend fun setCachedCurrentUserProfile(profile: UserData): Result<UserData> = runCatching {
-        cacheCurrentUserProfile(profile)
+        cancelStartupLoadIfRunning()
+        cacheCurrentUserProfile(profile, prefetchChatTermsConsent = false)
         profile
     }
 
@@ -1427,13 +1439,14 @@ class UserRepository(
 
         val currentProfile = currentUser.value.getOrNull()
         if (currentProfile != null) {
-            cacheCurrentUserProfile(
-                currentProfile.copy(
-                    chatTermsAcceptedAt = state.acceptedAt,
-                    chatTermsVersion = state.version.takeIf(String::isNotBlank),
+                cacheCurrentUserProfile(
+                    currentProfile.copy(
+                        chatTermsAcceptedAt = state.acceptedAt,
+                        chatTermsVersion = state.version.takeIf(String::isNotBlank),
+                    ),
+                    prefetchChatTermsConsent = false,
                 )
-            )
-        }
+            }
 
         state
     }.onFailure { throwable ->
@@ -1458,13 +1471,14 @@ class UserRepository(
         _chatTermsConsentState.value = state
         val currentProfile = currentUser.value.getOrNull()
         if (currentProfile != null) {
-            cacheCurrentUserProfile(
-                currentProfile.copy(
-                    chatTermsAcceptedAt = state.acceptedAt,
-                    chatTermsVersion = state.version.takeIf(String::isNotBlank),
+                cacheCurrentUserProfile(
+                    currentProfile.copy(
+                        chatTermsAcceptedAt = state.acceptedAt,
+                        chatTermsVersion = state.version.takeIf(String::isNotBlank),
+                    ),
+                    prefetchChatTermsConsent = false,
                 )
-            )
-        }
+            }
         state
     }.onFailure { throwable ->
         if (throwable is CancellationException) {
@@ -1478,7 +1492,7 @@ class UserRepository(
         val updated = responseUser?.toUserDataOrNull()
             ?: currentUser.value.getOrNull()?.id?.let { fetchUserProfile(it) }
             ?: error("Failed to refresh current user after social update.")
-        cacheCurrentUserProfile(updated)
+        cacheCurrentUserProfile(updated, prefetchChatTermsConsent = false)
     }
 
     private fun syncChatTermsConsentFromProfile(profile: UserData?) {
@@ -1507,7 +1521,7 @@ class UserRepository(
         if (hasLoadedChatTermsConsent || chatTermsPrefetchJob?.isActive == true) {
             return
         }
-        chatTermsPrefetchJob = scope.launch {
+        chatTermsPrefetchJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             getChatTermsConsentState()
         }
     }

@@ -129,10 +129,6 @@ private fun Team.matchesExactEventDivision(detail: DivisionDetail): Boolean {
         exactDivision == detailDivision
 }
 
-internal fun Team.matchesEventDivision(detail: DivisionDetail): Boolean {
-    return matchesExactEventDivision(detail)
-}
-
 private fun DivisionCapacityTarget.matchesExactTeamDivision(team: Team): Boolean =
     matchDetails.any { detail -> team.matchesExactEventDivision(detail) } ||
         team.matchesExactEventDivision(detail)

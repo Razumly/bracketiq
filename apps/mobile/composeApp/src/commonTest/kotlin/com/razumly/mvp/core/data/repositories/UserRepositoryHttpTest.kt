@@ -192,6 +192,7 @@ class UserRepositoryHttpTest {
     @Test
     fun login_prefetches_chat_terms_consent_state() = runTest {
         val requestedPaths = mutableListOf<String>()
+        var chatTermsAuthorization: String? = null
         val tokenStore = UserRepositoryHttp_InMemoryAuthTokenStore()
         val engine = MockEngine { request ->
             requestedPaths += "${request.method.value} ${request.url.encodedPath}"
@@ -227,7 +228,7 @@ class UserRepositoryHttpTest {
                 )
 
                 "/api/chat/terms-consent" -> {
-                    assertEquals("Bearer token-123", request.headers[HttpHeaders.Authorization])
+                    chatTermsAuthorization = request.headers[HttpHeaders.Authorization]
                     respond(
                         content = """
                             {
@@ -263,7 +264,11 @@ class UserRepositoryHttpTest {
 
         assertEquals("user_1", profile.id)
         assertEquals(false, repository.chatTermsConsentState.value.accepted)
-        assertEquals("2026-04-14", repository.chatTermsConsentState.value.version)
+        assertEquals(
+            "2026-04-14",
+            repository.chatTermsConsentState.value.version,
+            "requestedPaths=$requestedPaths state=${repository.chatTermsConsentState.value}",
+        )
         assertEquals(
             listOf(
                 "POST /api/auth/login",
@@ -271,6 +276,7 @@ class UserRepositoryHttpTest {
             ),
             requestedPaths,
         )
+        assertEquals("Bearer token-123", chatTermsAuthorization)
     }
 
     @Test
@@ -341,6 +347,7 @@ class UserRepositoryHttpTest {
             api = MvpApiClient(client, "http://localhost", tokenStore),
             tokenStore = tokenStore,
             currentUserDataSource = CurrentUserDataSource(prefsStore),
+            startupDispatcher = StandardTestDispatcher(testScheduler),
         )
         val state = repository.acceptChatTermsConsent().getOrThrow()
 

@@ -8,6 +8,7 @@ import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 data class EventDetailDivisionOption(
     val id: String,
     val label: String,
+    val matchIdentifiers: List<String> = emptyList(),
 )
 
 internal fun buildRegistrationDivisionOptions(event: Event): List<EventDetailDivisionOption> {
@@ -25,6 +26,7 @@ internal fun buildRegistrationDivisionOptions(event: Event): List<EventDetailDiv
         rawId: String?,
         explicitLabel: String? = null,
         allowPlayoffDivision: Boolean = false,
+        matchIdentifiers: List<String> = emptyList(),
     ) {
         val normalizedId = rawId
             ?.normalizeDivisionIdentifier()
@@ -40,9 +42,14 @@ internal fun buildRegistrationDivisionOptions(event: Event): List<EventDetailDiv
             ?.trim()
             ?.takeIf(String::isNotBlank)
             ?: normalizedId.toDivisionDisplayLabel(event.divisionDetails)
+        val normalizedMatchIdentifiers = matchIdentifiers
+            .map { identifier -> identifier.normalizeDivisionIdentifier() }
+            .filter { identifier -> identifier.isNotBlank() && identifier != normalizedId }
+            .distinct()
         options += EventDetailDivisionOption(
             id = normalizedId,
             label = label.ifBlank { normalizedId },
+            matchIdentifiers = normalizedMatchIdentifiers,
         )
     }
 
@@ -55,6 +62,7 @@ internal fun buildRegistrationDivisionOptions(event: Event): List<EventDetailDiv
                     rawId = detail.id,
                     explicitLabel = detail.name,
                     allowPlayoffDivision = true,
+                    matchIdentifiers = detail.eventDivisionMatchIdentifiers(),
                 )
             }
         } else {
@@ -63,11 +71,12 @@ internal fun buildRegistrationDivisionOptions(event: Event): List<EventDetailDiv
                     rawId = detail.id,
                     explicitLabel = detail.name,
                     allowPlayoffDivision = true,
+                    matchIdentifiers = detail.eventDivisionMatchIdentifiers(),
                 )
             }
         }
         if (options.isNotEmpty()) {
-            return options
+            return options.withoutAmbiguousMatchIdentifiers()
         }
     }
 
@@ -78,6 +87,7 @@ internal fun buildRegistrationDivisionOptions(event: Event): List<EventDetailDiv
             addOption(
                 rawId = detail.id,
                 explicitLabel = detail.name,
+                matchIdentifiers = detail.eventDivisionMatchIdentifiers(),
             )
         }
     } else {
@@ -86,7 +96,24 @@ internal fun buildRegistrationDivisionOptions(event: Event): List<EventDetailDiv
         }
     }
 
-    return options
+    return options.withoutAmbiguousMatchIdentifiers()
+}
+
+private fun List<EventDetailDivisionOption>.withoutAmbiguousMatchIdentifiers(): List<EventDetailDivisionOption> {
+    val identifierCounts = flatMap { option ->
+        option.matchIdentifiers
+            .map { identifier -> identifier.normalizeDivisionIdentifier() }
+            .filter(String::isNotBlank)
+            .distinct()
+    }.groupingBy { identifier -> identifier }.eachCount()
+
+    return map { option ->
+        option.copy(
+            matchIdentifiers = option.matchIdentifiers.filter { identifier ->
+                identifierCounts[identifier.normalizeDivisionIdentifier()] == 1
+            },
+        )
+    }
 }
 
 private fun buildSyntheticTournamentBracketRegistrationDetails(event: Event): List<DivisionDetail> {
@@ -155,7 +182,7 @@ internal fun List<EventDetailDivisionOption>.findEventDivisionOption(
         .orEmpty()
     if (normalizedValue.isEmpty()) return null
 
-    return firstOrNull { option -> option.id == normalizedValue }
+    return firstOrNull { option -> option.matchesDivisionIdentifier(normalizedValue) }
 }
 
 internal fun EventDetailDivisionOption.matchesDivisionIdentifier(value: String?): Boolean {
@@ -163,5 +190,6 @@ internal fun EventDetailDivisionOption.matchesDivisionIdentifier(value: String?)
         ?.normalizeDivisionIdentifier()
         .orEmpty()
     if (normalizedValue.isEmpty()) return false
-    return normalizedValue == id
+    return normalizedValue == id ||
+        matchIdentifiers.any { identifier -> identifier.normalizeDivisionIdentifier() == normalizedValue }
 }

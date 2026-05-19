@@ -169,7 +169,6 @@ class DefaultMatchContentComponent(
     private val selectedMatchForRealtime = selectedMatch.match
     private val realtimePauseReason = "$MATCH_DETAIL_REALTIME_PAUSE_PREFIX${selectedMatch.match.id}"
     private val localMatchSaveMutex = Mutex()
-    private val scoreSetMutex = Mutex()
     private val incidentQueueMutex = Mutex()
     private var localMatchSaveVersion = 0L
     private var directScoreSyncJob: Job? = null
@@ -913,23 +912,21 @@ class DefaultMatchContentComponent(
         if (editVersion <= directScoreInvalidatedThroughVersion) {
             return
         }
-        scoreSetMutex.withLock {
-            val pendingSync = pendingDirectScoreSync?.takeIf { pending -> pending.editVersion == editVersion }
-                ?: return
-            pendingDirectScoreSync = null
+        val pendingSync = pendingDirectScoreSync?.takeIf { pending -> pending.editVersion == editVersion }
+            ?: return
+        pendingDirectScoreSync = null
 
-            matchRepository.setMatchScore(
-                match = pendingSync.match,
-                segmentId = pendingSync.segmentId,
-                sequence = pendingSync.sequence,
-                eventTeamId = pendingSync.eventTeamId,
-                points = pendingSync.points,
-            ).onSuccess {
-                clearOptimisticAfterDirectScoreSync(editVersion)
-            }.onFailure { error ->
-                _errorState.value = "Failed to sync score: ${error.userMessage()}"
-                clearOptimisticAfterDirectScoreSync(editVersion)
-            }
+        matchRepository.setMatchScore(
+            match = pendingSync.match,
+            segmentId = pendingSync.segmentId,
+            sequence = pendingSync.sequence,
+            eventTeamId = pendingSync.eventTeamId,
+            points = pendingSync.points,
+        ).onSuccess {
+            clearOptimisticAfterDirectScoreSync(editVersion)
+        }.onFailure { error ->
+            _errorState.value = "Failed to sync score: ${error.userMessage()}"
+            clearOptimisticAfterDirectScoreSync(editVersion)
         }
     }
 

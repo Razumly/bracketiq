@@ -9,12 +9,17 @@ import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.buildEventOfficialPositionId
 import com.razumly.mvp.core.data.dataTypes.buildEventOfficialRecordId
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.network.ApiException
+import com.razumly.mvp.core.network.dto.EventParticipantsRequestDto
+import com.razumly.mvp.core.network.dto.EventParticipantsResponseDto
+import com.razumly.mvp.core.network.dto.EventParticipantsSnapshotResponseDto
 import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
 import com.razumly.mvp.testing.MOBILE_TEST_HOST_EMAIL
 import com.razumly.mvp.testing.MOBILE_TEST_HOST_PASSWORD
@@ -46,6 +51,7 @@ import kotlin.time.Instant
 @Config(sdk = [35])
 class EventLifecycleMobileApiIntegrationTest {
     private val createdEventIds = mutableListOf<String>()
+    private val createdTeamIds = mutableListOf<String>()
     private var hostSession: MobileApiTestSession? = null
     private var participantSession: MobileApiTestSession? = null
 
@@ -77,6 +83,9 @@ class EventLifecycleMobileApiIntegrationTest {
                 createdEventIds.asReversed().forEach { eventId ->
                     host?.deleteEvent(eventId)
                 }
+                createdTeamIds.asReversed().forEach { teamId ->
+                    host?.deleteTeam(teamId)
+                }
             }
         }
         hostSession?.close()
@@ -84,6 +93,7 @@ class EventLifecycleMobileApiIntegrationTest {
         hostSession = null
         participantSession = null
         createdEventIds.clear()
+        createdTeamIds.clear()
     }
 
     @Test
@@ -132,6 +142,15 @@ class EventLifecycleMobileApiIntegrationTest {
             }
             assertFalse(joinResult.requiresParentApproval, "${variant.key} should not require parent approval")
             assertFalse(joinResult.joinedWaitlist, "${variant.key} should not join the waitlist")
+
+            if (variant.event.autoCreatePointMatchIncidents) {
+                registerRosterTeamsForPointIncidentVariant(
+                    host = host,
+                    variant = variant,
+                    event = createdEvent,
+                    hostUserId = hostUser.id,
+                )
+            }
 
             if (variant.event.eventType.isSchedulable()) {
                 val scheduledEvent = host.eventRepository.scheduleEvent(createdEvent.id).getOrElse { error ->
@@ -191,12 +210,49 @@ class EventLifecycleMobileApiIntegrationTest {
         )
     }
 
+    private suspend fun registerRosterTeamsForPointIncidentVariant(
+        host: MobileApiTestSession,
+        variant: LifecycleVariant,
+        event: Event,
+        hostUserId: String,
+    ) {
+        val divisionIds = variant.event.divisions.ifEmpty { listOf(variant.primaryDivisionId) }
+        val registrationDivisionIds = divisionIds.flatMap { divisionId -> listOf(divisionId, divisionId) }
+        registrationDivisionIds.forEachIndexed { index, divisionId ->
+            val team = host.teamRepository.createTeam(
+                Team(hostUserId).copy(
+                    name = "Mobile Incident Team ${index + 1}",
+                    division = divisionId,
+                    sport = variant.event.sportId,
+                    teamSize = 2,
+                ).withSynchronizedMembership(),
+            ).getOrElse { error ->
+                error("Failed to create incident roster team ${index + 1}: ${error.backendSummary()}")
+            }
+            createdTeamIds += team.id
+
+            val response = host.api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
+                path = "api/events/${event.id}/participants",
+                body = EventParticipantsRequestDto(
+                    teamId = team.id,
+                    divisionId = divisionId,
+                    slotId = variant.occurrence?.slotId,
+                    occurrenceDate = variant.occurrence?.occurrenceDate,
+                ),
+            )
+            response.error?.takeIf(String::isNotBlank)?.let { message ->
+                error("Failed to register incident roster team ${team.id}: $message")
+            }
+        }
+    }
+
     private suspend fun updateMatchWithPointIncident(
         host: MobileApiTestSession,
         matches: List<MatchMVP>,
     ) {
-        val match = matches.firstPlayableMatch()
-        val teamId = requireNotNull(match.team1Id) { "Point incident test requires team1Id" }
+        val incidentTarget = selectPointIncidentTarget(host = host, matches = matches)
+        val match = incidentTarget.match
+        val teamId = incidentTarget.eventTeamId
         val segment = requireNotNull(match.segments.minByOrNull { segment -> segment.sequence }) {
             "Point incident test requires scheduled match segments"
         }
@@ -209,7 +265,10 @@ class EventLifecycleMobileApiIntegrationTest {
                 id = incidentId,
                 segmentId = segment.id,
                 eventTeamId = teamId,
-                participantUserId = teamId,
+                eventRegistrationId = incidentTarget.eventRegistrationId,
+                participantUserId = incidentTarget.participantUserId.takeIf {
+                    incidentTarget.eventRegistrationId.isNullOrBlank()
+                },
                 incidentType = "POINT",
                 sequence = 1,
                 linkedPointDelta = 1,
@@ -232,6 +291,50 @@ class EventLifecycleMobileApiIntegrationTest {
             eventTeamId = teamId,
             expected = 1,
             message = "Point incident should increment the selected team's segment score.",
+        )
+    }
+
+    private suspend fun selectPointIncidentTarget(
+        host: MobileApiTestSession,
+        matches: List<MatchMVP>,
+    ): PointIncidentTarget {
+        val diagnostics = mutableListOf<String>()
+        val snapshotsByEventId = mutableMapOf<String, EventParticipantsSnapshotResponseDto>()
+        matches.filter { match ->
+            !match.team1Id.isNullOrBlank() && !match.team2Id.isNullOrBlank()
+        }.forEach { match ->
+            val snapshot = snapshotsByEventId.getOrPut(match.eventId) {
+                host.api.get("api/events/${match.eventId}/participants?manage=true")
+            }
+            val teamsById = snapshot.teams
+                .mapNotNull { teamDto -> teamDto.toTeamOrNull() }
+                .associateBy { team -> team.id }
+
+            listOfNotNull(match.team1Id, match.team2Id).forEach { eventTeamId ->
+                val team = teamsById[eventTeamId]
+                if (team == null) {
+                    diagnostics += "$eventTeamId: missing from participant snapshot"
+                    return@forEach
+                }
+                val playerId = team.playerIds.firstOrNull { userId -> userId.isNotBlank() }
+                if (playerId.isNullOrBlank()) {
+                    diagnostics += "$eventTeamId: no active roster players"
+                    return@forEach
+                }
+                return PointIncidentTarget(
+                    match = match,
+                    eventTeamId = eventTeamId,
+                    participantUserId = playerId,
+                    eventRegistrationId = team.playerRegistrationIds.firstOrNull { registrationId ->
+                        registrationId.isNotBlank()
+                    },
+                )
+            }
+        }
+
+        error(
+            "Point incident test requires a scheduled event team with an event-roster player. " +
+                diagnostics.take(8).joinToString("; "),
         )
     }
 
@@ -889,6 +992,13 @@ private data class LifecycleVariant(
     val isTournamentPoolPlay: Boolean
         get() = event.eventType == EventType.TOURNAMENT && event.includePlayoffs
 }
+
+private data class PointIncidentTarget(
+    val match: MatchMVP,
+    val eventTeamId: String,
+    val participantUserId: String,
+    val eventRegistrationId: String?,
+)
 
 private data class OfficialBundle(
     val schedulingMode: OfficialSchedulingMode,

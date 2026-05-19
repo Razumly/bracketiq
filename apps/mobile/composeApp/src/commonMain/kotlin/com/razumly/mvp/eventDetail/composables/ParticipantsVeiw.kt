@@ -87,6 +87,7 @@ import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import com.razumly.mvp.eventDetail.EventDetailDivisionOption
+import com.razumly.mvp.eventDetail.eventDivisionMatchIdentifiers
 import com.razumly.mvp.eventDetail.findEventDivisionOption
 import com.razumly.mvp.eventDetail.matchesDivisionIdentifier
 import com.razumly.mvp.eventDetail.resolveSelectedEventDivisionId
@@ -327,8 +328,12 @@ private fun TeamWithPlayers.resolveParticipantDivisionId(
 private fun TeamWithPlayers.resolveParticipantDivisionOption(
     divisionOptions: List<EventDetailDivisionOption>,
 ): EventDetailDivisionOption? {
-    val teamDivision = team.division.trim().takeIf(String::isNotBlank)
-    return divisionOptions.findEventDivisionOption(teamDivision)
+    team.eventDivisionMatchIdentifiers().forEach { identifier ->
+        divisionOptions.findEventDivisionOption(identifier)?.let { option ->
+            return option
+        }
+    }
+    return null
 }
 
 @Composable

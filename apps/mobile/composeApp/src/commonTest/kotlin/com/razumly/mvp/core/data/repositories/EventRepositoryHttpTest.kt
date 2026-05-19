@@ -1754,6 +1754,7 @@ class EventRepositoryHttpTest {
                     divisionTypeName = "B",
                     ratingType = "SKILL",
                     gender = "M",
+                    maxParticipants = 8,
                 ),
                 DivisionDetail(
                     id = divisionBId,
@@ -1763,6 +1764,7 @@ class EventRepositoryHttpTest {
                     divisionTypeName = "A",
                     ratingType = "SKILL",
                     gender = "F",
+                    maxParticipants = 8,
                 ),
             ),
         )
@@ -2020,6 +2022,7 @@ class EventRepositoryHttpTest {
                     divisionTypeName = "B",
                     ratingType = "SKILL",
                     gender = "M",
+                    maxParticipants = 12,
                 ),
                 DivisionDetail(
                     id = divisionBId,
@@ -2029,6 +2032,7 @@ class EventRepositoryHttpTest {
                     divisionTypeName = "A",
                     ratingType = "SKILL",
                     gender = "F",
+                    maxParticipants = 12,
                 ),
             ),
         )

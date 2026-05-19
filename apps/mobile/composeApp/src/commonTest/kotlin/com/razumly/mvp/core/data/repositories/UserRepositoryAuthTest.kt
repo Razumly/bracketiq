@@ -850,34 +850,46 @@ class UserRepositoryAuthTest {
         var capturedBody = ""
 
         val engine = MockEngine { request ->
-            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
-                ?.bytes()
-                ?.decodeToString()
-                .orEmpty()
-            respond(
-                content = """
-                    {
-                      "user": { "id":"u_signup", "email":"signup@example.com", "name":"Signup User" },
-                      "session": { "userId":"u_signup", "isAdmin":false },
-                      "token":"signup_token",
-                      "profile": {
-                        "id":"u_signup",
-                        "firstName":"Existing",
-                        "lastName":"Up",
-                        "userName":"existing_user",
-                        "teamIds":[],
-                        "friendIds":[],
-                        "friendRequestIds":[],
-                        "friendRequestSentIds":[],
-                        "followingIds":[],
-                        "uploadedImages":[],
-                        "hasStripeAccount":false
-                      }
-                    }
-                """.trimIndent(),
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-            )
+            when (request.url.encodedPath) {
+                "/api/auth/register" -> {
+                    capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                        ?.bytes()
+                        ?.decodeToString()
+                        .orEmpty()
+                    respond(
+                        content = """
+                            {
+                              "user": { "id":"u_signup", "email":"signup@example.com", "name":"Signup User" },
+                              "session": { "userId":"u_signup", "isAdmin":false },
+                              "token":"signup_token",
+                              "profile": {
+                                "id":"u_signup",
+                                "firstName":"Existing",
+                                "lastName":"Up",
+                                "userName":"existing_user",
+                                "teamIds":[],
+                                "friendIds":[],
+                                "friendRequestIds":[],
+                                "friendRequestSentIds":[],
+                                "followingIds":[],
+                                "uploadedImages":[],
+                                "hasStripeAccount":false
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                    )
+                }
+
+                "/api/chat/terms-consent" -> respond(
+                    content = """{"accepted":false,"acceptedAt":null,"version":"2026-04-14","url":"/terms","summary":[]}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
         }
 
         val http = HttpClient(engine) {
