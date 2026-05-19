@@ -15,6 +15,7 @@ import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
 import com.razumly.mvp.core.data.repositories.isActive
@@ -71,6 +72,8 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     val billingAddressPrompt: StateFlow<BillingAddressDraft?>
     val currentUser: StateFlow<UserData>
     val startingTeamRegistrationId: StateFlow<String?>
+    val teamMemberCompliance: StateFlow<Map<String, EventTeamComplianceSummary>>
+    val loadingTeamMemberComplianceId: StateFlow<String?>
     val textSignaturePrompt: StateFlow<TextSignaturePromptState?>
     val webSignaturePrompt: StateFlow<WebSignaturePromptState?>
 
@@ -84,6 +87,7 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     fun startProductPurchase(product: Product)
     fun startTeamRegistration(team: TeamWithPlayers)
     fun leaveTeam(team: TeamWithPlayers)
+    fun loadTeamMemberCompliance(teamId: String)
     fun submitBillingAddress(address: BillingAddressDraft)
     fun dismissBillingAddressPrompt()
     fun confirmTextSignature()
@@ -165,6 +169,10 @@ class DefaultOrganizationDetailComponent(
         .stateIn(scope, SharingStarted.Eagerly, UserData())
     private val _startingTeamRegistrationId = MutableStateFlow<String?>(null)
     override val startingTeamRegistrationId: StateFlow<String?> = _startingTeamRegistrationId.asStateFlow()
+    private val _teamMemberCompliance = MutableStateFlow<Map<String, EventTeamComplianceSummary>>(emptyMap())
+    override val teamMemberCompliance: StateFlow<Map<String, EventTeamComplianceSummary>> = _teamMemberCompliance.asStateFlow()
+    private val _loadingTeamMemberComplianceId = MutableStateFlow<String?>(null)
+    override val loadingTeamMemberComplianceId: StateFlow<String?> = _loadingTeamMemberComplianceId.asStateFlow()
 
     private var organizationLoaded = false
     private var eventsLoaded = false
@@ -317,6 +325,26 @@ class DefaultOrganizationDetailComponent(
                 }
             _isLoadingTeams.value = false
             teamsLoaded = true
+        }
+    }
+
+    override fun loadTeamMemberCompliance(teamId: String) {
+        val normalizedTeamId = teamId.trim().takeIf(String::isNotBlank) ?: return
+        if (_teamMemberCompliance.value.containsKey(normalizedTeamId)) {
+            return
+        }
+        scope.launch {
+            _loadingTeamMemberComplianceId.value = normalizedTeamId
+            teamRepository.getTeamMemberCompliance(normalizedTeamId)
+                .onSuccess { summary ->
+                    _teamMemberCompliance.value = _teamMemberCompliance.value + (summary.teamId to summary)
+                }
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage(error.userMessage("Failed to load team member status."))
+                }
+            if (_loadingTeamMemberComplianceId.value == normalizedTeamId) {
+                _loadingTeamMemberComplianceId.value = null
+            }
         }
     }
 

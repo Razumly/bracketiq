@@ -1132,6 +1132,8 @@ fun ParticipantsView(
             team = selectedTeamForDialog,
             currentUser = currentUser,
             knownUsers = teamDialogKnownUsers.values.toList(),
+            memberCompliance = teamComplianceSummaries[selectedTeamForDialog.team.id],
+            memberComplianceLoading = participantComplianceLoading,
             onDismiss = {
                 showTeamDialog = false
                 selectedTeam = null

@@ -15,6 +15,11 @@ import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.dto.CreateInvitesRequestDto
 import com.razumly.mvp.core.network.dto.DeleteInvitesRequestDto
+import com.razumly.mvp.core.network.dto.EventComplianceDocumentCountsDto
+import com.razumly.mvp.core.network.dto.EventCompliancePaymentSummaryDto
+import com.razumly.mvp.core.network.dto.EventComplianceRequiredDocumentDto
+import com.razumly.mvp.core.network.dto.EventComplianceUserSummaryDto
+import com.razumly.mvp.core.network.dto.EventTeamComplianceSummaryDto
 import com.razumly.mvp.core.network.dto.InviteCreateDto
 import com.razumly.mvp.core.network.dto.InvitesResponseDto
 import com.razumly.mvp.core.network.dto.TeamApiDto
@@ -22,6 +27,7 @@ import com.razumly.mvp.core.network.dto.TeamInviteEventTeamOptionDto
 import com.razumly.mvp.core.network.dto.TeamInviteFreeAgentsResponseDto
 import com.razumly.mvp.core.network.dto.TeamMemberInviteRequestDto
 import com.razumly.mvp.core.network.dto.TeamMemberInviteResponseDto
+import com.razumly.mvp.core.network.dto.TeamMemberComplianceResponseDto
 import com.razumly.mvp.core.network.dto.TeamPlayerRegistrationApiDto
 import com.razumly.mvp.core.network.dto.TeamRegistrationResponseDto
 import com.razumly.mvp.core.network.dto.TeamsResponseDto
@@ -77,6 +83,8 @@ interface ITeamRepository : IMVPRepository {
     ): Result<TeamRegistrationResult> = Result.failure(
         NotImplementedError("Child team registration is not implemented."),
     )
+    suspend fun getTeamMemberCompliance(teamId: String): Result<EventTeamComplianceSummary> =
+        Result.failure(NotImplementedError("Team member compliance is not implemented."))
     suspend fun registerForTeam(teamId: String): Result<Team>
     suspend fun leaveTeam(teamId: String): Result<Team>
     suspend fun deleteTeam(team: TeamWithPlayers): Result<Unit>
@@ -204,6 +212,71 @@ private fun com.razumly.mvp.core.network.dto.TeamRegistrationConsentDto.toConsen
         status = normalizedStatus,
         childEmail = normalizedChildEmail,
         requiresChildEmail = childEmailRequired,
+    )
+}
+
+private fun EventCompliancePaymentSummaryDto?.toCompliancePaymentSummary(): EventCompliancePaymentSummary {
+    if (this == null) return EventCompliancePaymentSummary()
+    return EventCompliancePaymentSummary(
+        hasBill = hasBill == true,
+        billId = billId?.trim()?.takeIf(String::isNotBlank),
+        totalAmountCents = totalAmountCents ?: 0,
+        paidAmountCents = paidAmountCents ?: 0,
+        status = status?.trim()?.takeIf(String::isNotBlank),
+        isPaidInFull = isPaidInFull == true,
+        paymentPending = paymentPending == true,
+        inheritedFromTeamBill = inheritedFromTeamBill == true,
+    )
+}
+
+private fun EventComplianceDocumentCountsDto?.toComplianceDocumentCounts(): EventComplianceDocumentCounts {
+    if (this == null) return EventComplianceDocumentCounts()
+    return EventComplianceDocumentCounts(
+        signedCount = signedCount ?: 0,
+        requiredCount = requiredCount ?: 0,
+    )
+}
+
+private fun EventComplianceRequiredDocumentDto.toComplianceRequiredDocumentOrNull(): EventComplianceRequiredDocument? {
+    val normalizedKey = key?.trim()?.takeIf(String::isNotBlank)
+    val normalizedTemplateId = templateId?.trim()?.takeIf(String::isNotBlank)
+    if (normalizedKey == null || normalizedTemplateId == null) return null
+    return EventComplianceRequiredDocument(
+        key = normalizedKey,
+        templateId = normalizedTemplateId,
+        title = title?.trim()?.takeIf(String::isNotBlank) ?: "Required document",
+        type = type?.trim()?.takeIf(String::isNotBlank) ?: "PDF",
+        signerContext = signerContext?.trim()?.takeIf(String::isNotBlank) ?: "participant",
+        signerLabel = signerLabel?.trim()?.takeIf(String::isNotBlank) ?: "Participant",
+        signOnce = signOnce == true,
+        status = status?.trim()?.takeIf(String::isNotBlank) ?: "UNSIGNED",
+        signedDocumentRecordId = signedDocumentRecordId?.trim()?.takeIf(String::isNotBlank),
+        signedAt = signedAt?.trim()?.takeIf(String::isNotBlank),
+    )
+}
+
+private fun EventComplianceUserSummaryDto.toComplianceUserSummaryOrNull(): EventComplianceUserSummary? {
+    val normalizedUserId = userId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    return EventComplianceUserSummary(
+        userId = normalizedUserId,
+        fullName = fullName?.trim()?.takeIf(String::isNotBlank) ?: normalizedUserId,
+        userName = userName?.trim()?.takeIf(String::isNotBlank),
+        isMinorAtEvent = isMinorAtEvent == true,
+        registrationType = registrationType?.trim()?.takeIf(String::isNotBlank) ?: "ADULT",
+        payment = payment.toCompliancePaymentSummary(),
+        documents = documents.toComplianceDocumentCounts(),
+        requiredDocuments = requiredDocuments.mapNotNull(EventComplianceRequiredDocumentDto::toComplianceRequiredDocumentOrNull),
+    )
+}
+
+private fun EventTeamComplianceSummaryDto.toTeamComplianceSummaryOrNull(): EventTeamComplianceSummary? {
+    val normalizedTeamId = teamId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    return EventTeamComplianceSummary(
+        teamId = normalizedTeamId,
+        teamName = teamName?.trim()?.takeIf(String::isNotBlank) ?: "Team",
+        payment = payment.toCompliancePaymentSummary(),
+        documents = documents.toComplianceDocumentCounts(),
+        users = users.mapNotNull(EventComplianceUserSummaryDto::toComplianceUserSummaryOrNull),
     )
 }
 
@@ -568,6 +641,16 @@ class TeamRepository(
         databaseService.getTeamDao.upsertTeamWithRelations(result.team)
         runCatching { userRepository.getCurrentAccount().getOrThrow() }
         result
+    }
+
+    override suspend fun getTeamMemberCompliance(teamId: String): Result<EventTeamComplianceSummary> = runCatching {
+        val normalizedTeamId = teamId.trim().takeIf(String::isNotBlank)
+            ?: error("Team id is required.")
+        val response = api.get<TeamMemberComplianceResponseDto>(
+            path = "api/teams/${normalizedTeamId.encodeURLQueryComponent()}/compliance",
+        )
+        response.team?.toTeamComplianceSummaryOrNull()
+            ?: error("Team compliance response missing team.")
     }
 
     override suspend fun registerForTeam(teamId: String): Result<Team> =

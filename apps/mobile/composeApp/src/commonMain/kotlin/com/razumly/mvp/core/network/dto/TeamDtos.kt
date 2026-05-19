@@ -205,6 +205,11 @@ data class TeamRegistrationConsentDto(
 )
 
 @Serializable
+data class TeamMemberComplianceResponseDto(
+    val team: EventTeamComplianceSummaryDto? = null,
+)
+
+@Serializable
 data class TeamUpdateDto(
     val name: String? = null,
     val division: String? = null,

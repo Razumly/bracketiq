@@ -113,6 +113,8 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val billingAddressPrompt by component.billingAddressPrompt.collectAsState()
     val currentUser by component.currentUser.collectAsState()
     val startingTeamRegistrationId by component.startingTeamRegistrationId.collectAsState()
+    val teamMemberCompliance by component.teamMemberCompliance.collectAsState()
+    val loadingTeamMemberComplianceId by component.loadingTeamMemberComplianceId.collectAsState()
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
     val webSignaturePrompt by component.webSignaturePrompt.collectAsState()
 
@@ -300,6 +302,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
             .distinctBy(UserData::id)
             .associateBy(UserData::id)
         teamDialogKnownUsers = baseKnownUsers
+        component.loadTeamMemberCompliance(team.team.id)
 
         val missingRoleIds = buildSet {
             val syncedTeam = team.team.withSynchronizedMembership()
@@ -578,6 +581,8 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                 team = team,
                 currentUser = currentUser,
                 knownUsers = teamDialogKnownUsers.values.toList(),
+                memberCompliance = teamMemberCompliance[team.team.id],
+                memberComplianceLoading = loadingTeamMemberComplianceId == team.team.id,
                 onDismiss = { selectedTeam = null },
                 onPlayerMessage = {},
                 isRegistering = startingTeamRegistrationId == team.team.id,

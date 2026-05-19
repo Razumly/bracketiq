@@ -1,5 +1,6 @@
 package com.razumly.mvp.core.presentation.composables
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,10 +14,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -32,6 +38,11 @@ import com.razumly.mvp.core.data.dataTypes.isPaymentPending
 import com.razumly.mvp.core.data.dataTypes.isStarted
 import com.razumly.mvp.core.data.dataTypes.normalizedRole
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
+import com.razumly.mvp.core.data.repositories.EventComplianceDocumentCounts
+import com.razumly.mvp.core.data.repositories.EventCompliancePaymentSummary
+import com.razumly.mvp.core.data.repositories.EventComplianceRequiredDocument
+import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
+import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.presentation.util.MoneyInputUtils
 
 internal fun canRegisterForTeam(
@@ -81,6 +92,8 @@ fun TeamDetailsDialog(
     onUnblockPlayer: (UserData) -> Unit = {},
     isRegistering: Boolean = false,
     isLeaving: Boolean = false,
+    memberCompliance: EventTeamComplianceSummary? = null,
+    memberComplianceLoading: Boolean = false,
     onRegisterForTeam: (() -> Unit)? = null,
     onLeaveTeam: (() -> Unit)? = null,
 ) {
@@ -134,6 +147,13 @@ fun TeamDetailsDialog(
                             }
                         }.thenBy(TeamStaffAssignment::userId),
                     )
+                var expandedComplianceUserIds by remember(team.team.id, memberCompliance) {
+                    mutableStateOf<Set<String>>(emptySet())
+                }
+                val complianceByUserId = memberCompliance
+                    ?.users
+                    ?.associateBy(EventComplianceUserSummary::userId)
+                    .orEmpty()
 
                 // Team Header
                 Text(
@@ -202,6 +222,13 @@ fun TeamDetailsDialog(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
+                if (memberComplianceLoading) {
+                    Text(
+                        text = "Loading billing and document status...",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(8.dp))
 
@@ -210,23 +237,48 @@ fun TeamDetailsDialog(
                 ) {
                     items(team.players) { player ->
                         val playerRegistration = activePlayerRegistrationsByUserId[player.id]
-                        PlayerCardWithActions(
-                            player = player,
-                            currentUser = currentUser,
-                            onMessage = { user -> onPlayerMessage(user) },
-                            onSendFriendRequest = { user ->
-                                onPlayerAction(
-                                    user,
-                                    PlayerAction.FRIEND_REQUEST
+                        val compliance = complianceByUserId[player.id]
+                        val expanded = expandedComplianceUserIds.contains(player.id)
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            PlayerCardWithActions(
+                                player = player,
+                                currentUser = currentUser,
+                                onMessage = { user -> onPlayerMessage(user) },
+                                onSendFriendRequest = { user ->
+                                    onPlayerAction(
+                                        user,
+                                        PlayerAction.FRIEND_REQUEST
+                                    )
+                                },
+                                onFollow = { user -> onPlayerAction(user, PlayerAction.FOLLOW) },
+                                onUnfollow = { user -> onPlayerAction(user, PlayerAction.UNFOLLOW) },
+                                onBlock = onBlockPlayer,
+                                onUnblock = onUnblockPlayer,
+                                jerseyNumber = playerRegistration?.jerseyNumber,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(enabled = compliance != null) {
+                                        expandedComplianceUserIds = if (expanded) {
+                                            expandedComplianceUserIds - player.id
+                                        } else {
+                                            expandedComplianceUserIds + player.id
+                                        }
+                                    }
+                            )
+                            if (compliance != null) {
+                                TeamMemberComplianceStrip(
+                                    userSummary = compliance,
+                                    expanded = expanded,
+                                    onClick = {
+                                        expandedComplianceUserIds = if (expanded) {
+                                            expandedComplianceUserIds - player.id
+                                        } else {
+                                            expandedComplianceUserIds + player.id
+                                        }
+                                    },
                                 )
-                            },
-                            onFollow = { user -> onPlayerAction(user, PlayerAction.FOLLOW) },
-                            onUnfollow = { user -> onPlayerAction(user, PlayerAction.UNFOLLOW) },
-                            onBlock = onBlockPlayer,
-                            onUnblock = onUnblockPlayer,
-                            jerseyNumber = playerRegistration?.jerseyNumber,
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                            }
+                        }
                     }
 
                     // Show pending players if any
@@ -297,6 +349,126 @@ fun TeamDetailsDialog(
                         Text("Close")
                     }
                 }
+            }
+        }
+    }
+}
+
+private fun EventCompliancePaymentSummary.paymentStatusText(): String {
+    return when {
+        paymentPending -> "Payment pending"
+        !hasBill -> "No bill yet"
+        isPaidInFull -> "Paid in full ($${MoneyInputUtils.centsToDisplayValue(totalAmountCents)})"
+        else -> "$${MoneyInputUtils.centsToDisplayValue(paidAmountCents)} of $${MoneyInputUtils.centsToDisplayValue(totalAmountCents)} paid"
+    }
+}
+
+private fun EventComplianceDocumentCounts.documentStatusText(): String {
+    return if (requiredCount <= 0) {
+        "No required documents"
+    } else {
+        "$signedCount/$requiredCount signed"
+    }
+}
+
+private fun EventCompliancePaymentSummary.needsAttention(): Boolean =
+    paymentPending || (hasBill && !isPaidInFull)
+
+private fun EventComplianceDocumentCounts.needsAttention(): Boolean =
+    requiredCount > 0 && signedCount < requiredCount
+
+@Composable
+private fun TeamMemberComplianceStrip(
+    userSummary: EventComplianceUserSummary,
+    expanded: Boolean,
+    onClick: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = userSummary.payment.paymentStatusText(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (userSummary.payment.needsAttention()) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                    )
+                    Text(
+                        text = userSummary.documents.documentStatusText(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (userSummary.documents.needsAttention()) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                    )
+                }
+                Text(
+                    text = if (expanded) "Hide" else "Details",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+
+            if (expanded) {
+                HorizontalDivider()
+                if (userSummary.requiredDocuments.isEmpty()) {
+                    Text(
+                        text = "No required documents for this user.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    userSummary.requiredDocuments.forEach { document ->
+                        TeamMemberComplianceDocumentRow(document)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TeamMemberComplianceDocumentRow(document: EventComplianceRequiredDocument) {
+    val signed = document.status.equals("SIGNED", ignoreCase = true) ||
+        document.status.equals("COMPLETED", ignoreCase = true)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = document.title, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = document.signerLabel,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    text = if (signed) "Signed" else "Needs signature",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (signed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                )
             }
         }
     }
