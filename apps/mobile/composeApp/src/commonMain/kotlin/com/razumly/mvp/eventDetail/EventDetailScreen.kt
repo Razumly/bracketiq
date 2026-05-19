@@ -3530,7 +3530,10 @@ fun EventDetailScreen(
         )
     }
 
-    val refundPolicy = getRefundPolicy(selectedEvent.event)
+    val refundPolicy = getRefundPolicy(
+        event = selectedEvent.event,
+        effectiveStart = selectedWeeklyOccurrence?.sessionStart ?: selectedEvent.event.start,
+    )
     val eventHasStarted = refundPolicy.eventHasStarted
     val isWeeklyEvent = selectedEvent.event.eventType == EventType.WEEKLY_EVENT
     val selectedWeeklyOccurrenceStarted = remember(selectedWeeklyOccurrence?.sessionStart) {

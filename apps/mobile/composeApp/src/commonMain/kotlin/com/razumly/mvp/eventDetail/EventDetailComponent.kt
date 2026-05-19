@@ -1830,6 +1830,13 @@ class DefaultEventDetailComponent(
     private fun hasEventStarted(event: Event = selectedEvent.value): Boolean =
         Clock.System.now() >= event.start
 
+    private fun hasSelectedEventOrOccurrenceStarted(event: Event = selectedEvent.value): Boolean =
+        if (isWeeklyParentEvent(event)) {
+            hasSelectedWeeklyOccurrenceStarted(event)
+        } else {
+            hasEventStarted(event)
+        }
+
     private fun hasSelectedWeeklyOccurrenceStarted(event: Event = selectedEvent.value): Boolean {
         if (!isWeeklyParentEvent(event)) {
             return false
@@ -3441,7 +3448,7 @@ class DefaultEventDetailComponent(
                 )
                 return@launch
             }
-            if (hasEventStarted(event)) {
+            if (hasSelectedEventOrOccurrenceStarted(event)) {
                 _errorState.value = ErrorMessage("Automatic refunds are no longer available after the event starts.")
                 return@launch
             }
@@ -3514,7 +3521,7 @@ class DefaultEventDetailComponent(
                 _errorState.value = ErrorMessage("Selected profile is not registered for this event.")
                 return@launch
             }
-            if (hasEventStarted(event)) {
+            if (hasSelectedEventOrOccurrenceStarted(event)) {
                 _errorState.value = ErrorMessage(
                     if (canRequestPaidRefund(event, membership)) {
                         "This event has already started. Leaving is disabled. Request a refund instead."

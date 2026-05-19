@@ -64,6 +64,26 @@ class EventRefundPolicyTest {
     }
 
     @Test
+    fun givenWeeklyParentHasStartedAndSelectedOccurrenceIsFuture_whenGettingRefundPolicy_thenSelectedOccurrenceStartIsUsed() {
+        val event = Event(
+            start = Instant.parse("2026-07-01T12:00:00Z"),
+            end = Instant.parse("2026-07-01T13:00:00Z"),
+            cancellationRefundHours = 0,
+        )
+        val selectedOccurrenceStart = Instant.parse("2026-07-08T12:00:00Z")
+
+        val policy = getRefundPolicy(
+            event = event,
+            now = Instant.parse("2026-07-02T12:00:00Z"),
+            effectiveStart = selectedOccurrenceStart,
+        )
+
+        assertFalse(policy.eventHasStarted)
+        assertTrue(policy.canAutoRefund)
+        assertEquals(selectedOccurrenceStart, policy.refundDeadline)
+    }
+
+    @Test
     fun givenRefundSummary_whenUsingHourCounts_thenLabelsReflectRealHours() {
         assertEquals("36h before start", formatRefundSummary(36))
         assertEquals("Until event start", formatRefundSummary(0))

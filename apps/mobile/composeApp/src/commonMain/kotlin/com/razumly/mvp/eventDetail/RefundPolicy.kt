@@ -14,14 +14,15 @@ internal data class EventRefundPolicy(
 internal fun getRefundPolicy(
     event: Event,
     now: Instant = Clock.System.now(),
+    effectiveStart: Instant = event.start,
 ): EventRefundPolicy {
     val refundBufferHours = event.cancellationRefundHours?.coerceAtLeast(0)
     val refundDeadline = when (refundBufferHours) {
         null -> null
-        0 -> event.start
-        else -> event.start.minus(refundBufferHours.hours)
+        0 -> effectiveStart
+        else -> effectiveStart.minus(refundBufferHours.hours)
     }
-    val eventHasStarted = now >= event.start
+    val eventHasStarted = now >= effectiveStart
 
     return EventRefundPolicy(
         eventHasStarted = eventHasStarted,
