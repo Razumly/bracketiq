@@ -1475,13 +1475,15 @@ class DefaultEventDetailComponent(
                 .map { selected -> selected.resolveDefaultSelectedDivisionId() }
                 .distinctUntilChanged()
                 .collect { divisionId ->
-                    divisionId?.let { resolvedDivisionId ->
-                        if (
-                            _selectedDivision.value?.normalizeDivisionIdentifier().orEmpty() !=
-                            resolvedDivisionId.normalizeDivisionIdentifier()
-                        ) {
-                            selectDivision(resolvedDivisionId)
-                        }
+                    val resolvedDivisionId = divisionId?.normalizeDivisionIdentifier()?.takeIf(String::isNotBlank)
+                        ?: return@collect
+                    val availableDivisionIds = selectedEvent.value.divisions
+                        .map { it.normalizeDivisionIdentifier() }
+                        .filter(String::isNotBlank)
+                        .toSet()
+                    val currentDivisionId = _selectedDivision.value?.normalizeDivisionIdentifier()?.takeIf(String::isNotBlank)
+                    if (currentDivisionId == null || (availableDivisionIds.isNotEmpty() && currentDivisionId !in availableDivisionIds)) {
+                        selectDivision(resolvedDivisionId)
                     }
                 }
         }
@@ -4433,30 +4435,29 @@ class DefaultEventDetailComponent(
             } else {
                 null
             }
-            val canonicalTeamId = team.team.parentTeamId
-                ?.trim()
-                ?.takeIf(String::isNotBlank)
-                ?: team.team.id.trim().takeIf(String::isNotBlank)
-            if (canonicalTeamId == null) {
+            val eventTeamId = team.team.id.trim().takeIf(String::isNotBlank)
+                ?: team.team.parentTeamId?.trim()?.takeIf(String::isNotBlank)
+            if (eventTeamId == null) {
                 _errorState.value = ErrorMessage("Team id is required.")
                 return@launch
             }
-            val canonicalTeam = team.team.copy(id = canonicalTeamId)
+            val sourceEventTeam = team.team.copy(id = eventTeamId)
 
             loadingHandler.showLoading("Moving team...")
             eventRepository.moveTeamParticipantDivision(
                 event = event,
-                team = canonicalTeam,
+                team = sourceEventTeam,
                 preferredDivisionId = normalizedDivisionId,
                 occurrence = weeklyOccurrence,
             )
                 .onSuccess { result ->
                     applyParticipantSyncResult(result)
                     selectDivision(normalizedDivisionId)
-                    refreshEventAfterParticipantMutation(
-                        eventId = event.id,
-                        warningMessage = "Failed to refresh event after moving team division.",
-                    )
+                    refreshSelectedWeeklyOccurrenceSummaryIfNeeded(result.event)
+                    if (!isWeeklyParentEvent(result.event) || weeklyOccurrence == null) {
+                        refreshParticipantManagementSnapshotIfNeeded(result.event)
+                    }
+                    refreshParticipantComplianceIfNeeded(result.event)
                     _errorState.value = ErrorMessage("${team.team.name.ifBlank { "Team" }} moved to a new division.")
                 }
                 .onFailure { throwable ->

@@ -1659,7 +1659,7 @@ class EventRepository(
             ).event?.toEventOrNull() ?: event
 
             syncEventParticipantsAfterMutation(updated, occurrence)
-                ?: EventParticipantsSyncResult(event = preserveCachedDivisionState(updated))
+                ?: error("Failed to refresh event participants after moving team division.")
         }
 
     override suspend fun getLeagueDivisionStandings(
