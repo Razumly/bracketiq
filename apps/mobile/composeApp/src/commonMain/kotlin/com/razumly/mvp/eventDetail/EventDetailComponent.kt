@@ -62,7 +62,6 @@ import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckoutRequest
 import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
 import com.razumly.mvp.core.data.repositories.EventParticipantRefundMode
-import com.razumly.mvp.core.data.repositories.EventParticipantManagementEntry
 import com.razumly.mvp.core.data.repositories.EventParticipantManagementSnapshot
 import com.razumly.mvp.core.data.repositories.EventParticipantDivisionWarning
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
@@ -583,6 +582,28 @@ private data class CurrentUserRegistrationMembershipState(
     val teamId: String? = null,
 )
 
+private data class ParticipantManagementRoomTarget(
+    val eventId: String,
+    val slotId: String?,
+    val occurrenceDate: String?,
+    val teamSignup: Boolean,
+) {
+    fun toOccurrence(): EventOccurrenceSelection? {
+        val resolvedSlotId = slotId ?: return null
+        val resolvedOccurrenceDate = occurrenceDate ?: return null
+        return EventOccurrenceSelection(
+            slotId = resolvedSlotId,
+            occurrenceDate = resolvedOccurrenceDate,
+        )
+    }
+}
+
+private data class ParticipantManagementLocalState(
+    val snapshot: EventParticipantManagementSnapshot = EventParticipantManagementSnapshot(),
+    val teamSummaries: Map<String, EventTeamComplianceSummary> = emptyMap(),
+    val userSummaries: Map<String, EventComplianceUserSummary> = emptyMap(),
+)
+
 enum class TeamPosition { TEAM1, TEAM2, OFFICIAL }
 
 enum class MatchCreateContext {
@@ -672,6 +693,21 @@ class DefaultEventDetailComponent(
         val organization = eventWithRelations.value.organization
         return organization?.ownerId == currentUserId ||
             organization?.hostIds?.any { hostId -> hostId == currentUserId } == true
+    }
+
+    private fun canManageParticipantData(
+        event: Event = selectedEvent.value,
+        user: UserData = currentUser.value,
+        organization: Organization? = eventWithRelations.value.organization,
+    ): Boolean {
+        val currentUserId = user.id.trim()
+        if (currentUserId.isBlank()) {
+            return false
+        }
+        return event.hostId.trim() == currentUserId ||
+            event.assistantHostIds.any { assistantHostId -> assistantHostId.trim() == currentUserId } ||
+            organization?.ownerId?.trim() == currentUserId ||
+            organization?.hostIds?.any { hostId -> hostId.trim() == currentUserId } == true
     }
 
     private fun canEditMatchesNow(): Boolean = _isEditingMatches.value && canManageMatchEditing()
@@ -1099,7 +1135,6 @@ class DefaultEventDetailComponent(
     private var eventDetailHydrationJob: Job? = null
     private var eventDetailHydrationToken: Long = 0L
     private var weeklyOccurrenceSummaryPrefetchJob: Job? = null
-    private var participantManagementActive: Boolean = false
     private var participantManagementRequestToken: Long = 0L
     private var participantComplianceRequestToken: Long = 0L
 
@@ -1321,6 +1356,92 @@ class DefaultEventDetailComponent(
                     } finally {
                         _eventTeamsAndParticipantsLoading.value = false
                     }
+                }
+        }
+        scope.launch {
+            combine(selectedEvent, _selectedWeeklyOccurrence) { eventValue, occurrenceState ->
+                participantManagementRoomTarget(
+                    event = eventValue,
+                    occurrence = occurrenceState?.let { selectedOccurrence ->
+                        EventOccurrenceSelection(
+                            slotId = selectedOccurrence.slotId,
+                            occurrenceDate = selectedOccurrence.occurrenceDate,
+                            label = selectedOccurrence.label,
+                        )
+                    },
+                )
+            }
+                .distinctUntilChanged()
+                .flatMapLatest { target ->
+                    if (target == null) {
+                        flowOf(ParticipantManagementLocalState())
+                    } else {
+                        val occurrence = target.toOccurrence()
+                        val snapshotFlow = eventRepository.observeEventParticipantManagementSnapshot(
+                            eventId = target.eventId,
+                            occurrence = occurrence,
+                        )
+                        val complianceFlow = if (target.teamSignup) {
+                            eventRepository.observeEventTeamCompliance(
+                                eventId = target.eventId,
+                                occurrence = occurrence,
+                            ).map { summaries ->
+                                ParticipantManagementLocalState(
+                                    teamSummaries = summaries.associateBy(EventTeamComplianceSummary::teamId),
+                                )
+                            }
+                        } else {
+                            eventRepository.observeEventUserCompliance(
+                                eventId = target.eventId,
+                                occurrence = occurrence,
+                            ).map { summaries ->
+                                ParticipantManagementLocalState(
+                                    userSummaries = summaries.associateBy(EventComplianceUserSummary::userId),
+                                )
+                            }
+                        }
+                        combine(snapshotFlow, complianceFlow) { snapshot, compliance ->
+                            compliance.copy(snapshot = snapshot)
+                        }
+                    }
+                }
+                .collect { localState ->
+                    _participantManagementSnapshot.value = localState.snapshot
+                    _teamComplianceSummaries.value = localState.teamSummaries
+                    _userComplianceSummaries.value = localState.userSummaries
+                }
+        }
+        scope.launch {
+            combine(
+                selectedEvent,
+                currentUser,
+                eventWithRelations.map { relations -> relations.organization }.distinctUntilChanged(),
+                _selectedWeeklyOccurrence,
+            ) { eventValue, user, organization, occurrenceState ->
+                val occurrence = occurrenceState?.let { selectedOccurrence ->
+                    EventOccurrenceSelection(
+                        slotId = selectedOccurrence.slotId,
+                        occurrenceDate = selectedOccurrence.occurrenceDate,
+                        label = selectedOccurrence.label,
+                    )
+                }
+                participantManagementRoomTarget(eventValue, occurrence)
+                    ?.takeIf {
+                        canManageParticipantData(
+                            event = eventValue,
+                            user = user,
+                            organization = organization,
+                        )
+                    }
+            }
+                .distinctUntilChanged()
+                .collectLatest { target ->
+                    if (target == null) {
+                        _participantManagementLoading.value = false
+                        _participantComplianceLoading.value = false
+                        return@collectLatest
+                    }
+                    refreshParticipantManagementData(target, reportErrors = false)
                 }
         }
         scope.launch {
@@ -1587,8 +1708,6 @@ class DefaultEventDetailComponent(
         eventRepository.syncEventParticipants(event = event)
             .onSuccess { result ->
                 applyParticipantSyncResult(result)
-                refreshParticipantManagementSnapshotIfNeeded(result.event)
-                refreshParticipantComplianceIfNeeded(result.event)
             }
             .onFailure { throwable ->
                 _errorState.value = ErrorMessage(
@@ -1898,17 +2017,29 @@ class DefaultEventDetailComponent(
         )
     }
 
-    private suspend fun loadParticipantManagementSnapshot(
-        event: Event = selectedEvent.value,
+    private fun participantManagementRoomTarget(
+        event: Event,
+        occurrence: EventOccurrenceSelection?,
+    ): ParticipantManagementRoomTarget? {
+        val eventId = event.id.trim().takeIf(String::isNotBlank) ?: return null
+        if (isWeeklyParentEvent(event) && occurrence == null) {
+            return null
+        }
+        return ParticipantManagementRoomTarget(
+            eventId = eventId,
+            slotId = occurrence?.slotId?.trim()?.takeIf(String::isNotBlank),
+            occurrenceDate = occurrence?.occurrenceDate?.trim()?.takeIf(String::isNotBlank),
+            teamSignup = event.teamSignup,
+        )
+    }
+
+    private suspend fun refreshParticipantManagementSnapshot(
+        eventId: String,
+        occurrence: EventOccurrenceSelection?,
         reportErrors: Boolean = true,
     ) {
-        val eventId = event.id.trim()
-        if (!participantManagementActive || eventId.isEmpty()) {
-            _participantManagementLoading.value = false
-            return
-        }
-        if (isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() == null) {
-            _participantManagementSnapshot.value = EventParticipantManagementSnapshot()
+        val normalizedEventId = eventId.trim()
+        if (normalizedEventId.isEmpty()) {
             _participantManagementLoading.value = false
             return
         }
@@ -1916,40 +2047,35 @@ class DefaultEventDetailComponent(
         participantManagementRequestToken += 1
         val requestToken = participantManagementRequestToken
         _participantManagementLoading.value = true
-        eventRepository.getEventParticipantManagementSnapshot(
-            eventId = eventId,
-            occurrence = currentWeeklyOccurrenceSelection(),
-        ).onSuccess { snapshot ->
-            if (requestToken != participantManagementRequestToken) return@onSuccess
-            _participantManagementSnapshot.value = snapshot
-        }.onFailure { throwable ->
-            if (requestToken != participantManagementRequestToken) return@onFailure
-            if (reportErrors) {
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Failed to load participant registrations."),
-                )
-            } else {
-                Napier.w("Failed to refresh participant registrations.", throwable)
+        try {
+            eventRepository.getEventParticipantManagementSnapshot(
+                eventId = normalizedEventId,
+                occurrence = occurrence,
+            ).onFailure { throwable ->
+                if (requestToken != participantManagementRequestToken) return@onFailure
+                if (reportErrors) {
+                    _errorState.value = ErrorMessage(
+                        throwable.userMessage("Failed to load participant registrations."),
+                    )
+                } else {
+                    Napier.w("Failed to refresh participant registrations.", throwable)
+                }
             }
-        }
-        if (requestToken == participantManagementRequestToken) {
-            _participantManagementLoading.value = false
+        } finally {
+            if (requestToken == participantManagementRequestToken) {
+                _participantManagementLoading.value = false
+            }
         }
     }
 
-    private suspend fun loadParticipantComplianceSummaries(
-        event: Event = selectedEvent.value,
+    private suspend fun refreshParticipantComplianceSummaries(
+        eventId: String,
+        occurrence: EventOccurrenceSelection?,
+        teamSignup: Boolean,
         reportErrors: Boolean = true,
     ) {
-        val eventId = event.id.trim()
-        if (!participantManagementActive || eventId.isEmpty()) {
-            _participantComplianceLoading.value = false
-            return
-        }
-        val occurrence = currentWeeklyOccurrenceSelection()
-        if (isWeeklyParentEvent(event) && occurrence == null) {
-            _teamComplianceSummaries.value = emptyMap()
-            _userComplianceSummaries.value = emptyMap()
+        val normalizedEventId = eventId.trim()
+        if (normalizedEventId.isEmpty()) {
             _participantComplianceLoading.value = false
             return
         }
@@ -1958,48 +2084,58 @@ class DefaultEventDetailComponent(
         val requestToken = participantComplianceRequestToken
         _participantComplianceLoading.value = true
 
-        val result = if (event.teamSignup) {
-            eventRepository.getEventTeamCompliance(eventId, occurrence)
-                .map { summaries ->
-                    if (requestToken != participantComplianceRequestToken) return@map
-                    _teamComplianceSummaries.value = summaries.associateBy(EventTeamComplianceSummary::teamId)
-                    _userComplianceSummaries.value = emptyMap()
-                }
-        } else {
-            eventRepository.getEventUserCompliance(eventId, occurrence)
-                .map { summaries ->
-                    if (requestToken != participantComplianceRequestToken) return@map
-                    _teamComplianceSummaries.value = emptyMap()
-                    _userComplianceSummaries.value = summaries.associateBy(EventComplianceUserSummary::userId)
-                }
-        }
-
-        result.onFailure { throwable ->
-            if (requestToken != participantComplianceRequestToken) return@onFailure
-            _teamComplianceSummaries.value = emptyMap()
-            _userComplianceSummaries.value = emptyMap()
-            if (reportErrors) {
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Failed to load participant payment and document status."),
-                )
+        try {
+            val result = if (teamSignup) {
+                eventRepository.getEventTeamCompliance(normalizedEventId, occurrence).map { }
             } else {
-                Napier.w("Failed to refresh participant compliance.", throwable)
+                eventRepository.getEventUserCompliance(normalizedEventId, occurrence).map { }
+            }
+            result.onFailure { throwable ->
+                if (requestToken != participantComplianceRequestToken) return@onFailure
+                if (reportErrors) {
+                    _errorState.value = ErrorMessage(
+                        throwable.userMessage("Failed to load participant payment and document status."),
+                    )
+                } else {
+                    Napier.w("Failed to refresh participant compliance.", throwable)
+                }
+            }
+        } finally {
+            if (requestToken == participantComplianceRequestToken) {
+                _participantComplianceLoading.value = false
             }
         }
+    }
 
-        if (requestToken == participantComplianceRequestToken) {
-            _participantComplianceLoading.value = false
-        }
+    private suspend fun refreshParticipantManagementData(
+        target: ParticipantManagementRoomTarget,
+        reportErrors: Boolean = true,
+    ) {
+        val occurrence = target.toOccurrence()
+        refreshParticipantManagementSnapshot(
+            eventId = target.eventId,
+            occurrence = occurrence,
+            reportErrors = reportErrors,
+        )
+        refreshParticipantComplianceSummaries(
+            eventId = target.eventId,
+            occurrence = occurrence,
+            teamSignup = target.teamSignup,
+            reportErrors = reportErrors,
+        )
     }
 
     private suspend fun refreshParticipantManagementSnapshotIfNeeded(
         event: Event = selectedEvent.value,
     ) {
-        if (!participantManagementActive) {
-            return
-        }
-        loadParticipantManagementSnapshot(
+        val target = participantManagementRoomTarget(
             event = event,
+            occurrence = currentWeeklyOccurrenceSelection(),
+        ) ?: return
+        if (!canManageParticipantData(event)) return
+        refreshParticipantManagementSnapshot(
+            eventId = target.eventId,
+            occurrence = target.toOccurrence(),
             reportErrors = false,
         )
     }
@@ -2007,11 +2143,15 @@ class DefaultEventDetailComponent(
     private suspend fun refreshParticipantComplianceIfNeeded(
         event: Event = selectedEvent.value,
     ) {
-        if (!participantManagementActive) {
-            return
-        }
-        loadParticipantComplianceSummaries(
+        val target = participantManagementRoomTarget(
             event = event,
+            occurrence = currentWeeklyOccurrenceSelection(),
+        ) ?: return
+        if (!canManageParticipantData(event)) return
+        refreshParticipantComplianceSummaries(
+            eventId = target.eventId,
+            occurrence = target.toOccurrence(),
+            teamSignup = target.teamSignup,
             reportErrors = false,
         )
     }
@@ -2124,8 +2264,6 @@ class DefaultEventDetailComponent(
                     rememberWeeklyOccurrenceSummary(occurrence, summary)
                 }
             }
-            refreshParticipantManagementSnapshotIfNeeded(result.event)
-            refreshParticipantComplianceIfNeeded(result.event)
         }.onFailure { throwable ->
             if (reportErrors) {
                 _errorState.value = ErrorMessage(
@@ -2166,9 +2304,7 @@ class DefaultEventDetailComponent(
                 }
                 val eventForRefresh = syncResult?.event ?: refreshed
                 refreshSelectedWeeklyOccurrenceSummaryIfNeeded(eventForRefresh)
-                if (!isWeeklyParentEvent(eventForRefresh) || occurrence == null) {
-                    refreshParticipantManagementSnapshotIfNeeded(eventForRefresh)
-                }
+                refreshParticipantManagementSnapshotIfNeeded(eventForRefresh)
                 refreshParticipantComplianceIfNeeded(eventForRefresh)
             }.onFailure { throwable ->
                 Napier.w(warningMessage, throwable)
@@ -2422,11 +2558,11 @@ class DefaultEventDetailComponent(
 
     override fun clearSelectedWeeklySession() {
         _selectedWeeklyOccurrence.value = null
-        if (participantManagementActive) {
-            participantManagementRequestToken += 1
-            _participantManagementSnapshot.value = EventParticipantManagementSnapshot()
-            _participantManagementLoading.value = false
-        }
+        _participantManagementSnapshot.value = EventParticipantManagementSnapshot()
+        _participantManagementLoading.value = false
+        _teamComplianceSummaries.value = emptyMap()
+        _userComplianceSummaries.value = emptyMap()
+        _participantComplianceLoading.value = false
     }
 
     private suspend fun resumePendingSignatureFlowIfNeeded(): Boolean {
@@ -4383,36 +4519,16 @@ class DefaultEventDetailComponent(
     }
 
     override fun startManagingParticipants() {
-        scope.launch {
-            val event = selectedEvent.value
-            if (isWeeklyParentEvent(event)) {
-                requireSelectedWeeklyOccurrence(
-                    event = event,
-                    errorMessage = "Select an occurrence before managing participants.",
-                ) ?: return@launch
-            }
-            participantManagementActive = true
-            loadParticipantManagementSnapshot(
+        val event = selectedEvent.value
+        if (isWeeklyParentEvent(event)) {
+            requireSelectedWeeklyOccurrence(
                 event = event,
-                reportErrors = true,
-            )
-            loadParticipantComplianceSummaries(
-                event = event,
-                reportErrors = true,
+                errorMessage = "Select an occurrence before managing participants.",
             )
         }
     }
 
-    override fun stopManagingParticipants() {
-        participantManagementActive = false
-        participantManagementRequestToken += 1
-        participantComplianceRequestToken += 1
-        _participantManagementLoading.value = false
-        _participantManagementSnapshot.value = EventParticipantManagementSnapshot()
-        _participantComplianceLoading.value = false
-        _teamComplianceSummaries.value = emptyMap()
-        _userComplianceSummaries.value = emptyMap()
-    }
+    override fun stopManagingParticipants() = Unit
 
     override fun moveTeamParticipantDivision(team: TeamWithPlayers, divisionId: String) {
         val normalizedDivisionId = divisionId.normalizeDivisionIdentifier().takeIf(String::isNotBlank)
@@ -4454,9 +4570,7 @@ class DefaultEventDetailComponent(
                     applyParticipantSyncResult(result)
                     selectDivision(normalizedDivisionId)
                     refreshSelectedWeeklyOccurrenceSummaryIfNeeded(result.event)
-                    if (!isWeeklyParentEvent(result.event) || weeklyOccurrence == null) {
-                        refreshParticipantManagementSnapshotIfNeeded(result.event)
-                    }
+                    refreshParticipantManagementSnapshotIfNeeded(result.event)
                     refreshParticipantComplianceIfNeeded(result.event)
                     _errorState.value = ErrorMessage("${team.team.name.ifBlank { "Team" }} moved to a new division.")
                 }

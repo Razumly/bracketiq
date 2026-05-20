@@ -2075,7 +2075,10 @@ private fun BracketFloatingBar(
                 }
             }
             if (poolOptions.isNotEmpty() && onPoolSelected != null) {
-                Box(modifier = Modifier.floatingDockActionWidth()) {
+                Box(
+                    modifier = Modifier.floatingDockActionWidth(),
+                    propagateMinConstraints = useVerticalLayout,
+                ) {
                     Button(
                         onClick = { isPoolMenuExpanded = true },
                         modifier = Modifier.floatingDockActionWidth(minWidth = 96.dp),
@@ -2328,7 +2331,7 @@ private fun FloatingDockColumn(
     onCloseClick: (() -> Unit)?,
     content: @Composable () -> Unit,
 ) {
-    FloatingDockWrappedActions(
+    FloatingDockVerticalActions(
         modifier = Modifier
             .padding(horizontal = 12.dp, vertical = 10.dp),
         onCloseClick = onCloseClick,
@@ -2337,12 +2340,11 @@ private fun FloatingDockColumn(
 }
 
 @Composable
-private fun FloatingDockWrappedActions(
+private fun FloatingDockVerticalActions(
     onCloseClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    val horizontalSpacing = with(LocalDensity.current) { 10.dp.roundToPx() }
     val verticalSpacing = with(LocalDensity.current) { 8.dp.roundToPx() }
     Layout(
         modifier = modifier,
@@ -2360,95 +2362,50 @@ private fun FloatingDockWrappedActions(
         } else {
             measurables
         }
-        val closePlaceable = closeMeasurable?.measure(constraints.copy(minWidth = 0, minHeight = 0))
-        val closeReserveWidth = closePlaceable?.let { it.width + horizontalSpacing } ?: 0
+        val looseConstraints = constraints.copy(minWidth = 0, minHeight = 0)
+        val closePlaceable = closeMeasurable?.measure(looseConstraints)
         val maxWidth = constraints.maxWidth
-        val firstRowMaxWidth = (maxWidth - closeReserveWidth).coerceAtLeast(0)
-        val actionConstraints = constraints.copy(minWidth = 0, minHeight = 0)
+        val measuredActionWidth = actionMeasurables.maxOfOrNull { measurable ->
+            measurable.maxIntrinsicWidth(constraints.maxHeight)
+        } ?: 0
+        val actionWidth = measuredActionWidth.coerceAtMost(maxWidth)
+        val actionConstraints = looseConstraints.copy(
+            minWidth = actionWidth,
+            maxWidth = actionWidth,
+        )
         val actionPlaceables = actionMeasurables.map { measurable ->
             measurable.measure(actionConstraints)
         }
-        data class DockActionRow(
-            val startIndex: Int,
-            val endIndex: Int,
-            val y: Int,
-            val width: Int,
-            val requiredWidth: Int,
-        )
-
-        val rows = mutableListOf<DockActionRow>()
-        var rowStartIndex = 0
-        var x = 0
-        var y = 0
-        var rowHeight = 0
-
-        actionPlaceables.forEachIndexed { index, placeable ->
-            val rowMaxWidth = if (y == 0 && closePlaceable != null) firstRowMaxWidth else maxWidth
-            val shouldWrap = x > 0 && x + placeable.width > rowMaxWidth
-            if (shouldWrap) {
-                rows += DockActionRow(
-                    startIndex = rowStartIndex,
-                    endIndex = index,
-                    y = y,
-                    width = x - horizontalSpacing,
-                    requiredWidth = if (y == 0 && closePlaceable != null) {
-                        x - horizontalSpacing + closeReserveWidth
-                    } else {
-                        x - horizontalSpacing
-                    },
-                )
-                y += rowHeight + verticalSpacing
-                x = 0
-                rowHeight = 0
-                rowStartIndex = index
-            }
-            x += placeable.width + horizontalSpacing
-            rowHeight = maxOf(rowHeight, placeable.height)
-        }
-        if (actionPlaceables.isNotEmpty()) {
-            val lastRowWidth = x - horizontalSpacing
-            rows += DockActionRow(
-                startIndex = rowStartIndex,
-                endIndex = actionPlaceables.size,
-                y = y,
-                width = lastRowWidth,
-                requiredWidth = if (y == 0 && closePlaceable != null) {
-                    lastRowWidth + closeReserveWidth
-                } else {
-                    lastRowWidth
-                },
-            )
-        }
-
-        val actionsHeight = if (actionPlaceables.isEmpty()) 0 else y + rowHeight
         val closeHeight = closePlaceable?.height ?: 0
+        val closeSpacing = if (closePlaceable != null && actionPlaceables.isNotEmpty()) {
+            verticalSpacing
+        } else {
+            0
+        }
+        val actionsHeight = actionPlaceables.sumOf { placeable -> placeable.height } +
+            (actionPlaceables.size - 1).coerceAtLeast(0) * verticalSpacing
         val contentWidth = maxOf(
-            rows.maxOfOrNull { row -> row.requiredWidth } ?: 0,
+            actionPlaceables.maxOfOrNull { placeable -> placeable.width } ?: 0,
             closePlaceable?.width ?: 0,
         )
         val layoutWidth = contentWidth
             .coerceAtLeast(constraints.minWidth)
             .coerceAtMost(maxWidth)
-        val layoutHeight = maxOf(actionsHeight, closeHeight, constraints.minHeight)
+        val layoutHeight = (closeHeight + closeSpacing + actionsHeight)
+            .coerceAtLeast(constraints.minHeight)
+            .coerceAtMost(constraints.maxHeight)
 
         layout(width = layoutWidth, height = layoutHeight) {
-            rows.forEach { row ->
-                val rowMaxWidth = if (row.y == 0 && closePlaceable != null) {
-                    layoutWidth - closeReserveWidth
-                } else {
-                    layoutWidth
-                }.coerceAtLeast(0)
-                var rowX = (rowMaxWidth - row.width).coerceAtLeast(0)
-                for (index in row.startIndex until row.endIndex) {
-                    val placeable = actionPlaceables[index]
-                    placeable.placeRelative(rowX, row.y)
-                    rowX += placeable.width + horizontalSpacing
-                }
-            }
             closePlaceable?.placeRelative(
                 x = layoutWidth - closePlaceable.width,
                 y = 0,
             )
+            var y = closeHeight + closeSpacing
+            actionPlaceables.forEach { placeable ->
+                val x = ((layoutWidth - placeable.width) / 2).coerceAtLeast(0)
+                placeable.placeRelative(x = x, y = y)
+                y += placeable.height + verticalSpacing
+            }
         }
     }
 }
@@ -2641,7 +2598,10 @@ private fun ParticipantsFloatingBar(
                     }
                 }
             }
-            Box(modifier = Modifier.floatingDockActionWidth()) {
+            Box(
+                modifier = Modifier.floatingDockActionWidth(),
+                propagateMinConstraints = useVerticalLayout,
+            ) {
                 Button(
                     onClick = { isSectionMenuExpanded = true },
                     modifier = Modifier.floatingDockActionWidth(minWidth = 120.dp)

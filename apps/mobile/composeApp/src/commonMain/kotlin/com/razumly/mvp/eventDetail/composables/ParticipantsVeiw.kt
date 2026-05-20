@@ -39,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -244,8 +245,6 @@ private data class ParticipantCardListState(
     val animationKey: String,
     val cards: List<ParticipantAnimatedCard>,
     val emptyMessage: String,
-    val showLoading: Boolean = false,
-    val loadingMessage: String? = null,
 )
 
 private data class ParticipantBillingContext(
@@ -355,7 +354,6 @@ fun ParticipantsView(
     val selectedEvent by component.eventWithRelations.collectAsState()
     val currentUser by component.currentUser.collectAsState()
     val startingTeamRegistrationId by component.startingTeamRegistrationId.collectAsState()
-    val participantManagementLoading by component.participantManagementLoading.collectAsState()
     val teamComplianceSummaries by component.teamComplianceSummaries.collectAsState()
     val userComplianceSummaries by component.userComplianceSummaries.collectAsState()
     val participantComplianceLoading by component.participantComplianceLoading.collectAsState()
@@ -464,10 +462,6 @@ fun ParticipantsView(
         visibleDivisionTeams,
         freeAgentUsers,
         visibleParticipants,
-        manageMode,
-        canManageParticipants,
-        participantManagementLoading,
-        participantComplianceLoading,
     ) {
         when (section) {
             ParticipantsSection.TEAMS -> ParticipantCardListState(
@@ -504,10 +498,6 @@ fun ParticipantsView(
                     )
                 },
                 emptyMessage = "No participants yet.",
-                showLoading = manageMode &&
-                    canManageParticipants &&
-                    (participantManagementLoading || participantComplianceLoading),
-                loadingMessage = "Loading registration details...",
             )
         }
     }
@@ -954,64 +944,66 @@ fun ParticipantsView(
         index: Int,
         content: @Composable (ParticipantAnimatedCard) -> Unit,
     ) {
-        val screenWidth = getScreenWidth()
-        var enterReady by remember(card.stableId, phase) {
-            mutableStateOf(phase != ParticipantCardWavePhase.ENTERING)
-        }
-        LaunchedEffect(card.stableId, phase) {
-            if (phase == ParticipantCardWavePhase.ENTERING) {
-                enterReady = true
+        key(card.stableId, phase) {
+            val screenWidth = getScreenWidth()
+            var transitionStarted by remember {
+                mutableStateOf(phase == ParticipantCardWavePhase.VISIBLE)
             }
-        }
-        val rowDelay = participantWaveDelay(index)
-        val targetOffset = when (phase) {
-            ParticipantCardWavePhase.VISIBLE -> 0f
-            ParticipantCardWavePhase.ENTERING -> if (enterReady) 0f else -screenWidth / 4f
-            ParticipantCardWavePhase.EXITING -> screenWidth / 3f
-        }
-        val targetAlpha = when (phase) {
-            ParticipantCardWavePhase.VISIBLE -> 1f
-            ParticipantCardWavePhase.ENTERING -> if (enterReady) 1f else 0f
-            ParticipantCardWavePhase.EXITING -> 0f
-        }
-        val slideDuration = when (phase) {
-            ParticipantCardWavePhase.EXITING -> ParticipantCardSlideOutMillis
-            else -> ParticipantCardSlideInMillis
-        }
-        val fadeDuration = when (phase) {
-            ParticipantCardWavePhase.EXITING -> ParticipantCardFadeOutMillis
-            else -> ParticipantCardFadeInMillis
-        }
-        val fadeDelay = when (phase) {
-            ParticipantCardWavePhase.ENTERING -> ParticipantCardFadeInDelayMillis + rowDelay
-            ParticipantCardWavePhase.EXITING -> rowDelay
-            ParticipantCardWavePhase.VISIBLE -> 0
-        }
-        val animatedOffset by animateFloatAsState(
-            targetValue = targetOffset,
-            animationSpec = tween(
-                durationMillis = slideDuration,
-                delayMillis = if (phase == ParticipantCardWavePhase.VISIBLE) 0 else rowDelay,
-            ),
-            label = "participantCardWaveOffset",
-        )
-        val animatedAlpha by animateFloatAsState(
-            targetValue = targetAlpha,
-            animationSpec = tween(
-                durationMillis = fadeDuration,
-                delayMillis = fadeDelay,
-            ),
-            label = "participantCardWaveAlpha",
-        )
+            LaunchedEffect(Unit) {
+                if (phase != ParticipantCardWavePhase.VISIBLE) {
+                    transitionStarted = true
+                }
+            }
+            val rowDelay = participantWaveDelay(index)
+            val targetOffset = when (phase) {
+                ParticipantCardWavePhase.VISIBLE -> 0f
+                ParticipantCardWavePhase.ENTERING -> if (transitionStarted) 0f else -screenWidth / 4f
+                ParticipantCardWavePhase.EXITING -> if (transitionStarted) screenWidth / 3f else 0f
+            }
+            val targetAlpha = when (phase) {
+                ParticipantCardWavePhase.VISIBLE -> 1f
+                ParticipantCardWavePhase.ENTERING -> if (transitionStarted) 1f else 0f
+                ParticipantCardWavePhase.EXITING -> if (transitionStarted) 0f else 1f
+            }
+            val slideDuration = when (phase) {
+                ParticipantCardWavePhase.EXITING -> ParticipantCardSlideOutMillis
+                else -> ParticipantCardSlideInMillis
+            }
+            val fadeDuration = when (phase) {
+                ParticipantCardWavePhase.EXITING -> ParticipantCardFadeOutMillis
+                else -> ParticipantCardFadeInMillis
+            }
+            val fadeDelay = when (phase) {
+                ParticipantCardWavePhase.ENTERING -> ParticipantCardFadeInDelayMillis + rowDelay
+                ParticipantCardWavePhase.EXITING -> rowDelay
+                ParticipantCardWavePhase.VISIBLE -> 0
+            }
+            val animatedOffset by animateFloatAsState(
+                targetValue = targetOffset,
+                animationSpec = tween(
+                    durationMillis = slideDuration,
+                    delayMillis = if (phase == ParticipantCardWavePhase.VISIBLE) 0 else rowDelay,
+                ),
+                label = "participantCardWaveOffset",
+            )
+            val animatedAlpha by animateFloatAsState(
+                targetValue = targetAlpha,
+                animationSpec = tween(
+                    durationMillis = fadeDuration,
+                    delayMillis = fadeDelay,
+                ),
+                label = "participantCardWaveAlpha",
+            )
 
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .offset(x = animatedOffset.dp)
-                .alpha(animatedAlpha)
-                .padding(horizontal = 12.dp),
-        ) {
-            content(card)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .offset(x = animatedOffset.dp)
+                    .alpha(animatedAlpha)
+                    .padding(horizontal = 12.dp),
+            ) {
+                content(card)
+            }
         }
     }
 
@@ -1106,15 +1098,6 @@ fun ParticipantsView(
             }
         }
 
-        if (participantCardListState.showLoading && participantCardListState.loadingMessage != null) {
-            item(key = "participant-card-loading") {
-                Text(
-                    participantCardListState.loadingMessage,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
         if (displayedParticipantSlots.isEmpty()) {
             item(key = "participant-card-empty") {
                 Text(

@@ -27,8 +27,11 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
+import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
+import com.razumly.mvp.core.data.repositories.EventParticipantManagementSnapshot
 import com.razumly.mvp.core.data.repositories.EventParticipantsSummary
 import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
+import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.FamilyChild
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequest
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequestAction
@@ -1963,6 +1966,63 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
     }
 
     @Test
+    fun eventEntryLoadsRegistrationDetailsAndManageModeReusesThemUntilRefresh() = runTest(testDispatcher) {
+        val host = mobileUser(id = "host_1", firstName = "Host", lastName = "User")
+        val event = Event(
+            id = "event_1",
+            name = "Friday Teams",
+            hostId = host.id,
+            teamSignup = true,
+        )
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = event,
+            host = host,
+            currentUser = host,
+            players = emptyList(),
+            teams = emptyList(),
+            staffInvites = emptyList(),
+        )
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = EventDetailFakeUserRepository(host),
+            fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
+            event = event,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(emptyList(), emptyMap(), emptyMap()),
+            teamRepository = EventDetailFakeTeamRepository(emptyList(), listOf(host)),
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+        advance()
+
+        assertEquals(1, eventRepository.managementSnapshotCallCount)
+        assertEquals(1, eventRepository.teamComplianceCallCount)
+
+        component.startManagingParticipants()
+        advance()
+
+        assertEquals(1, eventRepository.managementSnapshotCallCount)
+        assertEquals(1, eventRepository.teamComplianceCallCount)
+
+        component.stopManagingParticipants()
+        component.startManagingParticipants()
+        advance()
+
+        assertEquals(1, eventRepository.managementSnapshotCallCount)
+        assertEquals(1, eventRepository.teamComplianceCallCount)
+
+        component.refreshEventDetails()
+        advance()
+
+        assertEquals(2, eventRepository.managementSnapshotCallCount)
+        assertEquals(2, eventRepository.teamComplianceCallCount)
+    }
+
+    @Test
     fun invitePlayerToEventByEmail_creates_event_invite_with_name_and_email() = runTest(testDispatcher) {
         val host = mobileUser(id = "host_1", firstName = "Host", lastName = "User")
         val event = Event(
@@ -2055,6 +2115,9 @@ private class EventDetailFakeEventRepository(
     val addedPlayerIds = mutableListOf<String>()
     val addPlayerEvents = mutableListOf<Event>()
     val childRegistrationRequests = mutableListOf<ChildRegistrationRequest>()
+    var managementSnapshotCallCount = 0
+    var teamComplianceCallCount = 0
+    var userComplianceCallCount = 0
 
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> = eventFlow
 
@@ -2186,6 +2249,30 @@ private class EventDetailFakeEventRepository(
                 weeklySelectionRequired = occurrence == null && snapshot == null,
             )
         )
+    }
+
+    override suspend fun getEventParticipantManagementSnapshot(
+        eventId: String,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<EventParticipantManagementSnapshot> {
+        managementSnapshotCallCount += 1
+        return Result.success(EventParticipantManagementSnapshot())
+    }
+
+    override suspend fun getEventTeamCompliance(
+        eventId: String,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<List<EventTeamComplianceSummary>> {
+        teamComplianceCallCount += 1
+        return Result.success(emptyList())
+    }
+
+    override suspend fun getEventUserCompliance(
+        eventId: String,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<List<EventComplianceUserSummary>> {
+        userComplianceCallCount += 1
+        return Result.success(emptyList())
     }
 }
 
