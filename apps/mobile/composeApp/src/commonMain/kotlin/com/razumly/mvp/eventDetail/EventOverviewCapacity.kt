@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.util.isPlaceholderSlot
+import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 
 internal fun Event.visibleTeams(teams: List<TeamWithPlayers>): List<TeamWithPlayers> =
     if (!teamSignup) {
@@ -12,12 +13,18 @@ internal fun Event.visibleTeams(teams: List<TeamWithPlayers>): List<TeamWithPlay
         teams.filterNot { teamWithPlayers -> teamWithPlayers.team.isPlaceholderSlot(eventType) }
     }
 
+internal fun Event.registeredTeamIdsForCapacity(): List<String> =
+    teamIds
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .distinct()
+
 internal fun EventWithFullRelations.resolveOverviewFilledParticipantCount(
     selectedWeeklyOccurrenceSummary: WeeklyOccurrenceSummary? = null,
 ): Int {
     selectedWeeklyOccurrenceSummary?.let { summary -> return summary.participantCount }
     return if (event.teamSignup) {
-        event.visibleTeams(teams).size
+        event.registeredTeamIdsForCapacity().size
     } else {
         event.playerIds
             .map(String::trim)
@@ -32,10 +39,20 @@ internal fun countTeamSignupParticipantsForCapacity(
     teams: List<TeamWithPlayers>,
     selectedDivision: DivisionDetail? = null,
 ): Int {
-    val visibleTeams = event.visibleTeams(teams)
+    val registeredTeamIds = event.registeredTeamIdsForCapacity()
     val targetDivision = selectedDivision
     if (event.singleDivision || targetDivision == null) {
-        return visibleTeams.size
+        return registeredTeamIds.size
     }
-    return visibleTeams.count { teamWithPlayers -> teamWithPlayers.team.matchesEventDivision(targetDivision) }
+    val registeredTeamIdSet = registeredTeamIds.toSet()
+    val targetDivisionId = targetDivision.id.normalizeDivisionIdentifier()
+    val assignedTeamIds = event.divisionDetails
+        .firstOrNull { detail -> detail.id.normalizeDivisionIdentifier() == targetDivisionId }
+        ?.teamIds
+        .orEmpty()
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .toSet()
+
+    return assignedTeamIds.count(registeredTeamIdSet::contains)
 }

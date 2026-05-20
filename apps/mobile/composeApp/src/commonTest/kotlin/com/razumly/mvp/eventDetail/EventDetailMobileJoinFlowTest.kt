@@ -295,7 +295,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             assertTrue(fieldRepository.requestedFieldIds.any { it == listOf(field.id) })
             assertTrue(fieldRepository.requestedTimeSlotIds.any { it == listOf(slot.id) })
             assertTrue(matchRepository.requestedTournamentIds.contains(initialEvent.id))
-            assertEquals(listOf(initialEvent.id), eventRepository.staffInviteRequests)
+            assertTrue(eventRepository.staffInviteRequests.isEmpty())
 
             component.joinEvent()
             advance()
@@ -308,7 +308,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             assertEquals(listOf(slot.id), component.eventWithRelations.value.timeSlots.map(TimeSlot::id))
             assertEquals(listOf(field.id), component.eventFields.value.map { it.field.id })
             assertEquals(staffInvites.map(Invite::id), component.eventWithRelations.value.staffInvites.map(Invite::id))
-            assertEquals(listOf(initialEvent.id), eventRepository.staffInviteRequests)
+            assertTrue(eventRepository.staffInviteRequests.isEmpty())
         }
 
     @Test
@@ -1282,6 +1282,10 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
                 participantCapacity = initialEvent.maxParticipants,
             ),
         )
+        val teamRepository = EventDetailFakeTeamRepository(
+            teams = listOf(team),
+            users = listOf(host, currentUser),
+        )
         val component = DefaultEventDetailComponent(
             componentContext = createTestComponentContext(),
             userRepository = EventDetailFakeUserRepository(currentUser),
@@ -1299,19 +1303,23 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
                 fieldsById = mapOf(field.id to field),
                 teamsById = mapOf(team.id to team),
             ),
-            teamRepository = EventDetailFakeTeamRepository(
-                teams = listOf(team),
-                users = listOf(host, currentUser),
-            ),
+            teamRepository = teamRepository,
             sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
             imageRepository = CreateEvent_FakeImagesRepository(),
             navigationHandler = NoopNavigationHandler,
         )
         component.setLoadingHandler(EventDetailTestLoadingHandler())
 
+        assertTrue(component.eventTeamsAndParticipantsLoading.value)
+
         advance()
 
         assertEquals(1, eventRepository.syncCallCount)
+        assertFalse(component.eventTeamsAndParticipantsLoading.value)
+        assertEquals(1, component.overviewParticipantSummary.value?.participantCount)
+        assertEquals(initialEvent.maxParticipants, component.overviewParticipantSummary.value?.participantCapacity)
+        assertTrue(teamRepository.getTeamsRequests.isEmpty())
+        assertTrue(teamRepository.getTeamsFlowRequests.any { request -> request == listOf(team.id) })
         assertEquals(listOf(team.id), component.eventWithRelations.value.teams.map { it.team.id })
         assertEquals(setOf(team.id), component.divisionTeams.value.keys)
 
@@ -2122,6 +2130,8 @@ private class EventDetailFakeEventRepository(
 
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> = eventFlow
 
+    override fun getCachedEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> = eventFlow
+
     override suspend fun getEvent(eventId: String): Result<Event> {
         refreshRequests += eventId
         return Result.success(eventFlow.value.getOrThrow().event)
@@ -2251,7 +2261,12 @@ private class EventDetailFakeEventRepository(
                 userComplianceCallCount += 1
             }
         }
-        return Result.success(EventDetailSyncResult(participants = participantResult))
+        return Result.success(
+            EventDetailSyncResult(
+                participants = participantResult,
+                staffInvites = staffInvites,
+            )
+        )
     }
 
     override suspend fun getEventParticipantsSummary(
@@ -2303,8 +2318,10 @@ private class EventDetailFakeFieldRepository(
     val requestedFieldIds = mutableListOf<List<String>>()
     val requestedTimeSlotIds = mutableListOf<List<String>>()
 
-    override fun getFieldsWithMatchesFlow(ids: List<String>): Flow<List<FieldWithMatches>> =
-        fieldMatchesFlow
+    override fun getFieldsWithMatchesFlow(ids: List<String>): Flow<List<FieldWithMatches>> {
+        requestedFieldIds += ids
+        return fieldMatchesFlow
+    }
 
     override suspend fun getFields(ids: List<String>): Result<List<Field>> {
         requestedFieldIds += ids
@@ -2348,6 +2365,11 @@ private class EventDetailFakeMatchRepository(
         return matchFlow
     }
 
+    override fun getCachedMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>> {
+        requestedTournamentIds += tournamentId
+        return matchFlow
+    }
+
     override suspend fun getMatchesOfTournament(tournamentId: String): Result<List<MatchMVP>> {
         requestedTournamentIds += tournamentId
         return Result.success(matchesByTournamentId[tournamentId].orEmpty())
@@ -2382,6 +2404,8 @@ private class EventDetailFakeTeamRepository(
         .mapValues { (_, results) -> results.toMutableList() }
         .toMutableMap()
     val registeredTeamIds = mutableListOf<String>()
+    val getTeamsRequests = mutableListOf<List<String>>()
+    val getTeamsFlowRequests = mutableListOf<List<String>>()
 
     private fun buildTeamRelations(): List<TeamWithPlayers> = teamsById.values.map { team ->
         TeamWithPlayers(
@@ -2393,6 +2417,7 @@ private class EventDetailFakeTeamRepository(
     }
 
     override fun getTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> {
+        getTeamsFlowRequests += ids
         val requested = ids.toSet()
         return flowOf(Result.success(buildTeamRelations().filter { it.team.id in requested }))
     }
@@ -2401,6 +2426,7 @@ private class EventDetailFakeTeamRepository(
         Result.success(buildTeamRelations().first { it.team.id == teamId })
 
     override suspend fun getTeams(ids: List<String>): Result<List<Team>> {
+        getTeamsRequests += ids
         val requested = ids.toSet()
         return Result.success(teamsById.values.filter { it.id in requested })
     }

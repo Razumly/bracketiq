@@ -66,6 +66,7 @@ import com.razumly.mvp.core.data.repositories.EventParticipantRefundMode
 import com.razumly.mvp.core.data.repositories.EventParticipantManagementSnapshot
 import com.razumly.mvp.core.data.repositories.EventParticipantDivisionWarning
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
+import com.razumly.mvp.core.data.repositories.EventParticipantsSummary
 import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
@@ -141,6 +142,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val selectedWeeklyOccurrence: StateFlow<SelectedWeeklyOccurrenceState?>
     val selectedWeeklyOccurrenceSummary: StateFlow<WeeklyOccurrenceSummary?>
     val weeklyOccurrenceSummaries: StateFlow<Map<String, WeeklyOccurrenceSummary>>
+    val overviewParticipantSummary: StateFlow<EventParticipantsSummary?>
     val eventFields: StateFlow<List<FieldWithMatches>>
     val divisionFields: StateFlow<List<FieldWithMatches>>
     val rounds: StateFlow<List<List<MatchWithRelations?>>>
@@ -735,6 +737,9 @@ class DefaultEventDetailComponent(
     private fun normalizeToken(value: String?): String? =
         value?.trim()?.takeIf(String::isNotBlank)
 
+    private fun Iterable<String>.normalizedTeamIds(): List<String> =
+        map(String::trim).filter(String::isNotBlank).distinct()
+
     private fun Event.playoffPlacementDivisionIdsNormalized(): Set<String> {
         val mappedPlayoffIds = divisionDetails
             .flatMap { detail -> detail.playoffPlacementDivisionIds }
@@ -910,15 +915,19 @@ class DefaultEventDetailComponent(
         .distinctUntilChanged()
         .stateIn(scope, SharingStarted.Eagerly, eventRelations.value.host)
 
-    private val eventRelationTeamIds: StateFlow<List<String>> = eventRelations
-        .map { relations ->
-            relations.teams
-                .map { team -> team.id.trim() }
-                .filter(String::isNotBlank)
-                .distinct()
+    private val eventRelationTeamIds: StateFlow<List<String>> = combine(
+        selectedEvent,
+        eventRelations,
+    ) { selected, relations ->
+        val registeredTeamIds = selected.teamIds.normalizedTeamIds()
+        if (selected.teamSignup) {
+            registeredTeamIds
+        } else {
+            (registeredTeamIds + relations.teams.map { team -> team.id }).normalizedTeamIds()
         }
+    }
         .distinctUntilChanged()
-        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+        .stateIn(scope, SharingStarted.Eagerly, event.teamIds.normalizedTeamIds())
 
     private val eventTimeSlots: StateFlow<List<TimeSlot>> = selectedEvent
         .map { selected ->
@@ -1022,7 +1031,7 @@ class DefaultEventDetailComponent(
             if (relationTeamIds.isEmpty()) {
                 flowOf(emptyList())
             } else {
-                teamRepository.getCachedTeamsFlow(relationTeamIds).map { result ->
+                teamRepository.getTeamsFlow(relationTeamIds).map { result ->
                     result.getOrElse {
                         _errorState.value = ErrorMessage("Failed to load teams: ${it.userMessage()}")
                         emptyList()
@@ -1101,6 +1110,9 @@ class DefaultEventDetailComponent(
     private val _weeklyOccurrenceSummaries = MutableStateFlow<Map<String, WeeklyOccurrenceSummary>>(emptyMap())
     override val weeklyOccurrenceSummaries = _weeklyOccurrenceSummaries.asStateFlow()
 
+    private val _overviewParticipantSummary = MutableStateFlow<EventParticipantsSummary?>(null)
+    override val overviewParticipantSummary = _overviewParticipantSummary.asStateFlow()
+
     private val eventFieldIds = combine(
         selectedEvent,
         eventWithRelations.map { relations ->
@@ -1167,7 +1179,9 @@ class DefaultEventDetailComponent(
     private val _showDetails = MutableStateFlow(false)
     override val showDetails = _showDetails.asStateFlow()
 
-    private val _eventTeamsAndParticipantsLoading = MutableStateFlow(false)
+    private val _eventTeamsAndParticipantsLoading = MutableStateFlow(
+        event.id.isNotBlank() && event.eventType != EventType.WEEKLY_EVENT
+    )
     override val eventTeamsAndParticipantsLoading = _eventTeamsAndParticipantsLoading.asStateFlow()
 
     private val _participantManagementSnapshot = MutableStateFlow(EventParticipantManagementSnapshot())
@@ -1261,10 +1275,17 @@ class DefaultEventDetailComponent(
         eventWithRelations,
         selectedDivision,
         selectedWeeklyOccurrenceSummary,
-    ) { relations, division, weeklySummary ->
+        overviewParticipantSummary,
+    ) { relations, division, weeklySummary, overviewSummary ->
         if (isWeeklyParentEvent(relations.event)) {
             val capacity = weeklySummary?.participantCapacity ?: return@combine false
             return@combine weeklySummary.participantCount >= capacity && capacity > 0
+        }
+        if ((relations.event.singleDivision || division == null) && overviewSummary != null) {
+            val capacity = overviewSummary.participantCapacity
+            if (capacity != null && capacity > 0) {
+                return@combine overviewSummary.participantCount >= capacity
+            }
         }
         checkEventIsFull(relations.event, relations.teams, division)
     }.stateIn(scope, SharingStarted.Eagerly, checkEventIsFull(event, emptyList(), null))
@@ -1374,6 +1395,7 @@ class DefaultEventDetailComponent(
                         _selectedWeeklyOccurrence.value = null
                         _selectedWeeklyOccurrenceSummary.value = null
                     }
+                    _overviewParticipantSummary.value = null
                 }
         }
         scope.launch {
@@ -1385,6 +1407,7 @@ class DefaultEventDetailComponent(
                         _eventTeamsAndParticipantsLoading.value = false
                         return@collectLatest
                     }
+                    _overviewParticipantSummary.value = null
                     _eventTeamsAndParticipantsLoading.value = true
                     try {
                         prefetchNonWeeklyParticipants(selectedEvent.value)
@@ -1794,6 +1817,18 @@ class DefaultEventDetailComponent(
 
     private fun applyParticipantSyncResult(result: EventParticipantsSyncResult) {
         _participantDivisionWarnings.value = result.divisionWarnings
+        _overviewParticipantSummary.value = if (
+            isWeeklyParentEvent(result.event) ||
+            result.weeklySelectionRequired
+        ) {
+            null
+        } else {
+            EventParticipantsSummary(
+                participantCount = result.participantCount,
+                participantCapacity = result.participantCapacity,
+                weeklySelectionRequired = false,
+            )
+        }
     }
 
     private fun markManagedBootstrapRequested(

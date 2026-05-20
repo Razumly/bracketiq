@@ -152,6 +152,7 @@ import com.razumly.mvp.core.data.dataTypes.withDoTeamsOfficiate
 import com.razumly.mvp.core.data.dataTypes.withOfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
+import com.razumly.mvp.core.data.repositories.EventParticipantsSummary
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
@@ -1410,13 +1411,21 @@ private fun EventOverviewSections(
     showFullnessSummary: Boolean,
     selectedWeeklyOccurrenceLabel: String? = null,
     selectedWeeklyOccurrenceSummary: WeeklyOccurrenceSummary? = null,
+    overviewParticipantSummary: EventParticipantsSummary? = null,
     showOpenDetailsAction: Boolean,
     onOpenDetails: () -> Unit,
 ) {
     val event = eventWithRelations.event
     val showRosterSections = shouldShowOverviewRosterSections(event)
-    val capacity = selectedWeeklyOccurrenceSummary?.participantCapacity ?: event.resolveParticipantCapacity()
-    val filled = eventWithRelations.resolveOverviewFilledParticipantCount(selectedWeeklyOccurrenceSummary)
+    val loadedParticipantSummary = selectedWeeklyOccurrenceSummary?.let { summary ->
+        EventParticipantsSummary(
+            participantCount = summary.participantCount,
+            participantCapacity = summary.participantCapacity,
+        )
+    } ?: overviewParticipantSummary
+    val capacity = loadedParticipantSummary?.participantCapacity ?: event.resolveParticipantCapacity()
+    val filled = loadedParticipantSummary?.participantCount
+        ?: eventWithRelations.resolveOverviewFilledParticipantCount()
     val spotsLeft = if (capacity > 0) (capacity - filled).coerceAtLeast(0) else 0
     val progress = if (capacity > 0) (filled.toFloat() / capacity.toFloat()).coerceIn(0f, 1f) else 0f
     val freeAgentIds = remember(event.freeAgentIds) { event.freeAgentIds.distinct() }
@@ -1424,21 +1433,33 @@ private fun EventOverviewSections(
     val visibleTeams = remember(event.eventType, event.teamSignup, eventWithRelations.teams) {
         event.visibleTeams(eventWithRelations.teams)
     }
+    val registeredTeamIds = remember(event.teamIds) {
+        event.registeredTeamIdsForCapacity()
+    }
+    val expectedTeamCount = if (event.teamSignup) {
+        registeredTeamIds.size.takeIf { count -> count > 0 }
+            ?: loadedParticipantSummary?.participantCount
+            ?: 0
+    } else {
+        0
+    }
+    val teamRosterHydrating = event.teamSignup &&
+        expectedTeamCount > 0 &&
+        visibleTeams.size < expectedTeamCount
     val teamCapacityLoading = event.teamSignup &&
         teamsAndParticipantsLoading &&
-        visibleTeams.isEmpty() &&
-        selectedWeeklyOccurrenceSummary == null
+        registeredTeamIds.isEmpty() &&
+        loadedParticipantSummary == null
     val divisionCapacitySummaries = remember(
         event.id,
         event.teamSignup,
         event.singleDivision,
-        visibleTeams,
+        registeredTeamIds,
         event.divisionDetails,
     ) {
         buildDivisionCapacitySummaries(
             event = event,
             divisionDetails = event.divisionDetails,
-            teams = visibleTeams,
         )
     }
     var showDivisionCapacities by rememberSaveable(event.id) { mutableStateOf(false) }
@@ -1530,7 +1551,10 @@ private fun EventOverviewSections(
                         title = if (event.teamSignup) "Free Agents" else "Waitlist",
                         value = if (event.teamSignup) freeAgentIds.size.toString() else waitlistIds.size.toString(),
                     )
-                    CapacityStat(title = "Left", value = spotsLeft.toString())
+                    CapacityStat(
+                        title = "Left",
+                        value = if (teamCapacityLoading) "Loading" else spotsLeft.toString(),
+                    )
                 }
                 if (teamCapacityLoading) {
                     LinearProgressIndicator(
@@ -1558,7 +1582,7 @@ private fun EventOverviewSections(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                if (selectedWeeklyOccurrenceSummary == null && divisionCapacitySummaries.isNotEmpty()) {
+                if (!teamCapacityLoading && selectedWeeklyOccurrenceSummary == null && divisionCapacitySummaries.isNotEmpty()) {
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1624,9 +1648,9 @@ private fun EventOverviewSections(
         }
         }
         if (event.teamSignup && showRosterSections) {
-            if (teamsAndParticipantsLoading) {
+            if (teamRosterHydrating) {
                 SectionHeader(
-                    title = "Teams",
+                    title = "Teams ($expectedTeamCount)",
                     action = "Loading",
                     onAction = {},
                     actionEnabled = false,
@@ -3285,6 +3309,7 @@ fun EventDetailScreen(
     val selectedWeeklyOccurrence by component.selectedWeeklyOccurrence.collectAsState()
     val selectedWeeklyOccurrenceSummary by component.selectedWeeklyOccurrenceSummary.collectAsState()
     val weeklyOccurrenceSummaries by component.weeklyOccurrenceSummaries.collectAsState()
+    val overviewParticipantSummary by component.overviewParticipantSummary.collectAsState()
     val losersBracket by component.losersBracket.collectAsState()
     val showTeamDialog by component.showTeamSelectionDialog.collectAsState()
     val showMatchEditDialog by component.showMatchEditDialog.collectAsState()
@@ -4602,6 +4627,7 @@ fun EventDetailScreen(
                                         showFullnessSummary = !isWeeklyParentEvent || selectedWeeklyOccurrenceSummary != null,
                                         selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
                                         selectedWeeklyOccurrenceSummary = selectedWeeklyOccurrenceSummary,
+                                        overviewParticipantSummary = overviewParticipantSummary,
                                         showOpenDetailsAction = showOverviewOpenDetailsAction,
                                         onOpenDetails = component::viewEvent
                                     )

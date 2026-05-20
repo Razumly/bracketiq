@@ -2,8 +2,6 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.Team
-import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
@@ -115,55 +113,37 @@ private fun List<DivisionDetail>.findCapacityDetailByDivisionId(divisionId: Stri
     }.singleOrNull()
 }
 
-private fun Team.exactDivisionIdentifier(): String =
-    division.normalizeDivisionIdentifier()
-
-private fun DivisionDetail.exactDivisionIdentifier(): String =
-    id.normalizeDivisionIdentifier()
-
-private fun Team.matchesExactEventDivision(detail: DivisionDetail): Boolean {
-    val exactDivision = exactDivisionIdentifier()
-    val detailDivision = detail.exactDivisionIdentifier()
-    return exactDivision.isNotBlank() &&
-        detailDivision.isNotBlank() &&
-        exactDivision == detailDivision
-}
-
-private fun DivisionCapacityTarget.matchesExactTeamDivision(team: Team): Boolean =
-    matchDetails.any { detail -> team.matchesExactEventDivision(detail) } ||
-        team.matchesExactEventDivision(detail)
+private fun DivisionCapacityTarget.registeredTeamIds(
+    registeredTeamIds: Set<String>,
+): Set<String> =
+    (matchDetails + detail)
+        .flatMap { detail -> detail.teamIds }
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .filter(registeredTeamIds::contains)
+        .toSet()
 
 internal fun buildDivisionCapacitySummaries(
     event: Event,
     divisionDetails: List<DivisionDetail>,
-    teams: List<TeamWithPlayers>,
 ): List<DivisionCapacitySummary> {
     if (!event.teamSignup || event.singleDivision || divisionDetails.isEmpty()) {
         return emptyList()
     }
 
-    val loadedTeams = event.visibleTeams(teams)
-        .map { teamWithPlayers -> teamWithPlayers.team }
-        .filter { team -> team.id.trim().isNotBlank() }
-        .distinctBy { team -> team.id.trim() }
+    val registeredTeamIds = event.registeredTeamIdsForCapacity().toSet()
     val capacityTargets = buildDivisionCapacityTargets(event, divisionDetails)
     val teamCountsByDivision = mutableMapOf<String, Int>()
-    var unassignedTeamCount = 0
+    val assignedTeamIds = mutableSetOf<String>()
 
-    loadedTeams.forEach { team ->
-        val matchingTarget = capacityTargets.firstOrNull { target ->
-            target.matchesExactTeamDivision(team)
+    capacityTargets.forEach { target ->
+        val divisionId = resolveDivisionIdentifier(target.detail)
+        if (divisionId.isBlank()) {
+            return@forEach
         }
-        if (matchingTarget == null) {
-            unassignedTeamCount += 1
-        } else {
-            val divisionId = resolveDivisionIdentifier(matchingTarget.detail)
-            if (divisionId.isBlank()) {
-                unassignedTeamCount += 1
-            } else {
-                teamCountsByDivision[divisionId] = (teamCountsByDivision[divisionId] ?: 0) + 1
-            }
-        }
+        val targetTeamIds = target.registeredTeamIds(registeredTeamIds)
+        assignedTeamIds += targetTeamIds
+        teamCountsByDivision[divisionId] = targetTeamIds.size
     }
 
     val capacityDetails = capacityTargets.map { target -> target.detail }
@@ -186,6 +166,7 @@ internal fun buildDivisionCapacitySummaries(
 
     if (summaries.isEmpty()) return emptyList()
 
+    val unassignedTeamCount = (registeredTeamIds - assignedTeamIds).size
     return if (unassignedTeamCount > 0) {
         summaries + DivisionCapacitySummary(
             id = "unassigned",

@@ -314,6 +314,9 @@ private fun Map<String, List<String>>.normalizeStringListMap(): Map<String, List
         normalizedKey to values.map(String::trim).filter(String::isNotBlank).distinct()
     }.toMap()
 
+private fun Team.isEventTeamSnapshot(): Boolean =
+    !kind.isNullOrBlank() || !parentTeamId.isNullOrBlank()
+
 class TeamRepository(
     private val api: MvpApiClient,
     private val databaseService: DatabaseService,
@@ -388,12 +391,22 @@ class TeamRepository(
         val teamIds = ids.distinct().filter(String::isNotBlank)
         if (teamIds.isEmpty()) return Result.success(emptyList())
 
-        return multiResponse(
-            getRemoteData = { fetchRemoteTeamsByIds(teamIds) },
-            getLocalData = { databaseService.getTeamDao.getTeams(teamIds) },
-            saveData = { teams -> databaseService.getTeamDao.upsertTeamsWithRelations(teams) },
-            deleteData = { staleIds -> databaseService.getTeamDao.deleteTeamsByIds(staleIds) },
-        )
+        return runCatching {
+            val remoteTeams = fetchRemoteTeamsByIds(teamIds)
+            val localTeams = databaseService.getTeamDao.getTeams(teamIds)
+            if (remoteTeams.isNotEmpty()) {
+                databaseService.getTeamDao.upsertTeamsWithRelations(remoteTeams)
+            }
+
+            val teamsById = (localTeams + remoteTeams)
+                .mapNotNull { team ->
+                    team.id.trim()
+                        .takeIf(String::isNotBlank)
+                        ?.let { teamId -> teamId to team }
+                }
+                .toMap()
+            teamIds.mapNotNull(teamsById::get)
+        }
     }
 
     override suspend fun getTeamsWithPlayers(ids: List<String>): Result<List<TeamWithPlayers>> =
@@ -722,7 +735,8 @@ class TeamRepository(
     }
 
     override fun getTeamsWithPlayersFlow(id: String): Flow<Result<List<TeamWithPlayers>>> {
-        val localTeamsFlow = databaseService.getTeamDao.getTeamsForUserFlow(id).map { Result.success(it) }
+        val localTeamsFlow = databaseService.getTeamDao.getTeamsForUserFlow(id)
+            .map { teams -> Result.success(teams.filterNot { it.team.isEventTeamSnapshot() }) }
 
         scope.launch {
             setTeamsLoading(userId = id, isLoading = true)
@@ -744,12 +758,22 @@ class TeamRepository(
     }
 
     private suspend fun fetchRemoteTeamsForUser(userId: String): Result<List<Team>> {
-        return multiResponse(
-            getRemoteData = { fetchRemoteTeamsByMembership(userId) },
-            getLocalData = { databaseService.getTeamDao.getTeamsForUser(userId) },
-            saveData = { teams -> databaseService.getTeamDao.upsertTeamsWithRelations(teams) },
-            deleteData = { staleIds -> databaseService.getTeamDao.deleteTeamsByIds(staleIds) },
-        )
+        return runCatching {
+            val remoteTeams = fetchRemoteTeamsByMembership(userId)
+            val localCanonicalTeams = databaseService.getTeamDao.getTeamsForUser(userId)
+                .filterNot(Team::isEventTeamSnapshot)
+            val remoteIds = remoteTeams.map(Team::id).toSet()
+            val staleCanonicalIds = localCanonicalTeams
+                .map(Team::id)
+                .filter { teamId -> teamId !in remoteIds }
+            if (staleCanonicalIds.isNotEmpty()) {
+                databaseService.getTeamDao.deleteTeamsByIds(staleCanonicalIds)
+            }
+            if (remoteTeams.isNotEmpty()) {
+                databaseService.getTeamDao.upsertTeamsWithRelations(remoteTeams)
+            }
+            remoteTeams
+        }
     }
 
     private fun setTeamsLoading(userId: String, isLoading: Boolean) {

@@ -404,6 +404,49 @@ class TeamRepositoryTeamsFetchTest {
     }
 
     @Test
+    fun getTeams_keeps_cached_requested_ids_when_remote_batch_is_partial() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        teamDao.upsertTeam(testTeam(id = "t2", name = "Cached Team 2"))
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+
+        val engine = MockEngine { request ->
+            assertEquals("ids=t1,t2&limit=200", request.url.encodedQuery)
+            respond(
+                content = """
+                    {
+                      "teams": [
+                        {
+                          "id": "t1",
+                          "name": "Team 1",
+                          "division": null,
+                          "playerIds": ["u1"],
+                          "captainId": "u1",
+                          "pending": [],
+                          "teamSize": 2
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        val teams = repo.getTeams(listOf("t1", "t2")).getOrThrow()
+
+        assertEquals(listOf("t1", "t2"), teams.map(Team::id))
+        assertEquals(listOf("t1", "t2"), teamDao.getTeams(listOf("t1", "t2")).map(Team::id))
+    }
+
+    @Test
     fun searchTeamsForEventInvite_empty_query_returns_empty_without_fetch() = runTest {
         val tokenStore = InMemoryAuthTokenStore("t123")
         val db = FakeDatabaseService(FakeTeamDao())
@@ -923,6 +966,72 @@ class TeamRepositoryTeamsFetchTest {
     }
 
     @Test
+    fun getTeamsWithPlayersFlow_does_not_delete_event_team_snapshots_for_user() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val userId = "u_manager"
+        teamDao.upsertTeam(testTeam(id = "stale_canonical", managerId = userId))
+        teamDao.upsertTeam(
+            testTeam(
+                id = "event_team_1",
+                name = "Event Team",
+                kind = "REGISTERED",
+                parentTeamId = "canonical_team_1",
+                managerId = userId,
+            )
+        )
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/teams", request.url.encodedPath)
+            assertEquals(userId, request.url.parameters["playerId"])
+            assertEquals(userId, request.url.parameters["managerId"])
+            respond(
+                content = """
+                    {
+                      "teams": [
+                        {
+                          "id": "canonical_team_1",
+                          "name": "Canonical Team",
+                          "division": null,
+                          "playerIds": [],
+                          "captainId": "u_other",
+                          "managerId": "u_manager",
+                          "pending": [],
+                          "teamSize": 2
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        repo.getTeamsWithPlayersFlow(userId).first()
+
+        for (attempt in 0 until 100) {
+            if (teamDao.getTeams(listOf("canonical_team_1")).isNotEmpty()) {
+                break
+            }
+            withContext(Dispatchers.Default) {
+                delay(10)
+            }
+        }
+
+        assertTrue(teamDao.getTeams(listOf("stale_canonical")).isEmpty())
+        assertEquals(listOf("event_team_1"), teamDao.getTeams(listOf("event_team_1")).map(Team::id))
+        assertEquals(listOf("canonical_team_1"), teamDao.getTeams(listOf("canonical_team_1")).map(Team::id))
+    }
+
+    @Test
     fun getTeamsByOrganization_uses_organization_query_param_and_returns_cached_relations() = runTest {
         val tokenStore = InMemoryAuthTokenStore("t123")
         val teamDao = FakeTeamDao()
@@ -1186,12 +1295,17 @@ private fun testTeam(
     id: String = "team_1",
     name: String = "Pacific Spike Volleyball",
     captainId: String = "captain_1",
+    managerId: String? = captainId,
+    kind: String? = null,
+    parentTeamId: String? = null,
     playerIds: List<String> = listOf(captainId),
 ): Team = Team(
     division = "Open",
     name = name,
+    kind = kind,
     captainId = captainId,
-    managerId = captainId,
+    managerId = managerId,
+    parentTeamId = parentTeamId,
     playerIds = playerIds,
     pending = emptyList(),
     teamSize = 6,

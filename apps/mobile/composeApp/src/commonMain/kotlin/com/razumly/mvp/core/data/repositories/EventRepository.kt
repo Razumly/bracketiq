@@ -1259,6 +1259,7 @@ class EventRepository(
         persistEventRelations(
             event = mergedEvent,
             allowWeeklyParticipantRoster = true,
+            preloadedTeams = teams,
         )
 
         return EventParticipantsSyncResult(
@@ -2306,12 +2307,39 @@ class EventRepository(
     private suspend fun persistEventRelations(
         event: Event,
         allowWeeklyParticipantRoster: Boolean = false,
+        preloadedTeams: List<Team> = emptyList(),
     ) {
         if (event.eventType == EventType.WEEKLY_EVENT && !allowWeeklyParticipantRoster) {
             return
         }
-        val teams = if (event.teamIds.isNotEmpty()) {
-            teamRepository.getTeams(event.teamIds).getOrThrow()
+        val teamIds = event.teamIds
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+        val teams = if (teamIds.isNotEmpty()) {
+            val preloadedById = preloadedTeams
+                .mapNotNull { team ->
+                    team.id.trim()
+                        .takeIf(String::isNotBlank)
+                        ?.lowercase()
+                        ?.let { teamId -> teamId to team }
+                }
+                .toMap()
+            val missingTeamIds = teamIds.filter { teamId -> preloadedById[teamId.lowercase()] == null }
+            val fetchedTeams = if (missingTeamIds.isNotEmpty()) {
+                teamRepository.getTeams(missingTeamIds).getOrThrow()
+            } else {
+                emptyList()
+            }
+            val teamsById = (preloadedTeams + fetchedTeams)
+                .mapNotNull { team ->
+                    team.id.trim()
+                        .takeIf(String::isNotBlank)
+                        ?.lowercase()
+                        ?.let { teamId -> teamId to team }
+                }
+                .toMap()
+            teamIds.mapNotNull { teamId -> teamsById[teamId.lowercase()] }
         } else {
             emptyList()
         }

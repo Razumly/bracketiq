@@ -13,12 +13,13 @@ import kotlin.test.assertEquals
 
 class EventOverviewCapacityTest {
     @Test
-    fun resolveOverviewFilledParticipantCount_teamSignup_excludesPlaceholderTeams() {
+    fun resolveOverviewFilledParticipantCount_teamSignup_usesRegisteredTeamIds() {
         val relations = EventWithFullRelations(
             event = Event(
                 eventType = EventType.LEAGUE,
                 teamSignup = true,
                 maxParticipants = 5,
+                teamIds = listOf("team-1", "team-2", "team-3"),
             ),
             players = emptyList(),
             matches = emptyList(),
@@ -57,11 +58,12 @@ class EventOverviewCapacityTest {
     }
 
     @Test
-    fun countTeamSignupParticipantsForCapacity_singleDivision_excludesPlaceholderTeams() {
+    fun countTeamSignupParticipantsForCapacity_singleDivision_usesRegisteredTeamIds() {
         val event = Event(
             eventType = EventType.LEAGUE,
             teamSignup = true,
             singleDivision = true,
+            teamIds = listOf("team-1", "team-2", "team-3"),
         )
         val teams = listOf(
             buildTeamWithPlayers("team-1"),
@@ -75,11 +77,21 @@ class EventOverviewCapacityTest {
     }
 
     @Test
-    fun countTeamSignupParticipantsForCapacity_multiDivision_filtersPlaceholdersBeforeDivisionCount() {
+    fun countTeamSignupParticipantsForCapacity_multiDivision_usesRegisteredDivisionAssignments() {
         val event = Event(
             eventType = EventType.LEAGUE,
             teamSignup = true,
             singleDivision = false,
+            teamIds = listOf("team-1", "team-3"),
+            divisions = listOf("open"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "open",
+                    key = "open",
+                    name = "Open",
+                    teamIds = listOf("team-1", "team-2"),
+                ),
+            ),
         )
         val selectedDivision = DivisionDetail(
             id = "open",
@@ -96,7 +108,7 @@ class EventOverviewCapacityTest {
     }
 
     @Test
-    fun countTeamSignupParticipantsForCapacity_multiDivision_matchesTeamDivisionTypeMetadata() {
+    fun countTeamSignupParticipantsForCapacity_multiDivision_doesNotFallbackToTeamDivisionTypeMetadata() {
         val eventId = "event-1"
         val divisionTypeId = buildCombinedDivisionTypeId(
             skillDivisionTypeId = "open",
@@ -116,6 +128,9 @@ class EventOverviewCapacityTest {
             eventType = EventType.LEAGUE,
             teamSignup = true,
             singleDivision = false,
+            teamIds = listOf("team-1", "team-2"),
+            divisions = listOf(selectedDivision.id),
+            divisionDetails = listOf(selectedDivision.copy(teamIds = emptyList())),
         )
         val teams = listOf(
             buildTeamWithPlayers(
@@ -135,7 +150,7 @@ class EventOverviewCapacityTest {
             ),
         )
 
-        assertEquals(1, countTeamSignupParticipantsForCapacity(event, teams, selectedDivision))
+        assertEquals(0, countTeamSignupParticipantsForCapacity(event, teams, selectedDivision))
     }
 
     private fun buildTeamWithPlayers(
