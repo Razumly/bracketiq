@@ -15,6 +15,7 @@ actual class UrlHandler(private val context: Context) {
             val scheme = targetUri.scheme?.lowercase()
             if (scheme == "http" || scheme == "https") {
                 val customTabsIntent = CustomTabsIntent.Builder().build()
+                customTabsIntent.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 customTabsIntent.launchUrl(context, targetUri)
             } else {
                 val intent = Intent(Intent.ACTION_VIEW, targetUri).apply {
