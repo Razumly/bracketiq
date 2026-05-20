@@ -2139,10 +2139,20 @@ class EventRepositoryHttpTest {
                             "freeAgentIds": [],
                             "divisions": []
                           },
-                          "teams": [{"id":"canonical_t1","name":"Team One","captainId":"u1","managerId":"u1","playerIds":["u1"],"teamSize":2,"division":"e1__division__advanced"}],
-                          "users": [],
-                          "participantCount": 1
-                        }
+	                          "teams": [{"id":"canonical_t1","name":"Team One","captainId":"u1","managerId":"u1","playerIds":["u1"],"teamSize":2,"division":"e1__division__advanced"}],
+	                          "users": [],
+	                          "participantCount": 1,
+	                          "divisionWarnings": [
+	                            {
+	                              "divisionId": "e1__division__advanced",
+	                              "code": "OVER_CAPACITY",
+	                              "message": "This division has 2 teams, which is over the 1-team limit.",
+	                              "filledCount": 2,
+	                              "slotCount": 2,
+	                              "maxTeams": 1
+	                            }
+	                          ]
+	                        }
                     """.trimIndent(),
                     status = HttpStatusCode.OK,
                     headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
@@ -2190,7 +2200,7 @@ class EventRepositoryHttpTest {
             ),
         )
 
-        repo.moveTeamParticipantDivision(
+        val result = repo.moveTeamParticipantDivision(
             event = event,
             team = team,
             preferredDivisionId = divisionAdvancedId,
@@ -2202,6 +2212,8 @@ class EventRepositoryHttpTest {
         assertTrue(capturedBody.contains("\"divisionId\":\"$divisionAdvancedId\""))
         assertTrue(capturedBody.contains("\"divisionTypeId\":\"advanced\""))
         assertTrue(capturedBody.contains("\"divisionTypeKey\":\"advanced\""))
+        assertEquals("OVER_CAPACITY", result.divisionWarnings.single().code)
+        assertEquals(divisionAdvancedId, result.divisionWarnings.single().divisionId)
     }
 
     @Test

@@ -64,6 +64,7 @@ import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
 import com.razumly.mvp.core.data.repositories.EventParticipantRefundMode
 import com.razumly.mvp.core.data.repositories.EventParticipantManagementEntry
 import com.razumly.mvp.core.data.repositories.EventParticipantManagementSnapshot
+import com.razumly.mvp.core.data.repositories.EventParticipantDivisionWarning
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
@@ -147,6 +148,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val showDetails: StateFlow<Boolean>
     val eventTeamsAndParticipantsLoading: StateFlow<Boolean>
     val participantManagementSnapshot: StateFlow<EventParticipantManagementSnapshot>
+    val participantDivisionWarnings: StateFlow<List<EventParticipantDivisionWarning>>
     val participantManagementLoading: StateFlow<Boolean>
     val teamComplianceSummaries: StateFlow<Map<String, EventTeamComplianceSummary>>
     val userComplianceSummaries: StateFlow<Map<String, EventComplianceUserSummary>>
@@ -1076,6 +1078,9 @@ class DefaultEventDetailComponent(
     private val _participantManagementSnapshot = MutableStateFlow(EventParticipantManagementSnapshot())
     override val participantManagementSnapshot = _participantManagementSnapshot.asStateFlow()
 
+    private val _participantDivisionWarnings = MutableStateFlow<List<EventParticipantDivisionWarning>>(emptyList())
+    override val participantDivisionWarnings = _participantDivisionWarnings.asStateFlow()
+
     private val _participantManagementLoading = MutableStateFlow(false)
     override val participantManagementLoading = _participantManagementLoading.asStateFlow()
 
@@ -1579,6 +1584,7 @@ class DefaultEventDetailComponent(
         }
         eventRepository.syncEventParticipants(event = event)
             .onSuccess { result ->
+                applyParticipantSyncResult(result)
                 refreshParticipantManagementSnapshotIfNeeded(result.event)
                 refreshParticipantComplianceIfNeeded(result.event)
             }
@@ -1587,6 +1593,10 @@ class DefaultEventDetailComponent(
                     throwable.userMessage("Failed to load teams and participants."),
                 )
             }
+    }
+
+    private fun applyParticipantSyncResult(result: EventParticipantsSyncResult) {
+        _participantDivisionWarnings.value = result.divisionWarnings
     }
 
     private fun loadSports(reportErrors: Boolean) {
@@ -2101,6 +2111,7 @@ class DefaultEventDetailComponent(
             event = event,
             occurrence = occurrence,
         ).onSuccess { result ->
+            applyParticipantSyncResult(result)
             _selectedWeeklyOccurrenceSummary.value = if (occurrence == null || result.weeklySelectionRequired) {
                 null
             } else {
@@ -2141,11 +2152,22 @@ class DefaultEventDetailComponent(
     ) {
         eventRepository.getEvent(eventId)
             .onSuccess { refreshed ->
-                refreshSelectedWeeklyOccurrenceSummaryIfNeeded(refreshed)
-                if (!isWeeklyParentEvent(refreshed) || currentWeeklyOccurrenceSelection() == null) {
-                    refreshParticipantManagementSnapshotIfNeeded(refreshed)
+                val occurrence = currentWeeklyOccurrenceSelection()
+                val syncResult = eventRepository.syncEventParticipants(
+                    event = refreshed,
+                    occurrence = occurrence,
+                ).onFailure { throwable ->
+                    Napier.w(warningMessage, throwable)
+                }.getOrNull()
+                if (syncResult != null) {
+                    applyParticipantSyncResult(syncResult)
                 }
-                refreshParticipantComplianceIfNeeded(refreshed)
+                val eventForRefresh = syncResult?.event ?: refreshed
+                refreshSelectedWeeklyOccurrenceSummaryIfNeeded(eventForRefresh)
+                if (!isWeeklyParentEvent(eventForRefresh) || occurrence == null) {
+                    refreshParticipantManagementSnapshotIfNeeded(eventForRefresh)
+                }
+                refreshParticipantComplianceIfNeeded(eventForRefresh)
             }.onFailure { throwable ->
                 Napier.w(warningMessage, throwable)
             }
@@ -3646,6 +3668,7 @@ class DefaultEventDetailComponent(
                     occurrence = occurrence,
                 ).onSuccess { result ->
                     if (requestToken != eventDetailHydrationToken) return@onSuccess
+                    applyParticipantSyncResult(result)
                     _selectedWeeklyOccurrenceSummary.value = if (
                         isWeeklyParentEvent(result.event) && occurrence != null && !result.weeklySelectionRequired
                     ) {
@@ -4427,7 +4450,8 @@ class DefaultEventDetailComponent(
                 preferredDivisionId = normalizedDivisionId,
                 occurrence = weeklyOccurrence,
             )
-                .onSuccess {
+                .onSuccess { result ->
+                    applyParticipantSyncResult(result)
                     selectDivision(normalizedDivisionId)
                     refreshEventAfterParticipantMutation(
                         eventId = event.id,
@@ -6608,6 +6632,7 @@ class DefaultEventDetailComponent(
         syncResult: EventParticipantsSyncResult,
         confirmationTarget: JoinConfirmationTarget,
     ) {
+        applyParticipantSyncResult(syncResult)
         val currentSelection = currentWeeklyOccurrenceSelection()
         if (!occurrencesMatch(confirmationTarget.occurrence, currentSelection)) {
             return

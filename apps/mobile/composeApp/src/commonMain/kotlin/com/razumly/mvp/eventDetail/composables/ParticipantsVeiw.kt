@@ -68,6 +68,7 @@ import com.razumly.mvp.core.data.repositories.EventComplianceDocumentCounts
 import com.razumly.mvp.core.data.repositories.EventCompliancePaymentSummary
 import com.razumly.mvp.core.data.repositories.EventComplianceRequiredDocument
 import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
+import com.razumly.mvp.core.data.repositories.EventParticipantDivisionWarning
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
@@ -346,6 +347,7 @@ fun ParticipantsView(
     topContentPadding: Dp = 0.dp,
     selectedDivisionId: String? = null,
     divisionOptions: List<EventDetailDivisionOption> = emptyList(),
+    divisionWarnings: List<EventParticipantDivisionWarning> = emptyList(),
     onTeamDivisionSelected: (TeamWithPlayers, String) -> Unit = { _, _ -> },
 ) {
     val component = LocalTournamentComponent.current
@@ -428,6 +430,31 @@ fun ParticipantsView(
         } else {
             divisionOptions.resolveSelectedEventDivisionId(selectedDivisionId)
                 ?: selectedDivisionId?.trim().orEmpty()
+        }
+    }
+    val visibleDivisionWarnings = remember(
+        section,
+        teamSignup,
+        selectedEvent.event.singleDivision,
+        divisionOptions,
+        selectedDivisionId,
+        divisionWarnings,
+    ) {
+        if (section != ParticipantsSection.TEAMS || !teamSignup) {
+            emptyList()
+        } else {
+            val selectedOption = selectedParticipantDivisionOption(
+                event = selectedEvent.event,
+                divisionOptions = divisionOptions,
+                selectedDivisionId = selectedDivisionId,
+            )
+            if (selectedOption == null) {
+                divisionWarnings
+            } else {
+                divisionWarnings.filter { warning ->
+                    selectedOption.matchesDivisionIdentifier(warning.divisionId)
+                }
+            }
         }
     }
     val participantCardListState = remember(
@@ -1073,6 +1100,12 @@ fun ParticipantsView(
             Text(section.label, style = MaterialTheme.typography.titleLarge)
         }
 
+        visibleDivisionWarnings.forEach { warning ->
+            item(key = "division-warning-${warning.divisionId}-${warning.code}") {
+                ParticipantDivisionWarningCard(warning)
+            }
+        }
+
         if (participantCardListState.showLoading && participantCardListState.loadingMessage != null) {
             item(key = "participant-card-loading") {
                 Text(
@@ -1571,6 +1604,25 @@ fun ParticipantsView(
                     Text("Cancel")
                 }
             },
+        )
+    }
+}
+
+@Composable
+private fun ParticipantDivisionWarningCard(warning: EventParticipantDivisionWarning) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.55f),
+            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        ),
+    ) {
+        Text(
+            text = warning.message,
+            modifier = Modifier.padding(12.dp),
+            style = MaterialTheme.typography.bodySmall,
         )
     }
 }

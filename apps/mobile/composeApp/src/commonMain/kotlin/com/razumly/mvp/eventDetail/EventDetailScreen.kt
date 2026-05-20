@@ -3313,6 +3313,7 @@ fun EventDetailScreen(
     val validTeams by component.validTeams.collectAsState()
     val showDetails by component.showDetails.collectAsState()
     val eventTeamsAndParticipantsLoading by component.eventTeamsAndParticipantsLoading.collectAsState()
+    val participantDivisionWarnings by component.participantDivisionWarnings.collectAsState()
     val eventMatchesLoading by component.eventMatchesLoading.collectAsState()
     val editedEvent by component.editedEvent.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
@@ -5331,6 +5332,7 @@ fun EventDetailScreen(
                                             selectedDivisionId = selectedParticipantsDivisionId
                                                 ?: selectedDivision,
                                             divisionOptions = registrationDivisionOptions,
+                                            divisionWarnings = participantDivisionWarnings,
                                             onTeamDivisionSelected = component::moveTeamParticipantDivision,
                                         )
                                     }

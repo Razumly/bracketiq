@@ -496,6 +496,16 @@ data class EventParticipantIdsSnapshotDto(
 )
 
 @Serializable
+data class EventParticipantDivisionWarningDto(
+    val divisionId: String? = null,
+    val code: String? = null,
+    val message: String? = null,
+    val filledCount: Int? = null,
+    val slotCount: Int? = null,
+    val maxTeams: Int? = null,
+)
+
+@Serializable
 data class EventParticipantRegistrationSectionsDto(
     val teams: List<EventParticipantEntryDto> = emptyList(),
     val users: List<EventParticipantEntryDto> = emptyList(),
@@ -520,6 +530,7 @@ data class EventParticipantsSnapshotResponseDto(
     val participantCount: Int? = null,
     val participantCapacity: Int? = null,
     val occurrence: EventOccurrenceDto? = null,
+    val divisionWarnings: List<EventParticipantDivisionWarningDto> = emptyList(),
     val weeklySelectionRequired: Boolean? = null,
     val error: String? = null,
 )

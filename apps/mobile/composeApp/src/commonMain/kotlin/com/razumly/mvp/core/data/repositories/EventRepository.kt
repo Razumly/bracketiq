@@ -37,6 +37,7 @@ import com.razumly.mvp.core.network.dto.EventComplianceDocumentCountsDto
 import com.razumly.mvp.core.network.dto.EventCompliancePaymentSummaryDto
 import com.razumly.mvp.core.network.dto.EventComplianceRequiredDocumentDto
 import com.razumly.mvp.core.network.dto.EventComplianceUserSummaryDto
+import com.razumly.mvp.core.network.dto.EventParticipantDivisionWarningDto
 import com.razumly.mvp.core.network.dto.EventParticipantEntryDto
 import com.razumly.mvp.core.network.dto.EventParticipantRegistrationSectionsDto
 import com.razumly.mvp.core.network.dto.EventParticipantsSnapshotResponseDto
@@ -164,7 +165,7 @@ interface IEventRepository : IMVPRepository {
         team: Team,
         preferredDivisionId: String,
         occurrence: EventOccurrenceSelection? = null,
-    ): Result<Unit> = Result.failure(NotImplementedError("Team division moves are not implemented."))
+    ): Result<EventParticipantsSyncResult> = Result.failure(NotImplementedError("Team division moves are not implemented."))
     suspend fun syncEventParticipants(
         event: Event,
         occurrence: EventOccurrenceSelection? = null,
@@ -234,7 +235,17 @@ data class EventParticipantsSyncResult(
     val event: Event,
     val participantCount: Int = 0,
     val participantCapacity: Int? = null,
+    val divisionWarnings: List<EventParticipantDivisionWarning> = emptyList(),
     val weeklySelectionRequired: Boolean = false,
+)
+
+data class EventParticipantDivisionWarning(
+    val divisionId: String,
+    val code: String,
+    val message: String,
+    val filledCount: Int = 0,
+    val slotCount: Int = 0,
+    val maxTeams: Int = 0,
 )
 
 data class EventParticipantsSummary(
@@ -372,6 +383,20 @@ private fun EventParticipantRegistrationSectionsDto?.toManagementSnapshot(): Eve
         childRegistrations = children.mapNotNull(EventParticipantEntryDto::toManagementEntryOrNull),
         waitlistRegistrations = waitlist.mapNotNull(EventParticipantEntryDto::toManagementEntryOrNull),
         freeAgentRegistrations = freeAgents.mapNotNull(EventParticipantEntryDto::toManagementEntryOrNull),
+    )
+}
+
+private fun EventParticipantDivisionWarningDto.toDomainWarningOrNull(): EventParticipantDivisionWarning? {
+    val normalizedDivisionId = divisionId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val normalizedCode = code?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val normalizedMessage = message?.trim()?.takeIf(String::isNotBlank) ?: return null
+    return EventParticipantDivisionWarning(
+        divisionId = normalizedDivisionId,
+        code = normalizedCode,
+        message = normalizedMessage,
+        filledCount = filledCount ?: 0,
+        slotCount = slotCount ?: 0,
+        maxTeams = maxTeams ?: 0,
     )
 }
 
@@ -795,6 +820,7 @@ class EventRepository(
         snapshot: EventParticipantsSnapshotResponseDto,
     ): EventParticipantsSyncResult {
         snapshot.error?.takeIf(String::isNotBlank)?.let { error(it) }
+        val divisionWarnings = snapshot.divisionWarnings.mapNotNull(EventParticipantDivisionWarningDto::toDomainWarningOrNull)
 
         if (snapshot.weeklySelectionRequired == true) {
             val clearedEvent = baseEvent.copy(
@@ -812,6 +838,7 @@ class EventRepository(
                 event = clearedEvent,
                 participantCount = 0,
                 participantCapacity = snapshot.participantCapacity,
+                divisionWarnings = divisionWarnings,
                 weeklySelectionRequired = true,
             )
         }
@@ -846,6 +873,7 @@ class EventRepository(
             event = mergedEvent,
             participantCount = snapshot.participantCount ?: 0,
             participantCapacity = snapshot.participantCapacity,
+            divisionWarnings = divisionWarnings,
             weeklySelectionRequired = snapshot.weeklySelectionRequired == true,
         )
     }
@@ -985,14 +1013,15 @@ class EventRepository(
     private suspend fun syncEventParticipantsAfterMutation(
         event: Event,
         occurrence: EventOccurrenceSelection?,
-    ) {
+    ): EventParticipantsSyncResult? {
         val eventWithStableDivisions = preserveCachedDivisionState(event)
         syncCurrentUserRegistrationCache().getOrNull()
-        syncEventParticipants(eventWithStableDivisions, occurrence)
+        return syncEventParticipants(eventWithStableDivisions, occurrence)
             .onFailure {
                 databaseService.getEventDao.upsertEvent(eventWithStableDivisions)
                 persistEventRelations(eventWithStableDivisions)
             }
+            .getOrNull()
     }
 
     override suspend fun getLeagueScoringConfig(eventId: String): Result<LeagueScoringConfig?> = runCatching {
@@ -1607,7 +1636,7 @@ class EventRepository(
         team: Team,
         preferredDivisionId: String,
         occurrence: EventOccurrenceSelection?,
-    ): Result<Unit> =
+    ): Result<EventParticipantsSyncResult> =
         runCatching {
             val normalizedTeamId = team.id.trim().takeIf(String::isNotBlank)
                 ?: error("Team id is required.")
@@ -1630,6 +1659,7 @@ class EventRepository(
             ).event?.toEventOrNull() ?: event
 
             syncEventParticipantsAfterMutation(updated, occurrence)
+                ?: EventParticipantsSyncResult(event = preserveCachedDivisionState(updated))
         }
 
     override suspend fun getLeagueDivisionStandings(
