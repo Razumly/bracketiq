@@ -28,6 +28,7 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
+import com.razumly.mvp.core.data.repositories.EventDetailSyncResult
 import com.razumly.mvp.core.data.repositories.EventParticipantManagementSnapshot
 import com.razumly.mvp.core.data.repositories.EventParticipantsSummary
 import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
@@ -2234,6 +2235,23 @@ private class EventDetailFakeEventRepository(
                 participantCount = eventFlow.value.getOrThrow().players.size,
             )
         )
+    }
+
+    override suspend fun syncEventDetail(
+        event: Event,
+        occurrence: EventOccurrenceSelection?,
+        manage: Boolean,
+    ): Result<EventDetailSyncResult> {
+        val participantResult = syncEventParticipants(event, occurrence).getOrThrow()
+        if (manage) {
+            managementSnapshotCallCount += 1
+            if (participantResult.event.teamSignup) {
+                teamComplianceCallCount += 1
+            } else {
+                userComplianceCallCount += 1
+            }
+        }
+        return Result.success(EventDetailSyncResult(participants = participantResult))
     }
 
     override suspend fun getEventParticipantsSummary(

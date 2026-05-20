@@ -635,6 +635,19 @@ data class ProfileScheduleResponseDto(
 )
 
 @Serializable
+data class EventDetailBootstrapResponseDto(
+    val event: EventApiDto? = null,
+    val participantSnapshot: EventParticipantsSnapshotResponseDto? = null,
+    val matches: List<MatchApiDto> = emptyList(),
+    val fields: List<Field> = emptyList(),
+    val timeSlots: List<TimeSlot> = emptyList(),
+    val leagueScoringConfig: LeagueScoringConfigDTO? = null,
+    val staffInvites: List<Invite> = emptyList(),
+    val teamCompliance: EventTeamComplianceResponseDto? = null,
+    val userCompliance: EventUserComplianceResponseDto? = null,
+)
+
+@Serializable
 data class EventUpdateDto(
     val name: String? = null,
     val start: String? = null,

@@ -44,6 +44,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -91,6 +92,8 @@ interface IMatchRepository : IMVPRepository {
         deletes: List<String> = emptyList(),
     ): Result<List<MatchMVP>>
     fun getMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>>
+    fun getCachedMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>> =
+        getMatchesOfTournamentFlow(tournamentId)
     suspend fun updateMatchFinished(match: MatchMVP, time: Instant): Result<Unit>
     suspend fun getMatchesOfTournament(tournamentId: String): Result<List<MatchMVP>>
     suspend fun getMatchesByEventIds(
@@ -694,6 +697,15 @@ class MatchRepository(
                 remoteJob.cancel()
             }
         }
+
+    override fun getCachedMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>> {
+        val normalizedTournamentId = tournamentId.trim()
+        if (normalizedTournamentId.isEmpty()) {
+            return flowOf(Result.success(emptyList()))
+        }
+        return databaseService.getMatchDao.getMatchesFlowOfTournament(normalizedTournamentId)
+            .map { matches -> Result.success(matches) }
+    }
 
     override suspend fun updateMatchFinished(match: MatchMVP, time: Instant): Result<Unit> =
         singleResponse(

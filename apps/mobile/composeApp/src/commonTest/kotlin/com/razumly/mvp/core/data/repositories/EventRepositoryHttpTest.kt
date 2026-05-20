@@ -5,7 +5,15 @@ import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventParticipantManagementCacheEntry
+import com.razumly.mvp.core.data.dataTypes.EventTeamComplianceCacheEntry
+import com.razumly.mvp.core.data.dataTypes.EventUserComplianceCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
+import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
+import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
@@ -15,7 +23,9 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
+import com.razumly.mvp.core.data.dataTypes.daos.EventComplianceDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
+import com.razumly.mvp.core.data.dataTypes.daos.EventParticipantManagementDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
@@ -69,6 +79,7 @@ private class EventRepositoryHttp_FakeEventDao : EventDao {
     val deleteEventsByIdCalls = mutableListOf<List<String>>()
     val deleteEventsWithCrossRefsCalls = mutableListOf<List<String>>()
     val deleteEventWithCrossRefsCalls = mutableListOf<String>()
+    val deleteEventCrossRefsCalls = mutableListOf<String>()
     var clearAllEventsWithCrossRefsCalls = 0
 
     override suspend fun upsertEvent(game: Event) {
@@ -117,7 +128,9 @@ private class EventRepositoryHttp_FakeEventDao : EventDao {
         deleteEventsWithCrossRefsCalls += eventIds
         eventIds.forEach { deleteEventWithCrossRefs(it) }
     }
-    override suspend fun deleteEventCrossRefs(eventId: String) {}
+    override suspend fun deleteEventCrossRefs(eventId: String) {
+        deleteEventCrossRefsCalls += eventId
+    }
     override suspend fun deleteEventUserCrossRefsByEventId(eventId: String) {}
     override suspend fun deleteEventTeamCrossRefsByEventId(eventId: String) {}
     override suspend fun clearAllEventsWithCrossRefs() {
@@ -171,13 +184,206 @@ private class EventRepositoryHttp_FakeTeamDao : TeamDao {
     override suspend fun upsertTeamsWithRelations(teams: List<Team>) {}
 }
 
+private class EventRepositoryHttp_FakeFieldDao : FieldDao {
+    val fields = mutableMapOf<String, Field>()
+    override suspend fun upsertField(field: Field) {
+        fields[field.id] = field
+    }
+    override suspend fun upsertFields(fields: List<Field>) {
+        fields.forEach { field -> this.fields[field.id] = field }
+    }
+    override suspend fun getFieldsByIds(ids: List<String>): List<Field> = ids.mapNotNull(fields::get)
+    override suspend fun getAllFields(): List<Field> = fields.values.toList()
+    override suspend fun deleteFieldsById(ids: List<String>) {
+        ids.forEach(fields::remove)
+    }
+    override suspend fun deleteField(field: Field) {
+        fields.remove(field.id)
+    }
+    override fun getFieldById(id: String): Flow<FieldWithMatches?> = flowOf(null)
+    override fun getFieldsWithMatches(ids: List<String>): Flow<List<FieldWithMatches>> = flowOf(emptyList())
+}
+
+private class EventRepositoryHttp_FakeMatchDao : MatchDao {
+    val matches = mutableMapOf<String, MatchMVP>()
+    val deletedMatchIds = mutableListOf<List<String>>()
+    override suspend fun upsertMatch(match: MatchMVP) {
+        matches[match.id] = match
+    }
+    override suspend fun upsertMatches(matches: List<MatchMVP>) {
+        matches.forEach { match -> this.matches[match.id] = match }
+    }
+    override suspend fun deleteMatch(match: MatchMVP) {
+        matches.remove(match.id)
+    }
+    override suspend fun getTotalMatchCount(): Int = matches.size
+    override suspend fun getMatchesOfTournament(tournamentId: String): List<MatchMVP> =
+        matches.values.filter { match -> match.eventId == tournamentId }
+    override suspend fun deleteMatchesOfTournament(tournamentId: String) {
+        matches.values
+            .filter { match -> match.eventId == tournamentId }
+            .map(MatchMVP::id)
+            .forEach(matches::remove)
+    }
+    override suspend fun deleteMatchesById(ids: List<String>) {
+        deletedMatchIds += ids
+        ids.forEach(matches::remove)
+    }
+    override fun getMatchFlowById(id: String): Flow<MatchWithRelations?> = flowOf(null)
+    override suspend fun getMatchById(id: String): MatchWithRelations? = null
+    override fun getMatchesFlowOfTournament(tournamentId: String): Flow<List<MatchWithRelations>> = flowOf(emptyList())
+}
+
+private class EventRepositoryHttp_FakeParticipantManagementDao : EventParticipantManagementDao {
+    val entries = mutableListOf<EventParticipantManagementCacheEntry>()
+    override suspend fun upsertEntries(entries: List<EventParticipantManagementCacheEntry>) {
+        this.entries += entries
+    }
+    override fun observeEntries(
+        eventId: String,
+        cacheSlotId: String,
+        cacheOccurrenceDate: String,
+    ): Flow<List<EventParticipantManagementCacheEntry>> = flowOf(
+        entries.filter { entry ->
+            entry.eventId == eventId &&
+                entry.cacheSlotId == cacheSlotId &&
+                entry.cacheOccurrenceDate == cacheOccurrenceDate
+        },
+    )
+    override suspend fun getEntries(
+        eventId: String,
+        cacheSlotId: String,
+        cacheOccurrenceDate: String,
+    ): List<EventParticipantManagementCacheEntry> = entries.filter { entry ->
+        entry.eventId == eventId &&
+            entry.cacheSlotId == cacheSlotId &&
+            entry.cacheOccurrenceDate == cacheOccurrenceDate
+    }
+    override suspend fun deleteEntries(eventId: String, cacheSlotId: String, cacheOccurrenceDate: String) {
+        entries.removeAll { entry ->
+            entry.eventId == eventId &&
+                entry.cacheSlotId == cacheSlotId &&
+                entry.cacheOccurrenceDate == cacheOccurrenceDate
+        }
+    }
+    override suspend fun clearAll() {
+        entries.clear()
+    }
+}
+
+private class EventRepositoryHttp_FakeComplianceDao : EventComplianceDao {
+    val teamSummaries = mutableListOf<EventTeamComplianceCacheEntry>()
+    val userSummaries = mutableListOf<EventUserComplianceCacheEntry>()
+
+    override suspend fun upsertTeamSummaries(summaries: List<EventTeamComplianceCacheEntry>) {
+        teamSummaries += summaries
+    }
+    override suspend fun upsertUserSummaries(summaries: List<EventUserComplianceCacheEntry>) {
+        userSummaries += summaries
+    }
+    override fun observeTeamSummaries(
+        eventId: String,
+        cacheSlotId: String,
+        cacheOccurrenceDate: String,
+    ): Flow<List<EventTeamComplianceCacheEntry>> = flowOf(getTeamSummariesSync(eventId, cacheSlotId, cacheOccurrenceDate))
+    override fun observeTeamUserSummaries(
+        eventId: String,
+        cacheSlotId: String,
+        cacheOccurrenceDate: String,
+    ): Flow<List<EventUserComplianceCacheEntry>> = flowOf(getTeamUserSummariesSync(eventId, cacheSlotId, cacheOccurrenceDate))
+    override fun observeStandaloneUserSummaries(
+        eventId: String,
+        cacheSlotId: String,
+        cacheOccurrenceDate: String,
+    ): Flow<List<EventUserComplianceCacheEntry>> = flowOf(getStandaloneUserSummariesSync(eventId, cacheSlotId, cacheOccurrenceDate))
+    override suspend fun getTeamSummaries(
+        eventId: String,
+        cacheSlotId: String,
+        cacheOccurrenceDate: String,
+    ): List<EventTeamComplianceCacheEntry> = getTeamSummariesSync(eventId, cacheSlotId, cacheOccurrenceDate)
+    override suspend fun getTeamUserSummaries(
+        eventId: String,
+        cacheSlotId: String,
+        cacheOccurrenceDate: String,
+    ): List<EventUserComplianceCacheEntry> = getTeamUserSummariesSync(eventId, cacheSlotId, cacheOccurrenceDate)
+    override suspend fun getStandaloneUserSummaries(
+        eventId: String,
+        cacheSlotId: String,
+        cacheOccurrenceDate: String,
+    ): List<EventUserComplianceCacheEntry> = getStandaloneUserSummariesSync(eventId, cacheSlotId, cacheOccurrenceDate)
+    override suspend fun deleteTeamSummaries(eventId: String, cacheSlotId: String, cacheOccurrenceDate: String) {
+        teamSummaries.removeAll { entry ->
+            entry.eventId == eventId &&
+                entry.cacheSlotId == cacheSlotId &&
+                entry.cacheOccurrenceDate == cacheOccurrenceDate
+        }
+    }
+    override suspend fun deleteTeamUserSummaries(eventId: String, cacheSlotId: String, cacheOccurrenceDate: String) {
+        userSummaries.removeAll { entry ->
+            entry.eventId == eventId &&
+                entry.cacheSlotId == cacheSlotId &&
+                entry.cacheOccurrenceDate == cacheOccurrenceDate &&
+                entry.parentTeamId.isNotEmpty()
+        }
+    }
+    override suspend fun deleteStandaloneUserSummaries(eventId: String, cacheSlotId: String, cacheOccurrenceDate: String) {
+        userSummaries.removeAll { entry ->
+            entry.eventId == eventId &&
+                entry.cacheSlotId == cacheSlotId &&
+                entry.cacheOccurrenceDate == cacheOccurrenceDate &&
+                entry.parentTeamId.isEmpty()
+        }
+    }
+    override suspend fun clearTeamSummaries() {
+        teamSummaries.clear()
+    }
+    override suspend fun clearUserSummaries() {
+        userSummaries.clear()
+    }
+
+    private fun getTeamSummariesSync(
+        eventId: String,
+        cacheSlotId: String,
+        cacheOccurrenceDate: String,
+    ): List<EventTeamComplianceCacheEntry> = teamSummaries.filter { entry ->
+        entry.eventId == eventId &&
+            entry.cacheSlotId == cacheSlotId &&
+            entry.cacheOccurrenceDate == cacheOccurrenceDate
+    }
+
+    private fun getTeamUserSummariesSync(
+        eventId: String,
+        cacheSlotId: String,
+        cacheOccurrenceDate: String,
+    ): List<EventUserComplianceCacheEntry> = userSummaries.filter { entry ->
+        entry.eventId == eventId &&
+            entry.cacheSlotId == cacheSlotId &&
+            entry.cacheOccurrenceDate == cacheOccurrenceDate &&
+            entry.parentTeamId.isNotEmpty()
+    }
+
+    private fun getStandaloneUserSummariesSync(
+        eventId: String,
+        cacheSlotId: String,
+        cacheOccurrenceDate: String,
+    ): List<EventUserComplianceCacheEntry> = userSummaries.filter { entry ->
+        entry.eventId == eventId &&
+            entry.cacheSlotId == cacheSlotId &&
+            entry.cacheOccurrenceDate == cacheOccurrenceDate &&
+            entry.parentTeamId.isEmpty()
+    }
+}
+
 private class EventRepositoryHttp_FakeDatabaseService(
     override val getEventDao: EventDao,
     override val getUserDataDao: UserDataDao,
     override val getTeamDao: TeamDao,
+    override val getMatchDao: MatchDao = EventRepositoryHttp_FakeMatchDao(),
+    override val getFieldDao: FieldDao = EventRepositoryHttp_FakeFieldDao(),
+    override val getEventParticipantManagementDao: EventParticipantManagementDao =
+        EventRepositoryHttp_FakeParticipantManagementDao(),
+    override val getEventComplianceDao: EventComplianceDao = EventRepositoryHttp_FakeComplianceDao(),
 ) : DatabaseService {
-    override val getMatchDao: MatchDao get() = error("unused")
-    override val getFieldDao: FieldDao get() = error("unused")
     override val getEventRegistrationDao: EventRegistrationDao get() = error("unused")
     override val getChatGroupDao: ChatGroupDao get() = error("unused")
     override val getMessageDao: MessageDao get() = error("unused")
@@ -628,6 +834,251 @@ class EventRepositoryHttpTest {
         assertTrue(result.isFailure)
         assertEquals(listOf("e1"), eventDao.deleteEventWithCrossRefsCalls)
         assertEquals(null, eventDao.getEventById("e1"))
+    }
+
+    @Test
+    fun getEvent_preserves_cached_participant_roster_until_participant_snapshot_refresh() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val cachedEvent = makeEvent(id = "e1", hostId = "h1").copy(
+            teamSignup = true,
+            teamIds = (1..9).map { index -> "team_$index" },
+            userIds = listOf("user_cached"),
+            waitListIds = listOf("wait_cached"),
+            freeAgentIds = listOf("free_cached"),
+        )
+        eventDao.upsertEvent(cachedEvent)
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("/api/events/e1", request.url.encodedPath)
+            respond(
+                content = """
+                    {
+                      "id": "e1",
+                      "name": "Event One Updated",
+                      "hostId": "h1",
+                      "coordinates": [-80.0, 25.0],
+                      "start": "2026-02-10T00:00:00Z",
+                      "end": "2026-02-10T01:00:00Z",
+                      "teamSignup": true,
+                      "teamIds": ["team_1", "team_2", "team_3", "team_4", "team_5", "team_6"],
+                      "userIds": [],
+                      "waitListIds": [],
+                      "freeAgentIds": []
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { configureMvpHttpClient() }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val refreshed = repo.getEvent("e1").getOrThrow()
+        val cachedAfterRefresh = eventDao.getEventById("e1")
+
+        assertEquals("Event One Updated", refreshed.name)
+        assertEquals(cachedEvent.teamIds, cachedAfterRefresh?.teamIds)
+        assertEquals(cachedEvent.userIds, cachedAfterRefresh?.userIds)
+        assertEquals(cachedEvent.waitListIds, cachedAfterRefresh?.waitListIds)
+        assertEquals(cachedEvent.freeAgentIds, cachedAfterRefresh?.freeAgentIds)
+        assertEquals(emptyList(), eventDao.deleteEventCrossRefsCalls)
+    }
+
+    @Test
+    fun getEventDetailBootstrap_persists_detail_payload_and_management_cache() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val cachedEvent = makeEvent(id = "e1", hostId = "h1").copy(
+            teamSignup = true,
+            teamIds = listOf("cached_team"),
+        )
+        eventDao.upsertEvent(cachedEvent)
+        val matchDao = EventRepositoryHttp_FakeMatchDao()
+        matchDao.upsertMatch(MatchMVP(matchId = 99, eventId = "e1", id = "stale_match"))
+        val fieldDao = EventRepositoryHttp_FakeFieldDao()
+        val managementDao = EventRepositoryHttp_FakeParticipantManagementDao()
+        val complianceDao = EventRepositoryHttp_FakeComplianceDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+            getMatchDao = matchDao,
+            getFieldDao = fieldDao,
+            getEventParticipantManagementDao = managementDao,
+            getEventComplianceDao = complianceDao,
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("/api/events/e1/detail", request.url.encodedPath)
+            assertEquals("true", request.url.parameters["manage"])
+            respond(
+                content = """
+                    {
+                      "event": {
+                        "id": "e1",
+                        "name": "Event One",
+                        "hostId": "h1",
+                        "coordinates": [-80.0, 25.0],
+                        "start": "2026-02-10T00:00:00Z",
+                        "end": "2026-02-10T01:00:00Z",
+                        "teamSignup": true,
+                        "teamIds": ["partial_team"],
+                        "fieldIds": ["field_1"],
+                        "timeSlotIds": ["slot_1"],
+                        "leagueScoringConfigId": "config_1"
+                      },
+                      "participantSnapshot": {
+                        "participants": {
+                          "teamIds": ["team_1", "team_2"],
+                          "userIds": [],
+                          "waitListIds": [],
+                          "freeAgentIds": [],
+                          "divisions": []
+                        },
+                        "registrations": {
+                          "teams": [
+                            {
+                              "registrationId": "reg_team_1",
+                              "registrantId": "team_1",
+                              "registrantType": "TEAM",
+                              "rosterRole": "PARTICIPANT",
+                              "status": "ACTIVE"
+                            }
+                          ],
+                          "users": [],
+                          "children": [],
+                          "waitlist": [],
+                          "freeAgents": []
+                        },
+                        "teams": [
+                          {
+                            "id": "team_1",
+                            "name": "Team One",
+                            "captainId": "captain_1",
+                            "playerIds": []
+                          },
+                          {
+                            "id": "team_2",
+                            "name": "Team Two",
+                            "captainId": "captain_2",
+                            "playerIds": []
+                          }
+                        ],
+                        "users": [],
+                        "participantCount": 2,
+                        "participantCapacity": 8,
+                        "divisionWarnings": [],
+                        "weeklySelectionRequired": false
+                      },
+                      "matches": [
+                        {
+                          "id": "match_1",
+                          "matchId": 1,
+                          "eventId": "e1",
+                          "team1Id": "team_1",
+                          "team2Id": "team_2",
+                          "start": "2026-02-10T00:00:00Z",
+                          "end": "2026-02-10T01:00:00Z"
+                        }
+                      ],
+                      "fields": [
+                        {
+                          "id": "field_1",
+                          "fieldNumber": 1,
+                          "divisions": []
+                        }
+                      ],
+                      "timeSlots": [
+                        {
+                          "id": "slot_1",
+                          "dayOfWeek": 2,
+                          "daysOfWeek": [2],
+                          "divisions": [],
+                          "startTimeMinutes": 600,
+                          "endTimeMinutes": 660,
+                          "startDate": "2026-02-10T00:00:00Z",
+                          "timeZone": "UTC",
+                          "repeating": false,
+                          "endDate": null,
+                          "scheduledFieldId": "field_1",
+                          "scheduledFieldIds": ["field_1"],
+                          "price": null
+                        }
+                      ],
+                      "leagueScoringConfig": {
+                        "pointsForWin": 3,
+                        "pointsForDraw": 1,
+                        "pointsForLoss": 0
+                      },
+                      "staffInvites": [
+                        {
+                          "id": "invite_1",
+                          "type": "STAFF",
+                          "email": "official@example.test",
+                          "eventId": "e1"
+                        }
+                      ],
+                      "teamCompliance": {
+                        "teams": [
+                          {
+                            "teamId": "team_1",
+                            "teamName": "Team One",
+                            "payment": { "hasBill": false },
+                            "documents": { "signedCount": 0, "requiredCount": 0 },
+                            "users": []
+                          }
+                        ]
+                      },
+                      "userCompliance": null
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { configureMvpHttpClient() }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val teamRepository = object : ITeamRepository by EventRepositoryHttp_UnusedTeamRepository {
+            override suspend fun getTeams(ids: List<String>): Result<List<Team>> =
+                Result.success(
+                    ids.map { teamId ->
+                        Team(
+                            division = "Open",
+                            name = teamId,
+                            captainId = "",
+                            playerIds = emptyList(),
+                            teamSize = 2,
+                            id = teamId,
+                        )
+                    },
+                )
+        }
+        val repo = EventRepository(db, api, teamRepository, userRepo)
+
+        val detail = repo.syncEventDetail(cachedEvent, manage = true).getOrThrow()
+        val cachedAfterRefresh = eventDao.getEventById("e1")
+
+        assertEquals(listOf("team_1", "team_2"), detail.event.teamIds)
+        assertEquals(2, detail.participants.participantCount)
+        assertEquals(listOf("team_1", "team_2"), cachedAfterRefresh?.teamIds)
+        assertEquals(listOf("match_1"), matchDao.matches.keys.toList())
+        assertEquals(listOf(listOf("stale_match")), matchDao.deletedMatchIds)
+        assertEquals(listOf("field_1"), fieldDao.fields.keys.toList())
+        assertEquals(listOf("slot_1"), detail.timeSlots.map { slot -> slot.id })
+        assertEquals("config_1", detail.leagueScoringConfig?.id)
+        assertEquals(3, detail.leagueScoringConfig?.pointsForWin)
+        assertEquals(listOf("invite_1"), detail.staffInvites.map(Invite::id))
+        assertEquals(1, managementDao.entries.size)
+        assertEquals(1, complianceDao.teamSummaries.size)
     }
 
     @Test

@@ -59,6 +59,7 @@ import kotlinx.serialization.json.contentOrNull
 
 interface ITeamRepository : IMVPRepository {
     fun getTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>>
+    fun getCachedTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> = getTeamsFlow(ids)
     suspend fun getTeamWithPlayers(teamId: String): Result<TeamWithPlayers>
     suspend fun getTeams(ids: List<String>): Result<List<Team>>
     suspend fun getTeamsWithPlayers(ids: List<String>): Result<List<TeamWithPlayers>>
@@ -372,6 +373,15 @@ class TeamRepository(
         }
 
         return localFlow
+    }
+
+    override fun getCachedTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> {
+        val teamIds = ids.distinct().filter(String::isNotBlank)
+        if (teamIds.isEmpty()) {
+            return flowOf(Result.success(emptyList()))
+        }
+        return databaseService.getTeamDao.getTeamsWithPlayersFlowByIds(teamIds)
+            .map { teams -> Result.success(teams) }
     }
 
     override suspend fun getTeams(ids: List<String>): Result<List<Team>> {

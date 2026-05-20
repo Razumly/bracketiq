@@ -61,6 +61,7 @@ import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckoutRequest
 import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
+import com.razumly.mvp.core.data.repositories.EventDetailSyncResult
 import com.razumly.mvp.core.data.repositories.EventParticipantRefundMode
 import com.razumly.mvp.core.data.repositories.EventParticipantManagementSnapshot
 import com.razumly.mvp.core.data.repositories.EventParticipantDivisionWarning
@@ -604,6 +605,25 @@ private data class ParticipantManagementLocalState(
     val userSummaries: Map<String, EventComplianceUserSummary> = emptyMap(),
 )
 
+private data class EventScopedValue<T>(
+    val eventId: String,
+    val value: T,
+)
+
+private data class EventTimeSlotLoadTarget(
+    val eventId: String,
+    val slotIds: List<String>,
+    val bootstrapSlots: List<TimeSlot>?,
+    val bootstrapped: Boolean,
+)
+
+private data class EventLeagueScoringLoadTarget(
+    val eventId: String,
+    val scoringConfigId: String,
+    val bootstrapConfig: LeagueScoringConfig?,
+    val bootstrapped: Boolean,
+)
+
 enum class TeamPosition { TEAM1, TEAM2, OFFICIAL }
 
 enum class MatchCreateContext {
@@ -780,6 +800,10 @@ class DefaultEventDetailComponent(
     private val _pendingStaffInvites = MutableStateFlow<List<PendingStaffInviteDraft>>(emptyList())
     override val pendingStaffInvites = _pendingStaffInvites.asStateFlow()
     private val _eventStaffInvites = MutableStateFlow<List<Invite>>(emptyList())
+    private val _bootstrappedEventIds = MutableStateFlow<Set<String>>(emptySet())
+    private val _bootstrapTimeSlots = MutableStateFlow<EventScopedValue<List<TimeSlot>>?>(null)
+    private val _bootstrapLeagueScoringConfig = MutableStateFlow<EventScopedValue<LeagueScoringConfig?>?>(null)
+    private var managedDetailBootstrapRequest: ParticipantManagementRoomTarget? = null
 
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
@@ -849,7 +873,7 @@ class DefaultEventDetailComponent(
     private var reportSportsLoadErrors = false
 
     private val eventRelations: StateFlow<EventWithRelations> =
-        eventRepository.getEventWithRelationsFlow(event.id).map { result ->
+        eventRepository.getCachedEventWithRelationsFlow(event.id).map { result ->
             result.getOrElse {
                 _errorState.value = ErrorMessage(it.userMessage())
                 EventWithRelations(event, null)
@@ -904,8 +928,29 @@ class DefaultEventDetailComponent(
                 .distinct()
         }
         .distinctUntilChanged()
-        .flatMapLatest { (eventId, slotIds) ->
+        .combine(_bootstrapTimeSlots) { (eventId, slotIds), bootstrap ->
+            val scopedSlots = bootstrap
+                ?.takeIf { scoped -> scoped.eventId == eventId }
+                ?.value
+                .orEmpty()
+            val slotsById = scopedSlots.associateBy { slot -> slot.id.trim() }
+            val orderedBootstrapSlots = slotIds.mapNotNull(slotsById::get)
+            EventTimeSlotLoadTarget(
+                eventId = eventId,
+                slotIds = slotIds,
+                bootstrapSlots = orderedBootstrapSlots.takeIf { slots -> slots.size == slotIds.size },
+                bootstrapped = _bootstrappedEventIds.value.contains(eventId),
+            )
+        }
+        .distinctUntilChanged()
+        .flatMapLatest { target ->
+            val eventId = target.eventId
+            val slotIds = target.slotIds
             if (slotIds.isEmpty()) {
+                flowOf(emptyList())
+            } else if (target.bootstrapSlots != null) {
+                flowOf(target.bootstrapSlots)
+            } else if (!target.bootstrapped) {
                 flowOf(emptyList())
             } else {
                 flow {
@@ -927,9 +972,22 @@ class DefaultEventDetailComponent(
                 .trim()
         }
         .distinctUntilChanged()
-        .flatMapLatest { (eventId, scoringConfigId) ->
+        .combine(_bootstrapLeagueScoringConfig) { (eventId, scoringConfigId), bootstrap ->
+            EventLeagueScoringLoadTarget(
+                eventId = eventId,
+                scoringConfigId = scoringConfigId,
+                bootstrapConfig = bootstrap?.takeIf { scoped -> scoped.eventId == eventId }?.value,
+                bootstrapped = _bootstrappedEventIds.value.contains(eventId),
+            )
+        }
+        .distinctUntilChanged()
+        .flatMapLatest { target ->
+            val eventId = target.eventId
+            val scoringConfigId = target.scoringConfigId
             if (scoringConfigId.isBlank()) {
                 flowOf<LeagueScoringConfig?>(null)
+            } else if (target.bootstrapped) {
+                flowOf(target.bootstrapConfig)
             } else {
                 flowOf(
                     eventRepository.getLeagueScoringConfig(eventId)
@@ -949,7 +1007,7 @@ class DefaultEventDetailComponent(
             if (eventId.isBlank()) {
                 flowOf(emptyList())
             } else {
-                matchRepository.getMatchesOfTournamentFlow(eventId).map { result ->
+                matchRepository.getCachedMatchesOfTournamentFlow(eventId).map { result ->
                     result.getOrElse {
                         _errorState.value = ErrorMessage("Error loading matches: ${it.userMessage()}")
                         emptyList()
@@ -964,7 +1022,7 @@ class DefaultEventDetailComponent(
             if (relationTeamIds.isEmpty()) {
                 flowOf(emptyList())
             } else {
-                teamRepository.getTeamsFlow(relationTeamIds).map { result ->
+                teamRepository.getCachedTeamsFlow(relationTeamIds).map { result ->
                     result.getOrElse {
                         _errorState.value = ErrorMessage("Failed to load teams: ${it.userMessage()}")
                         emptyList()
@@ -1058,16 +1116,17 @@ class DefaultEventDetailComponent(
             .distinct()
     }.distinctUntilChanged()
 
-    override val eventFields: StateFlow<List<FieldWithMatches>> = eventFieldIds.flatMapLatest { fieldIds ->
-        if (fieldIds.isEmpty()) {
+    override val eventFields: StateFlow<List<FieldWithMatches>> = combine(
+        selectedEventId,
+        eventFieldIds,
+        _bootstrappedEventIds,
+    ) { eventId, fieldIds, bootstrappedEventIds ->
+        Triple(eventId, fieldIds, bootstrappedEventIds.contains(eventId))
+    }.flatMapLatest { (eventId, fieldIds, bootstrapped) ->
+        if (fieldIds.isEmpty() || !bootstrapped) {
             flowOf(emptyList())
         } else {
-            flow {
-                fieldRepository.getFields(fieldIds).onFailure { error ->
-                    Napier.w("Failed to refresh fields for event ${selectedEvent.value.id}: ${error.message}")
-                }
-                emitAll(fieldRepository.getFieldsWithMatchesFlow(fieldIds))
-            }
+            fieldRepository.getFieldsWithMatchesFlow(fieldIds)
         }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
@@ -1441,7 +1500,31 @@ class DefaultEventDetailComponent(
                         _participantComplianceLoading.value = false
                         return@collectLatest
                     }
-                    refreshParticipantManagementData(target, reportErrors = false)
+                    if (target == managedDetailBootstrapRequest) {
+                        _participantManagementLoading.value = false
+                        _participantComplianceLoading.value = false
+                        return@collectLatest
+                    }
+                    managedDetailBootstrapRequest = target
+                    _participantManagementLoading.value = true
+                    _participantComplianceLoading.value = true
+                    try {
+                        eventRepository.syncEventDetail(
+                            event = selectedEvent.value,
+                            occurrence = target.toOccurrence(),
+                            manage = true,
+                        ).onSuccess { result ->
+                            applyEventDetailSyncResult(result)
+                        }.onFailure { throwable ->
+                            if (managedDetailBootstrapRequest == target) {
+                                managedDetailBootstrapRequest = null
+                            }
+                            Napier.w("Failed to refresh event detail management bootstrap.", throwable)
+                        }
+                    } finally {
+                        _participantManagementLoading.value = false
+                        _participantComplianceLoading.value = false
+                    }
                 }
         }
         scope.launch {
@@ -1528,19 +1611,6 @@ class DefaultEventDetailComponent(
                     loadingHandler.hideLoading()
                     pendingJoinConfirmationTarget = null
                     clearPaymentResult()
-                }
-            }
-        }
-        scope.launch {
-            selectedEventId.collect { eventId ->
-                if (eventId.isBlank()) {
-                    _eventStaffInvites.value = emptyList()
-                } else {
-                    _eventStaffInvites.value = eventRepository.getEventStaffInvites(eventId)
-                        .getOrElse { error ->
-                            Napier.w("Failed to refresh staff invites for event $eventId: ${error.message}")
-                            emptyList()
-                        }
                 }
             }
         }
@@ -1705,11 +1775,17 @@ class DefaultEventDetailComponent(
         if (isWeeklyParentEvent(event)) {
             return
         }
-        eventRepository.syncEventParticipants(event = event)
+        val manage = canManageParticipantData(event)
+        markManagedBootstrapRequested(event, occurrence = null, manage = manage)
+        eventRepository.syncEventDetail(
+            event = event,
+            manage = manage,
+        )
             .onSuccess { result ->
-                applyParticipantSyncResult(result)
+                applyEventDetailSyncResult(result)
             }
             .onFailure { throwable ->
+                clearManagedBootstrapRequestIfCurrent(event, occurrence = null)
                 _errorState.value = ErrorMessage(
                     throwable.userMessage("Failed to load teams and participants."),
                 )
@@ -1718,6 +1794,44 @@ class DefaultEventDetailComponent(
 
     private fun applyParticipantSyncResult(result: EventParticipantsSyncResult) {
         _participantDivisionWarnings.value = result.divisionWarnings
+    }
+
+    private fun markManagedBootstrapRequested(
+        event: Event,
+        occurrence: EventOccurrenceSelection?,
+        manage: Boolean,
+    ) {
+        if (!manage) {
+            return
+        }
+        managedDetailBootstrapRequest = participantManagementRoomTarget(
+            event = event,
+            occurrence = occurrence,
+        )
+    }
+
+    private fun clearManagedBootstrapRequestIfCurrent(
+        event: Event,
+        occurrence: EventOccurrenceSelection?,
+    ) {
+        val target = participantManagementRoomTarget(
+            event = event,
+            occurrence = occurrence,
+        )
+        if (managedDetailBootstrapRequest == target) {
+            managedDetailBootstrapRequest = null
+        }
+    }
+
+    private fun applyEventDetailSyncResult(result: EventDetailSyncResult) {
+        applyParticipantSyncResult(result.participants)
+        val normalizedEventId = result.event.id.trim()
+        if (normalizedEventId.isNotBlank()) {
+            _bootstrappedEventIds.value = _bootstrappedEventIds.value + normalizedEventId
+            _bootstrapTimeSlots.value = EventScopedValue(normalizedEventId, result.timeSlots)
+            _bootstrapLeagueScoringConfig.value = EventScopedValue(normalizedEventId, result.leagueScoringConfig)
+        }
+        _eventStaffInvites.value = result.staffInvites
     }
 
     private fun loadSports(reportErrors: Boolean) {
@@ -2249,22 +2363,27 @@ class DefaultEventDetailComponent(
         }
 
         val occurrence = currentWeeklyOccurrenceSelection()
-        eventRepository.syncEventParticipants(
+        val manage = canManageParticipantData(event)
+        markManagedBootstrapRequested(event, occurrence = occurrence, manage = manage)
+        eventRepository.syncEventDetail(
             event = event,
             occurrence = occurrence,
+            manage = manage,
         ).onSuccess { result ->
-            applyParticipantSyncResult(result)
-            _selectedWeeklyOccurrenceSummary.value = if (occurrence == null || result.weeklySelectionRequired) {
+            applyEventDetailSyncResult(result)
+            val participantResult = result.participants
+            _selectedWeeklyOccurrenceSummary.value = if (occurrence == null || participantResult.weeklySelectionRequired) {
                 null
             } else {
                 WeeklyOccurrenceSummary(
-                    participantCount = result.participantCount,
-                    participantCapacity = result.participantCapacity,
+                    participantCount = participantResult.participantCount,
+                    participantCapacity = participantResult.participantCapacity,
                 ).also { summary ->
                     rememberWeeklyOccurrenceSummary(occurrence, summary)
                 }
             }
         }.onFailure { throwable ->
+            clearManagedBootstrapRequestIfCurrent(event, occurrence)
             if (reportErrors) {
                 _errorState.value = ErrorMessage(
                     throwable.userMessage("Failed to load occurrence participants."),

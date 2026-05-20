@@ -41,6 +41,7 @@ import com.razumly.mvp.core.network.dto.EventComplianceDocumentCountsDto
 import com.razumly.mvp.core.network.dto.EventCompliancePaymentSummaryDto
 import com.razumly.mvp.core.network.dto.EventComplianceRequiredDocumentDto
 import com.razumly.mvp.core.network.dto.EventComplianceUserSummaryDto
+import com.razumly.mvp.core.network.dto.EventDetailBootstrapResponseDto
 import com.razumly.mvp.core.network.dto.EventParticipantDivisionWarningDto
 import com.razumly.mvp.core.network.dto.EventParticipantEntryDto
 import com.razumly.mvp.core.network.dto.EventParticipantRegistrationSectionsDto
@@ -89,6 +90,8 @@ import kotlin.time.Instant
 interface IEventRepository : IMVPRepository {
     fun getCachedEventsFlow(): Flow<Result<List<Event>>>
     fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>>
+    fun getCachedEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> =
+        getEventWithRelationsFlow(eventId)
     fun resetCursor()
     suspend fun getEvent(eventId: String): Result<Event>
     suspend fun getLeagueScoringConfig(eventId: String): Result<LeagueScoringConfig?> = Result.success(null)
@@ -176,6 +179,12 @@ interface IEventRepository : IMVPRepository {
         event: Event,
         occurrence: EventOccurrenceSelection? = null,
     ): Result<EventParticipantsSyncResult>
+    suspend fun syncEventDetail(
+        event: Event,
+        occurrence: EventOccurrenceSelection? = null,
+        manage: Boolean = false,
+    ): Result<EventDetailSyncResult> = syncEventParticipants(event, occurrence)
+        .map { participantResult -> EventDetailSyncResult(participants = participantResult) }
     suspend fun getEventParticipantsSummary(
         eventId: String,
         occurrence: EventOccurrenceSelection? = null,
@@ -256,6 +265,17 @@ data class EventParticipantsSyncResult(
     val divisionWarnings: List<EventParticipantDivisionWarning> = emptyList(),
     val weeklySelectionRequired: Boolean = false,
 )
+
+data class EventDetailSyncResult(
+    val participants: EventParticipantsSyncResult,
+    val matches: List<MatchMVP> = emptyList(),
+    val fields: List<Field> = emptyList(),
+    val timeSlots: List<TimeSlot> = emptyList(),
+    val leagueScoringConfig: LeagueScoringConfig? = null,
+    val staffInvites: List<Invite> = emptyList(),
+) {
+    val event: Event get() = participants.event
+}
 
 data class EventParticipantDivisionWarning(
     val divisionId: String,
@@ -842,6 +862,21 @@ class EventRepository(
             }
         }
 
+    override fun getCachedEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> {
+        val normalizedEventId = eventId.trim()
+        if (normalizedEventId.isBlank()) {
+            return flowOf(Result.failure(IllegalArgumentException("Event id is required.")))
+        }
+        return databaseService.getEventDao.getEventWithRelationsFlow(normalizedEventId)
+            .map { relations ->
+                if (relations != null) {
+                    Result.success(relations)
+                } else {
+                    Result.failure(NoSuchElementException("Event $normalizedEventId not found in local cache"))
+                }
+            }
+    }
+
     private suspend fun fetchRemoteEventDto(eventId: String): EventApiDto {
         return api.get<EventApiDto>("api/events/$eventId")
     }
@@ -889,6 +924,16 @@ class EventRepository(
         return copy(
             divisions = if (preserveDivisions) cached.divisions else divisions,
             divisionDetails = if (preserveDivisionDetails) cached.divisionDetails else divisionDetails,
+        )
+    }
+
+    private fun Event.withPreservedCachedParticipantRoster(cached: Event?): Event {
+        if (cached == null) return this
+        return copy(
+            teamIds = cached.teamIds,
+            userIds = cached.userIds,
+            waitListIds = cached.waitListIds,
+            freeAgentIds = cached.freeAgentIds,
         )
     }
 
@@ -1060,6 +1105,108 @@ class EventRepository(
         )
     }
 
+    private suspend fun fetchEventDetailBootstrap(
+        eventId: String,
+        occurrence: EventOccurrenceSelection?,
+        manage: Boolean,
+    ): EventDetailBootstrapResponseDto {
+        val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
+            ?: error("Event id is required.")
+        return api.get(
+            appendOccurrenceQuery(
+                basePath = "api/events/$normalizedEventId/detail",
+                occurrence = occurrence,
+                extraQueryParams = if (manage) {
+                    mapOf("manage" to "true")
+                } else {
+                    emptyMap()
+                },
+            ),
+        )
+    }
+
+    private suspend fun replaceParticipantManagementSnapshot(
+        scope: EventParticipantCacheScope,
+        registrations: EventParticipantRegistrationSectionsDto?,
+    ): EventParticipantManagementSnapshot {
+        val managementSnapshot = registrations.toManagementSnapshot()
+        databaseService.getEventParticipantManagementDao.replaceEntries(
+            eventId = scope.eventId,
+            cacheSlotId = scope.cacheSlotId,
+            cacheOccurrenceDate = scope.cacheOccurrenceDate,
+            entries = managementSnapshot.toCacheEntries(scope),
+        )
+        return databaseService.getEventParticipantManagementDao.getEntries(
+            eventId = scope.eventId,
+            cacheSlotId = scope.cacheSlotId,
+            cacheOccurrenceDate = scope.cacheOccurrenceDate,
+        ).toManagementSnapshotFromCache()
+    }
+
+    private suspend fun replaceTeamComplianceSummaries(
+        scope: EventParticipantCacheScope,
+        summaries: List<EventTeamComplianceSummary>,
+    ): List<EventTeamComplianceSummary> {
+        databaseService.getEventComplianceDao.replaceTeamCompliance(
+            eventId = scope.eventId,
+            cacheSlotId = scope.cacheSlotId,
+            cacheOccurrenceDate = scope.cacheOccurrenceDate,
+            teamSummaries = summaries.map { summary -> summary.toCacheEntry(scope) },
+            teamUserSummaries = summaries.flatMap { summary ->
+                summary.users.map { userSummary ->
+                    userSummary.toCacheEntry(scope, parentTeamId = summary.teamId)
+                }
+            },
+        )
+        return teamComplianceFromCache(
+            teamRows = databaseService.getEventComplianceDao.getTeamSummaries(
+                eventId = scope.eventId,
+                cacheSlotId = scope.cacheSlotId,
+                cacheOccurrenceDate = scope.cacheOccurrenceDate,
+            ),
+            userRows = databaseService.getEventComplianceDao.getTeamUserSummaries(
+                eventId = scope.eventId,
+                cacheSlotId = scope.cacheSlotId,
+                cacheOccurrenceDate = scope.cacheOccurrenceDate,
+            ),
+        )
+    }
+
+    private suspend fun replaceStandaloneUserComplianceSummaries(
+        scope: EventParticipantCacheScope,
+        summaries: List<EventComplianceUserSummary>,
+    ): List<EventComplianceUserSummary> {
+        databaseService.getEventComplianceDao.replaceStandaloneUserCompliance(
+            eventId = scope.eventId,
+            cacheSlotId = scope.cacheSlotId,
+            cacheOccurrenceDate = scope.cacheOccurrenceDate,
+            userSummaries = summaries.map { summary -> summary.toCacheEntry(scope) },
+        )
+        return databaseService.getEventComplianceDao.getStandaloneUserSummaries(
+            eventId = scope.eventId,
+            cacheSlotId = scope.cacheSlotId,
+            cacheOccurrenceDate = scope.cacheOccurrenceDate,
+        ).map(EventUserComplianceCacheEntry::toComplianceUserSummary)
+    }
+
+    private suspend fun persistBootstrapMatches(
+        eventId: String,
+        matches: List<MatchMVP>,
+    ) {
+        val normalizedEventId = eventId.trim().takeIf(String::isNotBlank) ?: return
+        val localMatches = databaseService.getMatchDao.getMatchesOfTournament(normalizedEventId)
+        val remoteIds = matches.map(MatchMVP::id).toSet()
+        val staleIds = localMatches
+            .map(MatchMVP::id)
+            .filter { localId -> localId !in remoteIds }
+        if (staleIds.isNotEmpty()) {
+            databaseService.getMatchDao.deleteMatchesById(staleIds)
+        }
+        if (matches.isNotEmpty()) {
+            databaseService.getMatchDao.upsertMatches(matches)
+        }
+    }
+
     private suspend fun mergeEventParticipantsSnapshot(
         baseEvent: Event,
         snapshot: EventParticipantsSnapshotResponseDto,
@@ -1127,8 +1274,11 @@ class EventRepository(
         runCatching {
             val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
                 ?: error("Event id is required.")
+            val cachedEvent = databaseService.getEventDao.getEventById(normalizedEventId)
             val event = try {
-                preserveCachedDivisionState(fetchRemoteEvent(normalizedEventId))
+                fetchRemoteEvent(normalizedEventId)
+                    .withPreservedCachedDivisionState(cachedEvent)
+                    .withPreservedCachedParticipantRoster(cachedEvent)
             } catch (throwable: Throwable) {
                 if (shouldEvictEventFromCache(throwable)) {
                     databaseService.getEventDao.deleteEventWithCrossRefs(normalizedEventId)
@@ -1136,7 +1286,6 @@ class EventRepository(
                 throw throwable
             }
             databaseService.getEventDao.upsertEvent(event)
-            persistEventRelations(event)
             databaseService.getEventDao.getEventById(normalizedEventId)
                 ?: throw IllegalStateException("Event $normalizedEventId not cached")
         }
@@ -1149,6 +1298,70 @@ class EventRepository(
         mergeEventParticipantsSnapshot(
             baseEvent = event,
             snapshot = snapshot,
+        )
+    }
+
+    override suspend fun syncEventDetail(
+        event: Event,
+        occurrence: EventOccurrenceSelection?,
+        manage: Boolean,
+    ): Result<EventDetailSyncResult> = runCatching {
+        val normalizedEventId = event.id.trim().takeIf(String::isNotBlank)
+            ?: error("Event id is required.")
+        val cacheScope = eventParticipantCacheScope(normalizedEventId, occurrence)
+        val bootstrap = fetchEventDetailBootstrap(
+            eventId = normalizedEventId,
+            occurrence = occurrence,
+            manage = manage,
+        )
+        val cachedEvent = databaseService.getEventDao.getEventById(normalizedEventId)
+        val bootstrapEvent = bootstrap.event
+            ?.toEventOrNull()
+            ?.withPreservedCachedDivisionState(cachedEvent)
+            ?.withPreservedCachedParticipantRoster(cachedEvent)
+        val baseEvent = bootstrapEvent ?: cachedEvent ?: event
+        val participantSnapshot = bootstrap.participantSnapshot
+            ?: EventParticipantsSnapshotResponseDto(event = bootstrap.event)
+        val participantResult = mergeEventParticipantsSnapshot(
+            baseEvent = baseEvent,
+            snapshot = participantSnapshot,
+        )
+
+        if (manage && participantSnapshot.registrations != null) {
+            replaceParticipantManagementSnapshot(cacheScope, participantSnapshot.registrations)
+        }
+
+        bootstrap.teamCompliance?.teams
+            ?.mapNotNull(EventTeamComplianceSummaryDto::toTeamComplianceSummaryOrNull)
+            ?.let { summaries -> replaceTeamComplianceSummaries(cacheScope, summaries) }
+        bootstrap.userCompliance?.users
+            ?.mapNotNull(EventComplianceUserSummaryDto::toComplianceUserSummaryOrNull)
+            ?.let { summaries -> replaceStandaloneUserComplianceSummaries(cacheScope, summaries) }
+
+        val fields = bootstrap.fields
+        if (fields.isNotEmpty()) {
+            databaseService.getFieldDao.upsertFields(fields)
+        }
+
+        val matches = bootstrap.matches.mapNotNull { dto -> dto.toMatchOrNull() }
+        persistBootstrapMatches(participantResult.event.id, matches)
+
+        val scoringConfigId = participantResult.event.leagueScoringConfigId
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+        val leagueScoringConfig = if (scoringConfigId != null) {
+            bootstrap.leagueScoringConfig?.toLeagueScoringConfig(scoringConfigId)
+        } else {
+            null
+        }
+
+        EventDetailSyncResult(
+            participants = participantResult,
+            matches = matches,
+            fields = fields,
+            timeSlots = bootstrap.timeSlots,
+            leagueScoringConfig = leagueScoringConfig,
+            staffInvites = bootstrap.staffInvites,
         )
     }
 
@@ -1184,18 +1397,7 @@ class EventRepository(
             baseEvent = baseEvent,
             snapshot = snapshot,
         )
-        val managementSnapshot = snapshot.registrations.toManagementSnapshot()
-        databaseService.getEventParticipantManagementDao.replaceEntries(
-            eventId = cacheScope.eventId,
-            cacheSlotId = cacheScope.cacheSlotId,
-            cacheOccurrenceDate = cacheScope.cacheOccurrenceDate,
-            entries = managementSnapshot.toCacheEntries(cacheScope),
-        )
-        databaseService.getEventParticipantManagementDao.getEntries(
-            eventId = cacheScope.eventId,
-            cacheSlotId = cacheScope.cacheSlotId,
-            cacheOccurrenceDate = cacheScope.cacheOccurrenceDate,
-        ).toManagementSnapshotFromCache()
+        replaceParticipantManagementSnapshot(cacheScope, snapshot.registrations)
     }
 
     override fun observeEventParticipantManagementSnapshot(
@@ -1227,29 +1429,7 @@ class EventRepository(
                 occurrence = occurrence,
             ),
         ).teams.mapNotNull(EventTeamComplianceSummaryDto::toTeamComplianceSummaryOrNull)
-        databaseService.getEventComplianceDao.replaceTeamCompliance(
-            eventId = cacheScope.eventId,
-            cacheSlotId = cacheScope.cacheSlotId,
-            cacheOccurrenceDate = cacheScope.cacheOccurrenceDate,
-            teamSummaries = summaries.map { summary -> summary.toCacheEntry(cacheScope) },
-            teamUserSummaries = summaries.flatMap { summary ->
-                summary.users.map { userSummary ->
-                    userSummary.toCacheEntry(cacheScope, parentTeamId = summary.teamId)
-                }
-            },
-        )
-        teamComplianceFromCache(
-            teamRows = databaseService.getEventComplianceDao.getTeamSummaries(
-                eventId = cacheScope.eventId,
-                cacheSlotId = cacheScope.cacheSlotId,
-                cacheOccurrenceDate = cacheScope.cacheOccurrenceDate,
-            ),
-            userRows = databaseService.getEventComplianceDao.getTeamUserSummaries(
-                eventId = cacheScope.eventId,
-                cacheSlotId = cacheScope.cacheSlotId,
-                cacheOccurrenceDate = cacheScope.cacheOccurrenceDate,
-            ),
-        )
+        replaceTeamComplianceSummaries(cacheScope, summaries)
     }
 
     override fun observeEventTeamCompliance(
@@ -1290,17 +1470,7 @@ class EventRepository(
                 occurrence = occurrence,
             ),
         ).users.mapNotNull(EventComplianceUserSummaryDto::toComplianceUserSummaryOrNull)
-        databaseService.getEventComplianceDao.replaceStandaloneUserCompliance(
-            eventId = cacheScope.eventId,
-            cacheSlotId = cacheScope.cacheSlotId,
-            cacheOccurrenceDate = cacheScope.cacheOccurrenceDate,
-            userSummaries = summaries.map { summary -> summary.toCacheEntry(cacheScope) },
-        )
-        databaseService.getEventComplianceDao.getStandaloneUserSummaries(
-            eventId = cacheScope.eventId,
-            cacheSlotId = cacheScope.cacheSlotId,
-            cacheOccurrenceDate = cacheScope.cacheOccurrenceDate,
-        ).map(EventUserComplianceCacheEntry::toComplianceUserSummary)
+        replaceStandaloneUserComplianceSummaries(cacheScope, summaries)
     }
 
     override fun observeEventUserCompliance(
