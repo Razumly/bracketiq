@@ -33,7 +33,6 @@ class OrganizationVerificationTest {
             logoId = null,
             ownerId = "owner-1",
             website = null,
-            officialIds = emptyList(),
             hasStripeAccount = false,
             verificationStatus = OrganizationVerificationStatus.VERIFIED,
             coordinates = null,

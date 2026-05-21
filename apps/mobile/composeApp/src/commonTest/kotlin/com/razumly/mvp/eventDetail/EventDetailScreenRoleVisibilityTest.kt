@@ -22,7 +22,7 @@ class EventDetailScreenRoleVisibilityTest {
     }
 
     @Test
-    fun givenAssistantHostOfficialOrOrganizationManager_whenCheckingOfficialsVisibility_thenReturnsTrue() {
+    fun givenAssistantHostOfficialOrOrganizationOwner_whenCheckingOfficialsVisibility_thenReturnsTrue() {
         val event = Event(
             hostId = "host-1",
             assistantHostIds = listOf("assistant-1"),
@@ -35,9 +35,7 @@ class EventDetailScreenRoleVisibilityTest {
             description = null,
             logoId = null,
             ownerId = "owner-1",
-            hostIds = listOf("org-host-1"),
             website = null,
-            officialIds = emptyList(),
             hasStripeAccount = false,
             coordinates = null,
             fieldIds = emptyList(),
@@ -64,17 +62,10 @@ class EventDetailScreenRoleVisibilityTest {
                 organization = organization,
             ),
         )
-        assertTrue(
-            canViewOfficialsPanel(
-                currentUserId = "org-host-1",
-                event = event,
-                organization = organization,
-            ),
-        )
     }
 
     @Test
-    fun givenRegularViewerOrBlankUser_whenCheckingOfficialsVisibility_thenReturnsFalse() {
+    fun givenRegularViewerOrgStaffOrBlankUser_whenCheckingOfficialsVisibility_thenReturnsFalse() {
         val event = Event(
             hostId = "host-1",
             assistantHostIds = listOf("assistant-1"),
@@ -87,9 +78,7 @@ class EventDetailScreenRoleVisibilityTest {
             description = null,
             logoId = null,
             ownerId = "owner-1",
-            hostIds = listOf("org-host-1"),
             website = null,
-            officialIds = emptyList(),
             hasStripeAccount = false,
             coordinates = null,
             fieldIds = emptyList(),
@@ -98,6 +87,13 @@ class EventDetailScreenRoleVisibilityTest {
         assertFalse(
             canViewOfficialsPanel(
                 currentUserId = "player-1",
+                event = event,
+                organization = organization,
+            ),
+        )
+        assertFalse(
+            canViewOfficialsPanel(
+                currentUserId = "org-host-1",
                 event = event,
                 organization = organization,
             ),

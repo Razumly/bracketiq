@@ -2040,10 +2040,8 @@ private data class OrganizationApiDto(
     val description: String? = null,
     val logoId: String? = null,
     val ownerId: String? = null,
-    val hostIds: List<String>? = null,
     val website: String? = null,
     val sports: List<String>? = null,
-    val officialIds: List<String>? = null,
     val hasStripeAccount: Boolean? = null,
     val verificationStatus: String? = null,
     val verifiedAt: String? = null,
@@ -2071,13 +2069,11 @@ private data class OrganizationApiDto(
             description = description,
             logoId = logoId,
             ownerId = resolvedOwnerId,
-            hostIds = hostIds ?: emptyList(),
             website = website,
             sports = sports
                 ?.map(String::trim)
                 ?.filter(String::isNotBlank)
                 ?: emptyList(),
-            officialIds = officialIds ?: emptyList(),
             hasStripeAccount = hasStripeAccount ?: false,
             verificationStatus = resolveOrganizationVerificationStatus(
                 verificationStatus = verificationStatus,

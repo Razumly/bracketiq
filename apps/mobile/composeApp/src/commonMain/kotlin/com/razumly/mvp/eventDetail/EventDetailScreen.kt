@@ -871,8 +871,7 @@ internal fun canViewOfficialsPanel(
     return event.hostId == normalizedCurrentUserId ||
         event.assistantHostIds.any { assistantHostId -> assistantHostId == normalizedCurrentUserId } ||
         isCurrentUserEventOfficial(normalizedCurrentUserId, event) ||
-        organization?.ownerId == normalizedCurrentUserId ||
-        organization?.hostIds?.any { hostId -> hostId == normalizedCurrentUserId } == true
+        organization?.ownerId == normalizedCurrentUserId
 }
 
 internal fun isCurrentUserEventOfficial(
@@ -3379,13 +3378,10 @@ fun EventDetailScreen(
     val isOrganizationManager = remember(
         currentUser.id,
         selectedEvent.organization?.ownerId,
-        selectedEvent.organization?.hostIds,
     ) {
         val currentUserId = currentUser.id.trim()
-        currentUserId.isNotBlank() && (
-            selectedEvent.organization?.ownerId?.trim() == currentUserId ||
-                selectedEvent.organization?.hostIds?.any { hostId -> hostId.trim() == currentUserId } == true
-            )
+        currentUserId.isNotBlank() &&
+            selectedEvent.organization?.ownerId?.trim() == currentUserId
     }
     val canManageTemplate = remember(isHost, isAssistantHost, isOrganizationManager) {
         isHost || isAssistantHost || isOrganizationManager

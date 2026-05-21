@@ -713,8 +713,7 @@ class DefaultEventDetailComponent(
             return true
         }
         val organization = eventWithRelations.value.organization
-        return organization?.ownerId == currentUserId ||
-            organization?.hostIds?.any { hostId -> hostId == currentUserId } == true
+        return organization?.ownerId == currentUserId
     }
 
     private fun canManageParticipantData(

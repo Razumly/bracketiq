@@ -32,10 +32,8 @@ data class Organization(
     val description: String?,
     val logoId: String?,
     val ownerId: String,
-    val hostIds: List<String> = emptyList(),
     val website: String?,
     val sports: List<String> = emptyList(),
-    val officialIds: List<String>,
     val hasStripeAccount: Boolean,
     val verificationStatus: OrganizationVerificationStatus = if (hasStripeAccount) {
         OrganizationVerificationStatus.LEGACY_CONNECTED
@@ -62,10 +60,8 @@ data class OrganizationDTO(
     val description: String? = null,
     val logoId: String? = null,
     val ownerId: String,
-    val hostIds: List<String> = emptyList(),
     val website: String? = null,
     val sports: List<String> = emptyList(),
-    val officialIds: List<String> = emptyList(),
     val hasStripeAccount: Boolean = false,
     val verificationStatus: OrganizationVerificationStatus = if (hasStripeAccount) {
         OrganizationVerificationStatus.LEGACY_CONNECTED
@@ -91,10 +87,8 @@ data class OrganizationDTO(
             description = description,
             logoId = logoId,
             ownerId = ownerId,
-            hostIds = hostIds,
             website = website,
             sports = sports,
-            officialIds = officialIds,
             hasStripeAccount = hasStripeAccount,
             verificationStatus = verificationStatus,
             verifiedAt = verifiedAt,
