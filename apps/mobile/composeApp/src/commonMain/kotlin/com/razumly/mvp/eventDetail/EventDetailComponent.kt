@@ -30,6 +30,7 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
+import com.razumly.mvp.core.data.dataTypes.canManageEventsForViewer
 import com.razumly.mvp.core.data.dataTypes.isPaymentPending
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
@@ -713,7 +714,7 @@ class DefaultEventDetailComponent(
             return true
         }
         val organization = eventWithRelations.value.organization
-        return organization?.ownerId == currentUserId
+        return organization?.canManageEventsForViewer(currentUserId) == true
     }
 
     private fun canManageParticipantData(
@@ -727,8 +728,7 @@ class DefaultEventDetailComponent(
         }
         return event.hostId.trim() == currentUserId ||
             event.assistantHostIds.any { assistantHostId -> assistantHostId.trim() == currentUserId } ||
-            organization?.ownerId?.trim() == currentUserId ||
-            organization?.hostIds?.any { hostId -> hostId.trim() == currentUserId } == true
+            organization?.canManageEventsForViewer(currentUserId) == true
     }
 
     private fun canEditMatchesNow(): Boolean = _isEditingMatches.value && canManageMatchEditing()
@@ -1060,6 +1060,28 @@ class DefaultEventDetailComponent(
         }
     }.stateIn(scope, SharingStarted.Eagerly, eventRelations.value.host)
 
+    private val eventOrganization: StateFlow<Organization?> = selectedEvent
+        .map { selected -> selected.organizationId?.trim().orEmpty() }
+        .distinctUntilChanged()
+        .flatMapLatest { organizationId ->
+            flow {
+                if (organizationId.isBlank()) {
+                    emit(null)
+                    return@flow
+                }
+                val organization = billingRepository.getOrganizationsByIds(listOf(organizationId))
+                    .getOrElse { error ->
+                        Napier.w(
+                            "Failed to load organization $organizationId for event ${selectedEvent.value.id}: ${error.message}"
+                        )
+                        emptyList()
+                    }
+                    .firstOrNull { organization -> organization.id == organizationId }
+                emit(organization)
+            }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, null)
+
     override val eventWithRelations = combine(
         selectedEvent,
         eventRelationPlayers,
@@ -1077,6 +1099,8 @@ class DefaultEventDetailComponent(
             teams = teams,
             sport = sport,
         )
+    }.combine(eventOrganization) { relations, organization ->
+        relations.copy(organization = organization)
     }.combine(eventHost) { relations, host ->
         relations.copy(host = host)
     }.combine(eventTimeSlots) { relations, timeSlots ->

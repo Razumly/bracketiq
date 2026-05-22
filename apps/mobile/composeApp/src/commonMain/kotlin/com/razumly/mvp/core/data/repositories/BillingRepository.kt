@@ -6,8 +6,10 @@ import com.razumly.mvp.core.data.dataTypes.BillPayment
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.BillingAddressProfile
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.OrganizationStaffMember
 import com.razumly.mvp.core.data.dataTypes.resolveOrganizationVerificationReviewStatus
 import com.razumly.mvp.core.data.dataTypes.resolveOrganizationVerificationStatus
 import com.razumly.mvp.core.data.dataTypes.Product
@@ -1211,6 +1213,11 @@ class BillingRepository(
     override suspend fun getOrganizationsByIds(organizationIds: List<String>): Result<List<Organization>> = runCatching {
         val ids = organizationIds.distinct().filter(String::isNotBlank)
         if (ids.isEmpty()) return@runCatching emptyList()
+        if (ids.size == 1) {
+            val encodedId = ids.first().encodeURLQueryComponent()
+            val response = api.get<OrganizationApiDto>(path = "api/organizations/$encodedId")
+            return@runCatching listOfNotNull(response.toOrganizationOrNull())
+        }
 
         val encodedIds = ids.joinToString(",") { it.encodeURLQueryComponent() }
         val response = api.get<OrganizationsResponseDto>(path = "api/organizations?ids=$encodedIds&limit=100")
@@ -2052,6 +2059,10 @@ private data class OrganizationApiDto(
     val fieldIds: List<String>? = null,
     val productIds: List<String>? = null,
     val teamIds: List<String>? = null,
+    val staffMembers: List<OrganizationStaffMember>? = null,
+    val staffInvites: List<Invite>? = null,
+    val staffEmailsByUserId: Map<String, String>? = null,
+    val viewerPermissions: List<String>? = null,
 ) {
     fun toOrganizationOrNull(): Organization? {
         val resolvedId = id ?: legacyId
@@ -2089,6 +2100,13 @@ private data class OrganizationApiDto(
             fieldIds = fieldIds ?: emptyList(),
             productIds = productIds ?: emptyList(),
             teamIds = teamIds ?: emptyList(),
+            staffMembers = staffMembers ?: emptyList(),
+            staffInvites = staffInvites ?: emptyList(),
+            staffEmailsByUserId = staffEmailsByUserId ?: emptyMap(),
+            viewerPermissions = viewerPermissions
+                ?.map(String::trim)
+                ?.filter(String::isNotBlank)
+                ?: emptyList(),
         )
     }
 }

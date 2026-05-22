@@ -3,6 +3,7 @@
 package com.razumly.mvp.core.data.dataTypes
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
 import kotlin.native.ObjCName
 
 @Serializable
@@ -48,8 +49,24 @@ data class Organization(
     val coordinates: List<Double>?,
     val fieldIds: List<String>,
     val productIds: List<String> = emptyList(),
-    val teamIds: List<String> = emptyList()
+    val teamIds: List<String> = emptyList(),
+    val staffMembers: List<OrganizationStaffMember> = emptyList(),
+    val staffInvites: List<Invite> = emptyList(),
+    val staffEmailsByUserId: Map<String, String> = emptyMap(),
+    val viewerPermissions: List<String> = emptyList(),
 )
+
+@Serializable
+data class OrganizationStaffMember(
+    val id: String? = null,
+    @SerialName("\$id") val legacyId: String? = null,
+    val organizationId: String = "",
+    val userId: String = "",
+    val types: List<String> = emptyList(),
+    val roleId: String? = null,
+) {
+    val resolvedId: String get() = id ?: legacyId ?: ""
+}
 
 @Serializable
 data class OrganizationDTO(
@@ -76,7 +93,11 @@ data class OrganizationDTO(
     val coordinates: List<Double>? = null,
     val fieldIds: List<String> = emptyList(),
     val productIds: List<String> = emptyList(),
-    val teamIds: List<String> = emptyList()
+    val teamIds: List<String> = emptyList(),
+    val staffMembers: List<OrganizationStaffMember> = emptyList(),
+    val staffInvites: List<Invite> = emptyList(),
+    val staffEmailsByUserId: Map<String, String> = emptyMap(),
+    val viewerPermissions: List<String> = emptyList(),
 ) {
     fun toOrganization(id: String): Organization =
         Organization(
@@ -98,8 +119,68 @@ data class OrganizationDTO(
             coordinates = coordinates,
             fieldIds = fieldIds,
             productIds = productIds,
-            teamIds = teamIds
+            teamIds = teamIds,
+            staffMembers = staffMembers,
+            staffInvites = staffInvites,
+            staffEmailsByUserId = staffEmailsByUserId,
+            viewerPermissions = viewerPermissions,
         )
+}
+
+private const val ORGANIZATION_EVENTS_MANAGE_PERMISSION = "events.manage"
+
+private fun String.normalizedOrganizationToken(): String = trim()
+
+private fun Iterable<String>.normalizedOrganizationTokens(): List<String> =
+    map(String::normalizedOrganizationToken)
+        .filter(String::isNotBlank)
+        .distinct()
+
+private fun OrganizationStaffMember.hasStaffType(type: String): Boolean {
+    val normalizedType = type.trim().uppercase()
+    return types.any { staffType -> staffType.trim().uppercase() == normalizedType }
+}
+
+private fun Invite.blocksStaffMember(organizationId: String, userId: String): Boolean {
+    val inviteOrganizationId = this.organizationId?.normalizedOrganizationToken().orEmpty()
+    val inviteUserId = this.userId?.normalizedOrganizationToken().orEmpty()
+    if (inviteOrganizationId != organizationId || inviteUserId != userId) {
+        return false
+    }
+    return type.trim().uppercase() == "STAFF"
+}
+
+private fun Organization.activeStaffIdsForType(type: String): List<String> {
+    val normalizedOrganizationId = id.normalizedOrganizationToken()
+    return staffMembers
+        .filter { staffMember ->
+            val memberOrganizationId = staffMember.organizationId.normalizedOrganizationToken()
+            val memberUserId = staffMember.userId.normalizedOrganizationToken()
+            memberOrganizationId == normalizedOrganizationId &&
+                memberUserId.isNotBlank() &&
+                staffMember.hasStaffType(type) &&
+                staffInvites.none { invite -> invite.blocksStaffMember(memberOrganizationId, memberUserId) }
+        }
+        .map(OrganizationStaffMember::userId)
+        .normalizedOrganizationTokens()
+}
+
+fun Organization.activeHostIds(): List<String> =
+    (listOf(ownerId) + activeStaffIdsForType("HOST")).normalizedOrganizationTokens()
+
+fun Organization.activeOfficialIds(): List<String> =
+    activeStaffIdsForType("OFFICIAL")
+
+fun Organization.canManageEventsForViewer(userId: String): Boolean {
+    val normalizedUserId = userId.normalizedOrganizationToken()
+    if (normalizedUserId.isBlank()) {
+        return false
+    }
+    return ownerId.normalizedOrganizationToken() == normalizedUserId ||
+        viewerPermissions.any { permission ->
+            permission.trim().equals(ORGANIZATION_EVENTS_MANAGE_PERMISSION, ignoreCase = true)
+        } ||
+        activeHostIds().any { hostId -> hostId == normalizedUserId }
 }
 
 fun resolveOrganizationVerificationStatus(

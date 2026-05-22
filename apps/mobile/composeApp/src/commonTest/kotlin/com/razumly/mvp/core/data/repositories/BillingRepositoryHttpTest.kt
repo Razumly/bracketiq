@@ -11,6 +11,9 @@ import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.activeHostIds
+import com.razumly.mvp.core.data.dataTypes.activeOfficialIds
+import com.razumly.mvp.core.data.dataTypes.canManageEventsForViewer
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
@@ -699,6 +702,79 @@ class BillingRepositoryHttpTest {
         assertEquals(OrganizationVerificationReviewStatus.OPEN, organizations[1].verificationReviewStatus)
         assertEquals("Waiting on payout details", organizations[1].verificationReviewNotes)
         assertEquals("2026-04-13T21:00:00.000Z", organizations[1].verificationReviewUpdatedAt)
+    }
+
+    @Test
+    fun getOrganizationsByIds_singleOrganization_maps_staff_permissions() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/organizations/org_1", request.url.encodedPath)
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            respond(
+                content = """
+                    {
+                      "id": "org_1",
+                      "name": "Indoor Soccer Arena",
+                      "ownerId": "owner_1",
+                      "staffMembers": [
+                        {
+                          "id": "staff_host",
+                          "organizationId": "org_1",
+                          "userId": "host_staff_1",
+                          "types": ["HOST"]
+                        },
+                        {
+                          "id": "staff_official",
+                          "organizationId": "org_1",
+                          "userId": "official_staff_1",
+                          "types": ["OFFICIAL"]
+                        },
+                        {
+                          "id": "staff_blocked",
+                          "organizationId": "org_1",
+                          "userId": "blocked_host_1",
+                          "types": ["HOST"]
+                        }
+                      ],
+                      "staffInvites": [
+                        {
+                          "type": "STAFF",
+                          "email": "blocked@example.test",
+                          "status": "PENDING",
+                          "organizationId": "org_1",
+                          "userId": "blocked_host_1"
+                        }
+                      ],
+                      "staffEmailsByUserId": {
+                        "host_staff_1": "host@example.test"
+                      },
+                      "viewerPermissions": ["events.manage"]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val organization = repo.getOrganizationsByIds(listOf("org_1")).getOrThrow().single()
+
+        assertEquals(listOf("owner_1", "host_staff_1"), organization.activeHostIds())
+        assertEquals(listOf("official_staff_1"), organization.activeOfficialIds())
+        assertEquals("host@example.test", organization.staffEmailsByUserId["host_staff_1"])
+        assertTrue(organization.canManageEventsForViewer("viewer_with_permission"))
+        assertFalse(organization.activeHostIds().contains("blocked_host_1"))
     }
 
     @Test

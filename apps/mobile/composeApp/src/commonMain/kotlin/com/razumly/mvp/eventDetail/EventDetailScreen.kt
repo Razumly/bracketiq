@@ -138,6 +138,7 @@ import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.canManageEventsForViewer
 import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
 import com.razumly.mvp.core.data.dataTypes.isDraftLikeState
 import com.razumly.mvp.core.data.dataTypes.isPrivateState
@@ -871,7 +872,7 @@ internal fun canViewOfficialsPanel(
     return event.hostId == normalizedCurrentUserId ||
         event.assistantHostIds.any { assistantHostId -> assistantHostId == normalizedCurrentUserId } ||
         isCurrentUserEventOfficial(normalizedCurrentUserId, event) ||
-        organization?.ownerId == normalizedCurrentUserId
+        organization?.canManageEventsForViewer(normalizedCurrentUserId) == true
 }
 
 internal fun isCurrentUserEventOfficial(
@@ -3378,10 +3379,12 @@ fun EventDetailScreen(
     val isOrganizationManager = remember(
         currentUser.id,
         selectedEvent.organization?.ownerId,
+        selectedEvent.organization?.staffMembers,
+        selectedEvent.organization?.staffInvites,
+        selectedEvent.organization?.viewerPermissions,
     ) {
         val currentUserId = currentUser.id.trim()
-        currentUserId.isNotBlank() &&
-            selectedEvent.organization?.ownerId?.trim() == currentUserId
+        selectedEvent.organization?.canManageEventsForViewer(currentUserId) == true
     }
     val canManageTemplate = remember(isHost, isAssistantHost, isOrganizationManager) {
         isHost || isAssistantHost || isOrganizationManager
