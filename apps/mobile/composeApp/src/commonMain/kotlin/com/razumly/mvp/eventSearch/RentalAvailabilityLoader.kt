@@ -1,11 +1,22 @@
+@file:OptIn(kotlin.time.ExperimentalTime::class)
+
 package com.razumly.mvp.eventSearch
 
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
+import com.razumly.mvp.core.util.toTimeZoneOrUtc
 import com.razumly.mvp.eventDetail.data.IMatchRepository
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Duration.Companion.days
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Instant
 
 class RentalAvailabilityLoader(
     private val eventRepository: IEventRepository,
@@ -84,6 +95,7 @@ class RentalAvailabilityLoader(
 
         val matchBackedEventIds = mutableSetOf<String>()
         val matchBackedEventNames = mutableMapOf<String, String>()
+        val slotBackedEvents = mutableListOf<Event>()
         val directBlocks = mutableListOf<RentalBusyBlock>()
 
         events.forEach { event ->
@@ -109,6 +121,9 @@ class RentalAvailabilityLoader(
                     }
                     matchBackedEventIds.add(event.id)
                     matchBackedEventNames[event.id] = event.name.ifBlank { "Reserved match" }
+                    if (event.timeSlotIds.any { slotId -> slotId.isNotBlank() }) {
+                        slotBackedEvents.add(event)
+                    }
                 }
             }
         }
@@ -138,7 +153,12 @@ class RentalAvailabilityLoader(
                 }
         }
 
-        (directBlocks + matchBlocks)
+        val slotBlocks = buildSlotBackedBusyBlocks(
+            events = slotBackedEvents,
+            selectedFieldIds = selectedFieldSet,
+        )
+
+        (directBlocks + slotBlocks + matchBlocks)
             .filter { block -> block.end > block.start }
             .distinctBy { block ->
                 "${block.eventId}:${block.fieldId}:${block.start.toEpochMilliseconds()}:${block.end.toEpochMilliseconds()}"
@@ -158,5 +178,164 @@ class RentalAvailabilityLoader(
             }
         }
         return grouped
+    }
+
+    private suspend fun buildSlotBackedBusyBlocks(
+        events: List<Event>,
+        selectedFieldIds: Set<String>,
+    ): List<RentalBusyBlock> {
+        if (events.isEmpty()) {
+            return emptyList()
+        }
+        val slotIds = events
+            .flatMap { event -> event.timeSlotIds }
+            .map { slotId -> slotId.trim() }
+            .filter(String::isNotBlank)
+            .distinct()
+        if (slotIds.isEmpty()) {
+            return emptyList()
+        }
+
+        val slotsById = fieldRepository.getTimeSlots(slotIds).getOrThrow()
+            .associateBy { slot -> slot.id }
+
+        return events.flatMap { event ->
+            val eventSlots = event.timeSlotIds.mapNotNull { slotId ->
+                slotsById[slotId.trim()]
+            }
+            eventSlots.flatMap { slot ->
+                slot.toRentalBusyBlocks(
+                    event = event,
+                    selectedFieldIds = selectedFieldIds,
+                )
+            }
+        }
+    }
+
+    private fun TimeSlot.toRentalBusyBlocks(
+        event: Event,
+        selectedFieldIds: Set<String>,
+    ): List<RentalBusyBlock> {
+        val fieldIds = normalizedScheduledFieldIds()
+            .filter { fieldId -> selectedFieldIds.contains(fieldId) }
+        if (fieldIds.isEmpty()) {
+            return emptyList()
+        }
+
+        return if (repeating) {
+            toRepeatingRentalBusyBlocks(event, fieldIds)
+        } else {
+            toSingleRentalBusyBlocks(event, fieldIds)
+        }
+    }
+
+    private fun TimeSlot.toSingleRentalBusyBlocks(
+        event: Event,
+        fieldIds: List<String>,
+    ): List<RentalBusyBlock> {
+        val start = startDate
+        val end = endDate ?: inferEndFromMinutes(start) ?: return emptyList()
+        if (end <= start) {
+            return emptyList()
+        }
+        return fieldIds.map { fieldId ->
+            RentalBusyBlock(
+                eventId = event.id,
+                eventName = event.name.ifBlank { "Reserved event" },
+                fieldId = fieldId,
+                start = start,
+                end = end,
+            )
+        }
+    }
+
+    private fun TimeSlot.toRepeatingRentalBusyBlocks(
+        event: Event,
+        fieldIds: List<String>,
+    ): List<RentalBusyBlock> {
+        val fallbackTimeZone = event.timeZone.toTimeZoneOrUtc(TimeZone.UTC)
+        val slotTimeZone = timeZone.toTimeZoneOrUtc(fallbackTimeZone)
+        val startMinutes = startTimeMinutes ?: startDate.toLocalDateTime(slotTimeZone).let { local ->
+            local.hour * 60 + local.minute
+        }
+        val endMinutes = endTimeMinutes ?: endDate?.toLocalDateTime(slotTimeZone)?.let { local ->
+            local.hour * 60 + local.minute
+        } ?: return emptyList()
+        if (endMinutes <= startMinutes) {
+            return emptyList()
+        }
+
+        val days = normalizedScheduleDays(slotTimeZone)
+        if (days.isEmpty()) {
+            return emptyList()
+        }
+
+        val windowStart = maxInstant(startDate, event.start)
+        val eventWindowEnd = if (event.noFixedEndDateTime || event.end <= event.start) {
+            event.start + (SLOT_BLOCK_LOOKAHEAD_WEEKS * DAYS_PER_WEEK).days
+        } else {
+            event.end
+        }
+        val windowEnd = minInstant(endDate ?: eventWindowEnd, eventWindowEnd)
+        if (windowEnd <= windowStart) {
+            return emptyList()
+        }
+
+        val blocks = mutableListOf<RentalBusyBlock>()
+        var cursor = windowStart.toLocalDateTime(slotTimeZone).date
+        val finalDate = windowEnd.toLocalDateTime(slotTimeZone).date
+
+        while (cursor.toEpochDays() <= finalDate.toEpochDays()) {
+            if (days.contains(cursor.dayOfWeek.toRentalDayIndex())) {
+                val occurrenceStart = cursor.toInstantAtMinutes(startMinutes, slotTimeZone)
+                val occurrenceEnd = cursor.toInstantAtMinutes(endMinutes, slotTimeZone)
+                if (occurrenceEnd > occurrenceStart && occurrenceStart < windowEnd && occurrenceEnd > windowStart) {
+                    val clippedStart = maxInstant(occurrenceStart, windowStart)
+                    val clippedEnd = minInstant(occurrenceEnd, windowEnd)
+                    fieldIds.forEach { fieldId ->
+                        blocks.add(
+                            RentalBusyBlock(
+                                eventId = event.id,
+                                eventName = event.name.ifBlank { "Reserved event" },
+                                fieldId = fieldId,
+                                start = clippedStart,
+                                end = clippedEnd,
+                            )
+                        )
+                    }
+                }
+            }
+            cursor = LocalDate.fromEpochDays(cursor.toEpochDays() + 1)
+        }
+
+        return blocks
+    }
+
+    private fun TimeSlot.inferEndFromMinutes(start: Instant): Instant? {
+        val startMinutes = startTimeMinutes ?: return null
+        val endMinutes = endTimeMinutes ?: return null
+        if (endMinutes <= startMinutes) {
+            return null
+        }
+        return start + (endMinutes - startMinutes).minutes
+    }
+
+    private fun TimeSlot.normalizedScheduleDays(timeZone: TimeZone): List<Int> {
+        if (!daysOfWeek.isNullOrEmpty()) {
+            return normalizedDaysOfWeek()
+        }
+        return toMondayBasedDayIndex(timeZone)?.let(::listOf)
+            ?: normalizedDaysOfWeek()
+    }
+
+    private fun maxInstant(first: Instant, second: Instant): Instant =
+        if (first >= second) first else second
+
+    private fun minInstant(first: Instant, second: Instant): Instant =
+        if (first <= second) first else second
+
+    private companion object {
+        const val SLOT_BLOCK_LOOKAHEAD_WEEKS = 52
+        const val DAYS_PER_WEEK = 7
     }
 }
