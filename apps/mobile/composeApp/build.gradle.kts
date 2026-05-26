@@ -70,6 +70,7 @@ kotlin {
                 "GooglePlaces",
                 "FirebaseCore",
                 "FirebaseMessaging",
+                "FirebaseAnalytics",
                 "IQKeyboardManagerSwift",
             ).forEach { podName ->
                 linkerOpts.add("-F$syntheticPodsBuildPath/$podName")
@@ -89,6 +90,7 @@ kotlin {
         pod("GooglePlaces")
         pod("FirebaseCore")
         pod("FirebaseMessaging")
+        pod("FirebaseAnalytics")
         pod("IQKeyboardManagerSwift") {
             extraOpts += listOf("-compiler-option", "-fmodules")
         }
@@ -182,6 +184,7 @@ kotlin {
                 implementation(libs.androidx.credentials.play.services.auth)
                 implementation(libs.androidx.core.splashscreen)
                 implementation(libs.googleid)
+                implementation(libs.firebase.analytics)
                 implementation("com.google.auth:google-auth-library-oauth2-http:1.37.1") {
                     exclude(group = "org.apache.httpcomponents", module = "httpclient")
                     exclude(group = "org.apache.httpcomponents", module = "httpcore")

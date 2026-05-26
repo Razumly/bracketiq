@@ -17,6 +17,7 @@ coroutines = "1.10.2"
 datastore = "1.2.1"
 decompose = "3.5.0"
 firebaseMessaging = "25.0.1"
+firebaseAnalytics = "23.2.0"
 foundation = "1.10.3"
 foundationLayout = "1.10.6"
 geo = "0.8.0"
@@ -72,6 +73,7 @@ androidx-core = { module = "androidx.test:core", version.ref = "core" }
 androidx-performance-annotation = { module = "androidx.performance:performance-annotation", version.ref = "performanceAnnotation" }
 compose-multiplatform = { module = "com.kizitonwose.calendar:compose-multiplatform", version.ref = "calendar" }
 firebase-messaging = { module = "com.google.firebase:firebase-messaging", version.ref = "firebaseMessaging" }
+firebase-analytics = { module = "com.google.firebase:firebase-analytics", version.ref = "firebaseAnalytics" }
 foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "foundation" }
 imagepickerkmp = { module = "io.github.ismoy:imagepickerkmp", version.ref = "imagepickerkmp" }
 jetbrains-components-resources = { module = "org.jetbrains.compose.components:components-resources", version.ref = "componentsResourcesVersion" }
