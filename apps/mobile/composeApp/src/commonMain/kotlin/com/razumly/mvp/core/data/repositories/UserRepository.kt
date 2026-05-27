@@ -4,6 +4,8 @@ import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.network.ApiException
@@ -26,11 +28,14 @@ import com.razumly.mvp.core.network.dto.RegisterConflictResponseDto
 import com.razumly.mvp.core.network.dto.RegisterProfileSelectionDto
 import com.razumly.mvp.core.network.dto.RegisterProfileSnapshotDto
 import com.razumly.mvp.core.network.dto.RegisterRequestDto
+import com.razumly.mvp.core.network.dto.TeamApiDto
+import com.razumly.mvp.core.network.dto.TeamPlayerRegistrationApiDto
 import com.razumly.mvp.core.network.dto.UpdateUserRequestDto
 import com.razumly.mvp.core.network.dto.UserResponseDto
 import com.razumly.mvp.core.network.dto.UserProfileDto
 import com.razumly.mvp.core.network.dto.UserUpdateDto
 import com.razumly.mvp.core.network.dto.UsersResponseDto
+import com.razumly.mvp.core.network.dto.toTeamPlayerRegistrationOrNull
 import com.razumly.mvp.core.network.dto.toAuthAccountOrNull
 import com.razumly.mvp.core.network.dto.toUserDataOrNull
 import com.razumly.mvp.core.presentation.util.toNameCase
@@ -99,9 +104,16 @@ data class FamilyChild(
 
 data class FamilyJoinRequest(
     val registrationId: String,
-    val eventId: String,
+    val requestType: String = "EVENT",
+    val requestSource: String? = null,
+    val inviteId: String? = null,
+    val eventId: String? = null,
     val eventName: String? = null,
     val eventStart: String? = null,
+    val teamId: String? = null,
+    val teamName: String? = null,
+    val teamRegistrationPriceCents: Int? = null,
+    val teamOpenRegistration: Boolean? = null,
     val childUserId: String,
     val childFirstName: String? = null,
     val childLastName: String? = null,
@@ -124,6 +136,10 @@ enum class FamilyJoinRequestAction(val apiValue: String) {
 
 data class FamilyJoinRequestResolution(
     val action: String? = null,
+    val requestType: String? = null,
+    val inviteId: String? = null,
+    val team: Team? = null,
+    val teamRegistration: TeamPlayerRegistration? = null,
     val registrationStatus: String? = null,
     val consentStatus: String? = null,
     val childEmail: String? = null,
@@ -1633,9 +1649,16 @@ private data class FamilyChildDto(
 @Serializable
 private data class FamilyJoinRequestDto(
     val registrationId: String? = null,
+    val requestType: String? = null,
+    val requestSource: String? = null,
+    val inviteId: String? = null,
     val eventId: String? = null,
     val eventName: String? = null,
     val eventStart: String? = null,
+    val teamId: String? = null,
+    val teamName: String? = null,
+    val teamRegistrationPriceCents: Int? = null,
+    val teamOpenRegistration: Boolean? = null,
     val childUserId: String? = null,
     val childFirstName: String? = null,
     val childLastName: String? = null,
@@ -1652,14 +1675,30 @@ private data class FamilyJoinRequestDto(
 ) {
     fun toFamilyJoinRequestOrNull(): FamilyJoinRequest? {
         val normalizedRegistrationId = registrationId?.trim()?.takeIf(String::isNotBlank) ?: return null
-        val normalizedEventId = eventId?.trim()?.takeIf(String::isNotBlank) ?: return null
+        val normalizedEventId = eventId?.trim()?.takeIf(String::isNotBlank)
+        val normalizedTeamId = teamId?.trim()?.takeIf(String::isNotBlank)
         val normalizedChildUserId = childUserId?.trim()?.takeIf(String::isNotBlank) ?: return null
+        val normalizedRequestType = requestType
+            ?.trim()
+            ?.uppercase()
+            ?.takeIf { it == "EVENT" || it == "TEAM" }
+            ?: if (normalizedTeamId != null) "TEAM" else "EVENT"
+
+        if (normalizedRequestType == "EVENT" && normalizedEventId == null) return null
+        if (normalizedRequestType == "TEAM" && normalizedTeamId == null) return null
 
         return FamilyJoinRequest(
             registrationId = normalizedRegistrationId,
+            requestType = normalizedRequestType,
+            requestSource = requestSource?.trim()?.takeIf(String::isNotBlank),
+            inviteId = inviteId?.trim()?.takeIf(String::isNotBlank),
             eventId = normalizedEventId,
             eventName = eventName?.trim()?.takeIf(String::isNotBlank),
             eventStart = eventStart?.trim()?.takeIf(String::isNotBlank),
+            teamId = normalizedTeamId,
+            teamName = teamName?.trim()?.takeIf(String::isNotBlank),
+            teamRegistrationPriceCents = teamRegistrationPriceCents?.coerceAtLeast(0),
+            teamOpenRegistration = teamOpenRegistration,
             childUserId = normalizedChildUserId,
             childFirstName = childFirstName?.trim()?.takeIf(String::isNotBlank)?.toNameCase(),
             childLastName = childLastName?.trim()?.takeIf(String::isNotBlank)?.toNameCase(),
@@ -1685,7 +1724,10 @@ private data class JoinRequestActionRequestDto(
 @Serializable
 private data class JoinRequestActionResponseDto(
     val action: String? = null,
-    val registration: JoinRequestRegistrationDto? = null,
+    val requestType: String? = null,
+    val inviteId: String? = null,
+    val team: TeamApiDto? = null,
+    val registration: TeamPlayerRegistrationApiDto? = null,
     val consent: JoinRequestConsentDto? = null,
     val warnings: List<String> = emptyList(),
     val error: String? = null,
@@ -1693,6 +1735,10 @@ private data class JoinRequestActionResponseDto(
     fun toResolution(): FamilyJoinRequestResolution {
         return FamilyJoinRequestResolution(
             action = action?.trim()?.takeIf(String::isNotBlank),
+            requestType = requestType?.trim()?.takeIf(String::isNotBlank),
+            inviteId = inviteId?.trim()?.takeIf(String::isNotBlank),
+            team = team?.toTeamOrNull(),
+            teamRegistration = registration?.toTeamPlayerRegistrationOrNull(),
             registrationStatus = registration?.status?.trim()?.takeIf(String::isNotBlank),
             consentStatus = consent?.status?.trim()?.takeIf(String::isNotBlank)
                 ?: registration?.consentStatus?.trim()?.takeIf(String::isNotBlank),
@@ -1702,12 +1748,6 @@ private data class JoinRequestActionResponseDto(
         )
     }
 }
-
-@Serializable
-private data class JoinRequestRegistrationDto(
-    val status: String? = null,
-    val consentStatus: String? = null,
-)
 
 @Serializable
 private data class JoinRequestConsentDto(

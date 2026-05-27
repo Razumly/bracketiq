@@ -6,8 +6,12 @@ import com.razumly.mvp.core.data.dataTypes.NotificationSettings
 import com.razumly.mvp.core.data.dataTypes.defaultNotificationSettings
 import com.razumly.mvp.core.data.dataTypes.normalizeNotificationSettings
 import com.razumly.mvp.core.presentation.util.toNameCase
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlin.time.Clock
 
 @Serializable
 data class LoginRequestDto(
@@ -212,11 +216,30 @@ fun UserProfileDto.toUserDataOrNull(): UserData? {
         uploadedImages = uploadedImages ?: emptyList(),
         profileImageId = profileImageId,
         privacyDisplayName = displayName,
-        isMinor = isMinor ?: false,
+        isMinor = isMinor ?: inferIsMinorFromDateOfBirth(dateOfBirth),
         isIdentityHidden = isIdentityHidden ?: false,
         chatTermsAcceptedAt = chatTermsAcceptedAt,
         chatTermsVersion = chatTermsVersion,
         notificationSettings = normalizeNotificationSettings(notificationSettings ?: defaultNotificationSettings()),
         id = resolvedId,
     )
+}
+
+private fun inferIsMinorFromDateOfBirth(dateOfBirth: String?, ageThreshold: Int = 18): Boolean {
+    val normalizedDatePart = dateOfBirth
+        ?.substringBefore('T')
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: return false
+    val birthDate = runCatching { LocalDate.parse(normalizedDatePart) }.getOrNull() ?: return false
+    val today = Clock.System.now().toLocalDateTime(TimeZone.UTC).date
+
+    var age = today.year - birthDate.year
+    if (today.month < birthDate.month ||
+        (today.month == birthDate.month && today.day < birthDate.day)
+    ) {
+        age -= 1
+    }
+
+    return age in 0 until ageThreshold
 }

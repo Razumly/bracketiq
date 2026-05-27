@@ -3,6 +3,7 @@ package com.razumly.mvp.core.network.dto
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.TeamStaffAssignment
+import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
 import com.razumly.mvp.core.data.util.normalizeDivisionLabel
@@ -191,6 +192,9 @@ data class TeamRegistrationResponseDto(
     val registration: TeamPlayerRegistrationApiDto? = null,
     val consent: TeamRegistrationConsentDto? = null,
     val warnings: List<String> = emptyList(),
+    val requiresParentApproval: Boolean? = null,
+    val message: String? = null,
+    val invite: Invite? = null,
     val left: Boolean? = null,
     val team: TeamApiDto? = null,
     val error: String? = null,

@@ -17,6 +17,11 @@ data class InviteDTO(
     val createdBy: String? = null,
     val firstName: String? = null,
     val lastName: String? = null,
+    val childUserId: String? = null,
+    val childFirstName: String? = null,
+    val childLastName: String? = null,
+    val childFullName: String? = null,
+    val viewerCanAcceptForChild: Boolean = false,
     @Transient val id: String = "",
 ) {
     fun toInvite(id: String): Invite =
@@ -31,6 +36,11 @@ data class InviteDTO(
             createdBy = createdBy,
             firstName = firstName?.toNameCase(),
             lastName = lastName?.toNameCase(),
+            childUserId = childUserId,
+            childFirstName = childFirstName?.toNameCase(),
+            childLastName = childLastName?.toNameCase(),
+            childFullName = childFullName?.toNameCase(),
+            viewerCanAcceptForChild = viewerCanAcceptForChild,
             id = id,
         )
 }

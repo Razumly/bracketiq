@@ -32,8 +32,8 @@ compose.resources {
     generateResClass = always
 }
 
-val mvpVersion = "1.5.11"
-val mvpVersionCode = 45
+val mvpVersion = "1.5.12"
+val mvpVersionCode = 46
 kotlin {
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")

@@ -144,6 +144,9 @@ data class TeamRegistrationResult(
     val registrationStatus: String? = null,
     val consent: TeamRegistrationConsent? = null,
     val warnings: List<String> = emptyList(),
+    val requiresParentApproval: Boolean = false,
+    val message: String? = null,
+    val invite: com.razumly.mvp.core.data.dataTypes.Invite? = null,
 )
 
 data class TeamInviteEventTeamOption(
@@ -177,6 +180,10 @@ fun TeamRegistrationResult.requiresAdditionalSigning(): Boolean =
 fun TeamRegistrationResult.requiresChildEmail(): Boolean = consent?.requiresChildEmail == true
 
 fun TeamRegistrationResult.userMessage(defaultMessage: String): String {
+    if (requiresParentApproval) {
+        return message?.trim()?.takeIf(String::isNotBlank)
+            ?: "A parent or guardian must approve this team request before registration can continue."
+    }
     if (requiresChildEmail()) {
         return warnings.firstOrNull()
             ?: "Add the child's email before requesting child-signature documents."
@@ -201,6 +208,9 @@ private fun TeamRegistrationResponseDto.toTeamRegistrationResult(): TeamRegistra
             ?: registration?.status?.trim()?.takeIf(String::isNotBlank),
         consent = consent?.toConsentOrNull(),
         warnings = warnings.map(String::trim).filter(String::isNotBlank),
+        requiresParentApproval = requiresParentApproval == true,
+        message = message?.trim()?.takeIf(String::isNotBlank),
+        invite = invite,
     )
 }
 

@@ -2573,6 +2573,14 @@ class DefaultEventDetailComponent(
         team: TeamWithPlayers,
         result: TeamRegistrationResult,
     ) {
+        if (result.requiresParentApproval) {
+            _errorState.value = ErrorMessage(
+                result.userMessage("A parent or guardian must approve this team request before registration can continue."),
+            )
+            refreshEventDetails()
+            return
+        }
+
         if (result.requiresChildEmail()) {
             _errorState.value = ErrorMessage(
                 result.userMessage("Add the child's email before continuing."),

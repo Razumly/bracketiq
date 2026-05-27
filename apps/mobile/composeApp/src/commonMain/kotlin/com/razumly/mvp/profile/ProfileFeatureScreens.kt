@@ -42,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.NotificationSettings
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.inferTeamInviteRole
@@ -380,19 +381,41 @@ fun ProfileInvitesScreen(component: ProfileComponent) {
                     SectionHeaderRow(title = "Team Invites")
                     teamInvites.forEach { invite ->
                         val team = invite.teamId?.let(invitesState.teamsById::get)
+                        val roleLabel = invite.inferTeamInviteRole(team?.team).label()
+                        val childLabel = invite.childDisplayName()
+                        val requiresParentAccept = invite.requiresParentAcceptanceForCurrentMinor(
+                            currentUserId = invitesState.currentUserId,
+                            currentUserIsMinor = invitesState.currentUserIsMinor,
+                        )
                         val isAccepting = invitesState.activeInviteId == invite.id &&
                             invitesState.activeInviteAction == ProfileInviteAction.ACCEPT
                         val isDeclining = invitesState.activeInviteId == invite.id &&
                             invitesState.activeInviteAction == ProfileInviteAction.DECLINE
                         InviteActionCard(
                             title = team?.team?.name?.takeIf(String::isNotBlank) ?: "Team",
-                            subtitle = invite.inferTeamInviteRole(team?.team).label(),
-                            tertiary = invite.email.takeIf(String::isNotBlank),
-                            primaryActionLabel = if (isAccepting) "Accepting..." else "Accept",
-                            onPrimaryAction = { component.acceptInvite(invite) },
+                            subtitle = when {
+                                requiresParentAccept -> "$roleLabel - parent/guardian approval required"
+                                invite.viewerCanAcceptForChild && childLabel != null -> "$roleLabel for $childLabel"
+                                else -> roleLabel
+                            },
+                            tertiary = when {
+                                requiresParentAccept -> CHILD_TEAM_INVITE_PARENT_MESSAGE
+                                invite.viewerCanAcceptForChild && childLabel != null -> "For $childLabel"
+                                else -> invite.email.takeIf(String::isNotBlank)
+                            },
+                            primaryActionLabel = when {
+                                requiresParentAccept -> "Parent required"
+                                isAccepting -> "Accepting..."
+                                else -> "Accept"
+                            },
+                            onPrimaryAction = {
+                                if (!requiresParentAccept) {
+                                    component.acceptInvite(invite)
+                                }
+                            },
                             secondaryActionLabel = if (isDeclining) "Declining..." else "Decline",
                             onSecondaryAction = { component.declineInvite(invite) },
-                            primaryEnabled = !hasActiveInviteAction || isAccepting,
+                            primaryEnabled = !requiresParentAccept && (!hasActiveInviteAction || isAccepting),
                             secondaryEnabled = !hasActiveInviteAction || isDeclining,
                         )
                     }
@@ -741,6 +764,13 @@ fun ProfileChildrenScreen(component: ProfileComponent) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     childrenState.joinRequests.forEach { request ->
                         val isResolving = childrenState.activeJoinRequestId == request.registrationId
+                        val requestVerb = when {
+                            request.isTeamRequest &&
+                                request.requestSource.equals("TEAM_INVITE", ignoreCase = true) ->
+                                "has a team invite for"
+                            request.isTeamRequest -> "requested to join"
+                            else -> "requested to join"
+                        }
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -753,14 +783,26 @@ fun ProfileChildrenScreen(component: ProfileComponent) {
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                                 Text(
-                                    text = "${request.childFullName} requested to join ${request.eventName}",
+                                    text = "${request.childFullName} $requestVerb ${request.targetName}",
                                     style = MaterialTheme.typography.titleMedium,
+                                )
+                                Text(
+                                    text = if (request.isTeamRequest) "Team request" else "Event request",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                                 Text(
                                     text = "Consent status: ${request.consentStatus ?: "guardian_approval_required"}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
+                                if (request.isTeamRequest && (request.teamRegistrationPriceCents ?: 0) > 0) {
+                                    Text(
+                                        text = "Approving starts registration. Payment can continue after approval.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                                 request.requestedAt?.let { requestedAt ->
                                     Text(
                                         text = "Requested: ${formatDateForDisplay(requestedAt)}",
@@ -1832,6 +1874,29 @@ private fun NotificationSettingsCard(
             }
         }
     }
+}
+
+private const val CHILD_TEAM_INVITE_PARENT_MESSAGE =
+    "A parent or guardian must accept team invitations for child accounts."
+
+private fun Invite.childDisplayName(): String? {
+    childFullName?.trim()?.takeIf(String::isNotBlank)?.let { return it }
+    val fullName = listOf(
+        childFirstName?.trim().orEmpty(),
+        childLastName?.trim().orEmpty(),
+    ).filter(String::isNotBlank).joinToString(" ")
+    return fullName.takeIf(String::isNotBlank)
+}
+
+private fun Invite.requiresParentAcceptanceForCurrentMinor(
+    currentUserId: String?,
+    currentUserIsMinor: Boolean,
+): Boolean {
+    val normalizedCurrentUserId = currentUserId?.trim()?.takeIf(String::isNotBlank) ?: return false
+    return currentUserIsMinor &&
+        type.equals("TEAM", ignoreCase = true) &&
+        userId?.trim() == normalizedCurrentUserId &&
+        !viewerCanAcceptForChild
 }
 
 @Composable

@@ -22,11 +22,15 @@ import com.razumly.mvp.core.data.dataTypes.NotificationSettings
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Subscription
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.defaultNotificationSettings
+import com.razumly.mvp.core.data.dataTypes.isPaymentPending
+import com.razumly.mvp.core.data.dataTypes.isStarted
 import com.razumly.mvp.core.data.dataTypes.normalizeNotificationSettings
 import com.razumly.mvp.core.data.dataTypes.withNotificationSetting
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.repositories.FamilyChild
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequest
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequestAction
@@ -155,15 +159,31 @@ data class ProfileChild(
 
 data class ProfileJoinRequest(
     val registrationId: String,
-    val eventId: String,
-    val eventName: String,
+    val requestType: String = "EVENT",
+    val requestSource: String? = null,
+    val inviteId: String? = null,
+    val eventId: String? = null,
+    val eventName: String? = null,
+    val teamId: String? = null,
+    val teamName: String? = null,
+    val teamRegistrationPriceCents: Int? = null,
     val childUserId: String,
     val childFullName: String,
     val childEmail: String? = null,
     val childHasEmail: Boolean = false,
     val consentStatus: String? = null,
     val requestedAt: String? = null,
-)
+) {
+    val isTeamRequest: Boolean
+        get() = requestType.equals("TEAM", ignoreCase = true)
+
+    val targetName: String
+        get() = if (isTeamRequest) {
+            teamName?.trim()?.takeIf(String::isNotBlank) ?: "Team"
+        } else {
+            eventName?.trim()?.takeIf(String::isNotBlank) ?: "Event"
+        }
+}
 
 data class ProfileChildrenState(
     val isLoading: Boolean = false,
@@ -228,6 +248,8 @@ data class ProfileNotificationSettingsState(
 data class ProfileInvitesState(
     val isLoading: Boolean = false,
     val invites: List<Invite> = emptyList(),
+    val currentUserId: String? = null,
+    val currentUserIsMinor: Boolean = false,
     val organizationsById: Map<String, Organization> = emptyMap(),
     val teamsById: Map<String, TeamWithPlayers> = emptyMap(),
     val eventsById: Map<String, Event> = emptyMap(),
@@ -235,6 +257,18 @@ data class ProfileInvitesState(
     val activeInviteId: String? = null,
     val activeInviteAction: ProfileInviteAction? = null,
 )
+
+private const val CHILD_TEAM_INVITE_PARENT_MESSAGE =
+    "A parent or guardian must accept team invitations for child accounts."
+
+private fun Invite.requiresParentAcceptanceForCurrentMinor(currentUser: UserData?): Boolean {
+    val resolvedCurrentUser = currentUser ?: return false
+    val currentUserId = resolvedCurrentUser.id.trim().takeIf(String::isNotBlank) ?: return false
+    return resolvedCurrentUser.isMinor &&
+        type.equals("TEAM", ignoreCase = true) &&
+        userId?.trim() == currentUserId &&
+        !viewerCanAcceptForChild
+}
 
 enum class ProfileInviteAction {
     ACCEPT,
@@ -501,6 +535,7 @@ class DefaultProfileComponent(
     private var childrenTabVisibilityUserId: String? = null
     private var pendingDocumentSyncJob: Job? = null
     private var pendingBillingAddressAction: (() -> Unit)? = null
+    private var pendingChildTeamRegistrationPayment: Team? = null
 
     override val childStack: Value<ChildStack<*, ProfileComponent.Child>> = childStack(
         source = navigation,
@@ -539,7 +574,27 @@ class DefaultProfileComponent(
         scope.launch {
             paymentResult.collect { payment ->
                 val activeAttempt = activeBillPaymentAttempt
-                if (payment == null || _activeBillPaymentId.value == null || activeAttempt == null) return@collect
+                val pendingTeam = pendingChildTeamRegistrationPayment
+                if (payment == null) return@collect
+                if (pendingTeam != null) {
+                    when (payment) {
+                        PaymentResult.Canceled -> _errorState.value = ErrorMessage("Payment canceled.")
+                        is PaymentResult.Failed -> _errorState.value = ErrorMessage(payment.error)
+                        PaymentResult.Completed -> {
+                            _errorState.value = ErrorMessage(
+                                "Payment submitted for ${pendingTeam.name}. Registration is pending until the bank payment clears.",
+                            )
+                            refreshChildren()
+                            refreshPaymentPlans()
+                        }
+                    }
+
+                    loadingHandler?.hideLoading()
+                    pendingChildTeamRegistrationPayment = null
+                    clearPaymentResult()
+                    return@collect
+                }
+                if (_activeBillPaymentId.value == null || activeAttempt == null) return@collect
 
                 when (payment) {
                     PaymentResult.Canceled -> _errorState.value = ErrorMessage("Payment canceled.")
@@ -828,7 +883,8 @@ class DefaultProfileComponent(
 
     override fun refreshInvites() {
         scope.launch {
-            val currentUserId = userRepository.currentUser.value.getOrNull()?.id
+            val currentUser = userRepository.currentUser.value.getOrNull()
+            val currentUserId = currentUser?.id
             if (currentUserId.isNullOrBlank()) {
                 _invitesState.value = ProfileInvitesState(
                     isLoading = false,
@@ -876,6 +932,8 @@ class DefaultProfileComponent(
                     _invitesState.value = ProfileInvitesState(
                         isLoading = false,
                         invites = pendingInvites,
+                        currentUserId = currentUserId,
+                        currentUserIsMinor = currentUser.isMinor,
                         organizationsById = organizationsById,
                         teamsById = teamsById,
                         eventsById = eventsById,
@@ -902,6 +960,12 @@ class DefaultProfileComponent(
             _errorState.value = ErrorMessage("Invalid invite.")
             return
         }
+        val currentUser = userRepository.currentUser.value.getOrNull()
+        if (invite.requiresParentAcceptanceForCurrentMinor(currentUser)) {
+            _invitesState.value = _invitesState.value.copy(error = CHILD_TEAM_INVITE_PARENT_MESSAGE)
+            _errorState.value = ErrorMessage(CHILD_TEAM_INVITE_PARENT_MESSAGE)
+            return
+        }
 
         scope.launch {
             _invitesState.value = _invitesState.value.copy(
@@ -912,12 +976,13 @@ class DefaultProfileComponent(
 
             userRepository.acceptInvite(inviteId)
                 .onSuccess {
-                    invite.teamId?.trim()?.takeIf(String::isNotBlank)?.let { teamId ->
-                        runCatching { teamRepository.getTeamWithPlayers(teamId).getOrThrow() }
+                    val acceptedTeam = invite.teamId?.trim()?.takeIf(String::isNotBlank)?.let { teamId ->
+                        runCatching { teamRepository.getTeamWithPlayers(teamId).getOrThrow() }.getOrNull()
                     }
                     runCatching { userRepository.getCurrentAccount().getOrThrow() }
                     refreshInviteCount()
                     refreshInvites()
+                    maybeStartAcceptedChildTeamPayment(invite, acceptedTeam)
                 }
                 .onFailure { throwable ->
                     _invitesState.value = _invitesState.value.copy(
@@ -927,6 +992,44 @@ class DefaultProfileComponent(
                     )
                 }
         }
+    }
+
+    private fun maybeStartAcceptedChildTeamPayment(
+        invite: Invite,
+        acceptedTeam: TeamWithPlayers?,
+    ) {
+        val childUserId = invite.acceptedChildTeamUserIdOrNull() ?: return
+        val team = acceptedTeam?.team ?: return
+        if (team.registrationPriceCents <= 0) return
+
+        val payableRegistration = team.withSynchronizedMembership()
+            .playerRegistrations
+            .firstOrNull { registration ->
+                registration.userId == childUserId &&
+                    (registration.isStarted() || registration.isPaymentPending())
+            }
+
+        if (payableRegistration == null) {
+            _errorState.value = ErrorMessage(
+                "Invite accepted, but the child registration could not be found for checkout.",
+            )
+            return
+        }
+
+        _errorState.value = ErrorMessage("Invite accepted. Starting payment...")
+        startChildTeamRegistrationPayment(
+            team = team,
+            registration = payableRegistration,
+        )
+    }
+
+    private fun Invite.acceptedChildTeamUserIdOrNull(): String? {
+        if (!viewerCanAcceptForChild || !type.equals("TEAM", ignoreCase = true)) {
+            return null
+        }
+
+        return childUserId?.trim()?.takeIf(String::isNotBlank)
+            ?: userId?.trim()?.takeIf(String::isNotBlank)
     }
 
     override fun declineInvite(invite: Invite) {
@@ -1394,18 +1497,33 @@ class DefaultProfileComponent(
                 registrationId = normalizedRegistrationId,
                 action = action,
             ).onSuccess { resolution ->
-                resolution.warnings.firstOrNull()?.let { warning ->
-                    _errorState.value = ErrorMessage(warning)
-                } ?: run {
-                    _errorState.value = ErrorMessage(
-                        if (action == FamilyJoinRequestAction.APPROVE) {
-                            "Join request approved."
-                        } else {
-                            "Join request declined."
-                        },
-                    )
+                val paymentTeam = resolution.team?.takeIf { team ->
+                    action == FamilyJoinRequestAction.APPROVE &&
+                        resolution.requestType.equals("TEAM", ignoreCase = true) &&
+                        team.registrationPriceCents > 0
                 }
-                refreshChildren()
+
+                if (paymentTeam != null) {
+                    _errorState.value = ErrorMessage("Join request approved. Starting payment...")
+                    refreshChildren()
+                    startChildTeamRegistrationPayment(
+                        team = paymentTeam,
+                        registration = resolution.teamRegistration,
+                    )
+                } else {
+                    resolution.warnings.firstOrNull()?.let { warning ->
+                        _errorState.value = ErrorMessage(warning)
+                    } ?: run {
+                        _errorState.value = ErrorMessage(
+                            if (action == FamilyJoinRequestAction.APPROVE) {
+                                "Join request approved."
+                            } else {
+                                "Join request declined."
+                            },
+                        )
+                    }
+                    refreshChildren()
+                }
                 refreshDocuments()
             }.onFailure {
                 _childrenState.value = _childrenState.value.copy(
@@ -1416,6 +1534,46 @@ class DefaultProfileComponent(
             _childrenState.value = _childrenState.value.copy(
                 activeJoinRequestId = null,
             )
+        }
+    }
+
+    private fun startChildTeamRegistrationPayment(
+        team: Team,
+        registration: TeamPlayerRegistration?,
+    ) {
+        scope.launch {
+            if (!ensureBillingAddressOrPrompt { startChildTeamRegistrationPayment(team, registration) }) {
+                return@launch
+            }
+
+            loadingHandler?.showLoading("Preparing checkout...")
+            billingRepository.createTeamRegistrationPurchaseIntent(
+                team = team,
+                teamRegistration = registration,
+            ).onSuccess { intent ->
+                runCatching {
+                    pendingChildTeamRegistrationPayment = team
+                    clearPaymentResult()
+                    setPaymentIntent(intent)
+                    val account = userRepository.currentAccount.value.getOrThrow()
+                    val user = userRepository.currentUser.value.getOrThrow()
+                    val billingAddress = loadSavedBillingAddress()
+                    loadingHandler?.showLoading("Waiting for payment completion ...")
+                    presentPaymentSheet(
+                        email = account.email,
+                        name = user.fullName,
+                        billingAddress = billingAddress,
+                    )
+                }.onFailure { error ->
+                    pendingChildTeamRegistrationPayment = null
+                    loadingHandler?.hideLoading()
+                    _errorState.value = ErrorMessage(error.userMessage("Unable to start payment sheet."))
+                }
+            }.onFailure { error ->
+                pendingChildTeamRegistrationPayment = null
+                loadingHandler?.hideLoading()
+                _errorState.value = ErrorMessage(error.userMessage("Unable to create payment intent."))
+            }
         }
     }
 
@@ -2110,8 +2268,14 @@ private fun FamilyChild.toProfileChild(): ProfileChild {
 private fun FamilyJoinRequest.toProfileJoinRequest(): ProfileJoinRequest {
     return ProfileJoinRequest(
         registrationId = registrationId,
+        requestType = requestType,
+        requestSource = requestSource?.trim()?.takeIf(String::isNotBlank),
+        inviteId = inviteId?.trim()?.takeIf(String::isNotBlank),
         eventId = eventId,
         eventName = eventName?.trim()?.takeIf(String::isNotBlank) ?: "Event",
+        teamId = teamId?.trim()?.takeIf(String::isNotBlank),
+        teamName = teamName?.trim()?.takeIf(String::isNotBlank),
+        teamRegistrationPriceCents = teamRegistrationPriceCents?.coerceAtLeast(0),
         childUserId = childUserId,
         childFullName = childFullName?.trim()?.takeIf(String::isNotBlank)
             ?: listOf(

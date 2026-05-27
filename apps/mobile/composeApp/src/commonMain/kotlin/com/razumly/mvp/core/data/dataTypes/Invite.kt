@@ -15,5 +15,10 @@ data class Invite(
     val createdBy: String? = null,
     val firstName: String? = null,
     val lastName: String? = null,
+    val childUserId: String? = null,
+    val childFirstName: String? = null,
+    val childLastName: String? = null,
+    val childFullName: String? = null,
+    val viewerCanAcceptForChild: Boolean = false,
     override val id: String = "",
 ) : MVPDocument
