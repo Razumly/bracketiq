@@ -2536,13 +2536,8 @@ class DefaultEventDetailComponent(
 
     override fun startTeamRegistration(team: TeamWithPlayers) {
         scope.launch {
-            val teamId = team.team.id.trim()
+            val teamId = team.team.registrationTargetTeamId()
             if (teamId.isBlank() || _startingTeamRegistrationId.value != null) return@launch
-
-            if (!team.team.openRegistration) {
-                _errorState.value = ErrorMessage("This team is not accepting registrations.")
-                return@launch
-            }
 
             if (currentUser.value.id.isBlank()) {
                 _errorState.value = ErrorMessage("Please sign in to join this team.")
@@ -2552,9 +2547,21 @@ class DefaultEventDetailComponent(
             _startingTeamRegistrationId.value = teamId
             try {
                 loadingHandler.showLoading("Preparing team registration...")
+                val registrationTeam = resolveTeamRegistrationTarget(team).getOrElse { throwable ->
+                    _errorState.value = ErrorMessage(
+                        throwable.userMessage("Unable to load team registration details."),
+                    )
+                    loadingHandler.hideLoading()
+                    return@launch
+                }
+                if (!registrationTeam.team.openRegistration) {
+                    _errorState.value = ErrorMessage("This team is not accepting registrations.")
+                    loadingHandler.hideLoading()
+                    return@launch
+                }
                 teamRepository.requestTeamRegistration(teamId)
                     .onSuccess { result ->
-                        handleTeamRegistrationResult(team, result)
+                        handleTeamRegistrationResult(registrationTeam, result)
                     }.onFailure { throwable ->
                         _errorState.value = ErrorMessage(
                             throwable.userMessage("Unable to start team registration.")
@@ -2566,6 +2573,21 @@ class DefaultEventDetailComponent(
                     _startingTeamRegistrationId.value = null
                 }
             }
+        }
+    }
+
+    private fun Team.registrationTargetTeamId(): String =
+        parentTeamId?.trim()?.takeIf { it.isNotBlank() } ?: id.trim()
+
+    private suspend fun resolveTeamRegistrationTarget(team: TeamWithPlayers): Result<TeamWithPlayers> = runCatching {
+        val targetTeamId = team.team.registrationTargetTeamId()
+        if (targetTeamId.isBlank()) {
+            error("Team id is missing.")
+        }
+        if (targetTeamId == team.team.id.trim()) {
+            team
+        } else {
+            teamRepository.getTeamWithPlayers(targetTeamId).getOrThrow()
         }
     }
 

@@ -1172,7 +1172,10 @@ fun ParticipantsView(
             onUnblockPlayer = { user ->
                 playerInteractionComponent.unblockUser(user)
             },
-            isRegistering = startingTeamRegistrationId == selectedTeamForDialog.team.id,
+            isRegistering = startingTeamRegistrationId?.let { registeringTeamId ->
+                registeringTeamId == selectedTeamForDialog.team.id ||
+                    registeringTeamId == selectedTeamForDialog.team.parentTeamId?.trim()
+            } == true,
             onRegisterForTeam = { component.startTeamRegistration(selectedTeamForDialog) },
         )
     }
