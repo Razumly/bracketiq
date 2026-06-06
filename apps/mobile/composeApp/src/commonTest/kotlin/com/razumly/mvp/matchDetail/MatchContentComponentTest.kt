@@ -2081,7 +2081,10 @@ private class MatchDetailFakeTeamRepository(
     override suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit> = Result.success(Unit)
     override suspend fun createTeam(newTeam: Team): Result<Team> = Result.success(newTeam)
     override suspend fun updateTeam(newTeam: Team): Result<Team> = Result.success(newTeam)
-    override suspend fun requestTeamRegistration(teamId: String): Result<TeamRegistrationResult> =
+    override suspend fun requestTeamRegistration(
+        teamId: String,
+        answers: Map<String, String>,
+    ): Result<TeamRegistrationResult> =
         teamsById[teamId]?.let { team ->
             Result.success(TeamRegistrationResult(team = team, registrationStatus = "ACTIVE"))
         } ?: Result.failure(IllegalStateException("Team $teamId not found"))

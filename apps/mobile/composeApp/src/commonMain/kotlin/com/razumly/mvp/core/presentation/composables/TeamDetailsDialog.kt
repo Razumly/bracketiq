@@ -43,10 +43,12 @@ import com.razumly.mvp.core.data.repositories.EventCompliancePaymentSummary
 import com.razumly.mvp.core.data.repositories.EventComplianceRequiredDocument
 import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
+import com.razumly.mvp.core.data.repositories.RegistrationQuestionAnswerSummary
 import com.razumly.mvp.core.presentation.util.MoneyInputUtils
 
 internal fun canRegisterForTeam(
     openRegistration: Boolean,
+    joinPolicy: String = if (openRegistration) "OPEN_REGISTRATION" else "CLOSED",
     isCurrentUserActive: Boolean,
     isCurrentUserPending: Boolean,
     teamHasCapacity: Boolean,
@@ -54,15 +56,16 @@ internal fun canRegisterForTeam(
 ): Boolean {
     return hasRegisterAction &&
         !isCurrentUserActive &&
-        (isCurrentUserPending || (openRegistration && teamHasCapacity))
+        (isCurrentUserPending || ((openRegistration || joinPolicy.isRequestToJoinPolicy()) && teamHasCapacity))
 }
 
 internal fun shouldShowTeamRegistrationButton(
     openRegistration: Boolean,
+    joinPolicy: String = if (openRegistration) "OPEN_REGISTRATION" else "CLOSED",
     isCurrentUserActive: Boolean,
     isCurrentUserPending: Boolean,
 ): Boolean {
-    return !isCurrentUserActive && (openRegistration || isCurrentUserPending)
+    return !isCurrentUserActive && (openRegistration || joinPolicy.isRequestToJoinPolicy() || isCurrentUserPending)
 }
 
 internal fun teamRegistrationButtonLabel(
@@ -70,15 +73,20 @@ internal fun teamRegistrationButtonLabel(
     isCurrentUserPending: Boolean,
     teamHasCapacity: Boolean,
     registrationPriceCents: Int,
+    joinPolicy: String = "OPEN_REGISTRATION",
 ): String {
     return when {
         isRegistering -> "Registering..."
         isCurrentUserPending -> "Resume Payment"
         !teamHasCapacity -> "Team Full"
+        joinPolicy.isRequestToJoinPolicy() -> "Request to join"
         registrationPriceCents > 0 -> "Join for $${MoneyInputUtils.centsToDisplayValue(registrationPriceCents)}"
         else -> "Join Team"
     }
 }
+
+private fun String?.isRequestToJoinPolicy(): Boolean =
+    equals("REQUEST_TO_JOIN", ignoreCase = true)
 
 @Composable
 fun TeamDetailsDialog(
@@ -131,6 +139,7 @@ fun TeamDetailsDialog(
                 val teamHasCapacity = syncedTeam.teamSize <= 0 || reservedOrActiveCount < syncedTeam.teamSize
                 val canRegister = canRegisterForTeam(
                     openRegistration = syncedTeam.openRegistration,
+                    joinPolicy = syncedTeam.joinPolicy,
                     isCurrentUserActive = isCurrentUserJoined,
                     isCurrentUserPending = isCurrentUserPending,
                     teamHasCapacity = teamHasCapacity,
@@ -318,6 +327,7 @@ fun TeamDetailsDialog(
                     } else if (
                         shouldShowTeamRegistrationButton(
                             openRegistration = syncedTeam.openRegistration,
+                            joinPolicy = syncedTeam.joinPolicy,
                             isCurrentUserActive = isCurrentUserJoined,
                             isCurrentUserPending = isCurrentUserPending,
                         )
@@ -333,6 +343,7 @@ fun TeamDetailsDialog(
                                     isCurrentUserPending = isCurrentUserPending,
                                     teamHasCapacity = teamHasCapacity,
                                     registrationPriceCents = syncedTeam.registrationPriceCents.coerceAtLeast(0),
+                                    joinPolicy = syncedTeam.joinPolicy,
                                 )
                             )
                         }
@@ -424,6 +435,10 @@ private fun TeamMemberComplianceStrip(
 
             if (expanded) {
                 HorizontalDivider()
+                if (userSummary.registrationAnswers.isNotEmpty()) {
+                    RegistrationAnswersSection(userSummary.registrationAnswers)
+                    HorizontalDivider()
+                }
                 if (userSummary.requiredDocuments.isEmpty()) {
                     Text(
                         text = "No required documents for this user.",
@@ -437,6 +452,36 @@ private fun TeamMemberComplianceStrip(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun RegistrationAnswersSection(answers: List<RegistrationQuestionAnswerSummary>) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = "Registration answers",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        answers
+            .sortedBy(RegistrationQuestionAnswerSummary::sortOrder)
+            .forEach { answer ->
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = answer.prompt,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = answer.answer.ifBlank { "No answer" },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
     }
 }
 

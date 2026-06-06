@@ -33,6 +33,20 @@ class TeamDetailsDialogTest {
     }
 
     @Test
+    fun teamRegistrationButtonLabel_givenRequestOnlyTeam_whenReady_thenShowsRequestToJoin() {
+        assertEquals(
+            "Request to join",
+            teamRegistrationButtonLabel(
+                isRegistering = false,
+                isCurrentUserPending = false,
+                teamHasCapacity = true,
+                registrationPriceCents = 2500,
+                joinPolicy = "REQUEST_TO_JOIN",
+            ),
+        )
+    }
+
+    @Test
     fun shouldShowTeamRegistrationButton_givenActiveUser_thenHidesButton() {
         assertFalse(
             shouldShowTeamRegistrationButton(
@@ -51,6 +65,20 @@ class TeamDetailsDialogTest {
                 isCurrentUserActive = false,
                 isCurrentUserPending = true,
                 teamHasCapacity = false,
+                hasRegisterAction = true,
+            ),
+        )
+    }
+
+    @Test
+    fun canRegisterForTeam_givenRequestOnlyTeam_thenAllowsAction() {
+        assertTrue(
+            canRegisterForTeam(
+                openRegistration = false,
+                joinPolicy = "REQUEST_TO_JOIN",
+                isCurrentUserActive = false,
+                isCurrentUserPending = false,
+                teamHasCapacity = true,
                 hasRegisterAction = true,
             ),
         )

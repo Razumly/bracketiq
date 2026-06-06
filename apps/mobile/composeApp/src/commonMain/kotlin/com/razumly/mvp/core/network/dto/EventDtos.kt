@@ -568,6 +568,16 @@ data class EventComplianceRequiredDocumentDto(
 )
 
 @Serializable
+data class RegistrationQuestionAnswerSnapshotDto(
+    val questionId: String? = null,
+    val prompt: String? = null,
+    val answerType: String? = null,
+    val required: Boolean? = null,
+    val sortOrder: Int? = null,
+    val answer: String? = null,
+)
+
+@Serializable
 data class EventComplianceUserSummaryDto(
     val userId: String? = null,
     val fullName: String? = null,
@@ -577,6 +587,7 @@ data class EventComplianceUserSummaryDto(
     val payment: EventCompliancePaymentSummaryDto? = null,
     val documents: EventComplianceDocumentCountsDto? = null,
     val requiredDocuments: List<EventComplianceRequiredDocumentDto> = emptyList(),
+    val registrationAnswers: List<RegistrationQuestionAnswerSnapshotDto> = emptyList(),
 )
 
 @Serializable
@@ -586,6 +597,7 @@ data class EventTeamComplianceSummaryDto(
     val payment: EventCompliancePaymentSummaryDto? = null,
     val documents: EventComplianceDocumentCountsDto? = null,
     val users: List<EventComplianceUserSummaryDto> = emptyList(),
+    val registrationAnswers: List<RegistrationQuestionAnswerSnapshotDto> = emptyList(),
 )
 
 @Serializable

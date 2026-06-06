@@ -3315,6 +3315,7 @@ fun EventDetailScreen(
     val showMatchEditDialog by component.showMatchEditDialog.collectAsState()
     val joinChoiceDialog by component.joinChoiceDialog.collectAsState()
     val childJoinSelectionDialog by component.childJoinSelectionDialog.collectAsState()
+    val teamJoinQuestionDialog by component.teamJoinQuestionDialog.collectAsState()
     val paymentPlanPreviewDialog by component.paymentPlanPreviewDialog.collectAsState()
     val withdrawTargets by component.withdrawTargets.collectAsState()
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
@@ -5744,6 +5745,13 @@ fun EventDetailScreen(
                     onChildSelected = component::selectChildForJoin,
                 )
             }
+            teamJoinQuestionDialog?.let { dialogState ->
+                TeamJoinQuestionsDialog(
+                    dialogState = dialogState,
+                    onDismiss = component::dismissTeamJoinQuestionDialog,
+                    onSubmit = component::submitTeamJoinQuestionAnswers,
+                )
+            }
             paymentPlanPreviewDialog?.let { dialogState ->
                 PaymentPlanPreviewDialog(
                     dialogState = dialogState,
@@ -6169,6 +6177,93 @@ private fun ChildJoinSelectionDialog(
         confirmButton = {
             Button(onClick = onDismiss) {
                 Text("Close")
+            }
+        },
+    )
+}
+
+@Composable
+private fun TeamJoinQuestionsDialog(
+    dialogState: TeamJoinQuestionDialogState,
+    onDismiss: () -> Unit,
+    onSubmit: (Map<String, String>) -> Unit,
+) {
+    var answers by remember(dialogState.teamId, dialogState.joinPolicy, dialogState.questions) {
+        mutableStateOf(dialogState.questions.associate { question -> question.id to "" })
+    }
+    var validationMessage by remember(dialogState.teamId, dialogState.joinPolicy, dialogState.questions) {
+        mutableStateOf<String?>(null)
+    }
+    val isRequestOnly = dialogState.joinPolicy.equals("REQUEST_TO_JOIN", ignoreCase = true)
+    val submitLabel = if (isRequestOnly) "Send request" else "Join team"
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (isRequestOnly) "Request to join" else "Join team") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = dialogState.teamName,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                validationMessage?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 360.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(dialogState.questions, key = { question -> question.id }) { question ->
+                        val answer = answers[question.id].orEmpty()
+                        StandardTextField(
+                            value = answer,
+                            onValueChange = { value ->
+                                answers = answers + (question.id to value)
+                                validationMessage = null
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = if (question.required) "${question.prompt} *" else question.prompt,
+                            placeholder = "Answer",
+                            supportingText = if (question.answerType.equals("LONG_TEXT", ignoreCase = true)) {
+                                "A short paragraph is fine."
+                            } else {
+                                ""
+                            },
+                            height = if (question.answerType.equals("LONG_TEXT", ignoreCase = true)) 128.dp else null,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val missingQuestion = dialogState.questions.firstOrNull { question ->
+                        question.required && answers[question.id].orEmpty().trim().isBlank()
+                    }
+                    if (missingQuestion != null) {
+                        validationMessage = "Answer \"${missingQuestion.prompt}\" before continuing."
+                        return@Button
+                    }
+                    onSubmit(answers)
+                },
+            ) {
+                Text(submitLabel)
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Cancel")
             }
         },
     )

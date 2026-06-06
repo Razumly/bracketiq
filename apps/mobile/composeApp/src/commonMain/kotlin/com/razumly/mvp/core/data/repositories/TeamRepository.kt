@@ -22,6 +22,7 @@ import com.razumly.mvp.core.network.dto.EventComplianceUserSummaryDto
 import com.razumly.mvp.core.network.dto.EventTeamComplianceSummaryDto
 import com.razumly.mvp.core.network.dto.InviteCreateDto
 import com.razumly.mvp.core.network.dto.InvitesResponseDto
+import com.razumly.mvp.core.network.dto.RegistrationQuestionAnswerSnapshotDto
 import com.razumly.mvp.core.network.dto.TeamApiDto
 import com.razumly.mvp.core.network.dto.TeamInviteEventTeamOptionDto
 import com.razumly.mvp.core.network.dto.TeamInviteFreeAgentsResponseDto
@@ -79,7 +80,19 @@ interface ITeamRepository : IMVPRepository {
     suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit>
     suspend fun createTeam(newTeam: Team): Result<Team>
     suspend fun updateTeam(newTeam: Team): Result<Team>
-    suspend fun requestTeamRegistration(teamId: String): Result<TeamRegistrationResult>
+    suspend fun getTeamsForUser(userId: String): Result<List<Team>> =
+        Result.failure(NotImplementedError("Team membership lookup is not implemented."))
+    suspend fun getTeamJoinRequestContext(teamId: String): Result<TeamJoinRequestContext> =
+        Result.failure(NotImplementedError("Team join request context is not implemented."))
+    suspend fun requestTeamRegistration(
+        teamId: String,
+        answers: Map<String, String> = emptyMap(),
+    ): Result<TeamRegistrationResult>
+    suspend fun submitTeamJoinRequest(
+        teamId: String,
+        answers: Map<String, String> = emptyMap(),
+    ): Result<TeamJoinRequestResult> =
+        Result.failure(NotImplementedError("Team join requests are not implemented."))
     suspend fun requestChildTeamRegistration(
         teamId: String,
         childId: String,
@@ -123,11 +136,73 @@ interface ITeamRepository : IMVPRepository {
 @Serializable
 private data class TeamRegistrationRequestDto(
     val noop: Boolean = true,
+    val answers: Map<String, String> = emptyMap(),
 )
 
 @Serializable
 private data class TeamChildRegistrationRequestDto(
     val childId: String,
+    val answers: Map<String, String> = emptyMap(),
+)
+
+@Serializable
+private data class TeamJoinQuestionDto(
+    val id: String = "",
+    val prompt: String = "",
+    val answerType: String = "TEXT",
+    val required: Boolean = false,
+    val sortOrder: Int = 0,
+)
+
+@Serializable
+private data class TeamJoinRequestContextDto(
+    val teamId: String = "",
+    val joinPolicy: String = "CLOSED",
+    val openRegistration: Boolean = false,
+    val registrationPriceCents: Int = 0,
+    val questions: List<TeamJoinQuestionDto> = emptyList(),
+)
+
+@Serializable
+private data class TeamJoinRequestSubmitDto(
+    val answers: Map<String, String> = emptyMap(),
+)
+
+@Serializable
+private data class TeamJoinRequestApiDto(
+    val id: String = "",
+    val teamId: String = "",
+    val status: String = "",
+    val registrantUserId: String = "",
+    val requesterUserId: String = "",
+)
+
+@Serializable
+private data class TeamJoinRequestResponseDto(
+    val request: TeamJoinRequestApiDto? = null,
+    val error: String? = null,
+)
+
+data class TeamJoinQuestion(
+    val id: String,
+    val prompt: String,
+    val answerType: String = "TEXT",
+    val required: Boolean = false,
+    val sortOrder: Int = 0,
+)
+
+data class TeamJoinRequestContext(
+    val teamId: String,
+    val joinPolicy: String,
+    val openRegistration: Boolean,
+    val registrationPriceCents: Int,
+    val questions: List<TeamJoinQuestion> = emptyList(),
+)
+
+data class TeamJoinRequestResult(
+    val requestId: String,
+    val status: String,
+    val teamId: String,
 )
 
 data class TeamRegistrationConsent(
@@ -169,6 +244,60 @@ data class TeamInviteFreeAgentContext(
 
 private fun String?.isJoinedTeamRegistrationStatus(): Boolean =
     equals("ACTIVE", ignoreCase = true) || equals("PENDING", ignoreCase = true)
+
+private fun String?.normalizeTeamJoinPolicy(openRegistration: Boolean = false): String {
+    val normalized = this?.trim()?.uppercase()?.takeIf(String::isNotBlank)
+    return when (normalized) {
+        "OPEN_REGISTRATION", "REQUEST_TO_JOIN", "CLOSED" -> normalized
+        else -> if (openRegistration) "OPEN_REGISTRATION" else "CLOSED"
+    }
+}
+
+private fun Map<String, String>.normalizeAnswerMap(): Map<String, String> =
+    mapNotNull { (questionId, answer) ->
+        val normalizedQuestionId = questionId.trim().takeIf(String::isNotBlank) ?: return@mapNotNull null
+        normalizedQuestionId to answer.trim()
+    }.toMap()
+
+private fun TeamJoinQuestionDto.toQuestionOrNull(): TeamJoinQuestion? {
+    val normalizedId = id.trim().takeIf(String::isNotBlank) ?: return null
+    val normalizedPrompt = prompt.trim().takeIf(String::isNotBlank) ?: return null
+    return TeamJoinQuestion(
+        id = normalizedId,
+        prompt = normalizedPrompt,
+        answerType = answerType.trim().uppercase().takeIf(String::isNotBlank) ?: "TEXT",
+        required = required,
+        sortOrder = sortOrder,
+    )
+}
+
+private fun TeamJoinRequestContextDto.toContext(): TeamJoinRequestContext {
+    val resolvedTeamId = teamId.trim().takeIf(String::isNotBlank)
+        ?: error("Team join context response missing team id.")
+    return TeamJoinRequestContext(
+        teamId = resolvedTeamId,
+        joinPolicy = joinPolicy.normalizeTeamJoinPolicy(openRegistration),
+        openRegistration = openRegistration,
+        registrationPriceCents = registrationPriceCents.coerceAtLeast(0),
+        questions = questions
+            .mapNotNull(TeamJoinQuestionDto::toQuestionOrNull)
+            .sortedBy(TeamJoinQuestion::sortOrder),
+    )
+}
+
+private fun TeamJoinRequestResponseDto.toJoinRequestResult(): TeamJoinRequestResult {
+    error?.trim()?.takeIf(String::isNotBlank)?.let(::error)
+    val row = request ?: error("Join request response missing request.")
+    val requestId = row.id.trim().takeIf(String::isNotBlank)
+        ?: error("Join request response missing request id.")
+    val teamId = row.teamId.trim().takeIf(String::isNotBlank)
+        ?: error("Join request response missing team id.")
+    return TeamJoinRequestResult(
+        requestId = requestId,
+        status = row.status.trim().takeIf(String::isNotBlank) ?: "PENDING",
+        teamId = teamId,
+    )
+}
 
 fun TeamRegistrationResult.isActive(): Boolean =
     registrationStatus.isJoinedTeamRegistrationStatus() ||
@@ -270,6 +399,19 @@ private fun EventComplianceRequiredDocumentDto.toComplianceRequiredDocumentOrNul
     )
 }
 
+private fun RegistrationQuestionAnswerSnapshotDto.toRegistrationQuestionAnswerOrNull(): RegistrationQuestionAnswerSummary? {
+    val normalizedQuestionId = questionId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val normalizedPrompt = prompt?.trim()?.takeIf(String::isNotBlank) ?: return null
+    return RegistrationQuestionAnswerSummary(
+        questionId = normalizedQuestionId,
+        prompt = normalizedPrompt,
+        answerType = answerType?.trim()?.takeIf(String::isNotBlank) ?: "TEXT",
+        required = required == true,
+        sortOrder = sortOrder ?: 0,
+        answer = answer?.trim().orEmpty(),
+    )
+}
+
 private fun EventComplianceUserSummaryDto.toComplianceUserSummaryOrNull(): EventComplianceUserSummary? {
     val normalizedUserId = userId?.trim()?.takeIf(String::isNotBlank) ?: return null
     return EventComplianceUserSummary(
@@ -281,6 +423,7 @@ private fun EventComplianceUserSummaryDto.toComplianceUserSummaryOrNull(): Event
         payment = payment.toCompliancePaymentSummary(),
         documents = documents.toComplianceDocumentCounts(),
         requiredDocuments = requiredDocuments.mapNotNull(EventComplianceRequiredDocumentDto::toComplianceRequiredDocumentOrNull),
+        registrationAnswers = registrationAnswers.mapNotNull(RegistrationQuestionAnswerSnapshotDto::toRegistrationQuestionAnswerOrNull),
     )
 }
 
@@ -292,6 +435,7 @@ private fun EventTeamComplianceSummaryDto.toTeamComplianceSummaryOrNull(): Event
         payment = payment.toCompliancePaymentSummary(),
         documents = documents.toComplianceDocumentCounts(),
         users = users.mapNotNull(EventComplianceUserSummaryDto::toComplianceUserSummaryOrNull),
+        registrationAnswers = registrationAnswers.mapNotNull(RegistrationQuestionAnswerSnapshotDto::toRegistrationQuestionAnswerOrNull),
     )
 }
 
@@ -352,6 +496,7 @@ class TeamRepository(
             "profileImageId",
             "sport",
             "divisionTypeId",
+            "joinPolicy",
             "openRegistration",
             "registrationPriceCents",
             "requiredTemplateIds",
@@ -361,6 +506,7 @@ class TeamRepository(
             "assistantCoachIds",
             "parentTeamId",
             "playerRegistrations",
+            "joinPolicy",
             "openRegistration",
             "registrationPriceCents",
             "requiredTemplateIds",
@@ -651,16 +797,49 @@ class TeamRepository(
         onReturn = { team -> team },
     )
 
-    override suspend fun requestTeamRegistration(teamId: String): Result<TeamRegistrationResult> = runCatching {
+    override suspend fun getTeamsForUser(userId: String): Result<List<Team>> {
+        val normalizedUserId = userId.trim().takeIf(String::isNotBlank)
+            ?: return Result.failure(IllegalArgumentException("User id is required."))
+        return fetchRemoteTeamsForUser(normalizedUserId)
+    }
+
+    override suspend fun getTeamJoinRequestContext(teamId: String): Result<TeamJoinRequestContext> = runCatching {
+        val normalizedTeamId = teamId.trim().takeIf(String::isNotBlank)
+            ?: error("Team id is required.")
+        val response = api.get<TeamJoinRequestContextDto>(
+            path = "api/teams/${normalizedTeamId.encodeURLQueryComponent()}/join-request-context",
+        )
+        response.toContext()
+    }
+
+    override suspend fun requestTeamRegistration(
+        teamId: String,
+        answers: Map<String, String>,
+    ): Result<TeamRegistrationResult> = runCatching {
+        val normalizedTeamId = teamId.trim().takeIf(String::isNotBlank)
+            ?: error("Team id is required.")
         val response = api.post<TeamRegistrationRequestDto, TeamRegistrationResponseDto>(
-            path = "api/teams/$teamId/registrations/self",
-            body = TeamRegistrationRequestDto(),
+            path = "api/teams/${normalizedTeamId.encodeURLQueryComponent()}/registrations/self",
+            body = TeamRegistrationRequestDto(answers = answers.normalizeAnswerMap()),
         )
         val result = response.toTeamRegistrationResult()
         ensureUsersCachedForTeam(result.team)
         databaseService.getTeamDao.upsertTeamWithRelations(result.team)
         runCatching { userRepository.getCurrentAccount().getOrThrow() }
         result
+    }
+
+    override suspend fun submitTeamJoinRequest(
+        teamId: String,
+        answers: Map<String, String>,
+    ): Result<TeamJoinRequestResult> = runCatching {
+        val normalizedTeamId = teamId.trim().takeIf(String::isNotBlank)
+            ?: error("Team id is required.")
+        val response = api.post<TeamJoinRequestSubmitDto, TeamJoinRequestResponseDto>(
+            path = "api/teams/${normalizedTeamId.encodeURLQueryComponent()}/join-requests",
+            body = TeamJoinRequestSubmitDto(answers = answers.normalizeAnswerMap()),
+        )
+        response.toJoinRequestResult()
     }
 
     override suspend fun requestChildTeamRegistration(
@@ -712,7 +891,7 @@ class TeamRepository(
     }
 
     override suspend fun registerForTeam(teamId: String): Result<Team> =
-        requestTeamRegistration(teamId).mapCatching { result ->
+        requestTeamRegistration(teamId, emptyMap()).mapCatching { result ->
             if (!result.isActive()) {
                 error(result.userMessage("Team registration requires additional steps."))
             }
@@ -1069,6 +1248,7 @@ class TeamRepository(
         if (existingTeam.profileImageId != updatedTeam.profileImageId) add("profileImageId")
         if (existingTeam.sport != updatedTeam.sport) add("sport")
         if (existingTeam.divisionTypeId != updatedTeam.divisionTypeId) add("divisionTypeId")
+        if (existingTeam.joinPolicy != updatedTeam.joinPolicy) add("joinPolicy")
         if (existingTeam.openRegistration != updatedTeam.openRegistration) add("openRegistration")
         if (existingTeam.registrationPriceCents != updatedTeam.registrationPriceCents) add("registrationPriceCents")
         if (existingTeam.requiredTemplateIds != updatedTeam.requiredTemplateIds) add("requiredTemplateIds")

@@ -27,6 +27,7 @@ data class EventTeamComplianceCacheEntry(
     val paymentInheritedFromTeamBill: Boolean = false,
     val documentsSignedCount: Int = 0,
     val documentsRequiredCount: Int = 0,
+    val registrationAnswersJson: String = "[]",
 )
 
 @Entity(
@@ -59,4 +60,5 @@ data class EventUserComplianceCacheEntry(
     val documentsSignedCount: Int = 0,
     val documentsRequiredCount: Int = 0,
     val requiredDocumentsJson: String = "[]",
+    val registrationAnswersJson: String = "[]",
 )

@@ -25,8 +25,11 @@ object MoneyInputUtils {
      * Cross-platform compatible formatting
      */
     fun centsToDisplayValue(cents: Int): String {
-        val dollars = cents / 100.0
-        return formatDoubleToCurrency(dollars)
+        val sign = if (cents < 0) "-" else ""
+        val absoluteCents = if (cents < 0) -cents.toLong() else cents.toLong()
+        val wholePart = absoluteCents / 100
+        val fractionalPart = absoluteCents % 100
+        return "$sign$wholePart.${fractionalPart.toString().padStart(2, '0')}"
     }
 
     /**
@@ -34,20 +37,7 @@ object MoneyInputUtils {
      * Formats a double to string with exactly 2 decimal places
      */
     private fun formatDoubleToCurrency(value: Double): String {
-        // Round to 2 decimal places
-        val roundedValue = round(value * 100) / 100
-
-        // Convert to string and handle decimal places manually
-        val integerPart = roundedValue.toInt()
-        val decimalPart = ((roundedValue - integerPart) * 100).toInt()
-
-        return if (decimalPart == 0) {
-            "$integerPart.00"
-        } else if (decimalPart < 10) {
-            "$integerPart.0$decimalPart"
-        } else {
-            "$integerPart.$decimalPart"
-        }
+        return centsToDisplayValue(round(value * 100).toInt())
     }
 
     /**
@@ -55,10 +45,6 @@ object MoneyInputUtils {
      * More reliable across all platforms
      */
     fun formatCurrency(value: Double): String {
-        val rounded = round(value * 100) / 100
-        val wholePart = rounded.toInt()
-        val fractionalPart = round((rounded - wholePart) * 100).toInt()
-
-        return "$wholePart.${fractionalPart.toString().padStart(2, '0')}"
+        return formatDoubleToCurrency(value)
     }
 }

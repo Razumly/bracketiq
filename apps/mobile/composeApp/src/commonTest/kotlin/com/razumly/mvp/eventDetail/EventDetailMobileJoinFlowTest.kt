@@ -2440,7 +2440,10 @@ private class EventDetailFakeTeamRepository(
     override suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit> = Result.success(Unit)
     override suspend fun createTeam(newTeam: Team): Result<Team> = Result.success(newTeam)
     override suspend fun updateTeam(newTeam: Team): Result<Team> = Result.success(newTeam)
-    override suspend fun requestTeamRegistration(teamId: String): Result<TeamRegistrationResult> {
+    override suspend fun requestTeamRegistration(
+        teamId: String,
+        answers: Map<String, String>,
+    ): Result<TeamRegistrationResult> {
         registeredTeamIds += teamId
         val queued = queuedRegistrationResults[teamId]
         if (queued != null && queued.isNotEmpty()) {

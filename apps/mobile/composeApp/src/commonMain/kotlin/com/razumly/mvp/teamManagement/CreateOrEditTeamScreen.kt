@@ -69,6 +69,7 @@ import com.razumly.mvp.core.data.repositories.EventCompliancePaymentSummary
 import com.razumly.mvp.core.data.repositories.EventComplianceRequiredDocument
 import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
+import com.razumly.mvp.core.data.repositories.RegistrationQuestionAnswerSummary
 import com.razumly.mvp.core.data.repositories.TeamInviteEventTeamOption
 import com.razumly.mvp.core.data.repositories.TeamInviteFreeAgentContext
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
@@ -115,31 +116,66 @@ internal fun formatRegistrationCostInput(registrationPriceCents: Int): String =
         ?.toString()
         .orEmpty()
 
+internal const val TEAM_JOIN_POLICY_CLOSED = "CLOSED"
+internal const val TEAM_JOIN_POLICY_OPEN_REGISTRATION = "OPEN_REGISTRATION"
+internal const val TEAM_JOIN_POLICY_REQUEST_TO_JOIN = "REQUEST_TO_JOIN"
+
+internal fun normalizeTeamJoinPolicyInput(value: String?, openRegistration: Boolean): String {
+    val normalized = value
+        ?.trim()
+        ?.uppercase()
+        ?.takeIf(String::isNotBlank)
+    return when (normalized) {
+        TEAM_JOIN_POLICY_OPEN_REGISTRATION,
+        TEAM_JOIN_POLICY_REQUEST_TO_JOIN,
+        TEAM_JOIN_POLICY_CLOSED,
+        -> normalized
+        else -> if (openRegistration) TEAM_JOIN_POLICY_OPEN_REGISTRATION else TEAM_JOIN_POLICY_CLOSED
+    }
+}
+
+private val TeamJoinPolicyOptions = listOf(
+    DropdownOption(TEAM_JOIN_POLICY_CLOSED, "Closed"),
+    DropdownOption(TEAM_JOIN_POLICY_OPEN_REGISTRATION, "Open registration"),
+    DropdownOption(TEAM_JOIN_POLICY_REQUEST_TO_JOIN, "Request to join"),
+)
+
+private fun String.isOpenTeamRegistrationPolicy(): Boolean =
+    normalizeTeamJoinPolicyInput(this, openRegistration = false) == TEAM_JOIN_POLICY_OPEN_REGISTRATION
+
+private fun String.isRequestToJoinPolicy(): Boolean =
+    normalizeTeamJoinPolicyInput(this, openRegistration = false) == TEAM_JOIN_POLICY_REQUEST_TO_JOIN
+
+private fun String.allowsRegistrationCostLabel(): Boolean =
+    isOpenTeamRegistrationPolicy() || isRequestToJoinPolicy()
+
 internal fun syncedRegistrationInputs(
     registrationSettingsEdited: Boolean,
-    openRegistrationInput: Boolean,
+    joinPolicyInput: String,
     registrationCostInput: String,
+    sourceJoinPolicy: String?,
     sourceOpenRegistration: Boolean,
     sourceRegistrationPriceCents: Int,
-): Pair<Boolean, String> = if (registrationSettingsEdited) {
-    openRegistrationInput to registrationCostInput
+): Pair<String, String> = if (registrationSettingsEdited) {
+    normalizeTeamJoinPolicyInput(joinPolicyInput, openRegistration = false) to registrationCostInput
 } else {
-    sourceOpenRegistration to formatRegistrationCostInput(sourceRegistrationPriceCents)
+    normalizeTeamJoinPolicyInput(sourceJoinPolicy, sourceOpenRegistration) to
+        formatRegistrationCostInput(sourceRegistrationPriceCents)
 }
 
 internal fun resolvedRegistrationPriceCents(
-    openRegistration: Boolean,
+    joinPolicy: String,
     canChargeRegistration: Boolean,
     registrationPriceCentsInput: Int,
-): Int = if (openRegistration && canChargeRegistration) {
-    registrationPriceCentsInput
-} else {
-    0
+): Int = when {
+    joinPolicy.isRequestToJoinPolicy() -> registrationPriceCentsInput
+    joinPolicy.isOpenTeamRegistrationPolicy() && canChargeRegistration -> registrationPriceCentsInput
+    else -> 0
 }
 
-private fun formatRegistrationCost(openRegistration: Boolean, registrationPriceCents: Int): String =
+private fun formatRegistrationCost(joinPolicy: String, registrationPriceCents: Int): String =
     when {
-        !openRegistration -> "Not open"
+        !joinPolicy.allowsRegistrationCostLabel() -> "Not open"
         registrationPriceCents <= 0 -> "Free"
         else -> {
             val dollars = registrationPriceCents / 100
@@ -147,6 +183,12 @@ private fun formatRegistrationCost(openRegistration: Boolean, registrationPriceC
             "\$$dollars.${cents.toString().padStart(2, '0')}"
         }
     }
+
+private fun formatJoinPolicy(joinPolicy: String): String = when {
+    joinPolicy.isOpenTeamRegistrationPolicy() -> "Open registration"
+    joinPolicy.isRequestToJoinPolicy() -> "Request to join"
+    else -> "Closed"
+}
 
 private fun String.isProbablyEmail(): Boolean {
     val value = trim()
@@ -197,7 +239,9 @@ fun CreateOrEditTeamScreen(
     val syncedTeam = remember(team.team) { team.team.withSynchronizedMembership() }
     var teamName by remember { mutableStateOf(team.team.name) }
     var teamSizeInput by remember { mutableStateOf(team.team.teamSize.toString()) }
-    var openRegistrationInput by remember(team.team.id) { mutableStateOf(team.team.openRegistration) }
+    var joinPolicyInput by remember(team.team.id) {
+        mutableStateOf(normalizeTeamJoinPolicyInput(team.team.joinPolicy, team.team.openRegistration))
+    }
     var registrationCostInput by remember(team.team.id) {
         mutableStateOf(formatRegistrationCostInput(team.team.registrationPriceCents))
     }
@@ -227,6 +271,9 @@ fun CreateOrEditTeamScreen(
     val isBusy = isSaving || isRequestingRefund
     val canEditFields = showEditDetails && !isBusy
     val canChargeRegistration = currentUser.hasStripeAccount == true || team.team.registrationPriceCents > 0
+    val syncedJoinPolicy = normalizeTeamJoinPolicyInput(syncedTeam.joinPolicy, syncedTeam.openRegistration)
+    val isOpenRegistrationInput = joinPolicyInput.isOpenTeamRegistrationPolicy()
+    val isRequestToJoinInput = joinPolicyInput.isRequestToJoinPolicy()
     val currentUserRegistration = remember(syncedTeam.playerRegistrations, currentUser.id) {
         syncedTeam.playerRegistrations.firstOrNull { registration ->
             registration.userId == currentUser.id && registration.isActive()
@@ -234,7 +281,7 @@ fun CreateOrEditTeamScreen(
     }
     val showRefundRequestAction = !showEditDetails &&
         onRequestRefund != null &&
-        syncedTeam.openRegistration &&
+        syncedJoinPolicy.isOpenTeamRegistrationPolicy() &&
         syncedTeam.registrationPriceCents > 0 &&
         currentUserRegistration != null
     val parsedTeamSize = teamSizeInput.toIntOrNull()
@@ -562,15 +609,16 @@ fun CreateOrEditTeamScreen(
             ageDivisionTypeInput = ""
         }
     }
-    LaunchedEffect(team.team.openRegistration, team.team.registrationPriceCents, registrationSettingsEdited) {
-        val (syncedOpenRegistration, syncedRegistrationCostInput) = syncedRegistrationInputs(
+    LaunchedEffect(team.team.joinPolicy, team.team.openRegistration, team.team.registrationPriceCents, registrationSettingsEdited) {
+        val (syncedJoinPolicy, syncedRegistrationCostInput) = syncedRegistrationInputs(
             registrationSettingsEdited = registrationSettingsEdited,
-            openRegistrationInput = openRegistrationInput,
+            joinPolicyInput = joinPolicyInput,
             registrationCostInput = registrationCostInput,
+            sourceJoinPolicy = team.team.joinPolicy,
             sourceOpenRegistration = team.team.openRegistration,
             sourceRegistrationPriceCents = team.team.registrationPriceCents,
         )
-        openRegistrationInput = syncedOpenRegistration
+        joinPolicyInput = syncedJoinPolicy
         registrationCostInput = syncedRegistrationCostInput
     }
     val knownUsersById = remember(
@@ -704,9 +752,10 @@ fun CreateOrEditTeamScreen(
             pending = invitedPlayerIds,
             playerRegistrations = updatedPlayerRegistrations,
             staffAssignments = syncedTeam.staffAssignments,
-            openRegistration = openRegistrationInput,
+            joinPolicy = joinPolicyInput,
+            openRegistration = isOpenRegistrationInput,
             registrationPriceCents = resolvedRegistrationPriceCents(
-                openRegistration = openRegistrationInput,
+                joinPolicy = joinPolicyInput,
                 canChargeRegistration = canChargeRegistration,
                 registrationPriceCentsInput = registrationPriceCentsInput,
             ),
@@ -851,28 +900,28 @@ fun CreateOrEditTeamScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
             if (showEditDetails) {
-                Row(
+                PlatformDropdown(
+                    selectedValue = joinPolicyInput,
+                    onSelectionChange = { value ->
+                        registrationSettingsEdited = true
+                        joinPolicyInput = normalizeTeamJoinPolicyInput(value, openRegistration = false)
+                    },
+                    options = TeamJoinPolicyOptions,
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Checkbox(
-                        checked = openRegistrationInput,
-                        onCheckedChange = { checked ->
-                            registrationSettingsEdited = true
-                            openRegistrationInput = checked
-                        },
-                        enabled = canEditFields,
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Open registration")
-                        Text(
-                            text = "Players can join this team without an invite.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+                    label = "Join mode",
+                    placeholder = "Select join mode",
+                    enabled = canEditFields,
+                )
+                Text(
+                    text = when {
+                        isOpenRegistrationInput -> "Players can join this team without an invite."
+                        isRequestToJoinInput -> "Players submit a request first. Managers approve before any bill is sent."
+                        else -> "Players need an invite to join this team."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
                 Spacer(modifier = Modifier.height(8.dp))
                 StandardTextField(
                     value = registrationCostInput,
@@ -884,21 +933,24 @@ fun CreateOrEditTeamScreen(
                     label = "Registration cost",
                     keyboardType = "money",
                     inputFilter = { value -> value.filter(Char::isDigit).take(7) },
-                    readOnly = !canEditFields || !openRegistrationInput || !canChargeRegistration,
-                    supportingText = if (canChargeRegistration) {
-                        "Leave blank for free registration."
-                    } else {
-                        "Connect Stripe to charge for registration. Free registration is still available."
+                    readOnly = !canEditFields ||
+                        !joinPolicyInput.allowsRegistrationCostLabel() ||
+                        (isOpenRegistrationInput && !canChargeRegistration),
+                    supportingText = when {
+                        isRequestToJoinInput -> "Request-only prices are labels. Players are not prompted for payment until you send a bill."
+                        !joinPolicyInput.allowsRegistrationCostLabel() -> "Choose open registration or request to join to set a price."
+                        canChargeRegistration -> "Leave blank for free registration."
+                        else -> "Connect Stripe to charge for open registration. Free registration is still available."
                     },
                 )
             } else {
                 ReadOnlyLabeledValue(
-                    label = "Open registration",
-                    value = if (openRegistrationInput) "Yes" else "No",
-                    supportingText = if (openRegistrationInput) {
-                        "Players can join this team without an invite."
-                    } else {
-                        "Players need an invite to join this team."
+                    label = "Join mode",
+                    value = formatJoinPolicy(joinPolicyInput),
+                    supportingText = when {
+                        isOpenRegistrationInput -> "Players can join this team without an invite."
+                        isRequestToJoinInput -> "Players submit a request before joining."
+                        else -> "Players need an invite to join this team."
                     },
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -906,7 +958,7 @@ fun CreateOrEditTeamScreen(
                 ReadOnlyLabeledValue(
                     label = "Registration cost",
                     value = formatRegistrationCost(
-                        openRegistration = openRegistrationInput,
+                        joinPolicy = joinPolicyInput,
                         registrationPriceCents = team.team.registrationPriceCents,
                     ),
                     modifier = Modifier.fillMaxWidth(),
@@ -1695,6 +1747,10 @@ private fun TeamMemberComplianceDetails(userSummary: EventComplianceUserSummary)
                 value = userSummary.documents.documentStatusText(),
                 needsAttention = userSummary.documents.needsAttention(),
             )
+            if (userSummary.registrationAnswers.isNotEmpty()) {
+                HorizontalDivider()
+                RegistrationAnswersSection(answers = userSummary.registrationAnswers)
+            }
             if (userSummary.requiredDocuments.isNotEmpty()) {
                 HorizontalDivider()
                 userSummary.requiredDocuments.forEach { document ->
@@ -1702,6 +1758,35 @@ private fun TeamMemberComplianceDetails(userSummary: EventComplianceUserSummary)
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun RegistrationAnswersSection(answers: List<RegistrationQuestionAnswerSummary>) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = "Registration answers",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        answers
+            .sortedBy(RegistrationQuestionAnswerSummary::sortOrder)
+            .forEach { answer ->
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = answer.prompt,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        text = answer.answer.ifBlank { "No answer" },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
     }
 }
 

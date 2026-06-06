@@ -57,6 +57,7 @@ import com.razumly.mvp.core.network.dto.EventTeamComplianceSummaryDto
 import com.razumly.mvp.core.network.dto.EventUserComplianceResponseDto
 import com.razumly.mvp.core.network.dto.EventsResponseDto
 import com.razumly.mvp.core.network.dto.ProfileScheduleResponseDto
+import com.razumly.mvp.core.network.dto.RegistrationQuestionAnswerSnapshotDto
 import com.razumly.mvp.core.network.dto.ScheduleEventRequestDto
 import com.razumly.mvp.core.network.dto.ScheduleEventResponseDto
 import com.razumly.mvp.core.network.dto.StandingsConfirmRequestDto
@@ -348,6 +349,16 @@ data class EventComplianceRequiredDocument(
     val signedAt: String? = null,
 )
 
+@Serializable
+data class RegistrationQuestionAnswerSummary(
+    val questionId: String,
+    val prompt: String,
+    val answerType: String = "TEXT",
+    val required: Boolean = false,
+    val sortOrder: Int = 0,
+    val answer: String = "",
+)
+
 data class EventComplianceUserSummary(
     val userId: String,
     val fullName: String,
@@ -357,6 +368,7 @@ data class EventComplianceUserSummary(
     val payment: EventCompliancePaymentSummary = EventCompliancePaymentSummary(),
     val documents: EventComplianceDocumentCounts = EventComplianceDocumentCounts(),
     val requiredDocuments: List<EventComplianceRequiredDocument> = emptyList(),
+    val registrationAnswers: List<RegistrationQuestionAnswerSummary> = emptyList(),
 )
 
 data class EventTeamComplianceSummary(
@@ -365,6 +377,7 @@ data class EventTeamComplianceSummary(
     val payment: EventCompliancePaymentSummary = EventCompliancePaymentSummary(),
     val documents: EventComplianceDocumentCounts = EventComplianceDocumentCounts(),
     val users: List<EventComplianceUserSummary> = emptyList(),
+    val registrationAnswers: List<RegistrationQuestionAnswerSummary> = emptyList(),
 )
 
 data class ChildRegistrationResult(
@@ -597,6 +610,19 @@ private fun EventComplianceRequiredDocumentDto.toComplianceRequiredDocumentOrNul
     )
 }
 
+private fun RegistrationQuestionAnswerSnapshotDto.toRegistrationQuestionAnswerOrNull(): RegistrationQuestionAnswerSummary? {
+    val normalizedQuestionId = questionId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val normalizedPrompt = prompt?.trim()?.takeIf(String::isNotBlank) ?: return null
+    return RegistrationQuestionAnswerSummary(
+        questionId = normalizedQuestionId,
+        prompt = normalizedPrompt,
+        answerType = answerType?.trim()?.takeIf(String::isNotBlank) ?: "TEXT",
+        required = required == true,
+        sortOrder = sortOrder ?: 0,
+        answer = answer?.trim().orEmpty(),
+    )
+}
+
 private fun EventComplianceUserSummaryDto.toComplianceUserSummaryOrNull(): EventComplianceUserSummary? {
     val normalizedUserId = userId?.trim()?.takeIf(String::isNotBlank) ?: return null
     return EventComplianceUserSummary(
@@ -608,6 +634,7 @@ private fun EventComplianceUserSummaryDto.toComplianceUserSummaryOrNull(): Event
         payment = payment.toCompliancePaymentSummary(),
         documents = documents.toComplianceDocumentCounts(),
         requiredDocuments = requiredDocuments.mapNotNull(EventComplianceRequiredDocumentDto::toComplianceRequiredDocumentOrNull),
+        registrationAnswers = registrationAnswers.mapNotNull(RegistrationQuestionAnswerSnapshotDto::toRegistrationQuestionAnswerOrNull),
     )
 }
 
@@ -619,6 +646,7 @@ private fun EventTeamComplianceSummaryDto.toTeamComplianceSummaryOrNull(): Event
         payment = payment.toCompliancePaymentSummary(),
         documents = documents.toComplianceDocumentCounts(),
         users = users.mapNotNull(EventComplianceUserSummaryDto::toComplianceUserSummaryOrNull),
+        registrationAnswers = registrationAnswers.mapNotNull(RegistrationQuestionAnswerSnapshotDto::toRegistrationQuestionAnswerOrNull),
     )
 }
 
@@ -641,6 +669,7 @@ private fun EventTeamComplianceSummary.toCacheEntry(
         paymentInheritedFromTeamBill = payment.inheritedFromTeamBill,
         documentsSignedCount = documents.signedCount,
         documentsRequiredCount = documents.requiredCount,
+        registrationAnswersJson = jsonMVP.encodeToString(registrationAnswers),
     )
 }
 
@@ -669,6 +698,7 @@ private fun EventComplianceUserSummary.toCacheEntry(
         documentsSignedCount = documents.signedCount,
         documentsRequiredCount = documents.requiredCount,
         requiredDocumentsJson = jsonMVP.encodeToString(requiredDocuments),
+        registrationAnswersJson = jsonMVP.encodeToString(registrationAnswers),
     )
 }
 
@@ -693,6 +723,9 @@ private fun EventTeamComplianceCacheEntry.toTeamComplianceSummary(
             requiredCount = documentsRequiredCount,
         ),
         users = users,
+        registrationAnswers = runCatching {
+            jsonMVP.decodeFromString<List<RegistrationQuestionAnswerSummary>>(registrationAnswersJson)
+        }.getOrDefault(emptyList()),
     )
 }
 
@@ -719,6 +752,9 @@ private fun EventUserComplianceCacheEntry.toComplianceUserSummary(): EventCompli
         ),
         requiredDocuments = runCatching {
             jsonMVP.decodeFromString<List<EventComplianceRequiredDocument>>(requiredDocumentsJson)
+        }.getOrDefault(emptyList()),
+        registrationAnswers = runCatching {
+            jsonMVP.decodeFromString<List<RegistrationQuestionAnswerSummary>>(registrationAnswersJson)
         }.getOrDefault(emptyList()),
     )
 }

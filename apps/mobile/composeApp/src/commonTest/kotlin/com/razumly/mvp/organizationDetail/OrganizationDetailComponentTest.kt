@@ -242,7 +242,10 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
                     }
                 )
 
-                override suspend fun requestTeamRegistration(teamId: String): Result<TeamRegistrationResult> =
+                override suspend fun requestTeamRegistration(
+                    teamId: String,
+                    answers: Map<String, String>,
+                ): Result<TeamRegistrationResult> =
                     Result.success(registrationResults.removeFirst())
             }
             val component = DefaultOrganizationDetailComponent(
@@ -405,7 +408,10 @@ private object NoopTeamRepository : ITeamRepository {
 
     override suspend fun updateTeam(newTeam: Team): Result<Team> = Result.success(newTeam)
 
-    override suspend fun requestTeamRegistration(teamId: String): Result<TeamRegistrationResult> =
+    override suspend fun requestTeamRegistration(
+        teamId: String,
+        answers: Map<String, String>,
+    ): Result<TeamRegistrationResult> =
         Result.failure(IllegalStateException("unused"))
 
     override suspend fun registerForTeam(teamId: String): Result<Team> =

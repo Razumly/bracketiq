@@ -1197,9 +1197,13 @@ class DefaultProfileComponent(
                 }
             plans.addAll(buildPaymentPlans(bills = userBills, ownerLabel = currentUser.fullName))
 
-            val teams = teamRepository.getTeams(currentUser.teamIds).getOrElse { emptyList() }
-            val captainTeams = teams.filter { it.captainId == currentUser.id }
-            captainTeams.forEach { team ->
+            val teams = teamRepository.getTeamsForUser(currentUser.id)
+                .getOrElse { throwable ->
+                    Napier.w("Unable to load teams for bills by membership.", throwable)
+                    teamRepository.getTeams(currentUser.teamIds).getOrElse { emptyList() }
+                }
+                .distinctBy { it.id }
+            teams.forEach { team ->
                 val ownerLabel = team.name.takeIf { it.isNotBlank() } ?: "Team"
                 val teamBills = billingRepository.listBills(ownerType = "TEAM", ownerId = team.id)
                     .getOrElse { throwable ->

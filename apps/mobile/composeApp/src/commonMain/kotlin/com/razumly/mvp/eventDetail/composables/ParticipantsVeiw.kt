@@ -73,6 +73,7 @@ import com.razumly.mvp.core.data.repositories.EventParticipantDivisionWarning
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.RegistrationQuestionAnswerSummary
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
@@ -1709,6 +1710,12 @@ private fun ParticipantManagementDialog(
                     )
                 }
 
+                if (target.cardType == ParticipantCardType.TEAM && !target.teamCompliance?.registrationAnswers.isNullOrEmpty()) {
+                    RegistrationAnswersSection(
+                        answers = target.teamCompliance?.registrationAnswers.orEmpty(),
+                    )
+                }
+
                 if (users.isEmpty()) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
@@ -2032,6 +2039,9 @@ private fun ComplianceUserCard(
                     value = userSummary.documents.documentStatusText(),
                     needsAttention = userSummary.documents.needsAttention(),
                 )
+                if (userSummary.registrationAnswers.isNotEmpty()) {
+                    RegistrationAnswersSection(userSummary.registrationAnswers)
+                }
                 if (userSummary.requiredDocuments.isEmpty()) {
                     Text(
                         text = "No required documents for this user.",
@@ -2044,6 +2054,42 @@ private fun ComplianceUserCard(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun RegistrationAnswersSection(answers: List<RegistrationQuestionAnswerSummary>) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "Registration answers",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            answers
+                .sortedBy(RegistrationQuestionAnswerSummary::sortOrder)
+                .forEach { answer ->
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = answer.prompt,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Text(
+                            text = answer.answer.ifBlank { "No answer" },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
         }
     }
 }

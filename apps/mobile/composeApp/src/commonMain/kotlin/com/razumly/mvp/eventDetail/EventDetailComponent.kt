@@ -52,6 +52,7 @@ import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.ITeamRepository
+import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
@@ -185,6 +186,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val showMatchEditDialog: StateFlow<MatchEditDialogState?>
     val joinChoiceDialog: StateFlow<JoinChoiceDialogState?>
     val childJoinSelectionDialog: StateFlow<ChildJoinSelectionDialogState?>
+    val teamJoinQuestionDialog: StateFlow<TeamJoinQuestionDialogState?>
     val paymentPlanPreviewDialog: StateFlow<PaymentPlanPreviewDialogState?>
     val withdrawTargets: StateFlow<List<WithdrawTargetOption>>
     val textSignaturePrompt: StateFlow<TextSignaturePromptState?>
@@ -263,6 +265,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun removeTeamParticipant(team: TeamWithPlayers)
     fun removeUserParticipant(userId: String)
     fun startTeamRegistration(team: TeamWithPlayers)
+    fun submitTeamJoinQuestionAnswers(answers: Map<String, String>)
+    fun dismissTeamJoinQuestionDialog()
     suspend fun getParticipantBillingSnapshot(teamId: String): Result<EventTeamBillingSnapshot>
     suspend fun createParticipantBill(
         teamId: String,
@@ -376,6 +380,13 @@ data class JoinChoiceDialogState(
 
 data class ChildJoinSelectionDialogState(
     val children: List<JoinChildOption>,
+)
+
+data class TeamJoinQuestionDialogState(
+    val teamId: String,
+    val teamName: String,
+    val joinPolicy: String,
+    val questions: List<TeamJoinQuestion>,
 )
 
 data class PaymentPlanPreviewDialogState(
@@ -1356,6 +1367,10 @@ class DefaultEventDetailComponent(
 
     private val _childJoinSelectionDialog = MutableStateFlow<ChildJoinSelectionDialogState?>(null)
     override val childJoinSelectionDialog = _childJoinSelectionDialog.asStateFlow()
+
+    private val _teamJoinQuestionDialog = MutableStateFlow<TeamJoinQuestionDialogState?>(null)
+    override val teamJoinQuestionDialog = _teamJoinQuestionDialog.asStateFlow()
+    private var pendingTeamJoinQuestionTeam: TeamWithPlayers? = null
 
     private val _paymentPlanPreviewDialog = MutableStateFlow<PaymentPlanPreviewDialogState?>(null)
     override val paymentPlanPreviewDialog = _paymentPlanPreviewDialog.asStateFlow()
@@ -2554,19 +2569,39 @@ class DefaultEventDetailComponent(
                     loadingHandler.hideLoading()
                     return@launch
                 }
-                if (!registrationTeam.team.openRegistration) {
+
+                val context = teamRepository.getTeamJoinRequestContext(teamId).getOrElse { throwable ->
+                    _errorState.value = ErrorMessage(
+                        throwable.userMessage("Unable to load team registration questions."),
+                    )
+                    loadingHandler.hideLoading()
+                    return@launch
+                }
+
+                val joinPolicy = context.joinPolicy
+                if (!joinPolicy.isOpenTeamJoinPolicy() && !joinPolicy.isRequestToJoinPolicy()) {
                     _errorState.value = ErrorMessage("This team is not accepting registrations.")
                     loadingHandler.hideLoading()
                     return@launch
                 }
-                teamRepository.requestTeamRegistration(teamId)
-                    .onSuccess { result ->
-                        handleTeamRegistrationResult(registrationTeam, result)
-                    }.onFailure { throwable ->
-                        _errorState.value = ErrorMessage(
-                            throwable.userMessage("Unable to start team registration.")
-                        )
-                    }
+
+                if (context.questions.isNotEmpty()) {
+                    pendingTeamJoinQuestionTeam = registrationTeam
+                    _teamJoinQuestionDialog.value = TeamJoinQuestionDialogState(
+                        teamId = context.teamId,
+                        teamName = registrationTeam.team.name.ifBlank { "this team" },
+                        joinPolicy = joinPolicy,
+                        questions = context.questions,
+                    )
+                    loadingHandler.hideLoading()
+                    return@launch
+                }
+
+                submitTeamJoin(
+                    team = registrationTeam,
+                    joinPolicy = joinPolicy,
+                    answers = emptyMap(),
+                )
                 loadingHandler.hideLoading()
             } finally {
                 if (pendingTeamRegistration == null) {
@@ -2575,6 +2610,90 @@ class DefaultEventDetailComponent(
             }
         }
     }
+
+    override fun submitTeamJoinQuestionAnswers(answers: Map<String, String>) {
+        val dialog = _teamJoinQuestionDialog.value ?: return
+        val missingQuestion = dialog.questions.firstOrNull { question ->
+            question.required && answers[question.id].orEmpty().trim().isBlank()
+        }
+        if (missingQuestion != null) {
+            _errorState.value = ErrorMessage("Answer \"${missingQuestion.prompt}\" before continuing.")
+            return
+        }
+        val team = pendingTeamJoinQuestionTeam
+        if (team == null) {
+            _teamJoinQuestionDialog.value = null
+            _errorState.value = ErrorMessage("Unable to continue team registration.")
+            return
+        }
+
+        _teamJoinQuestionDialog.value = null
+        pendingTeamJoinQuestionTeam = null
+        scope.launch {
+            val teamId = dialog.teamId.trim().takeIf(String::isNotBlank) ?: team.team.registrationTargetTeamId()
+            if (teamId.isBlank() || _startingTeamRegistrationId.value != null) return@launch
+            _startingTeamRegistrationId.value = teamId
+            try {
+                loadingHandler.showLoading(
+                    if (dialog.joinPolicy.isRequestToJoinPolicy()) {
+                        "Submitting join request..."
+                    } else {
+                        "Starting team registration..."
+                    },
+                )
+                submitTeamJoin(
+                    team = team,
+                    joinPolicy = dialog.joinPolicy,
+                    answers = answers,
+                )
+                loadingHandler.hideLoading()
+            } finally {
+                if (pendingTeamRegistration == null) {
+                    _startingTeamRegistrationId.value = null
+                }
+            }
+        }
+    }
+
+    override fun dismissTeamJoinQuestionDialog() {
+        _teamJoinQuestionDialog.value = null
+        pendingTeamJoinQuestionTeam = null
+    }
+
+    private suspend fun submitTeamJoin(
+        team: TeamWithPlayers,
+        joinPolicy: String,
+        answers: Map<String, String>,
+    ) {
+        val teamId = team.team.registrationTargetTeamId()
+        if (joinPolicy.isRequestToJoinPolicy()) {
+            teamRepository.submitTeamJoinRequest(teamId, answers)
+                .onSuccess {
+                    refreshEventDetails()
+                    _errorState.value = ErrorMessage("Request sent to ${team.team.name}.")
+                }.onFailure { throwable ->
+                    _errorState.value = ErrorMessage(
+                        throwable.userMessage("Unable to submit join request."),
+                    )
+                }
+            return
+        }
+
+        teamRepository.requestTeamRegistration(teamId, answers)
+            .onSuccess { result ->
+                handleTeamRegistrationResult(team, result, answers)
+            }.onFailure { throwable ->
+                _errorState.value = ErrorMessage(
+                    throwable.userMessage("Unable to start team registration."),
+                )
+            }
+    }
+
+    private fun String?.isRequestToJoinPolicy(): Boolean =
+        equals("REQUEST_TO_JOIN", ignoreCase = true)
+
+    private fun String?.isOpenTeamJoinPolicy(): Boolean =
+        equals("OPEN_REGISTRATION", ignoreCase = true)
 
     private fun Team.registrationTargetTeamId(): String =
         parentTeamId?.trim()?.takeIf { it.isNotBlank() } ?: id.trim()
@@ -2594,6 +2713,7 @@ class DefaultEventDetailComponent(
     private suspend fun handleTeamRegistrationResult(
         team: TeamWithPlayers,
         result: TeamRegistrationResult,
+        answers: Map<String, String> = emptyMap(),
     ) {
         if (result.requiresParentApproval) {
             _errorState.value = ErrorMessage(
@@ -2615,7 +2735,7 @@ class DefaultEventDetailComponent(
                 scope.launch {
                     _startingTeamRegistrationId.value = team.team.id
                     loadingHandler.showLoading("Refreshing team registration...")
-                    teamRepository.requestTeamRegistration(team.team.id)
+                    teamRepository.requestTeamRegistration(team.team.id, answers)
                         .onSuccess { refreshedResult ->
                             continueTeamRegistration(team, refreshedResult)
                         }.onFailure { throwable ->

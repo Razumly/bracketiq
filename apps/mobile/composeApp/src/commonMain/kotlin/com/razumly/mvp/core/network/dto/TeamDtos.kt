@@ -65,6 +65,7 @@ data class TeamApiDto(
     val divisionGender: String? = null,
     val organizationId: String? = null,
     val createdBy: String? = null,
+    val joinPolicy: String? = null,
     val openRegistration: Boolean? = null,
     val registrationPriceCents: Int? = null,
     val requiredTemplateIds: List<String>? = null,
@@ -116,6 +117,7 @@ data class TeamApiDto(
             divisionGender = divisionGender,
             organizationId = organizationId?.trim()?.takeIf(String::isNotBlank),
             createdBy = createdBy?.trim()?.takeIf(String::isNotBlank),
+            joinPolicy = normalizeTeamJoinPolicy(joinPolicy, openRegistration == true),
             openRegistration = openRegistration == true,
             registrationPriceCents = (registrationPriceCents ?: 0).coerceAtLeast(0),
             requiredTemplateIds = requiredTemplateIds.normalizeDistinctIds(),
@@ -242,6 +244,7 @@ data class TeamUpdateDto(
     val profileImageId: String? = null,
     val sport: String? = null,
     val divisionTypeId: String? = null,
+    val joinPolicy: String? = null,
     val openRegistration: Boolean? = null,
     val registrationPriceCents: Int? = null,
     val requiredTemplateIds: List<String>? = null,
@@ -259,6 +262,17 @@ private fun normalizeJerseyNumber(value: String?): String? =
         .filter(Char::isDigit)
         .take(3)
         .takeIf(String::isNotBlank)
+
+private fun normalizeTeamJoinPolicy(value: String?, openRegistration: Boolean): String {
+    val normalized = value
+        ?.trim()
+        ?.uppercase()
+        ?.takeIf(String::isNotBlank)
+    return when (normalized) {
+        "OPEN_REGISTRATION", "REQUEST_TO_JOIN", "CLOSED" -> normalized
+        else -> if (openRegistration) "OPEN_REGISTRATION" else "CLOSED"
+    }
+}
 
 private fun List<String>?.normalizeDistinctIds(): List<String> =
     this.orEmpty()
@@ -294,6 +308,11 @@ fun Team.toUpdateDto(
         profileImageId = if (shouldIncludeTeamUpdateField("profileImageId", omitFields, includeFields)) synced.profileImageId else null,
         sport = if (shouldIncludeTeamUpdateField("sport", omitFields, includeFields)) synced.sport else null,
         divisionTypeId = if (shouldIncludeTeamUpdateField("divisionTypeId", omitFields, includeFields)) synced.divisionTypeId else null,
+        joinPolicy = if (shouldIncludeTeamUpdateField("joinPolicy", omitFields, includeFields)) {
+            normalizeTeamJoinPolicy(synced.joinPolicy, synced.openRegistration)
+        } else {
+            null
+        },
         openRegistration = synced.openRegistration.takeIf {
             shouldIncludeTeamUpdateField("openRegistration", omitFields, includeFields)
         },
