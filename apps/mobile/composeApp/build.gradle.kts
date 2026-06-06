@@ -33,7 +33,7 @@ compose.resources {
 }
 
 val mvpVersion = "1.5.13"
-val mvpVersionCode = 47
+val mvpVersionCode = 48
 kotlin {
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
