@@ -5576,6 +5576,12 @@ fun EventDetailScreen(
                     }
                 }
             }
+            RegistrationHoldTimer(
+                expiresAt = registrationHoldExpiresAt,
+                bottomPadding = LocalNavBarPadding.current.calculateBottomPadding() +
+                    if (showStickyActions) 128.dp else 24.dp,
+                onExpired = component::registrationHoldExpired,
+            )
             AnimatedVisibility(
                 visible = showStickyActions,
                 modifier = Modifier
@@ -5761,10 +5767,6 @@ fun EventDetailScreen(
                     onSubmit = component::submitTeamJoinQuestionAnswers,
                 )
             }
-            RegistrationHoldTimer(
-                expiresAt = registrationHoldExpiresAt,
-                onExpired = component::registrationHoldExpired,
-            )
             paymentPlanPreviewDialog?.let { dialogState ->
                 PaymentPlanPreviewDialog(
                     dialogState = dialogState,
@@ -6198,6 +6200,7 @@ private fun ChildJoinSelectionDialog(
 @Composable
 private fun RegistrationHoldTimer(
     expiresAt: String?,
+    bottomPadding: Dp,
     onExpired: () -> Unit,
 ) {
     val expiresAtInstant = remember(expiresAt) {
@@ -6232,11 +6235,12 @@ private fun RegistrationHoldTimer(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .zIndex(30f)
+            .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = bottomPadding),
         contentAlignment = Alignment.BottomStart,
     ) {
         Surface(
-            modifier = Modifier.zIndex(20f),
+            modifier = Modifier.widthIn(max = 360.dp),
             shape = RoundedCornerShape(12.dp),
             tonalElevation = 6.dp,
             shadowElevation = 6.dp,

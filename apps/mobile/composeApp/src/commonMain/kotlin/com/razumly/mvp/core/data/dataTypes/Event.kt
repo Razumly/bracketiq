@@ -162,16 +162,22 @@ private fun formatPriceCentsLabel(priceCents: Int): String {
     return "$$wholeDollars.${cents.toString().padStart(2, '0')}"
 }
 
-fun Event.resolvedDivisionPriceCents(preferredDivisionId: String? = null): Int? =
-    findDivisionDetailForPricing(preferredDivisionId)?.price?.coerceAtLeast(0)
+fun Event.resolvedDivisionPriceCents(preferredDivisionId: String? = null): Int? {
+    val detail = findDivisionDetailForPricing(preferredDivisionId)
+    return if (detail == null) {
+        priceCents.coerceAtLeast(0)
+    } else {
+        detail.price?.coerceAtLeast(0)
+    }
+}
 
 fun Event.divisionPriceRange(): EventPriceRange {
     val mergedDetails = mergedDivisionDetailsForPricing()
     if (mergedDetails.isEmpty()) {
+        val eventPriceCents = priceCents.coerceAtLeast(0)
         return EventPriceRange(
-            minPriceCents = 0,
-            maxPriceCents = 0,
-            hasMissingPrices = true,
+            minPriceCents = eventPriceCents,
+            maxPriceCents = eventPriceCents,
         )
     }
 

@@ -7,14 +7,15 @@ import kotlin.test.assertTrue
 
 class EventPricingTest {
     @Test
-    fun resolvedDivisionPriceCents_returnsNull_whenNoDivisionPriceExists() {
+    fun resolvedDivisionPriceCents_fallsBackToEventPrice_whenNoDivisionPriceExists() {
         val event = Event(
             id = "event-1",
             priceCents = 5000,
         )
 
-        assertEquals(null, event.resolvedDivisionPriceCents())
-        assertEquals("Free", event.divisionPriceRangeLabel())
+        assertEquals(5000, event.resolvedDivisionPriceCents())
+        assertEquals("$50.00", event.divisionPriceRangeLabel())
+        assertTrue(event.hasAnyPaidDivision())
     }
 
     @Test
