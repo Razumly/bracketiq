@@ -88,6 +88,7 @@ val componentModule = module {
             fieldRepository = get(),
             billingRepository = get(),
             imageRepository = get(),
+            currentUserDataSource = get(),
             apiClient = get(),
             notificationsRepository = get(),
             navigationHandler = navHandler,

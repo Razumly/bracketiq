@@ -417,6 +417,7 @@ data class EventParticipantsRequestDto(
     val occurrenceDate: String? = null,
     val refundMode: String? = null,
     val refundReason: String? = null,
+    val answers: List<RegistrationQuestionAnswerDto> = emptyList(),
 )
 
 @Serializable

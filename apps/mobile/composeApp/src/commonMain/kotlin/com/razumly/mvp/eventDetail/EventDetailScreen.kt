@@ -3316,6 +3316,10 @@ fun EventDetailScreen(
     val joinChoiceDialog by component.joinChoiceDialog.collectAsState()
     val childJoinSelectionDialog by component.childJoinSelectionDialog.collectAsState()
     val teamJoinQuestionDialog by component.teamJoinQuestionDialog.collectAsState()
+    val eventRegistrationQuestions by component.eventRegistrationQuestions.collectAsState()
+    val eventRegistrationQuestionAnswers by component.eventRegistrationQuestionAnswers.collectAsState()
+    val eventRegistrationQuestionsExpanded by component.eventRegistrationQuestionsExpanded.collectAsState()
+    val registrationHoldExpiresAt by component.registrationHoldExpiresAt.collectAsState()
     val paymentPlanPreviewDialog by component.paymentPlanPreviewDialog.collectAsState()
     val withdrawTargets by component.withdrawTargets.collectAsState()
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
@@ -4323,6 +4327,11 @@ fun EventDetailScreen(
                             onAddCurrentUser = {},
                             imageScheme = imageScheme,
                             imageIds = eventImageIds,
+                            eventRegistrationQuestions = eventRegistrationQuestions,
+                            eventRegistrationQuestionAnswers = eventRegistrationQuestionAnswers,
+                            eventRegistrationQuestionsExpanded = eventRegistrationQuestionsExpanded,
+                            onToggleEventRegistrationQuestions = component::toggleEventRegistrationQuestionsExpanded,
+                            onEventRegistrationQuestionAnswerChange = component::updateEventRegistrationQuestionAnswer,
                             onHostCreateAccount = component::onHostCreateAccount,
                             onPlaceSelected = component::selectPlace,
                             onEditEvent = component::editEventField,
@@ -5752,6 +5761,10 @@ fun EventDetailScreen(
                     onSubmit = component::submitTeamJoinQuestionAnswers,
                 )
             }
+            RegistrationHoldTimer(
+                expiresAt = registrationHoldExpiresAt,
+                onExpired = component::registrationHoldExpired,
+            )
             paymentPlanPreviewDialog?.let { dialogState ->
                 PaymentPlanPreviewDialog(
                     dialogState = dialogState,
@@ -6183,6 +6196,63 @@ private fun ChildJoinSelectionDialog(
 }
 
 @Composable
+private fun RegistrationHoldTimer(
+    expiresAt: String?,
+    onExpired: () -> Unit,
+) {
+    val expiresAtInstant = remember(expiresAt) {
+        expiresAt
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?.let { raw -> runCatching { Instant.parse(raw) }.getOrNull() }
+    }
+    var now by remember(expiresAtInstant) { mutableStateOf(Clock.System.now()) }
+
+    LaunchedEffect(expiresAtInstant) {
+        if (expiresAtInstant == null) return@LaunchedEffect
+        while (true) {
+            now = Clock.System.now()
+            if (expiresAtInstant <= now) {
+                onExpired()
+                return@LaunchedEffect
+            }
+            delay(1_000)
+        }
+    }
+
+    val remainingSeconds = expiresAtInstant
+        ?.let { (it - now).inWholeSeconds.coerceAtLeast(0) }
+        ?: return
+    if (remainingSeconds <= 0) return
+
+    val minutes = remainingSeconds / 60
+    val seconds = remainingSeconds % 60
+    val remainingLabel = "${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        contentAlignment = Alignment.BottomStart,
+    ) {
+        Surface(
+            modifier = Modifier.zIndex(20f),
+            shape = RoundedCornerShape(12.dp),
+            tonalElevation = 6.dp,
+            shadowElevation = 6.dp,
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Text(
+                text = "Your registration is held for $remainingLabel",
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+@Composable
 private fun TeamJoinQuestionsDialog(
     dialogState: TeamJoinQuestionDialogState,
     onDismiss: () -> Unit,
@@ -6193,6 +6263,9 @@ private fun TeamJoinQuestionsDialog(
     }
     var validationMessage by remember(dialogState.teamId, dialogState.joinPolicy, dialogState.questions) {
         mutableStateOf<String?>(null)
+    }
+    var questionsExpanded by remember(dialogState.teamId, dialogState.joinPolicy, dialogState.questions) {
+        mutableStateOf(true)
     }
     val isRequestOnly = dialogState.joinPolicy.equals("REQUEST_TO_JOIN", ignoreCase = true)
     val submitLabel = if (isRequestOnly) "Send request" else "Join team"
@@ -6217,30 +6290,49 @@ private fun TeamJoinQuestionsDialog(
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
-                LazyColumn(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 360.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                        .clickable { questionsExpanded = !questionsExpanded },
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    items(dialogState.questions, key = { question -> question.id }) { question ->
-                        val answer = answers[question.id].orEmpty()
-                        StandardTextField(
-                            value = answer,
-                            onValueChange = { value ->
-                                answers = answers + (question.id to value)
-                                validationMessage = null
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = if (question.required) "${question.prompt} *" else question.prompt,
-                            placeholder = "Answer",
-                            supportingText = if (question.answerType.equals("LONG_TEXT", ignoreCase = true)) {
-                                "A short paragraph is fine."
-                            } else {
-                                ""
-                            },
-                            height = if (question.answerType.equals("LONG_TEXT", ignoreCase = true)) 128.dp else null,
-                        )
+                    Text(
+                        text = "Registration questions",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Icon(
+                        imageVector = if (questionsExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (questionsExpanded) "Collapse registration questions" else "Expand registration questions",
+                    )
+                }
+                AnimatedVisibility(visible = questionsExpanded) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 360.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        items(dialogState.questions, key = { question -> question.id }) { question ->
+                            val answer = answers[question.id].orEmpty()
+                            StandardTextField(
+                                value = answer,
+                                onValueChange = { value ->
+                                    answers = answers + (question.id to value)
+                                    validationMessage = null
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = if (question.required) "${question.prompt} *" else question.prompt,
+                                placeholder = "Answer",
+                                supportingText = if (question.answerType.equals("LONG_TEXT", ignoreCase = true)) {
+                                    "A short paragraph is fine."
+                                } else {
+                                    ""
+                                },
+                                height = if (question.answerType.equals("LONG_TEXT", ignoreCase = true)) 128.dp else null,
+                            )
+                        }
                     }
                 }
             }
@@ -6253,6 +6345,7 @@ private fun TeamJoinQuestionsDialog(
                     }
                     if (missingQuestion != null) {
                         validationMessage = "Answer \"${missingQuestion.prompt}\" before continuing."
+                        questionsExpanded = true
                         return@Button
                     }
                     onSubmit(answers)

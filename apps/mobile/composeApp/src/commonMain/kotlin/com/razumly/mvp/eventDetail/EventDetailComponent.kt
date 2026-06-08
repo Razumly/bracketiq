@@ -6,6 +6,8 @@ import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
+import com.razumly.mvp.core.data.CurrentUserDataSource
+import com.razumly.mvp.core.data.RegistrationProgressDraft
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
@@ -49,6 +51,7 @@ import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.ISportsRepository
+import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.ITeamRepository
@@ -187,6 +190,10 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val joinChoiceDialog: StateFlow<JoinChoiceDialogState?>
     val childJoinSelectionDialog: StateFlow<ChildJoinSelectionDialogState?>
     val teamJoinQuestionDialog: StateFlow<TeamJoinQuestionDialogState?>
+    val eventRegistrationQuestions: StateFlow<List<TeamJoinQuestion>>
+    val eventRegistrationQuestionAnswers: StateFlow<Map<String, String>>
+    val eventRegistrationQuestionsExpanded: StateFlow<Boolean>
+    val registrationHoldExpiresAt: StateFlow<String?>
     val paymentPlanPreviewDialog: StateFlow<PaymentPlanPreviewDialogState?>
     val withdrawTargets: StateFlow<List<WithdrawTargetOption>>
     val textSignaturePrompt: StateFlow<TextSignaturePromptState?>
@@ -212,6 +219,9 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun onNavigateToChat(user: UserData)
     fun matchSelected(selectedMatch: MatchWithRelations)
     fun showFeeBreakdown(feeBreakdown: FeeBreakdown, onConfirm: () -> Unit, onCancel: () -> Unit)
+    fun updateEventRegistrationQuestionAnswer(questionId: String, answer: String)
+    fun toggleEventRegistrationQuestionsExpanded()
+    fun registrationHoldExpired()
     fun onHostCreateAccount()
     fun selectDivision(division: String)
     fun setLoadingHandler(loadingHandler: LoadingHandler)
@@ -699,6 +709,7 @@ class DefaultEventDetailComponent(
     private val sportsRepository: ISportsRepository,
     private val imageRepository: IImagesRepository,
     private val navigationHandler: INavigationHandler,
+    private val currentUserDataSource: CurrentUserDataSource? = null,
     private val apiClient: MvpApiClient? = null,
 
 ) : EventDetailComponent, PaymentProcessor(), ComponentContext by componentContext {
@@ -835,6 +846,28 @@ class DefaultEventDetailComponent(
 
     override fun clearError() {
         _errorState.value = null
+    }
+
+    override fun updateEventRegistrationQuestionAnswer(questionId: String, answer: String) {
+        val normalizedQuestionId = questionId.trim().takeIf(String::isNotBlank) ?: return
+        _eventRegistrationQuestionAnswers.value = _eventRegistrationQuestionAnswers.value + (normalizedQuestionId to answer)
+        scope.launch {
+            saveCurrentRegistrationProgress(step = "questions")
+        }
+    }
+
+    override fun toggleEventRegistrationQuestionsExpanded() {
+        _eventRegistrationQuestionsExpanded.value = !_eventRegistrationQuestionsExpanded.value
+    }
+
+    override fun registrationHoldExpired() {
+        scope.launch {
+            clearCurrentRegistrationProgress()
+            pendingTeamRegistration = null
+            pendingJoinConfirmationTarget = null
+            _startingTeamRegistrationId.value = null
+            _errorState.value = ErrorMessage("Registration hold expired. Start registration again to reserve a new spot.")
+        }
     }
 
     private val _editedEvent = MutableStateFlow(event)
@@ -1372,6 +1405,15 @@ class DefaultEventDetailComponent(
     override val teamJoinQuestionDialog = _teamJoinQuestionDialog.asStateFlow()
     private var pendingTeamJoinQuestionTeam: TeamWithPlayers? = null
 
+    private val _eventRegistrationQuestions = MutableStateFlow<List<TeamJoinQuestion>>(emptyList())
+    override val eventRegistrationQuestions = _eventRegistrationQuestions.asStateFlow()
+    private val _eventRegistrationQuestionAnswers = MutableStateFlow<Map<String, String>>(emptyMap())
+    override val eventRegistrationQuestionAnswers = _eventRegistrationQuestionAnswers.asStateFlow()
+    private val _eventRegistrationQuestionsExpanded = MutableStateFlow(false)
+    override val eventRegistrationQuestionsExpanded = _eventRegistrationQuestionsExpanded.asStateFlow()
+    private val _registrationHoldExpiresAt = MutableStateFlow<String?>(null)
+    override val registrationHoldExpiresAt = _registrationHoldExpiresAt.asStateFlow()
+
     private val _paymentPlanPreviewDialog = MutableStateFlow<PaymentPlanPreviewDialogState?>(null)
     override val paymentPlanPreviewDialog = _paymentPlanPreviewDialog.asStateFlow()
 
@@ -1401,6 +1443,176 @@ class DefaultEventDetailComponent(
 
     private val shareServiceProvider = ShareServiceProvider()
 
+    private fun currentRegistrationProgressKey(): String? {
+        val userId = currentUser.value.id.trim().takeIf(String::isNotBlank) ?: return null
+        val eventId = selectedEvent.value.id.trim().takeIf(String::isNotBlank) ?: return null
+        val occurrence = currentWeeklyOccurrenceSelection()
+        return listOf(
+            "event",
+            userId,
+            eventId,
+            occurrence?.slotId?.trim()?.takeIf(String::isNotBlank) ?: "none",
+            occurrence?.occurrenceDate?.trim()?.takeIf(String::isNotBlank) ?: "none",
+        ).joinToString(":")
+    }
+
+    private suspend fun saveCurrentRegistrationProgress(
+        step: String? = null,
+        registrationId: String? = null,
+        holdExpiresAt: String? = _registrationHoldExpiresAt.value,
+    ) {
+        val key = currentRegistrationProgressKey() ?: return
+        val userId = currentUser.value.id.trim().takeIf(String::isNotBlank) ?: return
+        val eventId = selectedEvent.value.id.trim().takeIf(String::isNotBlank) ?: return
+        val occurrence = currentWeeklyOccurrenceSelection()
+        currentUserDataSource?.saveRegistrationProgress(
+            key = key,
+            draft = RegistrationProgressDraft(
+                scope = "event",
+                userId = userId,
+                eventId = eventId,
+                step = step,
+                answers = _eventRegistrationQuestionAnswers.value,
+                selectedDivisionId = selectedDivision.value,
+                slotId = occurrence?.slotId,
+                occurrenceDate = occurrence?.occurrenceDate,
+                registrationId = registrationId,
+                holdExpiresAt = holdExpiresAt,
+                updatedAt = Clock.System.now().toString(),
+            ),
+        )
+    }
+
+    private suspend fun loadCurrentRegistrationProgress() {
+        val key = currentRegistrationProgressKey() ?: run {
+            _registrationHoldExpiresAt.value = null
+            return
+        }
+        val draft = currentUserDataSource?.loadRegistrationProgress(key)
+        if (draft == null) {
+            _registrationHoldExpiresAt.value = null
+            return
+        }
+        if (draft.answers.isNotEmpty()) {
+            _eventRegistrationQuestionAnswers.value = _eventRegistrationQuestionAnswers.value + draft.answers
+        }
+        draft.selectedDivisionId
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?.let { restoredDivisionId ->
+                _selectedDivision.value = restoredDivisionId
+            }
+        _registrationHoldExpiresAt.value = draft.holdExpiresAt
+    }
+
+    private suspend fun clearCurrentRegistrationProgress() {
+        currentRegistrationProgressKey()?.let { key ->
+            currentUserDataSource?.clearRegistrationProgress(key)
+        }
+        _registrationHoldExpiresAt.value = null
+    }
+
+    private fun missingEventRegistrationQuestion(): TeamJoinQuestion? =
+        _eventRegistrationQuestions.value.firstOrNull { question ->
+            question.required && _eventRegistrationQuestionAnswers.value[question.id].orEmpty().trim().isBlank()
+        }
+
+    private fun ensureEventRegistrationQuestionsAnswered(): Boolean {
+        val missingQuestion = missingEventRegistrationQuestion() ?: return true
+        _eventRegistrationQuestionsExpanded.value = true
+        _errorState.value = ErrorMessage("Answer \"${missingQuestion.prompt}\" before continuing.")
+        return false
+    }
+
+    private fun eventRegistrationAnswersForRequest(): Map<String, String> {
+        val questionIds = _eventRegistrationQuestions.value
+            .mapNotNull { question -> question.id.trim().takeIf(String::isNotBlank) }
+            .toSet()
+        return _eventRegistrationQuestionAnswers.value
+            .filter { (questionId, answer) ->
+                val normalizedQuestionId = questionId.trim()
+                normalizedQuestionId.isNotBlank() &&
+                    answer.trim().isNotBlank() &&
+                    (questionIds.isEmpty() || normalizedQuestionId in questionIds)
+            }
+            .mapKeys { (questionId, _) -> questionId.trim() }
+    }
+
+    private suspend fun addCurrentUserToEventWithRegistrationAnswers(
+        event: Event,
+        preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<SelfRegistrationResult> {
+        val answers = eventRegistrationAnswersForRequest()
+        return if (answers.isEmpty()) {
+            eventRepository.addCurrentUserToEvent(
+                event = event,
+                preferredDivisionId = preferredDivisionId,
+                occurrence = occurrence,
+            )
+        } else {
+            eventRepository.addCurrentUserToEvent(
+                event = event,
+                preferredDivisionId = preferredDivisionId,
+                occurrence = occurrence,
+                answers = answers,
+            )
+        }
+    }
+
+    private suspend fun addTeamToEventWithRegistrationAnswers(
+        event: Event,
+        team: Team,
+        preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<Unit> {
+        val answers = eventRegistrationAnswersForRequest()
+        return if (answers.isEmpty()) {
+            eventRepository.addTeamToEvent(
+                event = event,
+                team = team,
+                preferredDivisionId = preferredDivisionId,
+                occurrence = occurrence,
+            )
+        } else {
+            eventRepository.addTeamToEvent(
+                event = event,
+                team = team,
+                preferredDivisionId = preferredDivisionId,
+                occurrence = occurrence,
+                answers = answers,
+            )
+        }
+    }
+
+    private suspend fun createPurchaseIntentWithRegistrationAnswers(
+        event: Event,
+        teamId: String? = null,
+        priceCents: Int,
+        occurrence: EventOccurrenceSelection?,
+        divisionId: String?,
+    ): Result<PurchaseIntent> {
+        val answers = eventRegistrationAnswersForRequest()
+        return if (answers.isEmpty()) {
+            billingRepository.createPurchaseIntent(
+                event = event,
+                teamId = teamId,
+                priceCents = priceCents,
+                occurrence = occurrence,
+                divisionId = divisionId,
+            )
+        } else {
+            billingRepository.createPurchaseIntent(
+                event = event,
+                teamId = teamId,
+                priceCents = priceCents,
+                occurrence = occurrence,
+                divisionId = divisionId,
+                answers = answers,
+            )
+        }
+    }
+
     init {
         backHandler.register(backCallback)
         if (_isEditing.value) {
@@ -1420,6 +1632,39 @@ class DefaultEventDetailComponent(
                 .distinctUntilChanged()
                 .collect {
                     refreshScheduleTrackedUserIds()
+                }
+        }
+        scope.launch {
+            combine(
+                selectedEvent.map { selected -> selected.id.trim() },
+                currentUser.map { user -> user.id.trim() },
+                _selectedWeeklyOccurrence,
+            ) { eventId, userId, occurrence ->
+                Triple(eventId, userId, occurrence)
+            }
+                .distinctUntilChanged()
+                .collectLatest { (eventId, userId, _) ->
+                    if (eventId.isBlank() || userId.isBlank()) {
+                        _eventRegistrationQuestions.value = emptyList()
+                        _eventRegistrationQuestionAnswers.value = emptyMap()
+                        _registrationHoldExpiresAt.value = null
+                        return@collectLatest
+                    }
+                    eventRepository.getRegistrationQuestions("EVENT", eventId)
+                        .onSuccess { questions ->
+                            _eventRegistrationQuestions.value = questions
+                            _eventRegistrationQuestionAnswers.value = _eventRegistrationQuestionAnswers.value.filterKeys { questionId ->
+                                questions.any { question -> question.id == questionId }
+                            } + questions.associate { question ->
+                                question.id to _eventRegistrationQuestionAnswers.value[question.id].orEmpty()
+                            }
+                        }
+                        .onFailure { throwable ->
+                            Napier.w("Failed to load event registration questions.", throwable)
+                            _eventRegistrationQuestions.value = emptyList()
+                            _eventRegistrationQuestionAnswers.value = emptyMap()
+                        }
+                    loadCurrentRegistrationProgress()
                 }
         }
         scope.launch {
@@ -1667,6 +1912,7 @@ class DefaultEventDetailComponent(
                                     )
                                 }
                             }
+                            clearCurrentRegistrationProgress()
                         }
                     }
                     loadingHandler.hideLoading()
@@ -2777,6 +3023,17 @@ class DefaultEventDetailComponent(
                     team = team.team,
                     teamRegistration = result.registration,
                 ).onSuccess { intent ->
+                    intent.registrationHoldExpiresAt
+                        ?.trim()
+                        ?.takeIf(String::isNotBlank)
+                        ?.let { holdExpiresAt ->
+                            _registrationHoldExpiresAt.value = holdExpiresAt
+                            saveCurrentRegistrationProgress(
+                                step = "checkout",
+                                registrationId = intent.registrationId,
+                                holdExpiresAt = holdExpiresAt,
+                            )
+                        }
                     pendingTeamRegistration = team
                     showPaymentSheet(intent)
                 }.onFailure { throwable ->
@@ -2798,6 +3055,7 @@ class DefaultEventDetailComponent(
             _usersTeam.value = teamRepository.getTeamWithPlayers(teamId).getOrNull() ?: team
             refreshCurrentUserMembershipState(selectedEvent.value)
             refreshEventDetails()
+            clearCurrentRegistrationProgress()
             _errorState.value = ErrorMessage("You joined ${team.team.name}.")
         } finally {
             if (pendingTeamRegistration == null) {
@@ -2904,6 +3162,7 @@ class DefaultEventDetailComponent(
     override fun joinEventAsTeam(team: TeamWithPlayers) {
         scope.launch {
             if (!ensureRegistrationOpen()) return@launch
+            if (!ensureEventRegistrationQuestionsAnswered()) return@launch
             _usersTeam.value = team
             _joinChoiceDialog.value = null
             _childJoinSelectionDialog.value = null
@@ -2983,6 +3242,7 @@ class DefaultEventDetailComponent(
 
     private suspend fun runSelfJoinFlow(skipPaymentPlanPreview: Boolean = false) {
         if (!ensureRegistrationOpen()) return
+        if (!ensureEventRegistrationQuestionsAnswered()) return
         if (!skipPaymentPlanPreview) {
             buildPaymentPlanPreviewDialogState(
                 ownerLabel = "You",
@@ -3309,7 +3569,7 @@ class DefaultEventDetailComponent(
             ) {
                 var joinedByThisFlow = false
                 loadingHandler.showLoading("Joining Event ...")
-                val registrationResult = eventRepository.addCurrentUserToEvent(
+                val registrationResult = addCurrentUserToEventWithRegistrationAnswers(
                     event = selectedEvent.value,
                     preferredDivisionId = selectedDivision.value,
                     occurrence = weeklyOccurrence,
@@ -3352,6 +3612,7 @@ class DefaultEventDetailComponent(
                         eventId = selectedEvent.value.id,
                         warningMessage = "Failed to refresh event after starting payment plan.",
                     )
+                    clearCurrentRegistrationProgress()
                     _errorState.value = ErrorMessage(
                         if (status == PaymentPlanBillStatus.ALREADY_EXISTS) {
                             "Joined. Payment plan already exists. You can manage installments from your Profile."
@@ -3369,7 +3630,7 @@ class DefaultEventDetailComponent(
             }
             if (paymentPlan.configuredPriceCents <= 0 || isEventFull.value || selectedEvent.value.teamSignup) {
                 loadingHandler.showLoading("Joining Event ...")
-                eventRepository.addCurrentUserToEvent(
+                addCurrentUserToEventWithRegistrationAnswers(
                     event = selectedEvent.value,
                     preferredDivisionId = selectedDivision.value,
                     occurrence = weeklyOccurrence,
@@ -3379,6 +3640,7 @@ class DefaultEventDetailComponent(
                         eventId = selectedEvent.value.id,
                         warningMessage = "Failed to refresh event after joining.",
                     )
+                    clearCurrentRegistrationProgress()
                     when {
                         registration.requiresParentApproval -> {
                             _errorState.value = ErrorMessage(
@@ -3397,7 +3659,7 @@ class DefaultEventDetailComponent(
                     return
                 }
                 loadingHandler.showLoading("Creating Purchase Request ...")
-                billingRepository.createPurchaseIntent(
+                createPurchaseIntentWithRegistrationAnswers(
                     event = selectedEvent.value,
                     priceCents = paymentPlan.configuredPriceCents,
                     occurrence = weeklyOccurrence,
@@ -3448,7 +3710,7 @@ class DefaultEventDetailComponent(
             ) {
                 var joinedByThisFlow = false
                 loadingHandler.showLoading("Joining Event ...")
-                val joinResult = eventRepository.addTeamToEvent(
+                val joinResult = addTeamToEventWithRegistrationAnswers(
                     event = selectedEvent.value,
                     team = team.team,
                     preferredDivisionId = selectedDivision.value,
@@ -3476,6 +3738,7 @@ class DefaultEventDetailComponent(
                         eventId = selectedEvent.value.id,
                         warningMessage = "Failed to refresh event after starting team payment plan.",
                     )
+                    clearCurrentRegistrationProgress()
                     _errorState.value = ErrorMessage(
                         if (status == PaymentPlanBillStatus.ALREADY_EXISTS) {
                             "Team joined. Payment plan already exists. Manage installments from your Profile."
@@ -3493,7 +3756,7 @@ class DefaultEventDetailComponent(
             }
             if (paymentPlan.configuredPriceCents <= 0 || isEventFull.value) {
                 loadingHandler.showLoading("Joining Event ...")
-                eventRepository.addTeamToEvent(
+                addTeamToEventWithRegistrationAnswers(
                     event = selectedEvent.value,
                     team = team.team,
                     preferredDivisionId = selectedDivision.value,
@@ -3504,6 +3767,7 @@ class DefaultEventDetailComponent(
                         eventId = selectedEvent.value.id,
                         warningMessage = "Failed to refresh event after team join.",
                     )
+                    clearCurrentRegistrationProgress()
                 }.onFailure {
                     _errorState.value = ErrorMessage(it.userMessage())
                 }
@@ -3512,7 +3776,7 @@ class DefaultEventDetailComponent(
                     return
                 }
                 loadingHandler.showLoading("Creating Purchase Request ...")
-                billingRepository.createPurchaseIntent(
+                createPurchaseIntentWithRegistrationAnswers(
                     event = selectedEvent.value,
                     teamId = team.team.id,
                     priceCents = paymentPlan.configuredPriceCents,
@@ -3757,6 +4021,20 @@ class DefaultEventDetailComponent(
         if (!ensureDocumentSignedBeforePurchase(intent)) {
             return
         }
+
+        intent.registrationHoldExpiresAt
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?.let { holdExpiresAt ->
+                _registrationHoldExpiresAt.value = holdExpiresAt
+                scope.launch {
+                    saveCurrentRegistrationProgress(
+                        step = "checkout",
+                        registrationId = intent.registrationId,
+                        holdExpiresAt = holdExpiresAt,
+                    )
+                }
+            }
 
         intent.feeBreakdown?.let { feeBreakdown ->
             showFeeBreakdown(feeBreakdown, onConfirm = {

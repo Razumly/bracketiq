@@ -132,6 +132,7 @@ import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.extractDivisionTokenFromId
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabels
+import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.MoneyInputField
@@ -319,6 +320,11 @@ fun EventDetails(
     organizationTemplates: List<OrganizationTemplateDocument> = emptyList(),
     organizationTemplatesLoading: Boolean = false,
     organizationTemplatesError: String? = null,
+    eventRegistrationQuestions: List<TeamJoinQuestion> = emptyList(),
+    eventRegistrationQuestionAnswers: Map<String, String> = emptyMap(),
+    eventRegistrationQuestionsExpanded: Boolean = false,
+    onToggleEventRegistrationQuestions: () -> Unit = {},
+    onEventRegistrationQuestionAnswerChange: (String, String) -> Unit = { _, _ -> },
     pendingStaffInvites: List<PendingStaffInviteDraft> = emptyList(),
     onSportSelected: (String) -> Unit = {},
     onSelectFieldCount: (Int) -> Unit,
@@ -2735,6 +2741,13 @@ fun EventDetails(
                         ReadOnlyDivisionsList(
                             event = event,
                             divisionDetails = divisionDetailsForSettings,
+                        )
+                        EventRegistrationQuestionsSection(
+                            questions = eventRegistrationQuestions,
+                            answers = eventRegistrationQuestionAnswers,
+                            expanded = eventRegistrationQuestionsExpanded,
+                            onToggleExpanded = onToggleEventRegistrationQuestions,
+                            onAnswerChange = onEventRegistrationQuestionAnswerChange,
                         )
                     },
                     editContent = {
@@ -5223,6 +5236,78 @@ private fun PriceWithFeesPreviewSupportingText(
             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
             color = Color(localImageScheme.current.primary),
         )
+    }
+}
+
+@Composable
+private fun EventRegistrationQuestionsSection(
+    questions: List<TeamJoinQuestion>,
+    answers: Map<String, String>,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
+    onAnswerChange: (String, String) -> Unit,
+) {
+    if (questions.isEmpty()) return
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggleExpanded),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Registration questions",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = "${questions.size} ${if (questions.size == 1) "question" else "questions"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "Collapse registration questions" else "Expand registration questions",
+                )
+            }
+            AnimatedVisibility(visible = expanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    questions.forEach { question ->
+                        StandardTextField(
+                            value = answers[question.id].orEmpty(),
+                            onValueChange = { value -> onAnswerChange(question.id, value) },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = if (question.required) "${question.prompt} *" else question.prompt,
+                            placeholder = "Answer",
+                            supportingText = if (question.answerType.equals("LONG_TEXT", ignoreCase = true)) {
+                                "A short paragraph is fine."
+                            } else {
+                                ""
+                            },
+                            height = if (question.answerType.equals("LONG_TEXT", ignoreCase = true)) 128.dp else null,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

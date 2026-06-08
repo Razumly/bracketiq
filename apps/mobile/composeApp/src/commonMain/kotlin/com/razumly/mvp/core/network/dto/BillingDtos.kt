@@ -50,6 +50,12 @@ data class BillingTimeSlotRefDto(
 )
 
 @Serializable
+data class RegistrationQuestionAnswerDto(
+    val questionId: String,
+    val answer: String,
+)
+
+@Serializable
 data class PurchaseIntentRequestDto(
     val purchaseType: String? = null,
     val user: BillingUserRefDto? = null,
@@ -64,6 +70,7 @@ data class PurchaseIntentRequestDto(
     val occurrenceDate: String? = null,
     val productId: String? = null,
     val billingAddress: BillingAddressDto? = null,
+    val answers: List<RegistrationQuestionAnswerDto> = emptyList(),
 )
 
 @Serializable

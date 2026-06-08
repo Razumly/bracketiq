@@ -31,6 +31,7 @@ import com.razumly.mvp.core.network.dto.BillingUserRefDto
 import com.razumly.mvp.core.network.dto.PurchaseIntentRequestDto
 import com.razumly.mvp.core.network.dto.RefundAllRequestDto
 import com.razumly.mvp.core.network.dto.RefundRequestsResponseDto
+import com.razumly.mvp.core.network.dto.RegistrationQuestionAnswerDto
 import com.razumly.mvp.core.network.dto.StripeHostLinkRequestDto
 import com.razumly.mvp.core.network.dto.UpdateRefundRequestDto
 import io.github.aakira.napier.Napier
@@ -69,6 +70,15 @@ private fun Throwable.withFriendlyBoldSignMessage(): Throwable {
     }
     return Exception(friendlyMessage, this)
 }
+
+private fun Map<String, String>.toRegistrationQuestionAnswerDtos(): List<RegistrationQuestionAnswerDto> =
+    mapNotNull { (questionId, answer) ->
+        val normalizedQuestionId = questionId.trim().takeIf(String::isNotBlank) ?: return@mapNotNull null
+        RegistrationQuestionAnswerDto(
+            questionId = normalizedQuestionId,
+            answer = answer,
+        )
+    }
 
 enum class SignerContext(val apiValue: String) {
     PARTICIPANT("participant"),
@@ -266,6 +276,22 @@ interface IBillingRepository : IMVPRepository {
         occurrence: EventOccurrenceSelection? = null,
         divisionId: String? = null,
     ): Result<PurchaseIntent>
+    suspend fun createPurchaseIntent(
+        event: Event,
+        teamId: String? = null,
+        priceCents: Int? = null,
+        timeSlotContext: PurchaseIntentTimeSlotContext? = null,
+        occurrence: EventOccurrenceSelection? = null,
+        divisionId: String? = null,
+        answers: Map<String, String>,
+    ): Result<PurchaseIntent> = createPurchaseIntent(
+        event = event,
+        teamId = teamId,
+        priceCents = priceCents,
+        timeSlotContext = timeSlotContext,
+        occurrence = occurrence,
+        divisionId = divisionId,
+    )
     suspend fun createTeamRegistrationPurchaseIntent(
         team: Team,
         teamRegistration: TeamPlayerRegistration? = null,
@@ -386,6 +412,24 @@ class BillingRepository(
         timeSlotContext: PurchaseIntentTimeSlotContext?,
         occurrence: EventOccurrenceSelection?,
         divisionId: String?,
+    ): Result<PurchaseIntent> = createPurchaseIntent(
+        event = event,
+        teamId = teamId,
+        priceCents = priceCents,
+        timeSlotContext = timeSlotContext,
+        occurrence = occurrence,
+        divisionId = divisionId,
+        answers = emptyMap(),
+    )
+
+    override suspend fun createPurchaseIntent(
+        event: Event,
+        teamId: String?,
+        priceCents: Int?,
+        timeSlotContext: PurchaseIntentTimeSlotContext?,
+        occurrence: EventOccurrenceSelection?,
+        divisionId: String?,
+        answers: Map<String, String>,
     ): Result<PurchaseIntent> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
         val email = userRepository.currentAccount.value.getOrNull()?.email
@@ -436,6 +480,7 @@ class BillingRepository(
                 },
                 slotId = occurrence?.slotId?.trim()?.takeIf(String::isNotBlank),
                 occurrenceDate = occurrence?.occurrenceDate?.trim()?.takeIf(String::isNotBlank),
+                answers = answers.toRegistrationQuestionAnswerDtos(),
             ),
         )
 
@@ -2188,6 +2233,9 @@ data class PurchaseIntent(
     val checkoutMode: String? = null,
     val checkoutUrl: String? = null,
     val checkoutSessionId: String? = null,
+    val registrationId: String? = null,
+    val registrationHoldExpiresAt: String? = null,
+    val registrationHoldTtlSeconds: Int? = null,
     val taxCalculationId: String? = null,
     val taxCategory: String? = null,
     val taxMode: String? = null,

@@ -57,6 +57,7 @@ import com.razumly.mvp.core.network.dto.EventTeamComplianceSummaryDto
 import com.razumly.mvp.core.network.dto.EventUserComplianceResponseDto
 import com.razumly.mvp.core.network.dto.EventsResponseDto
 import com.razumly.mvp.core.network.dto.ProfileScheduleResponseDto
+import com.razumly.mvp.core.network.dto.RegistrationQuestionAnswerDto
 import com.razumly.mvp.core.network.dto.RegistrationQuestionAnswerSnapshotDto
 import com.razumly.mvp.core.network.dto.ScheduleEventRequestDto
 import com.razumly.mvp.core.network.dto.ScheduleEventResponseDto
@@ -99,6 +100,8 @@ interface IEventRepository : IMVPRepository {
     suspend fun getEventStaffInvites(eventId: String): Result<List<Invite>>
     suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>>
     suspend fun getEventsByOrganization(organizationId: String, limit: Int = 200): Result<List<Event>>
+    suspend fun getRegistrationQuestions(scopeType: String, scopeId: String): Result<List<TeamJoinQuestion>> =
+        Result.success(emptyList())
     suspend fun createEvent(
         newEvent: Event,
         requiredTemplateIds: List<String> = emptyList(),
@@ -143,6 +146,16 @@ interface IEventRepository : IMVPRepository {
         preferredDivisionId: String? = null,
         occurrence: EventOccurrenceSelection? = null,
     ): Result<SelfRegistrationResult>
+    suspend fun addCurrentUserToEvent(
+        event: Event,
+        preferredDivisionId: String? = null,
+        occurrence: EventOccurrenceSelection? = null,
+        answers: Map<String, String>,
+    ): Result<SelfRegistrationResult> = addCurrentUserToEvent(
+        event = event,
+        preferredDivisionId = preferredDivisionId,
+        occurrence = occurrence,
+    )
     suspend fun addPlayerToEvent(
         event: Event,
         player: UserData,
@@ -170,6 +183,18 @@ interface IEventRepository : IMVPRepository {
         preferredDivisionId: String? = null,
         occurrence: EventOccurrenceSelection? = null,
     ): Result<Unit>
+    suspend fun addTeamToEvent(
+        event: Event,
+        team: Team,
+        preferredDivisionId: String? = null,
+        occurrence: EventOccurrenceSelection? = null,
+        answers: Map<String, String>,
+    ): Result<Unit> = addTeamToEvent(
+        event = event,
+        team = team,
+        preferredDivisionId = preferredDivisionId,
+        occurrence = occurrence,
+    )
     suspend fun moveTeamParticipantDivision(
         event: Event,
         team: Team,
@@ -239,9 +264,45 @@ interface IEventRepository : IMVPRepository {
     fun observeCurrentUserRegistrationsForEvent(eventId: String): Flow<List<EventRegistrationCacheEntry>> =
         flowOf(emptyList())
     suspend fun clearCurrentUserRegistrationCache(): Result<Unit> = Result.success(Unit)
-    suspend fun reportEvent(eventId: String, notes: String? = null): Result<Unit> =
+suspend fun reportEvent(eventId: String, notes: String? = null): Result<Unit> =
         Result.failure(NotImplementedError("Event reporting is not implemented"))
 }
+
+@Serializable
+private data class RegistrationQuestionDto(
+    val id: String = "",
+    val prompt: String = "",
+    val answerType: String = "TEXT",
+    val required: Boolean = false,
+    val sortOrder: Int = 0,
+)
+
+@Serializable
+private data class RegistrationQuestionsResponseDto(
+    val questions: List<RegistrationQuestionDto> = emptyList(),
+    val error: String? = null,
+)
+
+private fun RegistrationQuestionDto.toTeamJoinQuestionOrNull(): TeamJoinQuestion? {
+    val normalizedId = id.trim().takeIf(String::isNotBlank) ?: return null
+    val normalizedPrompt = prompt.trim().takeIf(String::isNotBlank) ?: return null
+    return TeamJoinQuestion(
+        id = normalizedId,
+        prompt = normalizedPrompt,
+        answerType = answerType.trim().ifBlank { "TEXT" },
+        required = required,
+        sortOrder = sortOrder,
+    )
+}
+
+private fun Map<String, String>.toRegistrationQuestionAnswerDtos(): List<RegistrationQuestionAnswerDto> =
+    mapNotNull { (questionId, answer) ->
+        val normalizedQuestionId = questionId.trim().takeIf(String::isNotBlank) ?: return@mapNotNull null
+        RegistrationQuestionAnswerDto(
+            questionId = normalizedQuestionId,
+            answer = answer,
+        )
+    }
 
 enum class EventParticipantRefundMode(val wireValue: String) {
     AUTO("auto"),
@@ -859,6 +920,25 @@ class EventRepository(
 
     override fun resetCursor() {
         // Paging is currently handled by the UI by re-issuing search calls; keep this as a no-op for now.
+    }
+
+    override suspend fun getRegistrationQuestions(
+        scopeType: String,
+        scopeId: String,
+    ): Result<List<TeamJoinQuestion>> = runCatching {
+        val normalizedScopeType = scopeType.trim().uppercase().takeIf(String::isNotBlank)
+            ?: error("Question scope type is required.")
+        val normalizedScopeId = scopeId.trim().takeIf(String::isNotBlank)
+            ?: error("Question scope id is required.")
+        val response = api.get<RegistrationQuestionsResponseDto>(
+            path = "api/registration-questions?scopeType=${normalizedScopeType.encodeURLQueryComponent()}&scopeId=${normalizedScopeId.encodeURLQueryComponent()}",
+        )
+        if (!response.error.isNullOrBlank()) {
+            error(response.error)
+        }
+        response.questions
+            .mapNotNull(RegistrationQuestionDto::toTeamJoinQuestionOrNull)
+            .sortedWith(compareBy<TeamJoinQuestion> { it.sortOrder }.thenBy { it.prompt })
     }
 
     override fun getCachedEventsFlow(): Flow<Result<List<Event>>> =
@@ -1953,6 +2033,18 @@ class EventRepository(
         event: Event,
         preferredDivisionId: String?,
         occurrence: EventOccurrenceSelection?,
+    ): Result<SelfRegistrationResult> = addCurrentUserToEvent(
+        event = event,
+        preferredDivisionId = preferredDivisionId,
+        occurrence = occurrence,
+        answers = emptyMap(),
+    )
+
+    override suspend fun addCurrentUserToEvent(
+        event: Event,
+        preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
+        answers: Map<String, String>,
     ): Result<SelfRegistrationResult> =
         runCatching {
             val currentUser = userRepository.currentUser.value.getOrThrow()
@@ -1976,6 +2068,7 @@ class EventRepository(
                 divisionTypeKey = divisionPayload.divisionTypeKey,
                 slotId = occurrence?.slotId,
                 occurrenceDate = occurrence?.occurrenceDate,
+                answers = answers.toRegistrationQuestionAnswerDtos(),
             )
             val response = when {
                 eventAtCapacity -> {
@@ -1992,6 +2085,7 @@ class EventRepository(
                             userId = currentUser.id,
                             slotId = occurrence?.slotId,
                             occurrenceDate = occurrence?.occurrenceDate,
+                            answers = answers.toRegistrationQuestionAnswerDtos(),
                         ),
                     )
                 }
@@ -2149,6 +2243,20 @@ class EventRepository(
         team: Team,
         preferredDivisionId: String?,
         occurrence: EventOccurrenceSelection?,
+    ): Result<Unit> = addTeamToEvent(
+        event = event,
+        team = team,
+        preferredDivisionId = preferredDivisionId,
+        occurrence = occurrence,
+        answers = emptyMap(),
+    )
+
+    override suspend fun addTeamToEvent(
+        event: Event,
+        team: Team,
+        preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
+        answers: Map<String, String>,
     ): Result<Unit> =
         runCatching {
             if (event.waitList.contains(team.id)) {
@@ -2166,6 +2274,7 @@ class EventRepository(
                 divisionTypeKey = divisionPayload.divisionTypeKey,
                 slotId = occurrence?.slotId,
                 occurrenceDate = occurrence?.occurrenceDate,
+                answers = answers.toRegistrationQuestionAnswerDtos(),
             )
             val updated = if (
                 isEventAtCapacity(

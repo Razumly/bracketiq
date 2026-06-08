@@ -48,6 +48,7 @@ import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignupProfileSelection
 import com.razumly.mvp.core.data.repositories.TeamRegistrationConsent
 import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
+import com.razumly.mvp.core.data.repositories.TeamJoinRequestContext
 import com.razumly.mvp.core.data.repositories.UserEmailMembershipMatch
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.network.dto.InviteCreateDto
@@ -175,20 +176,20 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
                 divisions = listOf("open"),
                 startTimeMinutes = 420,
                 endTimeMinutes = 780,
-                startDate = Instant.parse("2026-04-02T00:00:00Z"),
+                startDate = Instant.parse("2030-04-02T00:00:00Z"),
                 repeating = true,
-                endDate = Instant.parse("2026-06-25T00:00:00Z"),
+                endDate = Instant.parse("2030-06-25T00:00:00Z"),
                 scheduledFieldId = field.id,
                 scheduledFieldIds = listOf(field.id),
                 price = 0,
             )
             val matches = listOf(
-                mobileMatch("match_1", 1, "team_1", "team_4", field.id, "2026-04-02T07:00:00Z", "2026-04-02T08:00:00Z"),
-                mobileMatch("match_2", 2, "team_2", "team_3", field.id, "2026-04-02T08:00:00Z", "2026-04-02T09:00:00Z"),
-                mobileMatch("match_3", 3, "team_1", "team_3", field.id, "2026-04-02T09:00:00Z", "2026-04-02T10:00:00Z"),
-                mobileMatch("match_4", 4, "team_4", "team_2", field.id, "2026-04-02T10:00:00Z", "2026-04-02T11:00:00Z"),
-                mobileMatch("match_5", 5, "team_1", "team_2", field.id, "2026-04-02T11:00:00Z", "2026-04-02T12:00:00Z"),
-                mobileMatch("match_6", 6, "team_3", "team_4", field.id, "2026-04-02T12:00:00Z", "2026-04-02T13:00:00Z"),
+                mobileMatch("match_1", 1, "team_1", "team_4", field.id, "2030-04-02T07:00:00Z", "2030-04-02T08:00:00Z"),
+                mobileMatch("match_2", 2, "team_2", "team_3", field.id, "2030-04-02T08:00:00Z", "2030-04-02T09:00:00Z"),
+                mobileMatch("match_3", 3, "team_1", "team_3", field.id, "2030-04-02T09:00:00Z", "2030-04-02T10:00:00Z"),
+                mobileMatch("match_4", 4, "team_4", "team_2", field.id, "2030-04-02T10:00:00Z", "2030-04-02T11:00:00Z"),
+                mobileMatch("match_5", 5, "team_1", "team_2", field.id, "2030-04-02T11:00:00Z", "2030-04-02T12:00:00Z"),
+                mobileMatch("match_6", 6, "team_3", "team_4", field.id, "2030-04-02T12:00:00Z", "2030-04-02T13:00:00Z"),
             )
             val staffInvites = listOf(
                 Invite(
@@ -221,8 +222,8 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
                 hostId = host.id,
                 coordinates = listOf(-80.1918, 25.7617),
                 location = "Downtown Sports Hub",
-                start = Instant.parse("2026-06-01T15:00:00Z"),
-                end = Instant.parse("2026-06-29T19:00:00Z"),
+                start = Instant.parse("2030-06-01T15:00:00Z"),
+                end = Instant.parse("2030-06-29T19:00:00Z"),
                 state = "PUBLISHED",
                 eventType = EventType.LEAGUE,
                 imageId = UPLOADED_DB_IMAGE_ID,
@@ -2440,6 +2441,19 @@ private class EventDetailFakeTeamRepository(
     override suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit> = Result.success(Unit)
     override suspend fun createTeam(newTeam: Team): Result<Team> = Result.success(newTeam)
     override suspend fun updateTeam(newTeam: Team): Result<Team> = Result.success(newTeam)
+    override suspend fun getTeamJoinRequestContext(teamId: String): Result<TeamJoinRequestContext> =
+        teamsById[teamId]?.let { team ->
+            Result.success(
+                TeamJoinRequestContext(
+                    teamId = team.id,
+                    joinPolicy = if (team.openRegistration) "OPEN_REGISTRATION" else "CLOSED",
+                    openRegistration = team.openRegistration,
+                    registrationPriceCents = team.registrationPriceCents,
+                    questions = emptyList(),
+                )
+            )
+        } ?: Result.failure(IllegalStateException("Team $teamId not found"))
+
     override suspend fun requestTeamRegistration(
         teamId: String,
         answers: Map<String, String>,

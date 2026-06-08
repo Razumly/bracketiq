@@ -4,10 +4,31 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.razumly.mvp.core.util.jsonMVP
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlin.time.Clock
 import kotlin.time.Instant
+
+@Serializable
+data class RegistrationProgressDraft(
+    val version: Int = 1,
+    val scope: String,
+    val userId: String,
+    val eventId: String,
+    val step: String? = null,
+    val answers: Map<String, String> = emptyMap(),
+    val selectedDivisionId: String? = null,
+    val slotId: String? = null,
+    val occurrenceDate: String? = null,
+    val registrationId: String? = null,
+    val holdExpiresAt: String? = null,
+    val updatedAt: String,
+)
 
 class CurrentUserDataSource(private val dataStore: DataStore<Preferences>) {
     private val idKey = stringPreferencesKey("id")
@@ -122,6 +143,35 @@ class CurrentUserDataSource(private val dataStore: DataStore<Preferences>) {
     suspend fun getDismissedAppReleaseKeyNow(): String =
         dataStore.data.first()[dismissedAppReleaseKey].orEmpty()
 
+    suspend fun saveRegistrationProgress(
+        key: String,
+        draft: RegistrationProgressDraft,
+    ) {
+        val normalizedKey = key.trim().takeIf(String::isNotBlank) ?: return
+        dataStore.edit { preferences ->
+            preferences[registrationProgressKey(normalizedKey)] = jsonMVP.encodeToString(draft)
+        }
+    }
+
+    suspend fun loadRegistrationProgress(key: String): RegistrationProgressDraft? {
+        val normalizedKey = key.trim().takeIf(String::isNotBlank) ?: return null
+        val preferenceKey = registrationProgressKey(normalizedKey)
+        val raw = dataStore.data.first()[preferenceKey]?.trim()?.takeIf(String::isNotBlank) ?: return null
+        val draft = runCatching { jsonMVP.decodeFromString<RegistrationProgressDraft>(raw) }.getOrNull()
+        if (draft == null || draft.version != 1 || draft.isHoldExpired()) {
+            clearRegistrationProgress(normalizedKey)
+            return null
+        }
+        return draft
+    }
+
+    suspend fun clearRegistrationProgress(key: String) {
+        val normalizedKey = key.trim().takeIf(String::isNotBlank) ?: return
+        dataStore.edit { preferences ->
+            preferences.remove(registrationProgressKey(normalizedKey))
+        }
+    }
+
     private fun parseIdSet(raw: String?): MutableSet<String> {
         if (raw.isNullOrBlank()) return mutableSetOf()
         return raw
@@ -139,4 +189,13 @@ class CurrentUserDataSource(private val dataStore: DataStore<Preferences>) {
             .distinct()
             .sorted()
             .joinToString(",")
+
+    private fun registrationProgressKey(key: String) =
+        stringPreferencesKey("registration_progress_$key")
+
+    private fun RegistrationProgressDraft.isHoldExpired(): Boolean {
+        val rawHoldExpiresAt = holdExpiresAt?.trim()?.takeIf(String::isNotBlank) ?: return false
+        val expiresAt = runCatching { Instant.parse(rawHoldExpiresAt) }.getOrNull() ?: return false
+        return expiresAt <= Clock.System.now()
+    }
 }
