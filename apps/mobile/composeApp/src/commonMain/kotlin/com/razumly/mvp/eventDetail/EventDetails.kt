@@ -288,6 +288,19 @@ private fun kotlin.time.Instant.asSystemLocalPickerInstant(timeZone: TimeZone): 
     return LocalDateTime(local.date, local.time).toInstant(TimeZone.currentSystemDefault())
 }
 
+@Composable
+private fun RegistrationHoldSummaryChip(
+    expiresAt: String?,
+    onExpired: () -> Unit,
+) {
+    val remainingLabel = rememberRegistrationHoldRemainingLabel(
+        expiresAt = expiresAt,
+        onExpired = onExpired,
+    ) ?: return
+
+    SummaryTagChip(label = "Held $remainingLabel")
+}
+
 @OptIn(ExperimentalHazeApi::class, ExperimentalTime::class)
 @Suppress("UNUSED_PARAMETER")
 @Composable
@@ -323,8 +336,10 @@ fun EventDetails(
     eventRegistrationQuestions: List<TeamJoinQuestion> = emptyList(),
     eventRegistrationQuestionAnswers: Map<String, String> = emptyMap(),
     eventRegistrationQuestionsExpanded: Boolean = false,
+    registrationHoldExpiresAt: String? = null,
     onToggleEventRegistrationQuestions: () -> Unit = {},
     onEventRegistrationQuestionAnswerChange: (String, String) -> Unit = { _, _ -> },
+    onRegistrationHoldExpired: () -> Unit = {},
     pendingStaffInvites: List<PendingStaffInviteDraft> = emptyList(),
     onSportSelected: (String) -> Unit = {},
     onSelectFieldCount: (Int) -> Unit,
@@ -2517,6 +2532,10 @@ fun EventDetails(
                                     summaryTags.forEach { tag ->
                                         SummaryTagChip(label = tag)
                                     }
+                                    RegistrationHoldSummaryChip(
+                                        expiresAt = registrationHoldExpiresAt,
+                                        onExpired = onRegistrationHoldExpired,
+                                    )
                                 }
                             }
 

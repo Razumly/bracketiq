@@ -190,6 +190,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val joinChoiceDialog: StateFlow<JoinChoiceDialogState?>
     val childJoinSelectionDialog: StateFlow<ChildJoinSelectionDialogState?>
     val teamJoinQuestionDialog: StateFlow<TeamJoinQuestionDialogState?>
+    val eventRegistrationQuestionDialog: StateFlow<EventRegistrationQuestionDialogState?>
     val eventRegistrationQuestions: StateFlow<List<TeamJoinQuestion>>
     val eventRegistrationQuestionAnswers: StateFlow<Map<String, String>>
     val eventRegistrationQuestionsExpanded: StateFlow<Boolean>
@@ -221,6 +222,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun showFeeBreakdown(feeBreakdown: FeeBreakdown, onConfirm: () -> Unit, onCancel: () -> Unit)
     fun updateEventRegistrationQuestionAnswer(questionId: String, answer: String)
     fun toggleEventRegistrationQuestionsExpanded()
+    fun dismissEventRegistrationQuestionDialog()
+    fun submitEventRegistrationQuestionDialogAnswers(answers: Map<String, String>)
     fun registrationHoldExpired()
     fun onHostCreateAccount()
     fun selectDivision(division: String)
@@ -397,6 +400,12 @@ data class TeamJoinQuestionDialogState(
     val teamName: String,
     val joinPolicy: String,
     val questions: List<TeamJoinQuestion>,
+)
+
+data class EventRegistrationQuestionDialogState(
+    val eventName: String,
+    val questions: List<TeamJoinQuestion>,
+    val answers: Map<String, String>,
 )
 
 data class PaymentPlanPreviewDialogState(
@@ -860,11 +869,42 @@ class DefaultEventDetailComponent(
         _eventRegistrationQuestionsExpanded.value = !_eventRegistrationQuestionsExpanded.value
     }
 
+    override fun dismissEventRegistrationQuestionDialog() {
+        _eventRegistrationQuestionDialog.value = null
+        pendingEventRegistrationQuestionContinuation = null
+    }
+
+    override fun submitEventRegistrationQuestionDialogAnswers(answers: Map<String, String>) {
+        val dialog = _eventRegistrationQuestionDialog.value ?: return
+        val normalizedAnswers = dialog.questions.associate { question ->
+            question.id to answers[question.id].orEmpty()
+        }
+        val missingQuestion = dialog.questions.firstOrNull { question ->
+            question.required && normalizedAnswers[question.id].orEmpty().trim().isBlank()
+        }
+        if (missingQuestion != null) {
+            _errorState.value = ErrorMessage("Answer \"${missingQuestion.prompt}\" before continuing.")
+            return
+        }
+
+        _eventRegistrationQuestionAnswers.value = _eventRegistrationQuestionAnswers.value + normalizedAnswers
+        eventRegistrationQuestionsConfirmed = true
+        _eventRegistrationQuestionDialog.value = null
+        val continuation = pendingEventRegistrationQuestionContinuation
+        pendingEventRegistrationQuestionContinuation = null
+        scope.launch {
+            saveCurrentRegistrationProgress(step = "questions")
+            continuation?.invoke()
+        }
+    }
+
     override fun registrationHoldExpired() {
         scope.launch {
             clearCurrentRegistrationProgress()
             pendingTeamRegistration = null
             pendingJoinConfirmationTarget = null
+            pendingEventRegistrationQuestionContinuation = null
+            _eventRegistrationQuestionDialog.value = null
             _startingTeamRegistrationId.value = null
             _errorState.value = ErrorMessage("Registration hold expired. Start registration again to reserve a new spot.")
         }
@@ -1405,6 +1445,8 @@ class DefaultEventDetailComponent(
     override val teamJoinQuestionDialog = _teamJoinQuestionDialog.asStateFlow()
     private var pendingTeamJoinQuestionTeam: TeamWithPlayers? = null
 
+    private val _eventRegistrationQuestionDialog = MutableStateFlow<EventRegistrationQuestionDialogState?>(null)
+    override val eventRegistrationQuestionDialog = _eventRegistrationQuestionDialog.asStateFlow()
     private val _eventRegistrationQuestions = MutableStateFlow<List<TeamJoinQuestion>>(emptyList())
     override val eventRegistrationQuestions = _eventRegistrationQuestions.asStateFlow()
     private val _eventRegistrationQuestionAnswers = MutableStateFlow<Map<String, String>>(emptyMap())
@@ -1440,6 +1482,8 @@ class DefaultEventDetailComponent(
     private var pendingSignatureTeamId: String? = null
     private var pendingPdfSignaturePollJob: Job? = null
     private var pendingPaymentPlanPreviewAction: (() -> Unit)? = null
+    private var pendingEventRegistrationQuestionContinuation: (() -> Unit)? = null
+    private var eventRegistrationQuestionsConfirmed = false
 
     private val shareServiceProvider = ShareServiceProvider()
 
@@ -1491,8 +1535,11 @@ class DefaultEventDetailComponent(
         val draft = currentUserDataSource?.loadRegistrationProgress(key)
         if (draft == null) {
             _registrationHoldExpiresAt.value = null
+            eventRegistrationQuestionsConfirmed = false
             return
         }
+        eventRegistrationQuestionsConfirmed = draft.step == "checkout" ||
+            !draft.holdExpiresAt.isNullOrBlank()
         if (draft.answers.isNotEmpty()) {
             _eventRegistrationQuestionAnswers.value = _eventRegistrationQuestionAnswers.value + draft.answers
         }
@@ -1510,6 +1557,7 @@ class DefaultEventDetailComponent(
             currentUserDataSource?.clearRegistrationProgress(key)
         }
         _registrationHoldExpiresAt.value = null
+        eventRegistrationQuestionsConfirmed = false
     }
 
     private fun missingEventRegistrationQuestion(): TeamJoinQuestion? =
@@ -1517,10 +1565,21 @@ class DefaultEventDetailComponent(
             question.required && _eventRegistrationQuestionAnswers.value[question.id].orEmpty().trim().isBlank()
         }
 
-    private fun ensureEventRegistrationQuestionsAnswered(): Boolean {
-        val missingQuestion = missingEventRegistrationQuestion() ?: return true
+    private fun ensureEventRegistrationQuestionsAnswered(onReady: () -> Unit): Boolean {
+        val questions = _eventRegistrationQuestions.value
+        if (questions.isEmpty()) return true
+        val missingQuestion = missingEventRegistrationQuestion()
+        if (missingQuestion == null && eventRegistrationQuestionsConfirmed) {
+            return true
+        }
+
         _eventRegistrationQuestionsExpanded.value = true
-        _errorState.value = ErrorMessage("Answer \"${missingQuestion.prompt}\" before continuing.")
+        _eventRegistrationQuestionDialog.value = EventRegistrationQuestionDialogState(
+            eventName = selectedEvent.value.name.ifBlank { "this event" },
+            questions = questions,
+            answers = _eventRegistrationQuestionAnswers.value,
+        )
+        pendingEventRegistrationQuestionContinuation = onReady
         return false
     }
 
@@ -1648,10 +1707,16 @@ class DefaultEventDetailComponent(
                         _eventRegistrationQuestions.value = emptyList()
                         _eventRegistrationQuestionAnswers.value = emptyMap()
                         _registrationHoldExpiresAt.value = null
+                        eventRegistrationQuestionsConfirmed = false
                         return@collectLatest
                     }
                     eventRepository.getRegistrationQuestions("EVENT", eventId)
                         .onSuccess { questions ->
+                            val previousQuestionIds = _eventRegistrationQuestions.value.map { question -> question.id }
+                            val nextQuestionIds = questions.map { question -> question.id }
+                            if (previousQuestionIds != nextQuestionIds) {
+                                eventRegistrationQuestionsConfirmed = false
+                            }
                             _eventRegistrationQuestions.value = questions
                             _eventRegistrationQuestionAnswers.value = _eventRegistrationQuestionAnswers.value.filterKeys { questionId ->
                                 questions.any { question -> question.id == questionId }
@@ -1663,6 +1728,7 @@ class DefaultEventDetailComponent(
                             Napier.w("Failed to load event registration questions.", throwable)
                             _eventRegistrationQuestions.value = emptyList()
                             _eventRegistrationQuestionAnswers.value = emptyMap()
+                            eventRegistrationQuestionsConfirmed = false
                         }
                     loadCurrentRegistrationProgress()
                 }
@@ -3162,7 +3228,7 @@ class DefaultEventDetailComponent(
     override fun joinEventAsTeam(team: TeamWithPlayers) {
         scope.launch {
             if (!ensureRegistrationOpen()) return@launch
-            if (!ensureEventRegistrationQuestionsAnswered()) return@launch
+            if (!ensureEventRegistrationQuestionsAnswered { joinEventAsTeam(team) }) return@launch
             _usersTeam.value = team
             _joinChoiceDialog.value = null
             _childJoinSelectionDialog.value = null
@@ -3222,6 +3288,9 @@ class DefaultEventDetailComponent(
 
         _joinChoiceDialog.value = null
         _childJoinSelectionDialog.value = null
+        if (!ensureEventRegistrationQuestionsAnswered { selectChildForJoin(childUserId) }) {
+            return
+        }
         scope.launch {
             runActionAfterRequiredSigning(
                 signerContext = SignerContext.PARENT_GUARDIAN,
@@ -3242,7 +3311,12 @@ class DefaultEventDetailComponent(
 
     private suspend fun runSelfJoinFlow(skipPaymentPlanPreview: Boolean = false) {
         if (!ensureRegistrationOpen()) return
-        if (!ensureEventRegistrationQuestionsAnswered()) return
+        if (!ensureEventRegistrationQuestionsAnswered {
+                scope.launch { runSelfJoinFlow(skipPaymentPlanPreview = skipPaymentPlanPreview) }
+            }
+        ) {
+            return
+        }
         if (!skipPaymentPlanPreview) {
             buildPaymentPlanPreviewDialogState(
                 ownerLabel = "You",

@@ -3030,6 +3030,7 @@ private fun String.isValidInviteEmail(): Boolean {
 private fun JoinOptionsSheet(
     options: List<JoinOption>,
     paymentProcessor: EventDetailComponent,
+    registrationHoldExpiresAt: String?,
     isWeeklyParentEvent: Boolean,
     weeklySessionOptions: List<WeeklySessionOption>,
     weeklyOccurrenceSummaries: Map<String, WeeklyOccurrenceSummary>,
@@ -3043,6 +3044,7 @@ private fun JoinOptionsSheet(
     onDismiss: () -> Unit,
     onSelectOption: (JoinOption) -> Unit,
     onSelectWeeklySession: (WeeklySessionOption) -> Unit,
+    onRegistrationHoldExpired: () -> Unit,
 ) {
     var isDivisionMenuExpanded by remember { mutableStateOf(false) }
     var divisionMenuAnchorSize by remember { mutableStateOf(IntSize.Zero) }
@@ -3077,6 +3079,10 @@ private fun JoinOptionsSheet(
                 text = "Join options",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold
+            )
+            RegistrationHoldDialogTimer(
+                expiresAt = registrationHoldExpiresAt,
+                onExpired = onRegistrationHoldExpired,
             )
             if (showWeeklySelectionList) {
                 Text(
@@ -3316,6 +3322,7 @@ fun EventDetailScreen(
     val joinChoiceDialog by component.joinChoiceDialog.collectAsState()
     val childJoinSelectionDialog by component.childJoinSelectionDialog.collectAsState()
     val teamJoinQuestionDialog by component.teamJoinQuestionDialog.collectAsState()
+    val eventRegistrationQuestionDialog by component.eventRegistrationQuestionDialog.collectAsState()
     val eventRegistrationQuestions by component.eventRegistrationQuestions.collectAsState()
     val eventRegistrationQuestionAnswers by component.eventRegistrationQuestionAnswers.collectAsState()
     val eventRegistrationQuestionsExpanded by component.eventRegistrationQuestionsExpanded.collectAsState()
@@ -4330,8 +4337,10 @@ fun EventDetailScreen(
                             eventRegistrationQuestions = eventRegistrationQuestions,
                             eventRegistrationQuestionAnswers = eventRegistrationQuestionAnswers,
                             eventRegistrationQuestionsExpanded = eventRegistrationQuestionsExpanded,
+                            registrationHoldExpiresAt = registrationHoldExpiresAt,
                             onToggleEventRegistrationQuestions = component::toggleEventRegistrationQuestionsExpanded,
                             onEventRegistrationQuestionAnswerChange = component::updateEventRegistrationQuestionAnswer,
+                            onRegistrationHoldExpired = component::registrationHoldExpired,
                             onHostCreateAccount = component::onHostCreateAccount,
                             onPlaceSelected = component::selectPlace,
                             onEditEvent = component::editEventField,
@@ -5576,12 +5585,6 @@ fun EventDetailScreen(
                     }
                 }
             }
-            RegistrationHoldTimer(
-                expiresAt = registrationHoldExpiresAt,
-                bottomPadding = LocalNavBarPadding.current.calculateBottomPadding() +
-                    if (showStickyActions) 128.dp else 24.dp,
-                onExpired = component::registrationHoldExpired,
-            )
             AnimatedVisibility(
                 visible = showStickyActions,
                 modifier = Modifier
@@ -5659,6 +5662,7 @@ fun EventDetailScreen(
                     JoinOptionsSheet(
                         options = joinOptions,
                         paymentProcessor = component,
+                        registrationHoldExpiresAt = registrationHoldExpiresAt,
                         isWeeklyParentEvent = isWeeklyParentEvent,
                         weeklySessionOptions = weeklySessionOptions,
                         weeklyOccurrenceSummaries = weeklyOccurrenceSummaries,
@@ -5690,6 +5694,7 @@ fun EventDetailScreen(
                                 label = session.label,
                             )
                         },
+                        onRegistrationHoldExpired = component::registrationHoldExpired,
                     )
                 }
             }
@@ -5765,6 +5770,13 @@ fun EventDetailScreen(
                     dialogState = dialogState,
                     onDismiss = component::dismissTeamJoinQuestionDialog,
                     onSubmit = component::submitTeamJoinQuestionAnswers,
+                )
+            }
+            eventRegistrationQuestionDialog?.let { dialogState ->
+                EventRegistrationQuestionsDialog(
+                    dialogState = dialogState,
+                    onDismiss = component::dismissEventRegistrationQuestionDialog,
+                    onSubmit = component::submitEventRegistrationQuestionDialogAnswers,
                 )
             }
             paymentPlanPreviewDialog?.let { dialogState ->
@@ -6198,62 +6210,125 @@ private fun ChildJoinSelectionDialog(
 }
 
 @Composable
-private fun RegistrationHoldTimer(
+private fun RegistrationHoldDialogTimer(
     expiresAt: String?,
-    bottomPadding: Dp,
     onExpired: () -> Unit,
 ) {
-    val expiresAtInstant = remember(expiresAt) {
-        expiresAt
-            ?.trim()
-            ?.takeIf(String::isNotBlank)
-            ?.let { raw -> runCatching { Instant.parse(raw) }.getOrNull() }
-    }
-    var now by remember(expiresAtInstant) { mutableStateOf(Clock.System.now()) }
+    val remainingLabel = rememberRegistrationHoldRemainingLabel(
+        expiresAt = expiresAt,
+        onExpired = onExpired,
+    ) ?: return
 
-    LaunchedEffect(expiresAtInstant) {
-        if (expiresAtInstant == null) return@LaunchedEffect
-        while (true) {
-            now = Clock.System.now()
-            if (expiresAtInstant <= now) {
-                onExpired()
-                return@LaunchedEffect
-            }
-            delay(1_000)
-        }
-    }
-
-    val remainingSeconds = expiresAtInstant
-        ?.let { (it - now).inWholeSeconds.coerceAtLeast(0) }
-        ?: return
-    if (remainingSeconds <= 0) return
-
-    val minutes = remainingSeconds / 60
-    val seconds = remainingSeconds % 60
-    val remainingLabel = "${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .zIndex(30f)
-            .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = bottomPadding),
-        contentAlignment = Alignment.BottomStart,
+    Surface(
+        modifier = Modifier.widthIn(max = 360.dp),
+        shape = RoundedCornerShape(12.dp),
+        tonalElevation = 6.dp,
+        shadowElevation = 6.dp,
+        color = MaterialTheme.colorScheme.surface,
     ) {
-        Surface(
-            modifier = Modifier.widthIn(max = 360.dp),
-            shape = RoundedCornerShape(12.dp),
-            tonalElevation = 6.dp,
-            shadowElevation = 6.dp,
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Text(
-                text = "Your registration is held for $remainingLabel",
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
+        Text(
+            text = "Your registration is held for $remainingLabel",
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
+}
+
+@Composable
+private fun EventRegistrationQuestionsDialog(
+    dialogState: EventRegistrationQuestionDialogState,
+    onDismiss: () -> Unit,
+    onSubmit: (Map<String, String>) -> Unit,
+) {
+    var answers by remember(dialogState.eventName, dialogState.questions, dialogState.answers) {
+        mutableStateOf(
+            dialogState.questions.associate { question ->
+                question.id to dialogState.answers[question.id].orEmpty()
+            },
+        )
+    }
+    var validationMessage by remember(dialogState.eventName, dialogState.questions) {
+        mutableStateOf<String?>(null)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Registration questions") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = dialogState.eventName,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                validationMessage?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                Text(
+                    text = "${dialogState.questions.size} ${if (dialogState.questions.size == 1) "question" else "questions"}",
+                    modifier = Modifier
+                        .fillMaxWidth(),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 360.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(dialogState.questions, key = { question -> question.id }) { question ->
+                        val answer = answers[question.id].orEmpty()
+                        StandardTextField(
+                            value = answer,
+                            onValueChange = { value ->
+                                answers = answers + (question.id to value)
+                                validationMessage = null
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = if (question.required) "${question.prompt} *" else question.prompt,
+                            placeholder = "Answer",
+                            supportingText = if (question.answerType.equals("LONG_TEXT", ignoreCase = true)) {
+                                "A short paragraph is fine."
+                            } else {
+                                ""
+                            },
+                            height = if (question.answerType.equals("LONG_TEXT", ignoreCase = true)) 128.dp else null,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val missingQuestion = dialogState.questions.firstOrNull { question ->
+                        question.required && answers[question.id].orEmpty().trim().isBlank()
+                    }
+                    if (missingQuestion != null) {
+                        validationMessage = "Answer \"${missingQuestion.prompt}\" before continuing."
+                        return@Button
+                    }
+                    onSubmit(answers)
+                },
+            ) {
+                Text("Continue")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
 }
 
 @Composable
@@ -6267,9 +6342,6 @@ private fun TeamJoinQuestionsDialog(
     }
     var validationMessage by remember(dialogState.teamId, dialogState.joinPolicy, dialogState.questions) {
         mutableStateOf<String?>(null)
-    }
-    var questionsExpanded by remember(dialogState.teamId, dialogState.joinPolicy, dialogState.questions) {
-        mutableStateOf(true)
     }
     val isRequestOnly = dialogState.joinPolicy.equals("REQUEST_TO_JOIN", ignoreCase = true)
     val submitLabel = if (isRequestOnly) "Send request" else "Join team"
@@ -6294,49 +6366,37 @@ private fun TeamJoinQuestionsDialog(
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
-                Row(
+                Text(
+                    text = "Registration questions",
+                    modifier = Modifier
+                        .fillMaxWidth(),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { questionsExpanded = !questionsExpanded },
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+                        .heightIn(max = 360.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Text(
-                        text = "Registration questions",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Icon(
-                        imageVector = if (questionsExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                        contentDescription = if (questionsExpanded) "Collapse registration questions" else "Expand registration questions",
-                    )
-                }
-                AnimatedVisibility(visible = questionsExpanded) {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 360.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        items(dialogState.questions, key = { question -> question.id }) { question ->
-                            val answer = answers[question.id].orEmpty()
-                            StandardTextField(
-                                value = answer,
-                                onValueChange = { value ->
-                                    answers = answers + (question.id to value)
-                                    validationMessage = null
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = if (question.required) "${question.prompt} *" else question.prompt,
-                                placeholder = "Answer",
-                                supportingText = if (question.answerType.equals("LONG_TEXT", ignoreCase = true)) {
-                                    "A short paragraph is fine."
-                                } else {
-                                    ""
-                                },
-                                height = if (question.answerType.equals("LONG_TEXT", ignoreCase = true)) 128.dp else null,
-                            )
-                        }
+                    items(dialogState.questions, key = { question -> question.id }) { question ->
+                        val answer = answers[question.id].orEmpty()
+                        StandardTextField(
+                            value = answer,
+                            onValueChange = { value ->
+                                answers = answers + (question.id to value)
+                                validationMessage = null
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = if (question.required) "${question.prompt} *" else question.prompt,
+                            placeholder = "Answer",
+                            supportingText = if (question.answerType.equals("LONG_TEXT", ignoreCase = true)) {
+                                "A short paragraph is fine."
+                            } else {
+                                ""
+                            },
+                            height = if (question.answerType.equals("LONG_TEXT", ignoreCase = true)) 128.dp else null,
+                        )
                     }
                 }
             }
@@ -6349,7 +6409,6 @@ private fun TeamJoinQuestionsDialog(
                     }
                     if (missingQuestion != null) {
                         validationMessage = "Answer \"${missingQuestion.prompt}\" before continuing."
-                        questionsExpanded = true
                         return@Button
                     }
                     onSubmit(answers)
