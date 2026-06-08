@@ -105,8 +105,43 @@ data class MatchRulesConfigMVP(
     val canUseShootout: Boolean? = null,
     val officialRoles: List<String>? = null,
     val supportedIncidentTypes: List<String>? = null,
+    val incidentTypeDefinitions: List<MatchIncidentTypeDefinitionMVP>? = null,
     val autoCreatePointIncidentType: String? = null,
     val pointIncidentRequiresParticipant: Boolean? = null,
+    val timekeeping: MatchTimekeepingConfigMVP? = null,
+)
+
+@Serializable
+data class MatchIncidentTypeDefinitionMVP(
+    val code: String,
+    val label: String,
+    val kind: String = "DISCIPLINE",
+    val cardColor: String? = null,
+    val requiresTeam: Boolean? = null,
+    val requiresParticipant: Boolean? = null,
+    val defaultEnabled: Boolean? = null,
+    val linkedPointDelta: Int? = null,
+    val metadata: Map<String, String>? = null,
+)
+
+@Serializable
+data class MatchTimekeepingConfigMVP(
+    val timerMode: String? = null,
+    val segmentDurationMinutes: Int? = null,
+    val segmentDurationMinutesBySequence: List<Int>? = null,
+    val canUseAddedTime: Boolean? = null,
+    val addedTimeEnabled: Boolean? = null,
+    val stopAtRegulationEnd: Boolean? = null,
+)
+
+@Serializable
+data class ResolvedMatchTimekeepingConfigMVP(
+    val timerMode: String = "NONE",
+    val segmentDurationMinutes: Int? = null,
+    val segmentDurationMinutesBySequence: List<Int> = emptyList(),
+    val canUseAddedTime: Boolean = false,
+    val addedTimeEnabled: Boolean = false,
+    val stopAtRegulationEnd: Boolean = true,
 )
 
 @Serializable
@@ -121,8 +156,10 @@ data class ResolvedMatchRulesMVP(
     val canUseShootout: Boolean = false,
     val officialRoles: List<String> = emptyList(),
     val supportedIncidentTypes: List<String> = listOf("POINT", "DISCIPLINE", "NOTE", "ADMIN"),
+    val incidentTypeDefinitions: List<MatchIncidentTypeDefinitionMVP> = emptyList(),
     val autoCreatePointIncidentType: String? = "POINT",
     val pointIncidentRequiresParticipant: Boolean = false,
+    val timekeeping: ResolvedMatchTimekeepingConfigMVP = ResolvedMatchTimekeepingConfigMVP(),
 )
 
 @Serializable

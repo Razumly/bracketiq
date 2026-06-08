@@ -85,6 +85,7 @@ import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.core.presentation.util.getScreenWidth
+import com.razumly.mvp.core.presentation.util.playMatchTimerAlert
 import com.razumly.mvp.core.util.Platform
 import com.razumly.mvp.eventDetail.composables.DropdownField
 import com.razumly.mvp.eventMap.EventMap
@@ -97,6 +98,7 @@ import mvp.composeapp.generated.resources.not_official_check_in_message
 import mvp.composeapp.generated.resources.official_check_in_title
 import mvp.composeapp.generated.resources.official_checkin_message
 import org.jetbrains.compose.resources.stringResource
+import kotlinx.coroutines.delay
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
@@ -106,6 +108,7 @@ import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
@@ -171,6 +174,18 @@ private fun actualTimeLabel(value: String?): String {
         ?.toLocalDateTime(TimeZone.currentSystemDefault())
         ?.format(dateTimeFormat)
         ?: "Not set"
+}
+
+private fun formatClockSeconds(seconds: Int): String {
+    val safeSeconds = seconds.coerceAtLeast(0)
+    val hours = safeSeconds / 3600
+    val minutes = (safeSeconds % 3600) / 60
+    val remainingSeconds = safeSeconds % 60
+    return if (hours > 0) {
+        "$hours:${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}"
+    } else {
+        "${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}"
+    }
 }
 
 private fun shouldShowMatchStatusBlock(match: MatchMVP): Boolean {
@@ -413,6 +428,14 @@ fun MatchDetailScreen(
     val navBottomPadding = LocalNavBarPadding.current.calculateBottomPadding()
     val team1 = match.team1
     val team2 = match.team2
+    val incidentDefinitionsByCode = remember(rules.incidentTypeDefinitions) {
+        rules.incidentTypeDefinitions.associateBy { definition ->
+            definition.code.trim().uppercase()
+        }
+    }
+    fun incidentLabel(type: String): String =
+        incidentDefinitionsByCode[type.trim().uppercase()]?.label
+            ?: matchLogTypeLabel(type)
     val participantOptionsByTeam = remember(team1, team2, match.match.team1Id, match.match.team2Id) {
         buildMap {
             match.match.team1Id?.takeIf(String::isNotBlank)?.let { teamId ->
@@ -496,6 +519,64 @@ fun MatchDetailScreen(
         )
     }
     val activeSegment = orderedSegments.getOrNull(currentSet)
+    var timerNowMillis by remember(match.match.id) { mutableStateOf(Clock.System.now().toEpochMilliseconds()) }
+    val activeSegmentDurationMinutes = activeSegment?.let { segment ->
+        rules.timekeeping.segmentDurationMinutesBySequence.getOrNull(segment.sequence - 1)
+            ?: rules.timekeeping.segmentDurationMinutes
+    } ?: rules.timekeeping.segmentDurationMinutes
+    val activeSegmentDurationSeconds = activeSegmentDurationMinutes?.takeIf { it > 0 }?.times(60)
+    val regulationDurationSeconds = activeSegmentDurationSeconds ?: 0
+    val hasMatchClock = rules.timekeeping.timerMode != "NONE" && activeSegmentDurationSeconds != null
+    val activeSegmentStartedAt = parseMatchInstant(activeSegment?.startedAt)
+    val activeSegmentEndedAt = parseMatchInstant(activeSegment?.endedAt)
+    val rawClockSeconds = activeSegmentStartedAt?.let { started ->
+        (((activeSegmentEndedAt?.toEpochMilliseconds() ?: timerNowMillis) - started.toEpochMilliseconds()) / 1000L)
+            .coerceAtLeast(0L)
+            .toInt()
+    } ?: 0
+    val clockSeconds = if (hasMatchClock && rules.timekeeping.stopAtRegulationEnd) {
+        rawClockSeconds.coerceAtMost(regulationDurationSeconds)
+    } else {
+        rawClockSeconds
+    }
+    val clockInAddedTime = hasMatchClock &&
+        rules.timekeeping.addedTimeEnabled &&
+        rawClockSeconds > regulationDurationSeconds
+    val activeTimerRunning = hasMatchClock &&
+        activeSegmentStartedAt != null &&
+        activeSegmentEndedAt == null &&
+        (!rules.timekeeping.stopAtRegulationEnd || rawClockSeconds < regulationDurationSeconds)
+    val regulationClockEnded = hasMatchClock &&
+        activeSegmentStartedAt != null &&
+        activeSegmentEndedAt == null &&
+        rules.timekeeping.stopAtRegulationEnd &&
+        rawClockSeconds >= regulationDurationSeconds
+    val clockDisplay = when {
+        !hasMatchClock -> ""
+        activeSegmentStartedAt == null -> formatClockSeconds(0)
+        clockInAddedTime ->
+            "${formatClockSeconds(regulationDurationSeconds)} +${formatClockSeconds(rawClockSeconds - regulationDurationSeconds)}"
+        else -> formatClockSeconds(clockSeconds)
+    }
+    val clockMinute = if (hasMatchClock && activeSegmentStartedAt != null) {
+        (clockSeconds + 59) / 60
+    } else {
+        null
+    }
+    var regulationAlertedTimerKey by remember(match.match.id) { mutableStateOf<String?>(null) }
+    val regulationTimerKey = "${activeSegment?.id.orEmpty()}:${activeSegment?.startedAt.orEmpty()}"
+    LaunchedEffect(activeTimerRunning, activeSegment?.id, activeSegment?.startedAt, activeSegment?.endedAt) {
+        while (activeTimerRunning) {
+            timerNowMillis = Clock.System.now().toEpochMilliseconds()
+            delay(1_000L)
+        }
+    }
+    LaunchedEffect(regulationClockEnded, regulationTimerKey) {
+        if (regulationClockEnded && regulationAlertedTimerKey != regulationTimerKey) {
+            playMatchTimerAlert()
+            regulationAlertedTimerKey = regulationTimerKey
+        }
+    }
     val canAdjustScore = showOfficialScoreControls &&
         !matchFinished &&
         officialCheckedIn &&
@@ -562,7 +643,14 @@ fun MatchDetailScreen(
     val canStartMatch = showOfficialScoreControls &&
         officialCheckedIn &&
         !matchFinished &&
-        match.match.actualStart.isNullOrBlank()
+        activeSegment?.status != "COMPLETE" &&
+        activeSegment?.startedAt.isNullOrBlank()
+    val canResetMatchTimer = showOfficialScoreControls &&
+        officialCheckedIn &&
+        !matchFinished &&
+        hasMatchClock &&
+        activeSegment?.status != "COMPLETE" &&
+        activeSegmentStartedAt != null
     val promptScoringIncident = shouldRequireScoringIncident(rules, event)
     val showScoreAdjustButtons = !promptScoringIncident
     val teamIncidentTypes = remember(rules) {
@@ -586,7 +674,7 @@ fun MatchDetailScreen(
         if (options.isEmpty()) return
         pendingIncidentTarget = MatchIncidentDialogTarget(eventTeamId = resolvedTeamId)
         incidentType = defaultIncidentDialogType(rules, options)
-        incidentMinute = ""
+        incidentMinute = clockMinute?.toString().orEmpty()
         incidentNote = ""
         incidentParticipantId = resolvedTeamId?.let { teamKey ->
             participantOptionsByTeam[teamKey]?.firstOrNull()?.selectionId
@@ -687,6 +775,7 @@ fun MatchDetailScreen(
             incidentOptions = incidentOptions,
             selectedIncidentType = selectedIncidentType,
             onIncidentTypeChange = { type -> incidentType = type },
+            incidentLabel = { type -> incidentLabel(type) },
             teamScoped = pendingIncidentTarget?.eventTeamId != null,
             participantOptions = activeParticipantOptions,
             selectedParticipant = selectedParticipant,
@@ -825,6 +914,44 @@ fun MatchDetailScreen(
                 }
             }
 
+            if (hasMatchClock) {
+                Column(
+                    modifier = Modifier
+                        .background(
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.78f),
+                            shape = RoundedCornerShape(16.dp),
+                        )
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        text = activeSegmentLabel ?: segmentBaseLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = clockDisplay,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = when {
+                            regulationClockEnded -> MaterialTheme.colorScheme.error
+                            clockInAddedTime -> MaterialTheme.colorScheme.tertiary
+                            else -> MaterialTheme.colorScheme.onSurface
+                        },
+                    )
+                    Text(
+                        text = when {
+                            activeTimerRunning -> "Running"
+                            regulationClockEnded -> "Regulation time reached"
+                            activeSegmentStartedAt != null -> "Stopped"
+                            else -> "Ready"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
             if (segmentTrackerEntries.isNotEmpty()) {
                 MatchSegmentScoreTracker(
                     entries = segmentTrackerEntries,
@@ -853,7 +980,33 @@ fun MatchDetailScreen(
                                         color = MaterialTheme.colorScheme.onPrimary,
                                     )
                                 }
-                                Text("Start Match")
+                                Text(
+                                    if (activeSegment?.sequence == 1 && match.match.actualStart.isNullOrBlank()) {
+                                        "Start Match"
+                                    } else {
+                                        "Start ${activeSegmentLabel ?: segmentBaseLabel}"
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    if (canResetMatchTimer) {
+                        Button(
+                            onClick = { component.resetMatchTimer() },
+                            enabled = !matchStartSaving,
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (matchStartSaving) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                    )
+                                }
+                                Text("Reset Timer")
                             }
                         }
                     }
@@ -1165,6 +1318,7 @@ fun MatchDetailScreen(
                                         incident = incident,
                                         team1 = team1,
                                         team2 = team2,
+                                        incidentLabel = { type -> incidentLabel(type) },
                                     ),
                                     canRemove = isOfficial && officialCheckedIn,
                                     onRemove = { component.removeMatchIncident(incident.id) },
@@ -1642,6 +1796,7 @@ internal fun MatchIncidentEntryDialog(
     incidentOptions: List<String>,
     selectedIncidentType: String,
     onIncidentTypeChange: (String) -> Unit,
+    incidentLabel: (String) -> String = ::matchLogTypeLabel,
     teamScoped: Boolean,
     participantOptions: List<MatchParticipantOption>,
     selectedParticipant: MatchParticipantOption?,
@@ -1665,12 +1820,12 @@ internal fun MatchIncidentEntryDialog(
                 if (incidentOptions.size > 1) {
                     DropdownField(
                         modifier = Modifier.fillMaxWidth(),
-                        value = matchLogTypeLabel(selectedIncidentType),
+                        value = incidentLabel(selectedIncidentType),
                         label = "Incident type",
                     ) { closeMenu ->
                         incidentOptions.forEach { option ->
                             DropdownMenuItem(
-                                text = { Text(matchLogTypeLabel(option)) },
+                                text = { Text(incidentLabel(option)) },
                                 onClick = {
                                     onIncidentTypeChange(option)
                                     closeMenu()
@@ -1680,7 +1835,7 @@ internal fun MatchIncidentEntryDialog(
                     }
                 } else if (incidentOptions.size == 1) {
                     Text(
-                        text = matchLogTypeLabel(selectedIncidentType),
+                        text = incidentLabel(selectedIncidentType),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
@@ -1732,7 +1887,7 @@ internal fun MatchIncidentEntryDialog(
                 onClick = onSave,
                 enabled = !requiresParticipant || selectedParticipant != null,
             ) {
-                Text(if (selectedTypeIsScoring) "Save ${matchLogTypeLabel(selectedIncidentType)}" else "Save Incident")
+                Text(if (selectedTypeIsScoring) "Save ${incidentLabel(selectedIncidentType)}" else "Save Incident")
             }
         },
         dismissButton = {
@@ -1982,6 +2137,7 @@ internal fun buildIncidentSummary(
     incident: com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP,
     team1: TeamWithRelations?,
     team2: TeamWithRelations?,
+    incidentLabel: (String) -> String = ::matchLogTypeLabel,
 ): String {
     val teamLabel = when (incident.eventTeamId) {
         team1?.team?.id -> team1?.team?.name
@@ -1995,9 +2151,9 @@ internal fun buildIncidentSummary(
             else -> null
         }
         val minuteLabel = incident.minute?.let { minute -> "$minute'" }
-        return listOfNotNull(teamLabel, scoringParticipantLabel, minuteLabel)
+        return listOfNotNull(teamLabel, scoringParticipantLabel, incident.clock, minuteLabel)
             .joinToString(" | ")
-            .ifBlank { matchLogTypeLabel(incident.incidentType) }
+            .ifBlank { incidentLabel(incident.incidentType) }
     }
     val participantLabel = when (incident.eventTeamId) {
         team1?.team?.id -> resolveIncidentParticipantLabel(incident.participantUserId, incident.eventRegistrationId, team1)
@@ -2009,11 +2165,11 @@ internal fun buildIncidentSummary(
     val pointDelta = incident.linkedPointDelta?.let { delta ->
         "point change ${if (delta > 0) "+" else ""}$delta"
     }
-    val extras = listOfNotNull(teamLabel, participantLabel, minuteLabel, pointDelta, note)
+    val extras = listOfNotNull(teamLabel, participantLabel, incident.clock, minuteLabel, pointDelta, note)
     return if (extras.isEmpty()) {
-        matchLogTypeLabel(incident.incidentType)
+        incidentLabel(incident.incidentType)
     } else {
-        "${matchLogTypeLabel(incident.incidentType)}: ${extras.joinToString(" | ")}"
+        "${incidentLabel(incident.incidentType)}: ${extras.joinToString(" | ")}"
     }
 }
 

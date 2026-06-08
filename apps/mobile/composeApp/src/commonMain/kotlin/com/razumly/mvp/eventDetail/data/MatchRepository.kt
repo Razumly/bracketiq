@@ -28,6 +28,7 @@ import com.razumly.mvp.core.network.dto.MatchUpdateDto
 import com.razumly.mvp.core.network.dto.MatchesResponseDto
 import com.razumly.mvp.core.network.dto.toBulkMatchCreateEntryDto
 import com.razumly.mvp.core.network.dto.toBulkMatchUpdateEntryDto
+import com.razumly.mvp.core.network.dto.toMatchOperationsJsonObject
 import com.razumly.mvp.core.util.jsonMVP
 import io.ktor.http.encodeURLQueryComponent
 import io.ktor.websocket.Frame
@@ -534,7 +535,7 @@ class MatchRepository(
         time: Instant?,
     ): Result<MatchMVP> = singleResponse(
         networkCall = {
-            val responseMatch = api.patch<MatchUpdateDto, MatchResponseDto>(
+            val responseMatch = api.patch<kotlinx.serialization.json.JsonObject, MatchResponseDto>(
                 path = "api/events/${match.eventId}/matches/${match.id}",
                 body = MatchUpdateDto(
                     lifecycle = lifecycle,
@@ -543,7 +544,7 @@ class MatchRepository(
                     officialCheckIn = officialCheckIn,
                     finalize = finalize,
                     time = time?.toString(),
-                ),
+                ).toMatchOperationsJsonObject(),
             ).match ?: error("Match operations response missing match")
             persistEmbeddedField(responseMatch)
             responseMatch.toMatchOrNull() ?: error("Match operations response missing match")

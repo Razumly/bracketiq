@@ -9,6 +9,12 @@ import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.util.normalizeDivisionLabel
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
@@ -175,6 +181,8 @@ data class MatchLifecycleOperationDto(
     val actualEnd: String? = null,
     val statusReason: String? = null,
     val winnerEventTeamId: String? = null,
+    @Transient val clearActualStart: Boolean = false,
+    @Transient val clearActualEnd: Boolean = false,
 )
 
 @Serializable
@@ -188,6 +196,11 @@ data class MatchSegmentOperationDto(
     val endedAt: String? = null,
     val resultType: String? = null,
     val statusReason: String? = null,
+    @Transient val clearStartedAt: Boolean = false,
+    @Transient val clearEndedAt: Boolean = false,
+    @Transient val clearWinnerEventTeamId: Boolean = false,
+    @Transient val clearResultType: Boolean = false,
+    @Transient val clearStatusReason: Boolean = false,
 )
 
 @Serializable
@@ -256,6 +269,98 @@ data class MatchUpdateDto(
     val losersBracket: Boolean? = null,
     val locked: Boolean? = null,
 )
+
+fun MatchUpdateDto.toMatchOperationsJsonObject(): JsonObject = buildJsonObject {
+    lifecycle
+        ?.toJsonObject()
+        ?.takeIf { it.isNotEmpty() }
+        ?.let { put("lifecycle", it) }
+    segmentOperations
+        ?.takeIf { it.isNotEmpty() }
+        ?.let { operations -> put("segmentOperations", JsonArray(operations.map(MatchSegmentOperationDto::toJsonObject))) }
+    incidentOperations
+        ?.takeIf { it.isNotEmpty() }
+        ?.let { operations -> put("incidentOperations", JsonArray(operations.map(MatchIncidentOperationDto::toJsonObject))) }
+    officialCheckIn?.toJsonObject()?.let { put("officialCheckIn", it) }
+    finalize?.let { put("finalize", JsonPrimitive(it)) }
+    time?.let { put("time", JsonPrimitive(it)) }
+}
+
+private fun MatchLifecycleOperationDto.toJsonObject(): JsonObject = buildJsonObject {
+    status?.let { put("status", JsonPrimitive(it)) }
+    resultStatus?.let { put("resultStatus", JsonPrimitive(it)) }
+    resultType?.let { put("resultType", JsonPrimitive(it)) }
+    if (actualStart != null) {
+        put("actualStart", JsonPrimitive(actualStart))
+    } else if (clearActualStart) {
+        put("actualStart", JsonNull)
+    }
+    if (actualEnd != null) {
+        put("actualEnd", JsonPrimitive(actualEnd))
+    } else if (clearActualEnd) {
+        put("actualEnd", JsonNull)
+    }
+    statusReason?.let { put("statusReason", JsonPrimitive(it)) }
+    winnerEventTeamId?.let { put("winnerEventTeamId", JsonPrimitive(it)) }
+}
+
+private fun MatchSegmentOperationDto.toJsonObject(): JsonObject = buildJsonObject {
+    id?.let { put("id", JsonPrimitive(it)) }
+    put("sequence", JsonPrimitive(sequence))
+    status?.let { put("status", JsonPrimitive(it)) }
+    scores?.let { values ->
+        put("scores", JsonObject(values.mapValues { (_, score) -> JsonPrimitive(score) }))
+    }
+    if (winnerEventTeamId != null) {
+        put("winnerEventTeamId", JsonPrimitive(winnerEventTeamId))
+    } else if (clearWinnerEventTeamId) {
+        put("winnerEventTeamId", JsonNull)
+    }
+    if (startedAt != null) {
+        put("startedAt", JsonPrimitive(startedAt))
+    } else if (clearStartedAt) {
+        put("startedAt", JsonNull)
+    }
+    if (endedAt != null) {
+        put("endedAt", JsonPrimitive(endedAt))
+    } else if (clearEndedAt) {
+        put("endedAt", JsonNull)
+    }
+    if (resultType != null) {
+        put("resultType", JsonPrimitive(resultType))
+    } else if (clearResultType) {
+        put("resultType", JsonNull)
+    }
+    if (statusReason != null) {
+        put("statusReason", JsonPrimitive(statusReason))
+    } else if (clearStatusReason) {
+        put("statusReason", JsonNull)
+    }
+}
+
+private fun MatchIncidentOperationDto.toJsonObject(): JsonObject = buildJsonObject {
+    put("action", JsonPrimitive(action))
+    id?.let { put("id", JsonPrimitive(it)) }
+    segmentId?.let { put("segmentId", JsonPrimitive(it)) }
+    eventTeamId?.let { put("eventTeamId", JsonPrimitive(it)) }
+    eventRegistrationId?.let { put("eventRegistrationId", JsonPrimitive(it)) }
+    participantUserId?.let { put("participantUserId", JsonPrimitive(it)) }
+    officialUserId?.let { put("officialUserId", JsonPrimitive(it)) }
+    incidentType?.let { put("incidentType", JsonPrimitive(it)) }
+    sequence?.let { put("sequence", JsonPrimitive(it)) }
+    minute?.let { put("minute", JsonPrimitive(it)) }
+    clock?.let { put("clock", JsonPrimitive(it)) }
+    clockSeconds?.let { put("clockSeconds", JsonPrimitive(it)) }
+    linkedPointDelta?.let { put("linkedPointDelta", JsonPrimitive(it)) }
+    note?.let { put("note", JsonPrimitive(it)) }
+}
+
+private fun MatchOfficialCheckInOperationDto.toJsonObject(): JsonObject = buildJsonObject {
+    positionId?.let { put("positionId", JsonPrimitive(it)) }
+    slotIndex?.let { put("slotIndex", JsonPrimitive(it)) }
+    userId?.let { put("userId", JsonPrimitive(it)) }
+    put("checkedIn", JsonPrimitive(checkedIn))
+}
 
 @Serializable
 data class BulkMatchUpdateEntryDto(

@@ -88,6 +88,7 @@ interface MatchContentComponent {
     fun checkOfficialStatus()
     fun confirmOfficialCheckIn()
     fun startMatch()
+    fun resetMatchTimer()
     fun updateActualTimes(actualStart: Instant?, actualEnd: Instant?)
     fun selectSegment(index: Int)
     fun updateScore(isTeam1: Boolean, increment: Boolean)
@@ -461,11 +462,14 @@ class DefaultMatchContentComponent(
 
     override fun startMatch() {
         if (_matchStartSaving.value) return
-        val currentMatch = matchWithTeams.value.match
+        val currentMatchWithTeams = matchWithTeams.value
+        val currentMatch = updateMatchStructureForCurrentContext(currentMatchWithTeams.match)
         if (!isOfficial.value || officialCheckedIn.value != true || _matchFinished.value) {
             return
         }
-        if (!currentMatch.actualStart.isNullOrBlank()) {
+        val segmentIndex = currentSet.value.coerceIn(0, (currentMatch.segments.size - 1).coerceAtLeast(0))
+        val activeSegment = currentMatch.segments.getOrNull(segmentIndex) ?: return
+        if (!activeSegment.startedAt.isNullOrBlank() || activeSegment.status == "COMPLETE") {
             return
         }
 
@@ -473,21 +477,125 @@ class DefaultMatchContentComponent(
         scope.launch {
             try {
                 val startTime = Clock.System.now()
+                val startedAt = startTime.toString()
+                val updatedSegments = currentMatch.segments.toMutableList().apply {
+                    this[segmentIndex] = activeSegment.copy(
+                        status = "IN_PROGRESS",
+                        startedAt = startedAt,
+                        endedAt = null,
+                    )
+                }
                 val updatedMatch = currentMatch.copy(
                     status = "IN_PROGRESS",
-                    actualStart = startTime.toString(),
+                    actualStart = currentMatch.actualStart?.takeIf(String::isNotBlank) ?: startedAt,
+                    actualEnd = if (currentMatch.actualStart.isNullOrBlank()) null else currentMatch.actualEnd,
+                    segments = updatedSegments,
                 )
                 matchRepository.updateMatchOperations(
                     match = updatedMatch,
-                    lifecycle = MatchLifecycleOperationDto(
-                        status = "IN_PROGRESS",
-                        actualStart = startTime.toString(),
-                        actualEnd = currentMatch.actualEnd,
+                    lifecycle = if (currentMatch.actualStart.isNullOrBlank()) {
+                        MatchLifecycleOperationDto(
+                            status = "IN_PROGRESS",
+                            actualStart = startedAt,
+                            clearActualEnd = true,
+                        )
+                    } else {
+                        null
+                    },
+                    segmentOperations = listOf(
+                        MatchSegmentOperationDto(
+                            id = updatedSegments[segmentIndex].id,
+                            sequence = updatedSegments[segmentIndex].sequence,
+                            status = updatedSegments[segmentIndex].status,
+                            scores = updatedSegments[segmentIndex].scores,
+                            winnerEventTeamId = updatedSegments[segmentIndex].winnerEventTeamId,
+                            startedAt = startedAt,
+                            clearEndedAt = true,
+                        ),
                     ),
-                ).onSuccess {
-                    _optimisticMatch.value = null
+                ).onSuccess { remoteMatch ->
+                    val syncedMatch = remoteMatch.copy(
+                        status = updatedMatch.status,
+                        actualStart = updatedMatch.actualStart,
+                        actualEnd = updatedMatch.actualEnd,
+                        segments = updatedSegments,
+                    )
+                    _optimisticMatch.value = currentMatchWithTeams.copy(match = syncedMatch)
+                    persistMatchLocally(syncedMatch, clearOptimisticOnSuccess = true)
                 }.onFailure { error ->
-                    _errorState.value = "Failed to start match: ${error.userMessage()}"
+                    _errorState.value = "Failed to start timer: ${error.userMessage()}"
+                }
+            } finally {
+                _matchStartSaving.value = false
+            }
+        }
+    }
+
+    override fun resetMatchTimer() {
+        if (_matchStartSaving.value) return
+        val currentMatchWithTeams = matchWithTeams.value
+        val currentMatch = updateMatchStructureForCurrentContext(currentMatchWithTeams.match)
+        if (!isOfficial.value || officialCheckedIn.value != true || _matchFinished.value) {
+            return
+        }
+        val segmentIndex = currentSet.value.coerceIn(0, (currentMatch.segments.size - 1).coerceAtLeast(0))
+        val activeSegment = currentMatch.segments.getOrNull(segmentIndex) ?: return
+        if (activeSegment.status == "COMPLETE") {
+            return
+        }
+        val nextStatus = if (activeSegment.scores.values.any { score -> score > 0 }) "IN_PROGRESS" else "NOT_STARTED"
+        val resetFirstSegment = activeSegment.sequence == 1 &&
+            currentMatch.segments.none { segment -> segment.sequence < activeSegment.sequence && segment.status == "COMPLETE" }
+
+        _matchStartSaving.value = true
+        scope.launch {
+            try {
+                val updatedSegments = currentMatch.segments.toMutableList().apply {
+                    this[segmentIndex] = activeSegment.copy(
+                        status = nextStatus,
+                        startedAt = null,
+                        endedAt = null,
+                    )
+                }
+                val updatedMatch = currentMatch.copy(
+                    status = if (resetFirstSegment) "SCHEDULED" else currentMatch.status,
+                    actualStart = if (resetFirstSegment) null else currentMatch.actualStart,
+                    actualEnd = if (resetFirstSegment) null else currentMatch.actualEnd,
+                    segments = updatedSegments,
+                )
+                matchRepository.updateMatchOperations(
+                    match = updatedMatch,
+                    lifecycle = if (resetFirstSegment) {
+                        MatchLifecycleOperationDto(
+                            status = "SCHEDULED",
+                            clearActualStart = true,
+                            clearActualEnd = true,
+                        )
+                    } else {
+                        null
+                    },
+                    segmentOperations = listOf(
+                        MatchSegmentOperationDto(
+                            id = updatedSegments[segmentIndex].id,
+                            sequence = updatedSegments[segmentIndex].sequence,
+                            status = updatedSegments[segmentIndex].status,
+                            scores = updatedSegments[segmentIndex].scores,
+                            winnerEventTeamId = updatedSegments[segmentIndex].winnerEventTeamId,
+                            clearStartedAt = true,
+                            clearEndedAt = true,
+                        ),
+                    ),
+                ).onSuccess { remoteMatch ->
+                    val syncedMatch = remoteMatch.copy(
+                        status = updatedMatch.status,
+                        actualStart = updatedMatch.actualStart,
+                        actualEnd = updatedMatch.actualEnd,
+                        segments = updatedSegments,
+                    )
+                    _optimisticMatch.value = currentMatchWithTeams.copy(match = syncedMatch)
+                    persistMatchLocally(syncedMatch, clearOptimisticOnSuccess = true)
+                }.onFailure { error ->
+                    _errorState.value = "Failed to reset timer: ${error.userMessage()}"
                 }
             } finally {
                 _matchStartSaving.value = false
@@ -518,6 +626,8 @@ class DefaultMatchContentComponent(
                     lifecycle = MatchLifecycleOperationDto(
                         actualStart = actualStart?.toString(),
                         actualEnd = actualEnd?.toString(),
+                        clearActualStart = actualStart == null,
+                        clearActualEnd = actualEnd == null,
                     ),
                 ).onSuccess {
                     _optimisticMatch.value = null
@@ -704,6 +814,7 @@ class DefaultMatchContentComponent(
             return
         }
         val normalizedIncidentType = incidentType.trim().takeIf(String::isNotBlank) ?: "NOTE"
+        val activeRules = resolveActiveRules(scoringMatch, event.value)
         val scoringIncident = isScoringIncidentType(normalizedIncidentType)
         val normalizedEventTeamId = eventTeamId?.trim()?.takeIf(String::isNotBlank)
         if (scoringIncident && normalizedEventTeamId == null) {
@@ -713,7 +824,7 @@ class DefaultMatchContentComponent(
             scoringIncident &&
             !canIncrementCurrentSegment(
                 match = scoringMatch,
-                rules = resolveActiveRules(scoringMatch, event.value),
+                rules = activeRules,
                 currentEvent = event.value,
                 setIndex = segmentIndex,
             )
@@ -732,6 +843,7 @@ class DefaultMatchContentComponent(
             scoringMatch
         }
         val updatedSegment = updatedScoringMatch.segments.getOrNull(segmentIndex) ?: activeSegment
+        val clockDetails = clockDetailsForSegment(activeSegment, activeRules)
         val localIncident = buildPendingIncident(
             match = updatedScoringMatch,
             segment = updatedSegment,
@@ -741,7 +853,9 @@ class DefaultMatchContentComponent(
             officialUserId = currentUser.id.takeIf(String::isNotBlank),
             incidentType = normalizedIncidentType,
             linkedPointDelta = if (scoringIncident) 1 else null,
-            minute = minute,
+            minute = minute ?: clockDetails.minute,
+            clock = clockDetails.clock,
+            clockSeconds = clockDetails.clockSeconds,
             note = note,
         )
         val updatedScoringMatchWithIncident = updatedScoringMatch.copy(
@@ -1391,6 +1505,54 @@ class DefaultMatchContentComponent(
             )
         }
 
+    private data class IncidentClockDetails(
+        val minute: Int?,
+        val clock: String?,
+        val clockSeconds: Int?,
+    )
+
+    private fun clockDetailsForSegment(
+        segment: MatchSegmentMVP,
+        rules: ResolvedMatchRulesMVP,
+    ): IncidentClockDetails {
+        val startedAt = parseInstantOrNull(segment.startedAt) ?: return IncidentClockDetails(null, null, null)
+        val endedAt = parseInstantOrNull(segment.endedAt) ?: Clock.System.now()
+        val rawSeconds = ((endedAt.toEpochMilliseconds() - startedAt.toEpochMilliseconds()) / 1000L)
+            .coerceAtLeast(0L)
+            .toInt()
+        val durationSeconds = (rules.timekeeping.segmentDurationMinutesBySequence.getOrNull(segment.sequence - 1)
+            ?: rules.timekeeping.segmentDurationMinutes)
+            ?.takeIf { it > 0 }
+            ?.times(60)
+        val clockSeconds = if (rules.timekeeping.stopAtRegulationEnd && durationSeconds != null) {
+            rawSeconds.coerceAtMost(durationSeconds)
+        } else {
+            rawSeconds
+        }
+        return IncidentClockDetails(
+            minute = (clockSeconds + 59) / 60,
+            clock = formatClockSeconds(clockSeconds),
+            clockSeconds = clockSeconds,
+        )
+    }
+
+    private fun parseInstantOrNull(value: String?): Instant? =
+        value?.trim()?.takeIf(String::isNotBlank)?.let { raw ->
+            runCatching { Instant.parse(raw) }.getOrNull()
+        }
+
+    private fun formatClockSeconds(seconds: Int): String {
+        val safeSeconds = seconds.coerceAtLeast(0)
+        val hours = safeSeconds / 3600
+        val minutes = (safeSeconds % 3600) / 60
+        val remainingSeconds = safeSeconds % 60
+        return if (hours > 0) {
+            "$hours:${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}"
+        } else {
+            "${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}"
+        }
+    }
+
     private fun buildPendingIncident(
         match: MatchMVP,
         segment: MatchSegmentMVP,
@@ -1401,6 +1563,8 @@ class DefaultMatchContentComponent(
         incidentType: String,
         linkedPointDelta: Int?,
         minute: Int?,
+        clock: String?,
+        clockSeconds: Int?,
         note: String?,
     ): MatchIncidentMVP {
         val now = Clock.System.now().toEpochMilliseconds()
@@ -1417,6 +1581,8 @@ class DefaultMatchContentComponent(
             incidentType = incidentType,
             sequence = nextSequence,
             minute = minute,
+            clock = clock,
+            clockSeconds = clockSeconds,
             linkedPointDelta = linkedPointDelta,
             note = note?.trim()?.takeIf(String::isNotBlank),
             uploadStatus = MATCH_INCIDENT_UPLOAD_PENDING,
@@ -1609,7 +1775,7 @@ internal fun resolvePointsToVictory(match: MatchMVP, currentEvent: Event?, setIn
     return points?.takeIf { it > 0 }
 }
 
-private fun resolveActiveRules(match: MatchMVP, currentEvent: Event?): ResolvedMatchRulesMVP {
+internal fun resolveActiveRules(match: MatchMVP, currentEvent: Event?): ResolvedMatchRulesMVP {
     val eventRules = currentEvent?.let { current ->
         runCatching { resolveEventMatchRules(current, sport = null) }.getOrNull()
     }
@@ -1676,10 +1842,12 @@ private fun resolveActiveRules(match: MatchMVP, currentEvent: Event?): ResolvedM
         supportedIncidentTypes = source?.supportedIncidentTypes
             ?.takeIf { it.isNotEmpty() }
             ?: listOf("POINT", "DISCIPLINE", "NOTE", "ADMIN"),
+        incidentTypeDefinitions = source?.incidentTypeDefinitions ?: emptyList(),
         autoCreatePointIncidentType = source?.autoCreatePointIncidentType ?: "POINT",
         pointIncidentRequiresParticipant = currentEvent?.autoCreatePointMatchIncidents
             ?: source?.pointIncidentRequiresParticipant
             ?: false,
+        timekeeping = source?.timekeeping ?: ResolvedMatchRulesMVP().timekeeping,
     )
 }
 

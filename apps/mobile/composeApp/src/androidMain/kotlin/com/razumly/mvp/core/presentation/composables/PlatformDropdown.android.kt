@@ -1,15 +1,15 @@
 package com.razumly.mvp.core.presentation.composables
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuAnchorType
-import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -59,23 +59,23 @@ actual fun PlatformDropdown(
         else -> placeholder
     }
 
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it && enabled },
-        modifier = modifier
-    ) {
+    Box(modifier = modifier) {
         StandardTextField(
             value = displayValue,
             onValueChange = { },
             modifier = Modifier
-                .fillMaxWidth()
-                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true),
+                .fillMaxWidth(),
             label = label,
             placeholder = placeholder,
             isError = isError,
             supportingText = supportingText,
             enabled = enabled,
             readOnly = true,
+            onTap = {
+                if (enabled) {
+                    expanded = true
+                }
+            },
             trailingIcon = {
                 ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
             },
@@ -84,9 +84,10 @@ actual fun PlatformDropdown(
             contentPadding = contentPadding
         )
 
-        ExposedDropdownMenu(
+        DropdownMenu(
             expanded = expanded,
-            onDismissRequest = { expanded = false }
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.fillMaxWidth()
         ) {
             if (multiSelect) {
                 // Multi-select dropdown items

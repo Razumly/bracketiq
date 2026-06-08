@@ -4,9 +4,13 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
 import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
+import com.razumly.mvp.core.util.jsonMVP
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 class MatchDtosTest {
     @Test
@@ -97,5 +101,55 @@ class MatchDtosTest {
             ),
             completeField.toFieldOrNull(),
         )
+    }
+
+    @Test
+    fun match_operations_json_includes_explicit_nulls_for_timer_reset() {
+        val payload = MatchUpdateDto(
+            lifecycle = MatchLifecycleOperationDto(
+                status = "SCHEDULED",
+                clearActualStart = true,
+                clearActualEnd = true,
+            ),
+            segmentOperations = listOf(
+                MatchSegmentOperationDto(
+                    id = "segment-1",
+                    sequence = 1,
+                    status = "NOT_STARTED",
+                    scores = mapOf("team-1" to 1, "team-2" to 0),
+                    clearStartedAt = true,
+                    clearEndedAt = true,
+                ),
+            ),
+        ).toMatchOperationsJsonObject()
+
+        val encoded = jsonMVP.encodeToString(JsonObject.serializer(), payload)
+        val lifecycle = payload["lifecycle"] as JsonObject
+        val segment = (payload["segmentOperations"] as kotlinx.serialization.json.JsonArray).single() as JsonObject
+
+        assertTrue("\"actualStart\":null" in encoded)
+        assertTrue("\"startedAt\":null" in encoded)
+        assertEquals(JsonNull, lifecycle["actualStart"])
+        assertEquals(JsonNull, lifecycle["actualEnd"])
+        assertEquals(JsonNull, segment["startedAt"])
+        assertEquals(JsonNull, segment["endedAt"])
+    }
+
+    @Test
+    fun match_operations_json_omits_nullable_timer_fields_without_clear_flags() {
+        val payload = MatchUpdateDto(
+            lifecycle = MatchLifecycleOperationDto(status = "IN_PROGRESS"),
+            segmentOperations = listOf(
+                MatchSegmentOperationDto(
+                    sequence = 2,
+                    status = "IN_PROGRESS",
+                ),
+            ),
+        ).toMatchOperationsJsonObject()
+
+        val encoded = jsonMVP.encodeToString(JsonObject.serializer(), payload)
+
+        assertTrue("\"actualStart\"" !in encoded)
+        assertTrue("\"startedAt\"" !in encoded)
     }
 }

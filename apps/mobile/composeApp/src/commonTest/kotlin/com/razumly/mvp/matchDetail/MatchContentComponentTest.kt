@@ -9,6 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
+import com.razumly.mvp.core.data.dataTypes.MatchIncidentTypeDefinitionMVP
 import com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
@@ -16,6 +17,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
+import com.razumly.mvp.core.data.dataTypes.ResolvedMatchTimekeepingConfigMVP
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
@@ -89,6 +91,187 @@ class MatchContentComponentTest : MainDispatcherTest() {
 
         assertEquals(21, team1Score)
         assertEquals(13, team2Score)
+    }
+
+    @Test
+    fun given_match_rules_snapshot_when_resolving_active_rules_then_timekeeping_and_incidents_are_preserved() {
+        val snapshot = ResolvedMatchRulesMVP(
+            scoringModel = "PERIODS",
+            segmentCount = 2,
+            segmentLabel = "Half",
+            supportedIncidentTypes = listOf("GOAL", "YELLOW_CARD", "BLUE_CARD"),
+            incidentTypeDefinitions = listOf(
+                MatchIncidentTypeDefinitionMVP(
+                    code = "BLUE_CARD",
+                    label = "Blue Card",
+                    kind = "DISCIPLINE",
+                    cardColor = "blue",
+                    requiresTeam = true,
+                ),
+            ),
+            timekeeping = ResolvedMatchTimekeepingConfigMVP(
+                timerMode = "COUNT_UP",
+                segmentDurationMinutes = 30,
+                segmentDurationMinutesBySequence = listOf(30, 30),
+                canUseAddedTime = true,
+                addedTimeEnabled = true,
+                stopAtRegulationEnd = false,
+            ),
+        )
+        val match = createMatch(
+            eventId = "event-1",
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-official",
+            officialCheckedIn = true,
+        ).copy(
+            matchRulesSnapshot = snapshot,
+            team1Points = listOf(0, 0),
+            team2Points = listOf(0, 0),
+            setResults = listOf(0, 0),
+            segments = listOf(
+                createSegment(sequence = 1, team1Score = 0, team2Score = 0),
+                createSegment(sequence = 2, team1Score = 0, team2Score = 0),
+            ),
+        )
+
+        val rules = resolveActiveRules(match, currentEvent = null)
+
+        assertEquals("PERIODS", rules.scoringModel)
+        assertEquals("COUNT_UP", rules.timekeeping.timerMode)
+        assertEquals(30, rules.timekeeping.segmentDurationMinutes)
+        assertTrue(rules.timekeeping.addedTimeEnabled)
+        assertFalse(rules.timekeeping.stopAtRegulationEnd)
+        assertEquals(listOf("GOAL", "YELLOW_CARD", "BLUE_CARD"), rules.supportedIncidentTypes)
+        assertEquals("Blue Card", rules.incidentTypeDefinitions.single().label)
+        assertEquals("blue", rules.incidentTypeDefinitions.single().cardColor)
+    }
+
+    @Test
+    fun given_checked_in_official_when_starting_timer_then_timer_state_is_saved_locally() = runTest(testDispatcher) {
+        val user = createUser(id = "user-1", teamIds = listOf("team-c"))
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(usesSets = false)
+        val match = createMatch(
+            eventId = event.id,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = true,
+        ).copy(
+            resolvedMatchRules = ResolvedMatchRulesMVP(
+                scoringModel = "PERIODS",
+                segmentCount = 2,
+                segmentLabel = "Half",
+                timekeeping = ResolvedMatchTimekeepingConfigMVP(
+                    timerMode = "COUNT_UP",
+                    segmentDurationMinutes = 30,
+                    segmentDurationMinutesBySequence = listOf(30, 30),
+                    canUseAddedTime = true,
+                    addedTimeEnabled = true,
+                    stopAtRegulationEnd = false,
+                ),
+            ),
+            team1Points = listOf(0, 0),
+            team2Points = listOf(0, 0),
+            setResults = listOf(0, 0),
+            segments = listOf(
+                createSegment(sequence = 1, team1Score = 0, team2Score = 0),
+                createSegment(sequence = 2, team1Score = 0, team2Score = 0),
+            ),
+        )
+        val harness = MatchDetailHarness(
+            event = event,
+            initialMatch = match,
+            currentUser = user,
+            teams = listOf(
+                createTeam(id = "team-a", captainId = "captain-a"),
+                createTeam(id = "team-b", captainId = "captain-b"),
+                createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
+            ),
+        )
+
+        advance()
+        harness.component.startMatch()
+        advance()
+
+        val operation = harness.matchRepository.operationCalls.single()
+        assertEquals("IN_PROGRESS", operation.lifecycle?.status)
+        assertEquals("IN_PROGRESS", operation.segmentOperations.single().status)
+        assertTrue(operation.segmentOperations.single().startedAt?.isNotBlank() == true)
+        val savedMatch = harness.matchRepository.savedMatches.last()
+        assertEquals("IN_PROGRESS", savedMatch.status)
+        assertTrue(savedMatch.actualStart?.isNotBlank() == true)
+        assertEquals("IN_PROGRESS", savedMatch.segments.first().status)
+        assertTrue(savedMatch.segments.first().startedAt?.isNotBlank() == true)
+    }
+
+    @Test
+    fun given_checked_in_official_when_resetting_timer_then_timer_reset_is_saved_locally() = runTest(testDispatcher) {
+        val user = createUser(id = "user-1", teamIds = listOf("team-c"))
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(usesSets = false)
+        val startedAt = "2026-06-08T07:52:35.109Z"
+        val match = createMatch(
+            eventId = event.id,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = true,
+        ).copy(
+            status = "IN_PROGRESS",
+            actualStart = startedAt,
+            resolvedMatchRules = ResolvedMatchRulesMVP(
+                scoringModel = "PERIODS",
+                segmentCount = 2,
+                segmentLabel = "Half",
+                timekeeping = ResolvedMatchTimekeepingConfigMVP(
+                    timerMode = "COUNT_UP",
+                    segmentDurationMinutes = 30,
+                    segmentDurationMinutesBySequence = listOf(30, 30),
+                    canUseAddedTime = true,
+                    addedTimeEnabled = true,
+                    stopAtRegulationEnd = false,
+                ),
+            ),
+            team1Points = listOf(0, 0),
+            team2Points = listOf(0, 0),
+            setResults = listOf(0, 0),
+            segments = listOf(
+                createSegment(sequence = 1, team1Score = 0, team2Score = 0).copy(
+                    status = "IN_PROGRESS",
+                    startedAt = startedAt,
+                ),
+                createSegment(sequence = 2, team1Score = 0, team2Score = 0),
+            ),
+        )
+        val harness = MatchDetailHarness(
+            event = event,
+            initialMatch = match,
+            currentUser = user,
+            teams = listOf(
+                createTeam(id = "team-a", captainId = "captain-a"),
+                createTeam(id = "team-b", captainId = "captain-b"),
+                createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
+            ),
+        )
+
+        advance()
+        harness.component.resetMatchTimer()
+        advance()
+
+        val operation = harness.matchRepository.operationCalls.single()
+        assertEquals("SCHEDULED", operation.lifecycle?.status)
+        assertEquals(null, operation.lifecycle?.actualStart)
+        assertEquals(true, operation.lifecycle?.clearActualStart)
+        assertEquals(true, operation.lifecycle?.clearActualEnd)
+        assertEquals("NOT_STARTED", operation.segmentOperations.single().status)
+        assertEquals(null, operation.segmentOperations.single().startedAt)
+        assertEquals(true, operation.segmentOperations.single().clearStartedAt)
+        assertEquals(true, operation.segmentOperations.single().clearEndedAt)
+        val savedMatch = harness.matchRepository.savedMatches.last()
+        assertEquals("SCHEDULED", savedMatch.status)
+        assertEquals(null, savedMatch.actualStart)
+        assertEquals("NOT_STARTED", savedMatch.segments.first().status)
+        assertEquals(null, savedMatch.segments.first().startedAt)
     }
 
     @Test

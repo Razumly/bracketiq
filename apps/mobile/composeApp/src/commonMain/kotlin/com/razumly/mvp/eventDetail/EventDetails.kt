@@ -90,6 +90,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import com.razumly.mvp.core.data.dataTypes.MatchIncidentTypeDefinitionMVP
 import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.Organization
@@ -101,6 +102,7 @@ import com.razumly.mvp.core.data.dataTypes.LeagueConfig
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
+import com.razumly.mvp.core.data.dataTypes.MatchTimekeepingConfigMVP
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.divisionPriceRangeLabel
@@ -230,6 +232,46 @@ private const val STAFF_LAZY_LIST_THRESHOLD = 4
 private const val STAFF_LAZY_LIST_VISIBLE_COUNT = 4
 private const val DEFAULT_MVP_FEE_PERCENTAGE = 0.01
 private const val LEAGUE_OR_TOURNAMENT_MVP_FEE_PERCENTAGE = 0.03
+
+private fun customIncidentCodeFromLabel(label: String): String =
+    label.trim()
+        .uppercase()
+        .replace(Regex("[^A-Z0-9]+"), "_")
+        .trim('_')
+
+private fun customIncidentDefinition(label: String): MatchIncidentTypeDefinitionMVP? {
+    val trimmed = label.trim()
+    val code = customIncidentCodeFromLabel(trimmed)
+    if (trimmed.isBlank() || code.isBlank()) return null
+    return MatchIncidentTypeDefinitionMVP(
+        code = code,
+        label = trimmed,
+        kind = "DISCIPLINE",
+        requiresTeam = true,
+        requiresParticipant = false,
+        defaultEnabled = true,
+    )
+}
+
+private fun retainedCustomIncidentDefinitions(
+    selected: List<String>,
+    definitions: List<MatchIncidentTypeDefinitionMVP>,
+    baseDefinitions: List<MatchIncidentTypeDefinitionMVP>,
+): List<MatchIncidentTypeDefinitionMVP>? {
+    val selectedCodes = selected.map { it.trim().uppercase() }.filter(String::isNotBlank).toSet()
+    val baseCodes = baseDefinitions.map { it.code.trim().uppercase() }.filter(String::isNotBlank).toSet()
+    val retained = definitions
+        .mapNotNull { definition ->
+            val code = definition.code.trim().uppercase()
+            if (code.isBlank() || code !in selectedCodes || code in baseCodes) {
+                null
+            } else {
+                definition.copy(code = code)
+            }
+        }
+        .distinctBy { it.code }
+    return retained.takeIf { it.isNotEmpty() }
+}
 private val readOnlyNameListItemHeight = 28.dp
 private val readOnlyNameListSpacing = 4.dp
 private val editableOfficialStaffListHeight = 160.dp * STAFF_LAZY_LIST_VISIBLE_COUNT
@@ -1729,11 +1771,25 @@ fun EventDetails(
             .trim()
             .ifBlank { "POINT" }
     }
-    val availableMatchIncidentTypes = remember(baseMatchRules.supportedIncidentTypes, resolvedMatchRules.supportedIncidentTypes, autoPointIncidentType) {
+    val matchIncidentDefinitionsByCode = remember(resolvedMatchRules.incidentTypeDefinitions) {
+        resolvedMatchRules.incidentTypeDefinitions.associateBy { definition ->
+            definition.code.trim().uppercase()
+        }
+    }
+    fun matchIncidentLabel(incidentType: String): String =
+        matchIncidentDefinitionsByCode[incidentType.trim().uppercase()]?.label
+            ?: matchIncidentTypeLabel(incidentType)
+    val availableMatchIncidentTypes = remember(
+        baseMatchRules.supportedIncidentTypes,
+        resolvedMatchRules.supportedIncidentTypes,
+        resolvedMatchRules.incidentTypeDefinitions,
+        autoPointIncidentType,
+    ) {
         (
             listOf("POINT", "DISCIPLINE", "NOTE", "ADMIN") +
                 baseMatchRules.supportedIncidentTypes +
                 resolvedMatchRules.supportedIncidentTypes +
+                resolvedMatchRules.incidentTypeDefinitions.map { it.code } +
                 autoPointIncidentType
             )
             .map(String::trim)
@@ -1761,6 +1817,7 @@ fun EventDetails(
     }
     val matchIncidentOptions = remember(
         availableMatchIncidentTypes,
+        resolvedMatchRules.incidentTypeDefinitions,
         editEvent.autoCreatePointMatchIncidents,
         autoPointIncidentType,
     ) {
@@ -1772,9 +1829,12 @@ fun EventDetails(
             .map { incidentType ->
                 DropdownOption(
                     value = incidentType,
-                    label = matchIncidentTypeLabel(incidentType),
+                    label = matchIncidentLabel(incidentType),
                 )
             }
+    }
+    var customIncidentDraft by rememberSaveable(editEvent.id, editView) {
+        mutableStateOf("")
     }
     var lastAutoLoadedOfficialDefaultsSportId by rememberSaveable(editEvent.id, editView) {
         mutableStateOf<String?>(null)
@@ -2930,6 +2990,22 @@ fun EventDetails(
                                             ),
                                         )
                                     }
+                                    if (resolvedMatchRules.timekeeping.timerMode != "NONE") {
+                                        add(
+                                            DetailRowSpec(
+                                                "${resolvedMatchRules.segmentLabel} length",
+                                                "${resolvedMatchRules.timekeeping.segmentDurationMinutes ?: 0} minutes",
+                                            ),
+                                        )
+                                        if (resolvedMatchRules.timekeeping.canUseAddedTime) {
+                                            add(
+                                                DetailRowSpec(
+                                                    "Added time",
+                                                    if (resolvedMatchRules.timekeeping.addedTimeEnabled) "Yes" else "No",
+                                                ),
+                                            )
+                                        }
+                                    }
                                     add(
                                         DetailRowSpec(
                                             "Create a scoring incident for each point / goal",
@@ -2941,7 +3017,7 @@ fun EventDetails(
                                             DetailRowSpec(
                                                 "Incident types",
                                                 selectedMatchIncidentTypes.joinToString(", ") { incidentType ->
-                                                    matchIncidentTypeLabel(incidentType)
+                                                    matchIncidentLabel(incidentType)
                                                 },
                                             ),
                                         )
@@ -2999,6 +3075,61 @@ fun EventDetails(
                                         },
                                     )
                                 }
+                                if (baseMatchRules.timekeeping.timerMode != "NONE") {
+                                    NumberInputField(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        value = resolvedMatchRules.timekeeping.segmentDurationMinutes
+                                            ?.toString()
+                                            .orEmpty(),
+                                        label = "${resolvedMatchRules.segmentLabel} length",
+                                        isError = false,
+                                        onValueChange = { value ->
+                                            if (value.isNotEmpty() && !value.all { it.isDigit() }) {
+                                                return@NumberInputField
+                                            }
+                                            val parsedDuration = value.toIntOrNull()?.takeIf { it > 0 }
+                                            val durationOverride = parsedDuration
+                                                ?.takeUnless { it == baseMatchRules.timekeeping.segmentDurationMinutes }
+                                            val nextTimekeeping = (editEvent.matchRulesOverride?.timekeeping ?: MatchTimekeepingConfigMVP()).copy(
+                                                segmentDurationMinutes = durationOverride,
+                                            )
+                                            val totalDuration = parsedDuration
+                                                ?.let { duration -> duration * resolvedMatchRules.segmentCount.coerceAtLeast(1) }
+                                            onEditEvent {
+                                                copy(
+                                                    usesSets = false,
+                                                    setDurationMinutes = null,
+                                                    matchDurationMinutes = totalDuration ?: matchDurationMinutes,
+                                                    matchRulesOverride = copyMatchRulesOverride(
+                                                        current = matchRulesOverride,
+                                                        timekeeping = nextTimekeeping,
+                                                    ),
+                                                )
+                                            }
+                                        },
+                                    )
+                                    if (baseMatchRules.timekeeping.canUseAddedTime) {
+                                        LabeledCheckboxRow(
+                                            checked = resolvedMatchRules.timekeeping.addedTimeEnabled,
+                                            label = "Allow added time",
+                                            onCheckedChange = { checked ->
+                                                val addedTimeOverride = checked.takeUnless { it == baseMatchRules.timekeeping.addedTimeEnabled }
+                                                val nextTimekeeping = (editEvent.matchRulesOverride?.timekeeping ?: MatchTimekeepingConfigMVP()).copy(
+                                                    addedTimeEnabled = addedTimeOverride,
+                                                    stopAtRegulationEnd = addedTimeOverride?.not(),
+                                                )
+                                                onEditEvent {
+                                                    copy(
+                                                        matchRulesOverride = copyMatchRulesOverride(
+                                                            current = matchRulesOverride,
+                                                            timekeeping = nextTimekeeping,
+                                                        ),
+                                                    )
+                                                }
+                                            },
+                                        )
+                                    }
+                                }
                             }
                             PlatformDropdown(
                                 selectedValue = "",
@@ -3018,15 +3149,106 @@ fun EventDetails(
                                         selected = enforcedIncidentTypes,
                                         defaults = baseMatchRules.supportedIncidentTypes,
                                     )
+                                    val retainedDefinitions = retainedCustomIncidentDefinitions(
+                                        selected = enforcedIncidentTypes,
+                                        definitions = editEvent.matchRulesOverride?.incidentTypeDefinitions.orEmpty(),
+                                        baseDefinitions = baseMatchRules.incidentTypeDefinitions,
+                                    )
                                     onEditEvent {
                                         copy(
                                             matchRulesOverride = copyMatchRulesOverride(
                                                 current = matchRulesOverride,
                                                 supportedIncidentTypes = incidentOverride,
+                                                incidentTypeDefinitions = retainedDefinitions,
                                             ),
                                         )
                                     }
                                 },
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.Top,
+                            ) {
+                                StandardTextField(
+                                    value = customIncidentDraft,
+                                    onValueChange = { customIncidentDraft = it },
+                                    modifier = Modifier.weight(1f),
+                                    label = "Custom incident type",
+                                    placeholder = "Blue card",
+                                    imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                                    onImeAction = {
+                                        val definition = customIncidentDefinition(customIncidentDraft)
+                                        if (definition != null) {
+                                            val nextSelectedIncidentTypes = enforceAutoPointIncidentType(
+                                                selected = selectedMatchIncidentTypes + definition.code,
+                                                autoPointIncidentType = autoPointIncidentType,
+                                                enabled = editEvent.autoCreatePointMatchIncidents,
+                                            )
+                                            val incidentOverride = supportedIncidentTypesOverrideOrNull(
+                                                selected = nextSelectedIncidentTypes,
+                                                defaults = baseMatchRules.supportedIncidentTypes,
+                                            )
+                                            val nextDefinitions = retainedCustomIncidentDefinitions(
+                                                selected = nextSelectedIncidentTypes,
+                                                definitions = editEvent.matchRulesOverride?.incidentTypeDefinitions.orEmpty()
+                                                    .filterNot { existing -> existing.code.trim().uppercase() == definition.code }
+                                                    + definition,
+                                                baseDefinitions = baseMatchRules.incidentTypeDefinitions,
+                                            )
+                                            onEditEvent {
+                                                copy(
+                                                    matchRulesOverride = copyMatchRulesOverride(
+                                                        current = matchRulesOverride,
+                                                        supportedIncidentTypes = incidentOverride,
+                                                        incidentTypeDefinitions = nextDefinitions,
+                                                    ),
+                                                )
+                                            }
+                                            customIncidentDraft = ""
+                                        }
+                                    },
+                                )
+                                Button(
+                                    onClick = {
+                                        val definition = customIncidentDefinition(customIncidentDraft) ?: return@Button
+                                        val nextSelectedIncidentTypes = enforceAutoPointIncidentType(
+                                            selected = selectedMatchIncidentTypes + definition.code,
+                                            autoPointIncidentType = autoPointIncidentType,
+                                            enabled = editEvent.autoCreatePointMatchIncidents,
+                                        )
+                                        val incidentOverride = supportedIncidentTypesOverrideOrNull(
+                                            selected = nextSelectedIncidentTypes,
+                                            defaults = baseMatchRules.supportedIncidentTypes,
+                                        )
+                                        val nextDefinitions = retainedCustomIncidentDefinitions(
+                                            selected = nextSelectedIncidentTypes,
+                                            definitions = editEvent.matchRulesOverride?.incidentTypeDefinitions.orEmpty()
+                                                .filterNot { existing -> existing.code.trim().uppercase() == definition.code }
+                                                + definition,
+                                            baseDefinitions = baseMatchRules.incidentTypeDefinitions,
+                                        )
+                                        onEditEvent {
+                                            copy(
+                                                matchRulesOverride = copyMatchRulesOverride(
+                                                    current = matchRulesOverride,
+                                                    supportedIncidentTypes = incidentOverride,
+                                                    incidentTypeDefinitions = nextDefinitions,
+                                                ),
+                                            )
+                                        }
+                                        customIncidentDraft = ""
+                                    },
+                                    enabled = customIncidentDefinition(customIncidentDraft) != null,
+                                    modifier = Modifier.padding(top = 8.dp),
+                                ) {
+                                    Text("Add")
+                                }
+                            }
+                            Text(
+                                text = "Type a custom incident and add it to make it available for match officials.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(localImageScheme.current.onSurfaceVariant),
                             )
                             LabeledCheckboxRow(
                                 checked = editEvent.autoCreatePointMatchIncidents,
@@ -3048,12 +3270,18 @@ fun EventDetails(
                                         selected = nextSelectedIncidentTypes,
                                         defaults = baseMatchRules.supportedIncidentTypes,
                                     )
+                                    val retainedDefinitions = retainedCustomIncidentDefinitions(
+                                        selected = nextSelectedIncidentTypes,
+                                        definitions = editEvent.matchRulesOverride?.incidentTypeDefinitions.orEmpty(),
+                                        baseDefinitions = baseMatchRules.incidentTypeDefinitions,
+                                    )
                                     onEditEvent {
                                         copy(
                                             autoCreatePointMatchIncidents = checked,
                                             matchRulesOverride = copyMatchRulesOverride(
                                                 current = matchRulesOverride,
                                                 supportedIncidentTypes = incidentOverride,
+                                                incidentTypeDefinitions = retainedDefinitions,
                                             ),
                                         )
                                     }
@@ -3061,7 +3289,7 @@ fun EventDetails(
                             )
                             Text(
                                 text = if (editEvent.autoCreatePointMatchIncidents) {
-                                    "${matchIncidentTypeLabel(autoPointIncidentType)} incidents will stay available while automatic scoring capture is on."
+                                    "${matchIncidentLabel(autoPointIncidentType)} incidents will stay available while automatic scoring capture is on."
                                 } else {
                                     "Officials can still add incidents manually when needed."
                                 },
