@@ -1,6 +1,6 @@
 {
   "name": "composeApp",
-  "version": "1.5.12",
+  "version": "1.5.14",
   "homepage": "https://example.com",
   "source": {
     "http": ""
@@ -14,6 +14,7 @@
     "ios": "15.3"
   },
   "dependencies": {
+    "FirebaseAnalytics": [],
     "FirebaseCore": [],
     "FirebaseMessaging": [],
     "GooglePlaces": [],

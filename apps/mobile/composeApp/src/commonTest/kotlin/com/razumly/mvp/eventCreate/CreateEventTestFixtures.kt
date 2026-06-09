@@ -589,6 +589,8 @@ internal class CreateEvent_FakeMatchRepository : IMatchRepository {
         operation: MatchIncidentOperationDto,
     ): Result<MatchMVP> = Result.success(match)
 
+    override suspend fun syncPendingMatchOperations(matchId: String?): Result<Int> = Result.success(0)
+
     override suspend fun updateMatchesBulk(
         matches: List<MatchMVP>,
         creates: List<StagedMatchCreate>,

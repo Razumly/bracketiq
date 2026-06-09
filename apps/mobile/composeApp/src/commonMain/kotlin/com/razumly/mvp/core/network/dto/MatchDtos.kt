@@ -196,6 +196,11 @@ data class MatchSegmentOperationDto(
     val endedAt: String? = null,
     val resultType: String? = null,
     val statusReason: String? = null,
+    val clientOperationId: String? = null,
+    val clientDeviceId: String? = null,
+    val clientCreatedAt: String? = null,
+    val clientSequence: Long? = null,
+    val sourceDevice: String? = null,
     @Transient val clearStartedAt: Boolean = false,
     @Transient val clearEndedAt: Boolean = false,
     @Transient val clearWinnerEventTeamId: Boolean = false,
@@ -219,6 +224,11 @@ data class MatchIncidentOperationDto(
     val clockSeconds: Int? = null,
     val linkedPointDelta: Int? = null,
     val note: String? = null,
+    val clientOperationId: String? = null,
+    val clientDeviceId: String? = null,
+    val clientCreatedAt: String? = null,
+    val clientSequence: Long? = null,
+    val sourceDevice: String? = null,
 )
 
 @Serializable
@@ -227,6 +237,11 @@ data class MatchScoreSetDto(
     val sequence: Int,
     val eventTeamId: String,
     val points: Int,
+    val clientOperationId: String? = null,
+    val clientDeviceId: String? = null,
+    val clientCreatedAt: String? = null,
+    val clientSequence: Long? = null,
+    val sourceDevice: String? = null,
 )
 
 @Serializable
@@ -268,6 +283,11 @@ data class MatchUpdateDto(
     val division: String? = null,
     val losersBracket: Boolean? = null,
     val locked: Boolean? = null,
+    val clientOperationId: String? = null,
+    val clientDeviceId: String? = null,
+    val clientCreatedAt: String? = null,
+    val clientSequence: Long? = null,
+    val sourceDevice: String? = null,
 )
 
 fun MatchUpdateDto.toMatchOperationsJsonObject(): JsonObject = buildJsonObject {
@@ -284,6 +304,11 @@ fun MatchUpdateDto.toMatchOperationsJsonObject(): JsonObject = buildJsonObject {
     officialCheckIn?.toJsonObject()?.let { put("officialCheckIn", it) }
     finalize?.let { put("finalize", JsonPrimitive(it)) }
     time?.let { put("time", JsonPrimitive(it)) }
+    clientOperationId?.let { put("clientOperationId", JsonPrimitive(it)) }
+    clientDeviceId?.let { put("clientDeviceId", JsonPrimitive(it)) }
+    clientCreatedAt?.let { put("clientCreatedAt", JsonPrimitive(it)) }
+    clientSequence?.let { put("clientSequence", JsonPrimitive(it)) }
+    sourceDevice?.let { put("sourceDevice", JsonPrimitive(it)) }
 }
 
 private fun MatchLifecycleOperationDto.toJsonObject(): JsonObject = buildJsonObject {
@@ -336,6 +361,11 @@ private fun MatchSegmentOperationDto.toJsonObject(): JsonObject = buildJsonObjec
     } else if (clearStatusReason) {
         put("statusReason", JsonNull)
     }
+    clientOperationId?.let { put("clientOperationId", JsonPrimitive(it)) }
+    clientDeviceId?.let { put("clientDeviceId", JsonPrimitive(it)) }
+    clientCreatedAt?.let { put("clientCreatedAt", JsonPrimitive(it)) }
+    clientSequence?.let { put("clientSequence", JsonPrimitive(it)) }
+    sourceDevice?.let { put("sourceDevice", JsonPrimitive(it)) }
 }
 
 private fun MatchIncidentOperationDto.toJsonObject(): JsonObject = buildJsonObject {
@@ -353,6 +383,11 @@ private fun MatchIncidentOperationDto.toJsonObject(): JsonObject = buildJsonObje
     clockSeconds?.let { put("clockSeconds", JsonPrimitive(it)) }
     linkedPointDelta?.let { put("linkedPointDelta", JsonPrimitive(it)) }
     note?.let { put("note", JsonPrimitive(it)) }
+    clientOperationId?.let { put("clientOperationId", JsonPrimitive(it)) }
+    clientDeviceId?.let { put("clientDeviceId", JsonPrimitive(it)) }
+    clientCreatedAt?.let { put("clientCreatedAt", JsonPrimitive(it)) }
+    clientSequence?.let { put("clientSequence", JsonPrimitive(it)) }
+    sourceDevice?.let { put("sourceDevice", JsonPrimitive(it)) }
 }
 
 private fun MatchOfficialCheckInOperationDto.toJsonObject(): JsonObject = buildJsonObject {

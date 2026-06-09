@@ -476,6 +476,8 @@ private object NoopMatchRepository : IMatchRepository {
         operation: com.razumly.mvp.core.network.dto.MatchIncidentOperationDto,
     ): Result<com.razumly.mvp.core.data.dataTypes.MatchMVP> = Result.success(match)
 
+    override suspend fun syncPendingMatchOperations(matchId: String?): Result<Int> = Result.success(0)
+
     override suspend fun updateMatchesBulk(
         matches: List<com.razumly.mvp.core.data.dataTypes.MatchMVP>,
         creates: List<StagedMatchCreate>,

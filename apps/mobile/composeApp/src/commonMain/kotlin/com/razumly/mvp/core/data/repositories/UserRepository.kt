@@ -8,6 +8,8 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
+import com.razumly.mvp.core.auth.NoOpWatchAuthSync
+import com.razumly.mvp.core.auth.WatchAuthSync
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.AuthTokenStore
 import com.razumly.mvp.core.network.MvpApiClient
@@ -353,6 +355,7 @@ class UserRepository(
     private val api: MvpApiClient,
     private val tokenStore: AuthTokenStore,
     private val currentUserDataSource: CurrentUserDataSource,
+    private val watchAuthSync: WatchAuthSync = NoOpWatchAuthSync,
     private val startupDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : IUserRepository {
     private val scope = CoroutineScope(SupervisorJob() + startupDispatcher)
@@ -378,6 +381,19 @@ class UserRepository(
             if (throwable !is CancellationException) {
                 Napier.w("loadCurrentUser failed", throwable)
             }
+        }
+    }
+
+    private fun syncAuthenticatedWatchAsync() {
+        scope.launch {
+            runCatching { watchAuthSync.syncAuthenticatedWatch() }
+                .onFailure { throwable ->
+                    if (throwable !is CancellationException) {
+                        Napier.w(tag = USER_REPOSITORY_LOG_TAG) {
+                            "Watch auth sync failed: ${throwable.message}"
+                        }
+                    }
+                }
         }
     }
 
@@ -679,6 +695,7 @@ class UserRepository(
             cacheCurrentUserProfile(remoteProfile)
         } else {
             currentUserDataSource.saveUserId(account.id)
+            syncAuthenticatedWatchAsync()
         }
         return true
     }
@@ -706,6 +723,7 @@ class UserRepository(
             }
         }
         _startupAuthState.value = StartupAuthState.Authenticated
+        syncAuthenticatedWatchAsync()
     }
 
     override suspend fun setCachedCurrentUserProfile(profile: UserData): Result<UserData> = runCatching {

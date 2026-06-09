@@ -13,6 +13,7 @@ import com.razumly.mvp.core.data.dataTypes.EventTeamComplianceCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventUserComplianceCacheEntry
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchOperationOutboxEntry
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.Team
@@ -29,13 +30,14 @@ import com.razumly.mvp.core.data.dataTypes.daos.EventParticipantManagementDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
+import com.razumly.mvp.core.data.dataTypes.daos.MatchOperationOutboxDao
 import com.razumly.mvp.core.data.dataTypes.daos.MessageDao
 import com.razumly.mvp.core.data.dataTypes.daos.RefundRequestDao
 import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.data.util.Converters
 
-const val MVP_DATABASE_VERSION = 23
+const val MVP_DATABASE_VERSION = 24
 
 @Database(
     entities = [
@@ -46,6 +48,7 @@ const val MVP_DATABASE_VERSION = 23
         EventUserComplianceCacheEntry::class,
         UserData::class,
         MatchMVP::class,
+        MatchOperationOutboxEntry::class,
         Field::class,
         Team::class,
         ChatGroup::class,
@@ -63,6 +66,7 @@ const val MVP_DATABASE_VERSION = 23
 @ConstructedBy(MVPDatabaseCtor::class)
 abstract class MVPDatabaseService : RoomDatabase(), DatabaseService {
     abstract override val getMatchDao: MatchDao
+    abstract override val getMatchOperationOutboxDao: MatchOperationOutboxDao
     abstract override val getTeamDao: TeamDao
     abstract override val getFieldDao: FieldDao
     abstract override val getUserDataDao: UserDataDao

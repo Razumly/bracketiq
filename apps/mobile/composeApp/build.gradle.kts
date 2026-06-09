@@ -32,8 +32,8 @@ compose.resources {
     generateResClass = always
 }
 
-val mvpVersion = "1.5.13"
-val mvpVersionCode = 48
+val mvpVersion = "1.5.14"
+val mvpVersionCode = 49
 kotlin {
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
@@ -175,6 +175,7 @@ kotlin {
                 implementation(libs.maps.compose)
                 implementation(libs.play.services.maps)
                 implementation(libs.play.services.location)
+                implementation(libs.play.services.wearable)
                 implementation(libs.places)
                 implementation(libs.androidx.concurrent.futures.ktx)
                 implementation(libs.kotlinx.coroutines.android)

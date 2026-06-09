@@ -1,12 +1,15 @@
 package com.razumly.mvp
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -47,6 +50,7 @@ class MainActivity : ComponentActivity() {
         splashScreen.setKeepOnScreenCondition { keepSystemSplashVisible }
         configureEdgeToEdgeWindow()
         super.onCreate(savedInstanceState)
+        if (redirectWearLaunchIfNeeded()) return
 
         NotifierManager.onCreateOrOnNewIntent(intent)
         Napier.d(tag = "intent", message = intent.data.toString())
@@ -76,6 +80,21 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun redirectWearLaunchIfNeeded(): Boolean {
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_WATCH)) return false
+
+        val wearIntent = Intent()
+            .setClassName("com.razumly.mvp.wear", "com.razumly.mvp.wear.MainActivity")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            startActivity(wearIntent)
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, "Open MVP Official on this watch.", Toast.LENGTH_LONG).show()
+        }
+        finish()
+        return true
     }
 
     override fun onNewIntent(intent: Intent) {

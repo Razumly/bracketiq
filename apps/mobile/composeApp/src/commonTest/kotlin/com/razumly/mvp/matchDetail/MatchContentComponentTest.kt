@@ -46,6 +46,9 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.time.Clock
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
 class MatchContentComponentTest : MainDispatcherTest() {
@@ -1590,6 +1593,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
             eventRegistrationId = "reg-a",
             participantUserId = "player-a",
             minute = 12,
+            clockInput = null,
             note = "Header",
         )
         advance()
@@ -1604,6 +1608,74 @@ class MatchContentComponentTest : MainDispatcherTest() {
         assertEquals(12, incident.minute)
         assertEquals("Header", incident.note)
         assertEquals(1, harness.component.matchWithTeams.value.match.incidents.size)
+    }
+
+    @Test
+    fun given_added_time_segment_when_recording_incident_then_clock_uses_cumulative_added_time() = runTest(testDispatcher) {
+        val user = createUser(id = "user-1", teamIds = listOf("team-c"))
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(
+            usesSets = false,
+            autoCreatePointMatchIncidents = true,
+        )
+        val secondHalfStartedAt = (Clock.System.now() - 46.minutes - 30.seconds).toString()
+        val harness = MatchDetailHarness(
+            event = event,
+            initialMatch = createMatch(
+                eventId = event.id,
+                team1Id = "team-a",
+                team2Id = "team-b",
+                teamOfficialId = "team-c",
+                officialCheckedIn = true,
+            ).copy(
+                team1Points = listOf(1, 0),
+                team2Points = listOf(0, 0),
+                setResults = listOf(1, 0),
+                segments = listOf(
+                    createSegment(sequence = 1, team1Score = 1, team2Score = 0).copy(status = "COMPLETE"),
+                    createSegment(sequence = 2, team1Score = 0, team2Score = 0).copy(
+                        status = "IN_PROGRESS",
+                        startedAt = secondHalfStartedAt,
+                    ),
+                ),
+                resolvedMatchRules = ResolvedMatchRulesMVP(
+                    scoringModel = "PERIODS",
+                    segmentCount = 2,
+                    segmentLabel = "Half",
+                    supportedIncidentTypes = listOf("GOAL", "DISCIPLINE", "NOTE"),
+                    autoCreatePointIncidentType = "GOAL",
+                    pointIncidentRequiresParticipant = true,
+                    timekeeping = ResolvedMatchTimekeepingConfigMVP(
+                        timerMode = "COUNT_UP",
+                        segmentDurationMinutes = 45,
+                        addedTimeEnabled = true,
+                        stopAtRegulationEnd = false,
+                    ),
+                ),
+            ),
+            currentUser = user,
+            teams = listOf(
+                createTeam(id = "team-a", captainId = "captain-a"),
+                createTeam(id = "team-b", captainId = "captain-b"),
+                createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
+            ),
+        )
+
+        advance()
+
+        harness.component.recordPointIncident(
+            isTeam1 = true,
+            eventRegistrationId = null,
+            participantUserId = "player-a",
+            minute = null,
+            clockInput = null,
+            note = "Added time goal",
+        )
+        advance()
+
+        val incident = harness.matchRepository.incidentCalls.single().operation
+        assertEquals(92, incident.minute)
+        assertEquals("90+2", incident.clock)
+        assertTrue((incident.clockSeconds ?: 0) in (91 * 60)..(92 * 60))
     }
 
     @Test
@@ -1645,6 +1717,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
             eventRegistrationId = "reg-a",
             participantUserId = "player-a",
             minute = 12,
+            clockInput = null,
             note = "Header",
         )
         testDispatcher.scheduler.runCurrent()
@@ -1699,6 +1772,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
             eventRegistrationId = "reg-a",
             participantUserId = "player-a",
             minute = 12,
+            clockInput = null,
             note = "Header",
         )
         testDispatcher.scheduler.runCurrent()
@@ -1733,6 +1807,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
             eventRegistrationId = "reg-a",
             participantUserId = "player-a",
             minute = 13,
+            clockInput = null,
             note = "Volley",
         )
         testDispatcher.scheduler.runCurrent()
@@ -1959,6 +2034,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
             eventRegistrationId = null,
             participantUserId = null,
             minute = 8,
+            clockInput = null,
             note = "Yellow card",
         )
         advance()

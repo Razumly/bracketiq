@@ -97,6 +97,7 @@ interface MatchContentComponent {
         eventRegistrationId: String?,
         participantUserId: String?,
         minute: Int?,
+        clockInput: String? = null,
         note: String?,
     )
     fun recordMatchIncident(
@@ -105,6 +106,7 @@ interface MatchContentComponent {
         eventRegistrationId: String?,
         participantUserId: String?,
         minute: Int?,
+        clockInput: String? = null,
         note: String?,
     )
     fun removeMatchIncident(incidentId: String)
@@ -779,6 +781,7 @@ class DefaultMatchContentComponent(
         eventRegistrationId: String?,
         participantUserId: String?,
         minute: Int?,
+        clockInput: String?,
         note: String?,
     ) {
         val currentMatch = matchWithTeams.value.match
@@ -790,6 +793,7 @@ class DefaultMatchContentComponent(
             eventRegistrationId = eventRegistrationId,
             participantUserId = participantUserId,
             minute = minute,
+            clockInput = clockInput,
             note = note,
         )
     }
@@ -800,6 +804,7 @@ class DefaultMatchContentComponent(
         eventRegistrationId: String?,
         participantUserId: String?,
         minute: Int?,
+        clockInput: String?,
         note: String?,
     ) {
         if (!isOfficial.value || officialCheckedIn.value != true || matchFinished.value) {
@@ -843,7 +848,18 @@ class DefaultMatchContentComponent(
             scoringMatch
         }
         val updatedSegment = updatedScoringMatch.segments.getOrNull(segmentIndex) ?: activeSegment
-        val clockDetails = clockDetailsForSegment(activeSegment, activeRules)
+        val liveClockDetails = clockDetailsForSegment(activeSegment, activeRules)
+        val parsedClockDetails = parseIncidentClockInput(
+            value = clockInput,
+            allowAddedTimeNotation = activeRules.timekeeping.addedTimeEnabled,
+        )
+        val clockDetails = parsedClockDetails?.let { parsed ->
+            if (parsed.clock != null && parsed.clock == liveClockDetails.clock) {
+                parsed.copy(clockSeconds = liveClockDetails.clockSeconds)
+            } else {
+                parsed
+            }
+        } ?: liveClockDetails
         val localIncident = buildPendingIncident(
             match = updatedScoringMatch,
             segment = updatedSegment,
@@ -1511,6 +1527,62 @@ class DefaultMatchContentComponent(
         val clockSeconds: Int?,
     )
 
+    private fun durationSecondsForSegmentSequence(
+        rules: ResolvedMatchRulesMVP,
+        sequence: Int,
+    ): Int? {
+        val durationMinutes = rules.timekeeping.segmentDurationMinutesBySequence.getOrNull(sequence - 1)
+            ?: rules.timekeeping.segmentDurationMinutes
+        return durationMinutes?.takeIf { it > 0 }?.times(60)
+    }
+
+    private fun regulationOffsetSecondsForSegment(
+        segment: MatchSegmentMVP,
+        rules: ResolvedMatchRulesMVP,
+    ): Int {
+        if (!rules.timekeeping.addedTimeEnabled) return 0
+        val sequence = segment.sequence.coerceAtLeast(1)
+        var offsetSeconds = 0
+        for (index in 1 until sequence) {
+            offsetSeconds += durationSecondsForSegmentSequence(rules, index) ?: 0
+        }
+        return offsetSeconds
+    }
+
+    private fun formatAddedTimeIncidentClock(regulationEndSeconds: Int, addedSeconds: Int): String {
+        val regulationMinute = (regulationEndSeconds / 60).coerceAtLeast(0)
+        val addedMinute = ((addedSeconds.coerceAtLeast(1) + 59) / 60).coerceAtLeast(1)
+        return "$regulationMinute+$addedMinute"
+    }
+
+    private fun parseIncidentClockInput(
+        value: String?,
+        allowAddedTimeNotation: Boolean,
+    ): IncidentClockDetails? {
+        val trimmed = value?.trim()?.takeIf(String::isNotBlank) ?: return null
+        val addedTimeMatch = Regex("""^(\d+)\s*\+\s*(\d+)$""").matchEntire(trimmed)
+        if (addedTimeMatch != null && allowAddedTimeNotation) {
+            val regulationMinute = addedTimeMatch.groupValues[1].toIntOrNull()
+            val addedMinute = addedTimeMatch.groupValues[2].toIntOrNull()
+            if (regulationMinute != null && regulationMinute >= 0 && addedMinute != null && addedMinute > 0) {
+                val minute = regulationMinute + addedMinute
+                return IncidentClockDetails(
+                    minute = minute,
+                    clock = "$regulationMinute+$addedMinute",
+                    clockSeconds = minute * 60,
+                )
+            }
+            return null
+        }
+        if (addedTimeMatch != null) return null
+        val minute = trimmed.toIntOrNull()?.takeIf { it >= 0 } ?: return null
+        return IncidentClockDetails(
+            minute = minute,
+            clock = null,
+            clockSeconds = minute * 60,
+        )
+    }
+
     private fun clockDetailsForSegment(
         segment: MatchSegmentMVP,
         rules: ResolvedMatchRulesMVP,
@@ -1520,18 +1592,27 @@ class DefaultMatchContentComponent(
         val rawSeconds = ((endedAt.toEpochMilliseconds() - startedAt.toEpochMilliseconds()) / 1000L)
             .coerceAtLeast(0L)
             .toInt()
-        val durationSeconds = (rules.timekeeping.segmentDurationMinutesBySequence.getOrNull(segment.sequence - 1)
-            ?: rules.timekeeping.segmentDurationMinutes)
-            ?.takeIf { it > 0 }
-            ?.times(60)
-        val clockSeconds = if (rules.timekeeping.stopAtRegulationEnd && durationSeconds != null) {
+        val durationSeconds = durationSecondsForSegmentSequence(rules, segment.sequence)
+        val segmentClockSeconds = if (rules.timekeeping.stopAtRegulationEnd && durationSeconds != null) {
             rawSeconds.coerceAtMost(durationSeconds)
         } else {
             rawSeconds
         }
+        val regulationOffsetSeconds = regulationOffsetSecondsForSegment(segment, rules)
+        val clockSeconds = if (rules.timekeeping.addedTimeEnabled) {
+            regulationOffsetSeconds + segmentClockSeconds
+        } else {
+            segmentClockSeconds
+        }
         return IncidentClockDetails(
             minute = (clockSeconds + 59) / 60,
-            clock = formatClockSeconds(clockSeconds),
+            clock = if (rules.timekeeping.addedTimeEnabled && durationSeconds != null && rawSeconds > durationSeconds) {
+                formatAddedTimeIncidentClock(regulationOffsetSeconds + durationSeconds, rawSeconds - durationSeconds)
+            } else if (rules.timekeeping.addedTimeEnabled) {
+                formatClockSecondsAsMinutes(clockSeconds)
+            } else {
+                formatClockSeconds(clockSeconds)
+            },
             clockSeconds = clockSeconds,
         )
     }
@@ -1551,6 +1632,13 @@ class DefaultMatchContentComponent(
         } else {
             "${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}"
         }
+    }
+
+    private fun formatClockSecondsAsMinutes(seconds: Int): String {
+        val safeSeconds = seconds.coerceAtLeast(0)
+        val minutes = safeSeconds / 60
+        val remainingSeconds = safeSeconds % 60
+        return "$minutes:${remainingSeconds.toString().padStart(2, '0')}"
     }
 
     private fun buildPendingIncident(

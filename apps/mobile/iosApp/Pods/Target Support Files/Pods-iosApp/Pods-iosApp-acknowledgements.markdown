@@ -413,6 +413,10 @@ This application makes use of the following third party libraries:
    limitations under the License.
 
 
+## FirebaseAnalytics
+
+Copyright 2022 Google
+
 ## FirebaseCore
 
 
@@ -1648,6 +1652,14 @@ This application makes use of the following third party libraries:
    See the License for the specific language governing permissions and
    limitations under the License.
 
+
+## GoogleAdsOnDeviceConversion
+
+Copyright 2024 Google
+
+## GoogleAppMeasurement
+
+Copyright 2022 Google
 
 ## GoogleDataTransport
 

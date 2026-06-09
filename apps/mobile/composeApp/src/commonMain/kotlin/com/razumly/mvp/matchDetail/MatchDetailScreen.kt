@@ -188,6 +188,41 @@ private fun formatClockSeconds(seconds: Int): String {
     }
 }
 
+private fun formatClockSecondsAsMinutes(seconds: Int): String {
+    val safeSeconds = seconds.coerceAtLeast(0)
+    val minutes = safeSeconds / 60
+    val remainingSeconds = safeSeconds % 60
+    return "$minutes:${remainingSeconds.toString().padStart(2, '0')}"
+}
+
+private fun durationSecondsForSegmentSequence(
+    rules: ResolvedMatchRulesMVP,
+    sequence: Int,
+): Int? {
+    val durationMinutes = rules.timekeeping.segmentDurationMinutesBySequence.getOrNull(sequence - 1)
+        ?: rules.timekeeping.segmentDurationMinutes
+    return durationMinutes?.takeIf { it > 0 }?.times(60)
+}
+
+private fun regulationOffsetSecondsForSegment(
+    segment: MatchSegmentMVP?,
+    rules: ResolvedMatchRulesMVP,
+): Int {
+    if (segment == null || !rules.timekeeping.addedTimeEnabled) return 0
+    val sequence = segment.sequence.coerceAtLeast(1)
+    var offsetSeconds = 0
+    for (index in 1 until sequence) {
+        offsetSeconds += durationSecondsForSegmentSequence(rules, index) ?: 0
+    }
+    return offsetSeconds
+}
+
+private fun formatAddedTimeIncidentClock(regulationEndSeconds: Int, addedSeconds: Int): String {
+    val regulationMinute = (regulationEndSeconds / 60).coerceAtLeast(0)
+    val addedMinute = ((addedSeconds.coerceAtLeast(1) + 59) / 60).coerceAtLeast(1)
+    return "$regulationMinute+$addedMinute"
+}
+
 private fun shouldShowMatchStatusBlock(match: MatchMVP): Boolean {
     val statusReason = match.statusReason?.trim().orEmpty()
     val resultStatus = match.resultStatus?.trim()?.uppercase().orEmpty()
@@ -525,7 +560,10 @@ fun MatchDetailScreen(
             ?: rules.timekeeping.segmentDurationMinutes
     } ?: rules.timekeeping.segmentDurationMinutes
     val activeSegmentDurationSeconds = activeSegmentDurationMinutes?.takeIf { it > 0 }?.times(60)
+    val useCumulativeClock = rules.timekeeping.addedTimeEnabled
+    val activeSegmentRegulationOffsetSeconds = regulationOffsetSecondsForSegment(activeSegment, rules)
     val regulationDurationSeconds = activeSegmentDurationSeconds ?: 0
+    val activeSegmentRegulationEndSeconds = activeSegmentRegulationOffsetSeconds + regulationDurationSeconds
     val hasMatchClock = rules.timekeeping.timerMode != "NONE" && activeSegmentDurationSeconds != null
     val activeSegmentStartedAt = parseMatchInstant(activeSegment?.startedAt)
     val activeSegmentEndedAt = parseMatchInstant(activeSegment?.endedAt)
@@ -534,10 +572,15 @@ fun MatchDetailScreen(
             .coerceAtLeast(0L)
             .toInt()
     } ?: 0
-    val clockSeconds = if (hasMatchClock && rules.timekeeping.stopAtRegulationEnd) {
+    val segmentClockSeconds = if (hasMatchClock && rules.timekeeping.stopAtRegulationEnd) {
         rawClockSeconds.coerceAtMost(regulationDurationSeconds)
     } else {
         rawClockSeconds
+    }
+    val clockSeconds = if (useCumulativeClock) {
+        activeSegmentRegulationOffsetSeconds + segmentClockSeconds
+    } else {
+        segmentClockSeconds
     }
     val clockInAddedTime = hasMatchClock &&
         rules.timekeeping.addedTimeEnabled &&
@@ -551,17 +594,24 @@ fun MatchDetailScreen(
         activeSegmentEndedAt == null &&
         rules.timekeeping.stopAtRegulationEnd &&
         rawClockSeconds >= regulationDurationSeconds
+    val displayClockFormatter: (Int) -> String = if (useCumulativeClock) ::formatClockSecondsAsMinutes else ::formatClockSeconds
     val clockDisplay = when {
         !hasMatchClock -> ""
-        activeSegmentStartedAt == null -> formatClockSeconds(0)
+        activeSegmentStartedAt == null -> displayClockFormatter(if (useCumulativeClock) activeSegmentRegulationOffsetSeconds else 0)
         clockInAddedTime ->
-            "${formatClockSeconds(regulationDurationSeconds)} +${formatClockSeconds(rawClockSeconds - regulationDurationSeconds)}"
-        else -> formatClockSeconds(clockSeconds)
+            "${displayClockFormatter(if (useCumulativeClock) activeSegmentRegulationEndSeconds else regulationDurationSeconds)} +${formatClockSeconds(rawClockSeconds - regulationDurationSeconds)}"
+        else -> displayClockFormatter(clockSeconds)
     }
     val clockMinute = if (hasMatchClock && activeSegmentStartedAt != null) {
         (clockSeconds + 59) / 60
     } else {
         null
+    }
+    val incidentClockInput = when {
+        !hasMatchClock || activeSegmentStartedAt == null -> ""
+        useCumulativeClock && clockInAddedTime ->
+            formatAddedTimeIncidentClock(activeSegmentRegulationEndSeconds, rawClockSeconds - regulationDurationSeconds)
+        else -> clockMinute?.toString().orEmpty()
     }
     var regulationAlertedTimerKey by remember(match.match.id) { mutableStateOf<String?>(null) }
     val regulationTimerKey = "${activeSegment?.id.orEmpty()}:${activeSegment?.startedAt.orEmpty()}"
@@ -674,7 +724,7 @@ fun MatchDetailScreen(
         if (options.isEmpty()) return
         pendingIncidentTarget = MatchIncidentDialogTarget(eventTeamId = resolvedTeamId)
         incidentType = defaultIncidentDialogType(rules, options)
-        incidentMinute = clockMinute?.toString().orEmpty()
+        incidentMinute = incidentClockInput
         incidentNote = ""
         incidentParticipantId = resolvedTeamId?.let { teamKey ->
             participantOptionsByTeam[teamKey]?.firstOrNull()?.selectionId
@@ -782,7 +832,7 @@ fun MatchDetailScreen(
             onParticipantSelected = { option -> incidentParticipantId = option?.selectionId },
             requiresParticipant = requiresParticipant,
             minute = incidentMinute,
-            onMinuteChange = { value -> incidentMinute = value.filter(Char::isDigit) },
+            onMinuteChange = { value -> incidentMinute = value.filter { char -> char.isDigit() || char == '+' } },
             note = incidentNote,
             onNoteChange = { value -> incidentNote = value },
             onSave = {
@@ -792,6 +842,7 @@ fun MatchDetailScreen(
                     eventRegistrationId = selectedParticipant?.eventRegistrationId,
                     participantUserId = selectedParticipant?.participantUserId,
                     minute = incidentMinute.toIntOrNull(),
+                    clockInput = incidentMinute,
                     note = incidentNote.takeIf(String::isNotBlank),
                 )
                 clearIncidentDialog()
@@ -1335,40 +1386,46 @@ fun MatchDetailScreen(
                 tonalElevation = 3.dp,
                 shadowElevation = 6.dp,
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Button(
-                        onClick = mapComponent::toggleMap,
-                        modifier = Modifier.onGloballyPositioned {
-                            mapRevealCenter = it.boundsInWindow().center
-                        }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        Button(
+                            onClick = mapComponent::toggleMap,
+                            modifier = Modifier.onGloballyPositioned {
+                                mapRevealCenter = it.boundsInWindow().center
+                            }
                         ) {
-                            Text(fieldLocationLabel)
-                            Icon(
-                                imageVector = Icons.Default.Place,
-                                contentDescription = "Show field on map",
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(fieldLocationLabel)
+                                Icon(
+                                    imageVector = Icons.Default.Place,
+                                    contentDescription = "Show field on map",
+                                )
+                            }
                         }
-                    }
-                    Button(
-                        onClick = { showMatchDetails = !showMatchDetails },
-                        modifier = Modifier.padding(start = 8.dp),
-                    ) {
-                        Text(if (showMatchDetails) "Hide Match Details" else "Match Details")
+                        Button(
+                            onClick = { showMatchDetails = !showMatchDetails },
+                        ) {
+                            Text(if (showMatchDetails) "Hide Match Details" else "Match Details")
+                        }
                     }
                     locationTarget.warningDistanceMiles?.let { distance ->
                         Row(
-                            modifier = Modifier.padding(start = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Warning,
@@ -2133,6 +2190,10 @@ private fun resolveScoringIncidentParticipantLabel(
     return if (jersey == null) name else "$name #$jersey"
 }
 
+private fun incidentTimeLabel(incident: com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP): String? =
+    incident.clock?.trim()?.takeIf(String::isNotBlank)
+        ?: incident.minute?.let { minute -> "$minute'" }
+
 internal fun buildIncidentSummary(
     incident: com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP,
     team1: TeamWithRelations?,
@@ -2150,8 +2211,7 @@ internal fun buildIncidentSummary(
             team2?.team?.id -> resolveScoringIncidentParticipantLabel(incident.participantUserId, incident.eventRegistrationId, team2)
             else -> null
         }
-        val minuteLabel = incident.minute?.let { minute -> "$minute'" }
-        return listOfNotNull(teamLabel, scoringParticipantLabel, incident.clock, minuteLabel)
+        return listOfNotNull(teamLabel, scoringParticipantLabel, incidentTimeLabel(incident))
             .joinToString(" | ")
             .ifBlank { incidentLabel(incident.incidentType) }
     }
@@ -2160,12 +2220,11 @@ internal fun buildIncidentSummary(
         team2?.team?.id -> resolveIncidentParticipantLabel(incident.participantUserId, incident.eventRegistrationId, team2)
         else -> null
     }
-    val minuteLabel = incident.minute?.let { minute -> "$minute'" }
     val note = incident.note?.takeIf(String::isNotBlank)
     val pointDelta = incident.linkedPointDelta?.let { delta ->
         "point change ${if (delta > 0) "+" else ""}$delta"
     }
-    val extras = listOfNotNull(teamLabel, participantLabel, incident.clock, minuteLabel, pointDelta, note)
+    val extras = listOfNotNull(teamLabel, participantLabel, incidentTimeLabel(incident), pointDelta, note)
     return if (extras.isEmpty()) {
         incidentLabel(incident.incidentType)
     } else {

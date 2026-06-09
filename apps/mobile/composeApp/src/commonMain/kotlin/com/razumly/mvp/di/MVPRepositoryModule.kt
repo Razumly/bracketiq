@@ -38,10 +38,10 @@ val MVPRepositoryModule = module {
         TeamRepository(get(), get(), get(), get())
     } bind ITeamRepository::class
     single(createdAtStart = true) {
-        UserRepository(get(), get(), get(), get())
+        UserRepository(get(), get(), get(), get(), get())
     } bind IUserRepository::class
     single {
-        MatchRepository(get(), get())
+        MatchRepository(get(), get(), get())
     } bind IMatchRepository::class
     single {
         PushNotificationsRepository(get(), get(), get())

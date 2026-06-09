@@ -35,6 +35,23 @@ data class AppleMobileLoginRequestDto(
 )
 
 @Serializable
+data class WatchSetupRequestDto(
+    val platform: String = "android",
+)
+
+@Serializable
+data class WatchSetupResponseDto(
+    val setupToken: String,
+    val expiresInSeconds: Int,
+)
+
+@Serializable
+data class WatchSetupMessageDto(
+    val setupToken: String,
+    val issuedAt: String,
+)
+
+@Serializable
 data class RegisterRequestDto(
     val email: String,
     val password: String,

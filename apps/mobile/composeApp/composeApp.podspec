@@ -1,6 +1,6 @@
 Pod::Spec.new do |spec|
     spec.name                     = 'composeApp'
-    spec.version                  = '1.5.12'
+    spec.version                  = '1.5.14'
     spec.homepage                 = 'https://example.com'
     spec.source                   = { :http=> ''}
     spec.authors                  = ''
@@ -9,6 +9,7 @@ Pod::Spec.new do |spec|
     spec.vendored_frameworks      = 'build/cocoapods/framework/ComposeApp.framework'
     spec.libraries                = 'c++'
     spec.ios.deployment_target    = '15.3'
+    spec.dependency 'FirebaseAnalytics'
     spec.dependency 'FirebaseCore'
     spec.dependency 'FirebaseMessaging'
     spec.dependency 'GooglePlaces'
