@@ -268,6 +268,11 @@ fun CreateOrEditTeamScreen(
     }
     val scope = rememberCoroutineScope()
     val showEditDetails = isCaptain || isNewTeam
+    val screenTitle = when {
+        isNewTeam -> "Create Team"
+        showEditDetails -> "Edit Team"
+        else -> teamName.trim().ifBlank { "Team" }
+    }
     val isBusy = isSaving || isRequestingRefund
     val canEditFields = showEditDetails && !isBusy
     val canChargeRegistration = currentUser.hasStripeAccount == true || team.team.registrationPriceCents > 0
@@ -766,7 +771,7 @@ fun CreateOrEditTeamScreen(
         contentWindowInsets = NoScaffoldContentInsets,
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(if (isNewTeam) "Create Team" else "Edit Team") },
+                title = { Text(screenTitle) },
                 navigationIcon = {
                     PlatformBackButton(
                         onBack = { if (!isSaving) onDismiss() },
@@ -783,8 +788,10 @@ fun CreateOrEditTeamScreen(
                 .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp + navBottomPadding)
                 .verticalScroll(rememberScrollState())
         ) {
-            Text("Team Setup", style = MaterialTheme.typography.titleLarge)
-            Spacer(modifier = Modifier.height(8.dp))
+            if (showEditDetails) {
+                Text("Team Setup", style = MaterialTheme.typography.titleLarge)
+                Spacer(modifier = Modifier.height(8.dp))
+            }
 
             inviteError?.let {
                 Text(
@@ -802,23 +809,26 @@ fun CreateOrEditTeamScreen(
                 )
             }
 
-            StandardTextField(
-                value = teamName,
-                onValueChange = {
-                    teamName = it
-                },
-                modifier = Modifier.fillMaxWidth(),
-                label = "Team Name",
-                isError = showEditDetails && !isTeamNameValid,
-                supportingText = if (showEditDetails && !isTeamNameValid) {
-                    "Team name is required."
-                } else {
-                    ""
-                },
-                readOnly = !canEditFields
-            )
+            if (showEditDetails) {
+                StandardTextField(
+                    value = teamName,
+                    onValueChange = {
+                        teamName = it
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "Team Name",
+                    isError = !isTeamNameValid,
+                    supportingText = if (!isTeamNameValid) {
+                        "Team name is required."
+                    } else {
+                        ""
+                    },
+                    readOnly = !canEditFields
+                )
 
-            Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
             StandardTextField(
                 value = teamSizeInput,
                 onValueChange = { teamSizeInput = it },
@@ -1598,7 +1608,18 @@ private fun TeamPlayerRosterRow(
     ) {
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
             val shouldStackControls = maxWidth < TeamPlayerInlineMinWidth
-            if (shouldStackControls) {
+            if (!showEditDetails) {
+                PlayerCard(
+                    player = player,
+                    isPending = isPending,
+                    modifier = Modifier.fillMaxWidth(),
+                    jerseyNumber = jerseyNumber,
+                    trailingContent = {
+                        JerseyNumberReadOnlyView(value = jerseyNumber)
+                    },
+                    showDivider = false,
+                )
+            } else if (shouldStackControls) {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(8.dp),

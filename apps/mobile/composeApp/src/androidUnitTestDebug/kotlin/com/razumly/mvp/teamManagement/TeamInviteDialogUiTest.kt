@@ -1,20 +1,32 @@
 package com.razumly.mvp.teamManagement
 
 import android.app.Application
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.TeamInviteEventTeamOption
 import com.razumly.mvp.core.data.repositories.TeamInviteFreeAgentContext
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -132,6 +144,66 @@ class TeamInviteDialogUiTest {
         assertEquals(false, inviteSubmitted)
     }
 
+    @Test
+    fun existing_team_read_only_view_uses_team_name_title_and_inline_jersey() {
+        val rosterPlayer = user("player_1", "Alex", "Setter")
+        val currentUser = user("viewer_1", "Casey", "Viewer")
+        val team = team("team_1", "Read Only Rockets").copy(
+            playerIds = listOf(rosterPlayer.id),
+            playerRegistrations = listOf(
+                TeamPlayerRegistration(
+                    id = "registration_1",
+                    teamId = "team_1",
+                    userId = rosterPlayer.id,
+                    jerseyNumber = "24",
+                )
+            ),
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                Box(
+                    modifier = Modifier
+                        .width(420.dp)
+                        .height(900.dp)
+                ) {
+                    CreateOrEditTeamScreen(
+                        team = TeamWithPlayers(
+                            team = team,
+                            captain = null,
+                            players = listOf(rosterPlayer),
+                            pendingPlayers = emptyList(),
+                        ),
+                        sports = emptyList(),
+                        friends = emptyList(),
+                        freeAgents = emptyList(),
+                        suggestions = emptyList(),
+                        onSearch = {},
+                        onFinish = {},
+                        onLeaveTeam = {},
+                        onDelete = {},
+                        onDismiss = {},
+                        deleteEnabled = false,
+                        selectedEvent = null,
+                        isCaptain = false,
+                        currentUser = currentUser,
+                        isNewTeam = false,
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Read Only Rockets").assertIsDisplayed()
+        composeRule.onAllNodesWithText("Edit Team").assertCountEquals(0)
+        composeRule.onAllNodesWithText("Team Name").assertCountEquals(0)
+
+        val playerBounds = composeRule.onNodeWithText("Alex Setter").getUnclippedBoundsInRoot()
+        val jerseyBounds = composeRule.onNodeWithText("Jersey").getUnclippedBoundsInRoot()
+
+        assertTrue(jerseyBounds.left > playerBounds.left)
+        assertTrue(jerseyBounds.top < playerBounds.bottom && jerseyBounds.bottom > playerBounds.top)
+    }
+
     private fun inviteContext(): TeamInviteFreeAgentContext =
         TeamInviteFreeAgentContext(
             users = listOf(user("user-free-agent", "Jane", "Free")),
@@ -179,5 +251,16 @@ class TeamInviteDialogUiTest {
         isMinor = false,
         isIdentityHidden = false,
         id = id,
+    )
+
+    private fun team(id: String, name: String): Team = Team(
+        division = "Open",
+        name = name,
+        captainId = "captain_1",
+        managerId = "manager_1",
+        playerIds = listOf("captain_1"),
+        teamSize = 4,
+        id = id,
+        sport = "Volleyball",
     )
 }

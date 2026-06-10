@@ -42,6 +42,7 @@ import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.PlayerCard
+import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.util.LocalLoadingHandler
 
@@ -181,74 +182,80 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
         },
         floatingActionButtonPosition = FabPosition.End
     ) { paddingValues ->
-        if (currentTeams.isEmpty()) {
-            if (isCurrentTeamsLoading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(paddingValues)
-                        .padding(bottom = navBottomPadding),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator()
-                }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(paddingValues)
-                        .padding(bottom = navBottomPadding),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    EmptyTeamCallToAction(
-                        onClick = onCreateTeamClick,
-                        buttonSize = 112.dp,
-                        icon = Icons.Default.Add,
+        PullToRefreshContainer(
+            isRefreshing = isCurrentTeamsLoading,
+            onRefresh = component::refreshTeams,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues),
+        ) {
+            if (currentTeams.isEmpty()) {
+                if (isCurrentTeamsLoading) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(bottom = navBottomPadding),
+                        contentAlignment = Alignment.Center,
                     ) {
-                        Text("Create your first team", fontSize = 28.sp)
+                        CircularProgressIndicator()
                     }
-                }
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(paddingValues),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = navBottomPadding + 16.dp),
-                state = lazyListState,
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                selectedFreeAgent?.let { freeAgent ->
-                    item(key = "selected-free-agent-suggestion") {
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp),
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(bottom = navBottomPadding),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        EmptyTeamCallToAction(
+                            onClick = onCreateTeamClick,
+                            buttonSize = 112.dp,
+                            icon = Icons.Default.Add,
                         ) {
-                            Text(
-                                text = "Suggested free agent from event",
-                                style = MaterialTheme.typography.titleSmall,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            )
-                            PlayerCard(
-                                player = freeAgent,
-                                modifier = Modifier.padding(horizontal = 12.dp),
-                            )
-                            Text(
-                                text = "Open a team and invite this player from the free-agent list.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            )
+                            Text("Create your first team", fontSize = 28.sp)
                         }
                     }
                 }
-                items(currentTeams) { team ->
-                    TeamCard(
-                        modifier = Modifier.clickable(onClick = {
-                            createTeam = false
-                            component.selectTeam(team)
-                        }), team = team
-                    )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = navBottomPadding + 16.dp),
+                    state = lazyListState,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    selectedFreeAgent?.let { freeAgent ->
+                        item(key = "selected-free-agent-suggestion") {
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp),
+                            ) {
+                                Text(
+                                    text = "Suggested free agent from event",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                )
+                                PlayerCard(
+                                    player = freeAgent,
+                                    modifier = Modifier.padding(horizontal = 12.dp),
+                                )
+                                Text(
+                                    text = "Open a team and invite this player from the free-agent list.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                )
+                            }
+                        }
+                    }
+                    items(currentTeams) { team ->
+                        TeamCard(
+                            modifier = Modifier.clickable(onClick = {
+                                createTeam = false
+                                component.selectTeam(team)
+                            }), team = team
+                        )
+                    }
                 }
             }
         }

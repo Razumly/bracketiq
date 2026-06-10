@@ -65,6 +65,7 @@ interface TeamManagementComponent {
     fun updateTeam(team: Team, onResult: (Result<Unit>) -> Unit = {})
     fun leaveTeam(team: Team)
     fun requestTeamRefund(team: Team, reason: String, onResult: (Result<Unit>) -> Unit = {})
+    fun refreshTeams()
     fun loadTeamMemberCompliance(teamId: String)
     fun deselectTeam()
     fun deleteTeam(team: TeamWithPlayers)
@@ -131,7 +132,8 @@ class DefaultTeamManagementComponent(
                 emptyList()
             }
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
-    override val isCurrentTeamsLoading = currentUserIdFlow
+    private val _isTeamsRefreshing = MutableStateFlow(false)
+    private val repositoryCurrentTeamsLoading = currentUserIdFlow
         .flatMapLatest { currentUserId ->
             if (currentUserId.isBlank()) {
                 flowOf(true)
@@ -140,6 +142,12 @@ class DefaultTeamManagementComponent(
             }
         }
         .stateIn(scope, SharingStarted.Eagerly, true)
+    override val isCurrentTeamsLoading = combine(
+        repositoryCurrentTeamsLoading,
+        _isTeamsRefreshing,
+    ) { isRepositoryLoading, isRefreshing ->
+        isRepositoryLoading || isRefreshing
+    }.stateIn(scope, SharingStarted.Eagerly, true)
 
     private val _selectedTeam = MutableStateFlow<TeamWithPlayers?>(null)
     override val selectedTeam = _selectedTeam.asStateFlow()
@@ -361,6 +369,23 @@ class DefaultTeamManagementComponent(
                 }
             loadingHandler?.hideLoading()
             onResult(result)
+        }
+    }
+
+    override fun refreshTeams() {
+        val currentUserId = currentUser.id.trim()
+        if (currentUserId.isBlank() || _isTeamsRefreshing.value) return
+
+        scope.launch {
+            _isTeamsRefreshing.value = true
+            try {
+                teamRepository.getTeamsForUser(currentUserId)
+                    .onFailure {
+                        _errorState.value = it.userMessage("Failed to refresh teams.")
+                    }
+            } finally {
+                _isTeamsRefreshing.value = false
+            }
         }
     }
 
