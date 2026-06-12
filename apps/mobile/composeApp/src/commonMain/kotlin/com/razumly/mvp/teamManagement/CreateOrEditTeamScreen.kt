@@ -1,5 +1,7 @@
 package com.razumly.mvp.teamManagement
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -17,8 +20,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -109,6 +115,8 @@ private fun normalizeJerseyNumberInput(value: String?): String =
 private val TeamPlayerInlineMinWidth = 560.dp
 private val JerseyNumberFieldWidth = 88.dp
 private val JerseyNumberFieldHeight = 56.dp
+private val LegacyDivisionWhitespaceRegex = "\\s+".toRegex()
+private val LegacyDivisionAgeTokenRegex = Regex("^(?:u\\d+|\\d+u|\\d+\\+|\\d+plus)$", RegexOption.IGNORE_CASE)
 
 internal fun formatRegistrationCostInput(registrationPriceCents: Int): String =
     registrationPriceCents
@@ -190,6 +198,67 @@ private fun formatJoinPolicy(joinPolicy: String): String = when {
     else -> "Closed"
 }
 
+private data class ReadOnlyTeamDivisionLabels(
+    val gender: String,
+    val skillDivision: String,
+    val ageDivision: String,
+)
+
+private fun formatGenderDivisionLabel(value: String): String {
+    return when (value.trim().uppercase()) {
+        "M" -> "Men's"
+        "F" -> "Women's"
+        "C" -> "CoEd"
+        else -> value.toDivisionDisplayLabel()
+    }
+}
+
+private fun parseLegacyTeamDivisionLabels(rawDivision: String): ReadOnlyTeamDivisionLabels? {
+    val tokens = rawDivision
+        .trim()
+        .split(LegacyDivisionWhitespaceRegex)
+        .filter(String::isNotBlank)
+    if (tokens.isEmpty()) return null
+
+    val gender = when (tokens.first().trim().lowercase()) {
+        "coed", "co-ed" -> "CoEd"
+        "mens", "men", "men's" -> "Men's"
+        "womens", "women", "women's" -> "Women's"
+        else -> null
+    } ?: return null
+
+    val remaining = tokens.drop(1)
+    val ageToken = remaining.lastOrNull { token -> LegacyDivisionAgeTokenRegex.matches(token) }
+    val skillToken = remaining.firstOrNull { token -> token != ageToken }
+    return ReadOnlyTeamDivisionLabels(
+        gender = gender,
+        skillDivision = skillToken?.toDivisionDisplayLabel().orEmpty(),
+        ageDivision = ageToken?.toDivisionDisplayLabel().orEmpty(),
+    )
+}
+
+private fun readOnlyTeamDivisionLabels(
+    rawDivision: String?,
+    normalizedGender: String,
+    resolvedSkillDivisionTypeName: String,
+    resolvedAgeDivisionTypeName: String,
+): ReadOnlyTeamDivisionLabels {
+    val parsedLegacy = rawDivision
+        ?.takeIf(String::isNotBlank)
+        ?.let(::parseLegacyTeamDivisionLabels)
+    return ReadOnlyTeamDivisionLabels(
+        gender = parsedLegacy?.gender
+            ?: formatGenderDivisionLabel(normalizedGender)
+                .ifBlank { "Unassigned" },
+        skillDivision = parsedLegacy?.skillDivision
+            ?.takeIf(String::isNotBlank)
+            ?: resolvedSkillDivisionTypeName.trim().ifBlank { "Unassigned" },
+        ageDivision = parsedLegacy?.ageDivision
+            ?.takeIf(String::isNotBlank)
+            ?: resolvedAgeDivisionTypeName.trim().ifBlank { "Unassigned" },
+    )
+}
+
 private fun String.isProbablyEmail(): Boolean {
     val value = trim()
     if (value.isBlank() || value.length > 254 || value.any(Char::isWhitespace)) return false
@@ -266,6 +335,7 @@ fun CreateOrEditTeamScreen(
     var expandedComplianceUserIds by remember(team.team.id, memberCompliance) {
         mutableStateOf<Set<String>>(emptySet())
     }
+    var teamDetailsExpanded by remember(team.team.id) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val showEditDetails = isCaptain || isNewTeam
     val screenTitle = when {
@@ -560,6 +630,19 @@ fun CreateOrEditTeamScreen(
         skillDivisionTypeName = resolvedSkillDivisionTypeName,
         ageDivisionTypeName = resolvedAgeDivisionTypeName,
     )
+    val readOnlyDivisionLabels = remember(
+        team.team.division,
+        normalizedDivisionGender,
+        resolvedSkillDivisionTypeName,
+        resolvedAgeDivisionTypeName,
+    ) {
+        readOnlyTeamDivisionLabels(
+            rawDivision = team.team.division,
+            normalizedGender = normalizedDivisionGender,
+            resolvedSkillDivisionTypeName = resolvedSkillDivisionTypeName,
+            resolvedAgeDivisionTypeName = resolvedAgeDivisionTypeName,
+        )
+    }
     val resolvedDivisionToken = buildGenderSkillAgeDivisionToken(
         gender = normalizedDivisionGender,
         skillDivisionTypeId = normalizedSkillDivisionTypeId,
@@ -651,28 +734,43 @@ fun CreateOrEditTeamScreen(
             ?.let { knownUsersById[it]?.displayName ?: "Unknown user" }
     }
     val activeStaffAssignments = remember(syncedTeam) { syncedTeam.activeStaffAssignments() }
-    val managerLabel = activeStaffAssignments
+    fun staffUserFor(userId: String?): UserData? = userId
+        ?.takeIf(String::isNotBlank)
+        ?.let(knownUsersById::get)
+
+    val managerUserId = activeStaffAssignments
         .firstOrNull { assignment -> assignment.normalizedRole() == "MANAGER" }
         ?.userId
-        ?.let(resolveUserName)
-        ?: resolveUserName(syncedTeam.managerId ?: syncedTeam.captainId)
-        ?: "Unassigned"
-    val headCoachLabel = activeStaffAssignments
+        ?: syncedTeam.managerId
+        ?: syncedTeam.captainId
+    val managerUser = staffUserFor(managerUserId)
+    val managerFallbackLabels = if (managerUser == null) {
+        listOf(resolveUserName(managerUserId) ?: "Unassigned")
+    } else {
+        emptyList()
+    }
+    val headCoachUserId = activeStaffAssignments
         .firstOrNull { assignment -> assignment.normalizedRole() == "HEAD_COACH" }
         ?.userId
-        ?.let(resolveUserName)
-        ?: resolveUserName(syncedTeam.headCoachId)
-        ?: "Unassigned"
+        ?: syncedTeam.headCoachId
+    val headCoachUser = staffUserFor(headCoachUserId)
+    val headCoachFallbackLabels = if (headCoachUser == null) {
+        listOf(resolveUserName(headCoachUserId) ?: "Unassigned")
+    } else {
+        emptyList()
+    }
     val assistantCoachIds = activeStaffAssignments
         .filter { assignment -> assignment.normalizedRole() == "ASSISTANT_COACH" }
         .map(TeamStaffAssignment::userId)
         .ifEmpty { syncedTeam.coachIds }
-    val assistantCoachLabel = if (assistantCoachIds.isNotEmpty()) {
-        assistantCoachIds.joinToString { coachId ->
-            resolveUserName(coachId) ?: "Unknown user"
-        }
+        .distinct()
+    val assistantCoachUsers = assistantCoachIds.mapNotNull(::staffUserFor)
+    val assistantCoachFallbackLabels = if (assistantCoachIds.isEmpty()) {
+        listOf("Unassigned")
     } else {
-        "Unassigned"
+        assistantCoachIds
+            .filter { coachId -> staffUserFor(coachId) == null }
+            .map { coachId -> resolveUserName(coachId) ?: "Unknown user" }
     }
     val existingPlayerRegistrationsByUserId = remember(syncedTeam.playerRegistrations) {
         syncedTeam.playerRegistrations.associateBy(TeamPlayerRegistration::userId)
@@ -785,8 +883,9 @@ fun CreateOrEditTeamScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp + navBottomPadding)
+                .padding(bottom = navBottomPadding)
                 .verticalScroll(rememberScrollState())
+                .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp)
         ) {
             if (showEditDetails) {
                 Text("Team Setup", style = MaterialTheme.typography.titleLarge)
@@ -827,85 +926,85 @@ fun CreateOrEditTeamScreen(
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
-            }
 
-            StandardTextField(
-                value = teamSizeInput,
-                onValueChange = { teamSizeInput = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = "Team Size",
-                keyboardType = "number",
-                inputFilter = { value -> value.filter(Char::isDigit) },
-                readOnly = !canEditFields,
-                isError = showEditDetails && !isTeamSizeValid,
-                supportingText = if (showEditDetails && !isTeamSizeValid) {
-                    "Enter a team size greater than 0."
-                } else {
-                    ""
-                },
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-            PlatformDropdown(
-                selectedValue = sportInput,
-                onSelectionChange = { value -> sportInput = value },
-                options = sportOptions,
-                modifier = Modifier.fillMaxWidth(),
-                label = "Sport",
-                placeholder = "Select sport",
-                enabled = canEditFields,
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-            Text("Team Division")
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                PlatformDropdown(
-                    selectedValue = divisionGenderInput,
-                    onSelectionChange = { value ->
-                        divisionGenderInput = value
+                StandardTextField(
+                    value = teamSizeInput,
+                    onValueChange = { teamSizeInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "Team Size",
+                    keyboardType = "number",
+                    inputFilter = { value -> value.filter(Char::isDigit) },
+                    readOnly = !canEditFields,
+                    isError = !isTeamSizeValid,
+                    supportingText = if (!isTeamSizeValid) {
+                        "Enter a team size greater than 0."
+                    } else {
+                        ""
                     },
-                    options = genderOptions,
-                    modifier = Modifier.weight(1f),
-                    label = "Gender",
-                    placeholder = "Select gender",
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+                PlatformDropdown(
+                    selectedValue = sportInput,
+                    onSelectionChange = { value -> sportInput = value },
+                    options = sportOptions,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "Sport",
+                    placeholder = "Select sport",
                     enabled = canEditFields,
                 )
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Team Division")
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    PlatformDropdown(
+                        selectedValue = divisionGenderInput,
+                        onSelectionChange = { value ->
+                            divisionGenderInput = value
+                        },
+                        options = genderOptions,
+                        modifier = Modifier.weight(1f),
+                        label = "Gender",
+                        placeholder = "Select gender",
+                        enabled = canEditFields,
+                    )
+                    PlatformDropdown(
+                        selectedValue = skillDivisionTypeInput,
+                        onSelectionChange = { value ->
+                            skillDivisionTypeInput = value
+                        },
+                        options = skillDivisionOptions,
+                        modifier = Modifier.weight(1f),
+                        label = "Skill Division",
+                        placeholder = "Select skill",
+                        enabled = canEditFields,
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
                 PlatformDropdown(
-                    selectedValue = skillDivisionTypeInput,
+                    selectedValue = ageDivisionTypeInput,
                     onSelectionChange = { value ->
-                        skillDivisionTypeInput = value
+                        ageDivisionTypeInput = value
                     },
-                    options = skillDivisionOptions,
-                    modifier = Modifier.weight(1f),
-                    label = "Skill Division",
-                    placeholder = "Select skill",
+                    options = ageDivisionOptions,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "Age Division",
+                    placeholder = "Select age",
                     enabled = canEditFields,
                 )
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            PlatformDropdown(
-                selectedValue = ageDivisionTypeInput,
-                onSelectionChange = { value ->
-                    ageDivisionTypeInput = value
-                },
-                options = ageDivisionOptions,
-                modifier = Modifier.fillMaxWidth(),
-                label = "Age Division",
-                placeholder = "Select age",
-                enabled = canEditFields,
-            )
-            if (showEditDetails && !isTeamDivisionValid) {
-                Text(
-                    text = "Select gender, skill division, and age division.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
+                if (!isTeamDivisionValid) {
+                    Text(
+                        text = "Select gender, skill division, and age division.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -1043,18 +1142,23 @@ fun CreateOrEditTeamScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
             Text("Team Staff")
-            Text(
-                text = "Manager: $managerLabel",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                text = "Head Coach: $headCoachLabel",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                text = "Assistant Coaches: $assistantCoachLabel",
-                style = MaterialTheme.typography.bodySmall,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                TeamStaffRoleSection(
+                    role = "Manager",
+                    users = listOfNotNull(managerUser),
+                    fallbackLabels = managerFallbackLabels,
+                )
+                TeamStaffRoleSection(
+                    role = "Head Coach",
+                    users = listOfNotNull(headCoachUser),
+                    fallbackLabels = headCoachFallbackLabels,
+                )
+                TeamStaffRoleSection(
+                    role = "Assistant Coaches",
+                    users = assistantCoachUsers,
+                    fallbackLabels = assistantCoachFallbackLabels,
+                )
+            }
             if (showEditDetails && !isNewTeam) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1091,6 +1195,20 @@ fun CreateOrEditTeamScreen(
                     text = "Save the team first to invite manager/coaches.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            if (!showEditDetails) {
+                Spacer(modifier = Modifier.height(16.dp))
+                ExpandableReadOnlyTeamDetails(
+                    teamSize = teamSizeInput.trim().ifBlank { syncedTeam.teamSize.toString() },
+                    sport = sportInput.trim().ifBlank { "Unassigned" },
+                    gender = readOnlyDivisionLabels.gender,
+                    skillDivision = readOnlyDivisionLabels.skillDivision,
+                    ageDivision = readOnlyDivisionLabels.ageDivision,
+                    expanded = teamDetailsExpanded,
+                    onToggleExpanded = { teamDetailsExpanded = !teamDetailsExpanded },
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
 
@@ -1917,6 +2035,165 @@ private fun JerseyNumberReadOnlyView(value: String) {
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface,
         )
+    }
+}
+
+@Composable
+private fun ExpandableReadOnlyTeamDetails(
+    teamSize: String,
+    sport: String,
+    gender: String,
+    skillDivision: String,
+    ageDivision: String,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val bottomCornerSize = if (expanded) 0.dp else 16.dp
+    val details = listOf(
+        "Team Size" to teamSize,
+        "Sport" to sport,
+        "Gender" to gender,
+        "Skill Division" to skillDivision,
+        "Age Division" to ageDivision,
+    )
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = if (expanded) 0.dp else 6.dp),
+            shape = RoundedCornerShape(
+                topStart = 16.dp,
+                topEnd = 16.dp,
+                bottomStart = bottomCornerSize,
+                bottomEnd = bottomCornerSize,
+            ),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggleExpanded)
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = if (expanded) {
+                            "Collapse team details"
+                        } else {
+                            "Expand team details"
+                        }
+                    }
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Team Details",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        AnimatedVisibility(visible = expanded) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 6.dp)
+                    .offset(y = (-1).dp),
+                shape = RoundedCornerShape(
+                    topStart = 0.dp,
+                    topEnd = 0.dp,
+                    bottomStart = 16.dp,
+                    bottomEnd = 16.dp,
+                ),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            ) {
+                ReadOnlyDetailsGrid(
+                    values = details,
+                    modifier = Modifier.padding(16.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReadOnlyDetailsGrid(
+    values: List<Pair<String, String>>,
+    modifier: Modifier = Modifier,
+) {
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        val columns = if (maxWidth >= 360.dp) 2 else 1
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            values.chunked(columns).forEach { rowValues ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    rowValues.forEach { (label, value) ->
+                        ReadOnlyLabeledValue(
+                            label = label,
+                            value = value.ifBlank { "Unassigned" },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    repeat(columns - rowValues.size) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TeamStaffRoleSection(
+    role: String,
+    users: List<UserData>,
+    fallbackLabels: List<String>,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = role,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (users.isEmpty() && fallbackLabels.isEmpty()) {
+            Text(
+                text = "Unassigned",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        users.forEach { user ->
+            PlayerCard(
+                player = user,
+                modifier = Modifier.fillMaxWidth(),
+                showDivider = false,
+            )
+        }
+        fallbackLabels.forEach { label ->
+            Text(
+                text = label.ifBlank { "Unassigned" },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
     }
 }
 

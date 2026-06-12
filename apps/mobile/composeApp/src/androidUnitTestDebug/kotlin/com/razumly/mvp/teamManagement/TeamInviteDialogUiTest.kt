@@ -16,6 +16,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Team
@@ -145,10 +146,12 @@ class TeamInviteDialogUiTest {
     }
 
     @Test
-    fun existing_team_read_only_view_uses_team_name_title_and_inline_jersey() {
+    fun existing_team_read_only_view_uses_team_name_title_inline_jersey_and_expandable_details() {
         val rosterPlayer = user("player_1", "Alex", "Setter")
         val currentUser = user("viewer_1", "Casey", "Viewer")
+        val manager = user("manager_1", "Morgan", "Manager")
         val team = team("team_1", "Read Only Rockets").copy(
+            division = "CoEd C 18+",
             playerIds = listOf(rosterPlayer.id),
             playerRegistrations = listOf(
                 TeamPlayerRegistration(
@@ -188,6 +191,7 @@ class TeamInviteDialogUiTest {
                         isCaptain = false,
                         currentUser = currentUser,
                         isNewTeam = false,
+                        staffUsersById = mapOf(manager.id to manager),
                     )
                 }
             }
@@ -196,12 +200,34 @@ class TeamInviteDialogUiTest {
         composeRule.onNodeWithText("Read Only Rockets").assertIsDisplayed()
         composeRule.onAllNodesWithText("Edit Team").assertCountEquals(0)
         composeRule.onAllNodesWithText("Team Name").assertCountEquals(0)
+        composeRule.onAllNodesWithText("Team Setup").assertCountEquals(0)
+        composeRule.onAllNodesWithText("Team Size").assertCountEquals(0)
+        composeRule.onAllNodesWithText("CoEd").assertCountEquals(0)
+        composeRule.onAllNodesWithText("CoEd C 18+").assertCountEquals(0)
+        composeRule.onAllNodes(hasSetTextAction()).assertCountEquals(0)
+        composeRule.onNodeWithText("Team Staff").assertIsDisplayed()
+        composeRule.onNodeWithText("Morgan Manager").assertIsDisplayed()
+        composeRule.onAllNodesWithText("Manager: Morgan Manager").assertCountEquals(0)
 
         val playerBounds = composeRule.onNodeWithText("Alex Setter").getUnclippedBoundsInRoot()
         val jerseyBounds = composeRule.onNodeWithText("Jersey").getUnclippedBoundsInRoot()
 
         assertTrue(jerseyBounds.left > playerBounds.left)
         assertTrue(jerseyBounds.top < playerBounds.bottom && jerseyBounds.bottom > playerBounds.top)
+
+        composeRule
+            .onNodeWithContentDescription("Expand team details")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        composeRule.onNodeWithContentDescription("Collapse team details").assertIsDisplayed()
+        composeRule.onNodeWithText("Team Size").assertIsDisplayed()
+        composeRule.onNodeWithText("Sport").assertIsDisplayed()
+        composeRule.onNodeWithText("Volleyball").assertIsDisplayed()
+        composeRule.onNodeWithText("CoEd").assertIsDisplayed()
+        composeRule.onNodeWithText("C").assertIsDisplayed()
+        composeRule.onNodeWithText("18+").assertIsDisplayed()
+        composeRule.onAllNodesWithText("CoEd C 18+").assertCountEquals(0)
     }
 
     private fun inviteContext(): TeamInviteFreeAgentContext =
