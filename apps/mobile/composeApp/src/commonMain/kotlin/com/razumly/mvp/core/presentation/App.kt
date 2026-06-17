@@ -96,6 +96,7 @@ fun App(root: RootComponent) {
     val unreadChatMessageCount by root.unreadChatMessageCount.collectAsState()
     val pendingInviteCount by root.pendingInviteCount.collectAsState()
     val appUpdatePrompt by root.appUpdatePrompt.collectAsState()
+    val centerNavAction by root.centerNavAction.collectAsState()
 
     val popupHandler = remember { PopupHandlerImpl() }
     val loadingHandler = remember { LoadingHandlerImpl() }
@@ -158,12 +159,15 @@ fun App(root: RootComponent) {
                 val shouldShowBottomNav = currentChild !is RootComponent.Child.Login &&
                     currentChild !is RootComponent.Child.Splash &&
                     currentChild !is RootComponent.Child.Chat &&
+                    currentChild !is RootComponent.Child.MatchContent &&
                     currentChild !is RootComponent.Child.ProfileCompletion
 
                 MVPBottomNavBar(
                     selectedPage = selectedPage,
                     unreadChatMessageCount = unreadChatMessageCount,
                     pendingInviteCount = pendingInviteCount,
+                    centerAction = centerNavAction,
+                    onCenterActionClick = root::onCenterNavActionSelected,
                     onPageSelected = { root.onTabSelected(it) },
                     showNavBar = shouldShowBottomNav
                 ) { paddingValues ->
@@ -352,7 +356,7 @@ private fun AppContent(
                 }
 
                 is RootComponent.Child.EventContent -> {
-                    EventDetailScreen(instance.component, instance.mapComponent)
+                    EventDetailScreen(instance.component, instance.mapComponent, instance.initialTab)
                 }
 
                 is RootComponent.Child.OrganizationDetail -> {

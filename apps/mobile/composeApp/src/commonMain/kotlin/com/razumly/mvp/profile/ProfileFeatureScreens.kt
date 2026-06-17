@@ -2210,6 +2210,7 @@ fun ProfileSectionScaffold(
     title: String,
     description: String,
     onBack: () -> Unit,
+    showBackButton: Boolean = true,
     onRefresh: (() -> Unit)? = null,
     isRefreshing: Boolean = false,
     scrollContent: Boolean = true,
@@ -2223,11 +2224,13 @@ fun ProfileSectionScaffold(
             CenterAlignedTopAppBar(
                 title = { Text(title) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                        )
+                    if (showBackButton) {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                            )
+                        }
                     }
                 },
             )

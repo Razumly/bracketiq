@@ -188,7 +188,49 @@ class MainActivity : ComponentActivity() {
         }
         Napier.d(tag = "DeepLink", message = "Effective segments: $effectiveSegments")
 
+        val queryEventId = getQueryParameter("eventId")?.trim().orEmpty()
+        val queryMatchId = getQueryParameter("matchId")?.trim().orEmpty()
+        if (queryEventId.isNotEmpty() && queryMatchId.isNotEmpty()) {
+            Napier.d(tag = "DeepLink", message = "Navigating to Match from query: $queryEventId/$queryMatchId")
+            return DeepLinkNav.Match(eventId = queryEventId, matchId = queryMatchId)
+        }
+
         return when {
+            effectiveSegments.size >= 4 -> {
+                val route = effectiveSegments[0].lowercase()
+                val eventId = effectiveSegments[1].trim()
+                val matchRoute = effectiveSegments[2].lowercase()
+                val matchId = effectiveSegments[3].trim()
+                if (
+                    (route == "event" ||
+                        route == "events" ||
+                        route == "tournament" ||
+                        route == "tournaments") &&
+                    (matchRoute == "match" || matchRoute == "matches") &&
+                    eventId.isNotEmpty() &&
+                    matchId.isNotEmpty()
+                ) {
+                    Napier.d(tag = "DeepLink", message = "Navigating to Match: $eventId/$matchId")
+                    DeepLinkNav.Match(eventId = eventId, matchId = matchId)
+                } else {
+                    Napier.d(tag = "DeepLink", message = "No matching deep link pattern found")
+                    null
+                }
+            }
+
+            effectiveSegments.size >= 2 &&
+                (effectiveSegments[0].lowercase() == "match" || effectiveSegments[0].lowercase() == "matches") &&
+                queryEventId.isNotEmpty() -> {
+                val matchId = effectiveSegments[1].trim()
+                if (matchId.isEmpty()) {
+                    Napier.w(tag = "DeepLink", message = "Deep link match id was blank")
+                    null
+                } else {
+                    Napier.d(tag = "DeepLink", message = "Navigating to Match: $queryEventId/$matchId")
+                    DeepLinkNav.Match(eventId = queryEventId, matchId = matchId)
+                }
+            }
+
             effectiveSegments.size >= 2 -> {
                 val route = effectiveSegments[0].lowercase()
                 val eventId = effectiveSegments[1].trim()

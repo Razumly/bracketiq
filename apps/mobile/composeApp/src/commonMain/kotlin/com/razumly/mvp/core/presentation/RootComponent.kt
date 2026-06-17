@@ -15,6 +15,7 @@ import com.razumly.mvp.chat.ChatGroupComponent
 import com.razumly.mvp.chat.ChatListComponent
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.AppUpdatePrompt
@@ -23,13 +24,16 @@ import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.StartupAuthState
 import com.razumly.mvp.core.data.repositories.IEventRepository
+import com.razumly.mvp.core.data.repositories.UserScheduleSnapshot
 import com.razumly.mvp.eventCreate.CreateEventComponent
 import com.razumly.mvp.eventDetail.EventDetailComponent
+import com.razumly.mvp.eventDetail.data.IMatchRepository
 import com.razumly.mvp.eventManagement.EventManagementComponent
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.eventSearch.EventSearchComponent
 import com.razumly.mvp.matchDetail.MatchContentComponent
 import com.razumly.mvp.profile.ProfileComponent
+import com.razumly.mvp.profile.ProfileStartDestination
 import com.razumly.mvp.profile.profileDetails.ProfileDetailsComponent
 import com.razumly.mvp.profileCompletion.ProfileCompletionComponent
 import com.razumly.mvp.refundManager.RefundManagerComponent
@@ -56,6 +60,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
+import kotlin.time.Clock
 
 class RootComponent(
     componentContext: ComponentContext,
@@ -64,6 +69,7 @@ class RootComponent(
     val locationTracker: LocationTracker,
     private val userRepository: IUserRepository,
     private val eventRepository: IEventRepository,
+    private val matchRepository: IMatchRepository,
     private val pushNotificationsRepository: IPushNotificationsRepository,
     private val chatGroupRepository: IChatGroupRepository,
     private val appUpdateRepository: IAppUpdateRepository,
@@ -75,6 +81,8 @@ class RootComponent(
         private const val PUSH_TARGET_REGISTRATION_ATTEMPTS = 3
         private const val PUSH_TARGET_REGISTRATION_RETRY_DELAY_MS = 2_000L
         private const val CHAT_REFRESH_INTERVAL_MS = 30_000L
+        private const val CENTER_ACTION_SCHEDULE_REFRESH_INTERVAL_MS = 5 * 60_000L
+        private const val CENTER_ACTION_RECOMPUTE_INTERVAL_MS = 60_000L
     }
 
     private val navigation = StackNavigation<AppConfig>()
@@ -110,8 +118,11 @@ class RootComponent(
     private var chatStartupSyncJob: Job? = null
     private var chatRefreshJob: Job? = null
     private var registrationSyncJob: Job? = null
+    private var centerActionRefreshJob: Job? = null
     private var activeChatRefreshUserId: String? = null
     private var activeRegistrationSyncUserId: String? = null
+    private var activeCenterActionUserId: String? = null
+    private var centerActionScheduleSnapshot = UserScheduleSnapshot()
 
     private val _selectedPage = MutableStateFlow<AppConfig>(AppConfig.Search())
     val selectedPage: StateFlow<AppConfig> = _selectedPage.asStateFlow()
@@ -127,6 +138,8 @@ class RootComponent(
     val startupNotice: StateFlow<String?> = _startupNotice.asStateFlow()
     private val _appUpdatePrompt = MutableStateFlow<AppUpdatePrompt?>(null)
     val appUpdatePrompt: StateFlow<AppUpdatePrompt?> = _appUpdatePrompt.asStateFlow()
+    private val _centerNavAction = MutableStateFlow<CenterNavAction>(CenterNavAction.CreateEvent)
+    val centerNavAction: StateFlow<CenterNavAction> = _centerNavAction.asStateFlow()
 
     val childStack: Value<ChildStack<AppConfig, Child>> = childStack(
         source = navigation,
@@ -213,11 +226,13 @@ class RootComponent(
                             registerPushTargetIfNeeded(userData.id)
                             refreshChatsOnStartupIfNeeded(userData.id)
                             startChatRefreshLoopIfNeeded(userData.id)
+                            startCenterActionRefreshLoopIfNeeded(userData.id)
                         } else if (userRepository.startupAuthState.value == StartupAuthState.Unauthenticated) {
                             clearRegistrationCacheSyncState()
                             clearPushTargetIfNeeded()
                             clearChatStartupSyncState()
                             clearChatRefreshLoop()
+                            clearCenterActionRefreshLoop()
                         }
                     },
                     onFailure = {
@@ -226,6 +241,7 @@ class RootComponent(
                             clearPushTargetIfNeeded()
                             clearChatStartupSyncState()
                             clearChatRefreshLoop()
+                            clearCenterActionRefreshLoop()
                         }
                     }
                 )
@@ -312,6 +328,7 @@ class RootComponent(
         deepLinkNav.value = null
         when (deepLinkNavVal) {
             is DeepLinkNav.Event -> navigateToDeepLinkedEvent(deepLinkNavVal.eventId)
+            is DeepLinkNav.Match -> navigateToDeepLinkedMatch(deepLinkNavVal.eventId, deepLinkNavVal.matchId)
             is DeepLinkNav.Refresh -> {
                 setDefaultNavigationDirection()
                 navigation.replaceAll(AppConfig.ProfileHome)
@@ -360,6 +377,61 @@ class RootComponent(
         }
     }
 
+    private fun navigateToDeepLinkedMatch(rawEventId: String, rawMatchId: String) {
+        val eventId = rawEventId.trim()
+        val matchId = rawMatchId.trim()
+        if (eventId.isEmpty() || matchId.isEmpty()) {
+            setDefaultNavigationDirection()
+            navigation.replaceAll(AppConfig.Search())
+            _selectedPage.value = AppConfig.Search()
+            return
+        }
+
+        deepLinkNavigationJob?.cancel()
+        deepLinkNavigationJob = scope.launch {
+            val event = eventRepository.getEvent(eventId)
+                .getOrElse { throwable ->
+                    Napier.w("Failed to resolve deep-linked match event $eventId: ${throwable.message}")
+                    _startupNotice.value = throwable.userMessage("Couldn't open that match link.")
+                    setDefaultNavigationDirection()
+                    navigation.replaceAll(AppConfig.Search())
+                    _selectedPage.value = AppConfig.Search()
+                    return@launch
+                }
+
+            matchRepository.getMatchesOfTournament(eventId)
+                .onSuccess { matches ->
+                    val match = matches.firstOrNull { it.matchesRouteId(matchId) }
+                    if (match == null) {
+                        Napier.w("Deep-linked match $matchId was not found for event $eventId")
+                        _startupNotice.value = "Couldn't open that match link."
+                        setDefaultNavigationDirection()
+                        navigation.replaceAll(AppConfig.Search(), AppConfig.EventDetail(event))
+                        _selectedPage.value = AppConfig.Search()
+                        return@onSuccess
+                    }
+
+                    setDefaultNavigationDirection()
+                    navigation.replaceAll(
+                        AppConfig.Search(),
+                        AppConfig.EventDetail(event, initialTab = EventDetailInitialTab.SCHEDULE),
+                        AppConfig.MatchDetail(match.toRootMatchWithRelations(), event),
+                    )
+                    _selectedPage.value = AppConfig.Search()
+                }
+                .onFailure { throwable ->
+                    Napier.w("Failed to resolve deep-linked match $eventId/$matchId: ${throwable.message}")
+                    _startupNotice.value = throwable.userMessage("Couldn't open that match link.")
+                    setDefaultNavigationDirection()
+                    navigation.replaceAll(
+                        AppConfig.Search(),
+                        AppConfig.EventDetail(event, initialTab = EventDetailInitialTab.SCHEDULE),
+                    )
+                    _selectedPage.value = AppConfig.Search()
+                }
+        }
+    }
+
     fun handleDeepLink(deepLinkNav: DeepLinkNav?) {
         this.deepLinkNav.value = deepLinkNav
         // If user is already logged in, handle immediately
@@ -377,8 +449,82 @@ class RootComponent(
             is AppConfig.Search -> navigation.replaceAll(AppConfig.Search())
             AppConfig.ChatList -> navigation.replaceAll(AppConfig.ChatList)
             is AppConfig.Create -> navigation.replaceAll(AppConfig.Create())
+            AppConfig.Schedule -> navigation.replaceAll(AppConfig.Schedule)
             AppConfig.ProfileHome -> navigation.replaceAll(AppConfig.ProfileHome)
             else -> {}
+        }
+    }
+
+    fun onCenterNavActionSelected() {
+        when (val action = _centerNavAction.value) {
+            CenterNavAction.CreateEvent -> navigateToCreate()
+            is CenterNavAction.EventShortcut -> openEventShortcut(action.eventId)
+            is CenterNavAction.MatchShortcut -> openMatchShortcut(
+                eventId = action.eventId,
+                matchId = action.matchId,
+            )
+        }
+    }
+
+    private fun openEventShortcut(rawEventId: String) {
+        val eventId = rawEventId.trim()
+        if (eventId.isEmpty()) {
+            navigateToCreate()
+            return
+        }
+
+        deepLinkNavigationJob?.cancel()
+        deepLinkNavigationJob = scope.launch {
+            eventRepository.getEvent(eventId)
+                .onSuccess { event ->
+                    setDefaultNavigationDirection()
+                    navigation.pushNew(AppConfig.EventDetail(event))
+                }
+                .onFailure { throwable ->
+                    Napier.w("Failed to open center event shortcut $eventId: ${throwable.message}")
+                    _startupNotice.value = throwable.userMessage("Couldn't open that event.")
+                    _centerNavAction.value = CenterNavAction.CreateEvent
+                }
+        }
+    }
+
+    private fun openMatchShortcut(eventId: String, matchId: String) {
+        val normalizedEventId = eventId.trim()
+        val normalizedMatchId = matchId.trim()
+        if (normalizedEventId.isEmpty() || normalizedMatchId.isEmpty()) {
+            navigateToCreate()
+            return
+        }
+
+        deepLinkNavigationJob?.cancel()
+        deepLinkNavigationJob = scope.launch {
+            val event = eventRepository.getEvent(normalizedEventId)
+                .getOrElse { throwable ->
+                    Napier.w("Failed to open center match event $normalizedEventId: ${throwable.message}")
+                    _startupNotice.value = throwable.userMessage("Couldn't open that match.")
+                    _centerNavAction.value = CenterNavAction.CreateEvent
+                    return@launch
+                }
+
+            matchRepository.getMatchesOfTournament(normalizedEventId)
+                .onSuccess { matches ->
+                    val match = matches.firstOrNull { it.matchesRouteId(normalizedMatchId) }
+                    if (match == null) {
+                        Napier.w("Center match shortcut $normalizedMatchId was not found for event $normalizedEventId")
+                        _startupNotice.value = "Couldn't open that match."
+                        recomputeCenterNavAction()
+                        return@onSuccess
+                    }
+
+                    setDefaultNavigationDirection()
+                    navigation.pushNew(AppConfig.EventDetail(event, initialTab = EventDetailInitialTab.SCHEDULE))
+                    navigation.pushNew(AppConfig.MatchDetail(match.toRootMatchWithRelations(), event))
+                }
+                .onFailure { throwable ->
+                    Napier.w("Failed to open center match shortcut $normalizedEventId/$normalizedMatchId: ${throwable.message}")
+                    _startupNotice.value = throwable.userMessage("Couldn't open that match.")
+                    recomputeCenterNavAction()
+                }
         }
     }
 
@@ -490,6 +636,56 @@ class RootComponent(
         chatRefreshJob = null
     }
 
+    private fun startCenterActionRefreshLoopIfNeeded(userId: String) {
+        if (activeCenterActionUserId == userId && centerActionRefreshJob?.isActive == true) return
+
+        centerActionRefreshJob?.cancel()
+        activeCenterActionUserId = userId
+        centerActionRefreshJob = scope.launch(Dispatchers.Default) {
+            while (isActive && activeCenterActionUserId == userId) {
+                refreshCenterActionScheduleSnapshot()
+
+                var elapsedMillis = 0L
+                while (
+                    isActive &&
+                    activeCenterActionUserId == userId &&
+                    elapsedMillis < CENTER_ACTION_SCHEDULE_REFRESH_INTERVAL_MS
+                ) {
+                    delay(CENTER_ACTION_RECOMPUTE_INTERVAL_MS)
+                    elapsedMillis += CENTER_ACTION_RECOMPUTE_INTERVAL_MS
+                    recomputeCenterNavAction()
+                }
+            }
+        }
+    }
+
+    private suspend fun refreshCenterActionScheduleSnapshot() {
+        eventRepository.getMySchedule()
+            .onSuccess { snapshot ->
+                centerActionScheduleSnapshot = snapshot
+                recomputeCenterNavAction()
+            }
+            .onFailure { throwable ->
+                Napier.w("Failed to refresh center nav schedule shortcut: ${throwable.message}")
+                recomputeCenterNavAction()
+            }
+    }
+
+    private fun recomputeCenterNavAction() {
+        _centerNavAction.value = resolveCenterNavAction(
+            snapshot = centerActionScheduleSnapshot,
+            now = Clock.System.now(),
+        )
+    }
+
+    private fun clearCenterActionRefreshLoop() {
+        activeCenterActionUserId = null
+        centerActionRefreshJob?.cancel()
+        centerActionRefreshJob = null
+        centerActionScheduleSnapshot = UserScheduleSnapshot()
+        _centerNavAction.value = CenterNavAction.CreateEvent
+    }
+
     private suspend fun refreshPendingInviteCount(userId: String) {
         userRepository.listInvites(userId)
             .onSuccess { invites ->
@@ -537,6 +733,12 @@ class RootComponent(
 
     override fun navigateToMatch(match: MatchWithRelations, event: Event) {
         setDefaultNavigationDirection()
+        navigation.pushNew(AppConfig.MatchDetail(match, event))
+    }
+
+    override fun navigateToMatchFromSchedule(match: MatchWithRelations, event: Event) {
+        setDefaultNavigationDirection()
+        navigation.pushNew(AppConfig.EventDetail(event, initialTab = EventDetailInitialTab.SCHEDULE))
         navigation.pushNew(AppConfig.MatchDetail(match, event))
     }
 
@@ -625,7 +827,7 @@ class RootComponent(
     private fun bottomTabIndex(config: AppConfig): Int? = when (config) {
         is AppConfig.Search -> 0
         AppConfig.ChatList -> 1
-        is AppConfig.Create -> 2
+        AppConfig.Schedule -> 2
         AppConfig.ProfileHome -> 3
         else -> null
     }
@@ -653,7 +855,8 @@ class RootComponent(
 
         is AppConfig.EventDetail -> Child.EventContent(
             _koin.get { parametersOf(componentContext, config.event, this@RootComponent) },
-            _koin.get { parametersOf(componentContext) }
+            _koin.get { parametersOf(componentContext) },
+            config.initialTab,
         )
 
         is AppConfig.OrganizationDetail -> Child.OrganizationDetail(
@@ -679,7 +882,23 @@ class RootComponent(
         )
 
         AppConfig.ProfileHome -> Child.Profile(
-            _koin.get { parametersOf(componentContext, this@RootComponent) }
+            _koin.get {
+                parametersOf(
+                    componentContext,
+                    this@RootComponent,
+                    ProfileStartDestination.HOME,
+                )
+            }
+        )
+
+        AppConfig.Schedule -> Child.Profile(
+            _koin.get {
+                parametersOf(
+                    componentContext,
+                    this@RootComponent,
+                    ProfileStartDestination.MY_SCHEDULE,
+                )
+            }
         )
 
         is AppConfig.Teams -> Child.Teams(
@@ -712,7 +931,11 @@ class RootComponent(
         data class Login(val component: AuthComponent) : Child()
         data class ProfileCompletion(val component: ProfileCompletionComponent) : Child()
         data class Search(val component: EventSearchComponent, val mapComponent: MapComponent) : Child()
-        data class EventContent(val component: EventDetailComponent, val mapComponent: MapComponent) : Child()
+        data class EventContent(
+            val component: EventDetailComponent,
+            val mapComponent: MapComponent,
+            val initialTab: EventDetailInitialTab,
+        ) : Child()
         data class OrganizationDetail(val component: OrganizationDetailComponent) : Child()
         data class MatchContent(
             val component: MatchContentComponent,
@@ -730,7 +953,29 @@ class RootComponent(
 
     sealed class DeepLinkNav {
         data class Event(val eventId: String) : DeepLinkNav()
+        data class Match(val eventId: String, val matchId: String) : DeepLinkNav()
         data object Refresh : DeepLinkNav()
         data object Return : DeepLinkNav()
     }
 }
+
+private fun MatchMVP.matchesRouteId(routeMatchId: String): Boolean {
+    val normalizedRouteMatchId = routeMatchId.trim()
+    if (id == normalizedRouteMatchId) return true
+    return normalizedRouteMatchId.toIntOrNull()?.let { routeNumber ->
+        matchId == routeNumber
+    } == true
+}
+
+private fun MatchMVP.toRootMatchWithRelations(): MatchWithRelations =
+    MatchWithRelations(
+        match = this,
+        field = null,
+        team1 = null,
+        team2 = null,
+        teamOfficial = null,
+        winnerNextMatch = null,
+        loserNextMatch = null,
+        previousLeftMatch = null,
+        previousRightMatch = null,
+    )

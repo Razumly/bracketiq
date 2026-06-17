@@ -160,6 +160,7 @@ import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.resolveParticipantCapacity
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
+import com.razumly.mvp.core.presentation.EventDetailInitialTab
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
 import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
@@ -3286,7 +3287,9 @@ private fun JoinOptionsSheet(
 @Composable
 @OptIn(ExperimentalTime::class, ExperimentalMaterial3Api::class)
 fun EventDetailScreen(
-    component: EventDetailComponent, mapComponent: MapComponent
+    component: EventDetailComponent,
+    mapComponent: MapComponent,
+    initialTab: EventDetailInitialTab = EventDetailInitialTab.DEFAULT,
 ) {
     PreparePaymentProcessor(component)
 
@@ -4833,7 +4836,15 @@ fun EventDetailScreen(
                                 if (hasBracketView) add(DetailTab.BRACKET)
                             }
                         }
-                        var selectedTab by rememberSaveable { mutableStateOf(DetailTab.PARTICIPANTS) }
+                        val requestedInitialTab = remember(initialTab, availableTabs) {
+                            when {
+                                initialTab == EventDetailInitialTab.SCHEDULE &&
+                                    DetailTab.SCHEDULE in availableTabs -> DetailTab.SCHEDULE
+
+                                else -> DetailTab.PARTICIPANTS
+                            }
+                        }
+                        var selectedTab by rememberSaveable { mutableStateOf(requestedInitialTab) }
                         val bracketTabDivisionOptions = remember(
                             tournamentPoolPlayEnabled,
                             tournamentBracketDivisionOptions,
@@ -4920,6 +4931,15 @@ fun EventDetailScreen(
                         LaunchedEffect(availableTabs) {
                             if (selectedTab !in availableTabs) {
                                 selectedTab = availableTabs.first()
+                            }
+                        }
+                        LaunchedEffect(initialTab, availableTabs) {
+                            if (
+                                initialTab == EventDetailInitialTab.SCHEDULE &&
+                                selectedTab == DetailTab.PARTICIPANTS &&
+                                DetailTab.SCHEDULE in availableTabs
+                            ) {
+                                selectedTab = DetailTab.SCHEDULE
                             }
                         }
                         LaunchedEffect(selectedTab) {

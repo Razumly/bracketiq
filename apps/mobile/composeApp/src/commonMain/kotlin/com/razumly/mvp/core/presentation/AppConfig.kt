@@ -16,6 +16,12 @@ enum class OrganizationDetailTab {
 }
 
 @Serializable
+enum class EventDetailInitialTab {
+    DEFAULT,
+    SCHEDULE,
+}
+
+@Serializable
 sealed class AppConfig {
     @Serializable
     data object Splash : AppConfig()
@@ -29,6 +35,7 @@ sealed class AppConfig {
     @Serializable
     data class EventDetail(
         val event: Event,
+        val initialTab: EventDetailInitialTab = EventDetailInitialTab.DEFAULT,
     ) : AppConfig()
 
     @Serializable
@@ -53,6 +60,9 @@ sealed class AppConfig {
 
     @Serializable
     data object ProfileHome : AppConfig()
+
+    @Serializable
+    data object Schedule : AppConfig()
 
     @Serializable
     data object ProfileDetails : AppConfig()

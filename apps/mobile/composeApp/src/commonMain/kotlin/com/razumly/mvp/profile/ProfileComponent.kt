@@ -18,6 +18,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.NotificationSettings
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Subscription
@@ -275,6 +276,11 @@ enum class ProfileInviteAction {
     DECLINE,
 }
 
+enum class ProfileStartDestination {
+    HOME,
+    MY_SCHEDULE,
+}
+
 data class ProfileTextSignaturePromptState(
     val document: ProfileDocumentCard,
     val step: SignStep,
@@ -372,6 +378,7 @@ interface ProfileComponent : IPaymentProcessor {
     fun signDocument(document: ProfileDocumentCard)
     fun openSignedDocument(document: ProfileDocumentCard)
     fun openScheduleEvent(eventId: String)
+    fun openScheduleMatch(match: MatchWithRelations)
     fun confirmTextSignature()
     fun dismissTextSignature()
     fun dismissWebDocumentPrompt()
@@ -456,6 +463,11 @@ private sealed class ProfileConfig {
 
 }
 
+private fun ProfileStartDestination.toProfileConfig(): ProfileConfig = when (this) {
+    ProfileStartDestination.HOME -> ProfileConfig.Home
+    ProfileStartDestination.MY_SCHEDULE -> ProfileConfig.MySchedule
+}
+
 class DefaultProfileComponent(
     componentContext: ComponentContext,
     private val userRepository: IUserRepository,
@@ -464,6 +476,7 @@ class DefaultProfileComponent(
     private val teamRepository: ITeamRepository,
     private val pushNotificationsRepository: IPushNotificationsRepository,
     private val navigationHandler: INavigationHandler,
+    initialDestination: ProfileStartDestination = ProfileStartDestination.HOME,
 ) : ProfileComponent, PaymentProcessor(), ComponentContext by componentContext {
 
     private val navigation = StackNavigation<ProfileConfig>()
@@ -539,7 +552,7 @@ class DefaultProfileComponent(
 
     override val childStack: Value<ChildStack<*, ProfileComponent.Child>> = childStack(
         source = navigation,
-        initialConfiguration = ProfileConfig.Home,
+        initialConfiguration = initialDestination.toProfileConfig(),
         serializer = ProfileConfig.serializer(),
         handleBackButton = true,
         childFactory = ::createChild,
@@ -1073,6 +1086,30 @@ class DefaultProfileComponent(
             eventId = eventId,
             cachedEvents = _myScheduleState.value.events,
         )
+    }
+
+    override fun openScheduleMatch(match: MatchWithRelations) {
+        val eventId = match.match.eventId.trim()
+        if (eventId.isEmpty()) {
+            _errorState.value = ErrorMessage("Invalid match.")
+            return
+        }
+
+        val cachedEvent = _myScheduleState.value.events.firstOrNull { event -> event.id == eventId }
+        if (cachedEvent != null) {
+            navigationHandler.navigateToMatchFromSchedule(match, cachedEvent)
+            return
+        }
+
+        scope.launch {
+            eventRepository.getEvent(eventId)
+                .onSuccess { event ->
+                    navigationHandler.navigateToMatchFromSchedule(match, event)
+                }
+                .onFailure {
+                    _errorState.value = ErrorMessage(it.userMessage("Unable to open match."))
+                }
+        }
     }
 
     override fun manageStripeAccountOnboarding() {

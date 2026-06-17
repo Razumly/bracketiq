@@ -53,6 +53,42 @@ extension URL {
             effectiveSegments = segmentsWithHost
         }
 
+        let queryItems = URLComponents(url: self, resolvingAgainstBaseURL: false)?.queryItems
+        let queryEventId = queryItems?
+            .first(where: { $0.name == "eventId" })?
+            .value?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let queryMatchId = queryItems?
+            .first(where: { $0.name == "matchId" })?
+            .value?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        if !queryEventId.isEmpty && !queryMatchId.isEmpty {
+            return RootComponent.DeepLinkNavMatch.init(eventId: queryEventId, matchId: queryMatchId)
+        }
+
+        if effectiveSegments.count >= 4 {
+            let route = effectiveSegments[0].lowercased()
+            let eventId = effectiveSegments[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            let matchRoute = effectiveSegments[2].lowercased()
+            let matchId = effectiveSegments[3].trimmingCharacters(in: .whitespacesAndNewlines)
+            if (route == "event" || route == "events" || route == "tournament" || route == "tournaments")
+                && (matchRoute == "match" || matchRoute == "matches")
+                && !eventId.isEmpty
+                && !matchId.isEmpty {
+                return RootComponent.DeepLinkNavMatch.init(eventId: eventId, matchId: matchId)
+            }
+        }
+
+        if effectiveSegments.count >= 2
+            && (effectiveSegments[0].lowercased() == "match" || effectiveSegments[0].lowercased() == "matches")
+            && !queryEventId.isEmpty {
+            let matchId = effectiveSegments[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !matchId.isEmpty {
+                return RootComponent.DeepLinkNavMatch.init(eventId: queryEventId, matchId: matchId)
+            }
+        }
+
         if effectiveSegments.count >= 2 {
             let route = effectiveSegments[0].lowercased()
             let eventId = effectiveSegments[1].trimmingCharacters(in: .whitespacesAndNewlines)
@@ -65,7 +101,6 @@ extension URL {
 
         switch effectiveSegments.count {
         case 2 where effectiveSegments[0].lowercased() == "host" && effectiveSegments[1].lowercased() == "onboarding":
-            let queryItems = URLComponents(url: self, resolvingAgainstBaseURL: false)?.queryItems
             let isRefresh = queryItems?.first(where: { $0.name == "refresh" })?.value == "true"
             let isReturn = queryItems?.first(where: { $0.name == "success" })?.value == "true"
             

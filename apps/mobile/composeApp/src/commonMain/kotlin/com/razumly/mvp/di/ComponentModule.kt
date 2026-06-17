@@ -27,6 +27,7 @@ import com.razumly.mvp.matchDetail.DefaultMatchContentComponent
 import com.razumly.mvp.matchDetail.MatchContentComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
 import com.razumly.mvp.profile.ProfileComponent
+import com.razumly.mvp.profile.ProfileStartDestination
 import com.razumly.mvp.profile.profileDetails.DefaultProfileDetailsComponent
 import com.razumly.mvp.profile.profileDetails.ProfileDetailsComponent
 import com.razumly.mvp.profileCompletion.DefaultProfileCompletionComponent
@@ -50,6 +51,7 @@ val componentModule = module {
             deepLinkNavStart = deepLinkNav,
             userRepository = get(),
             eventRepository = get(),
+            matchRepository = get(),
             pushNotificationsRepository = get(),
             chatGroupRepository = get(),
             appUpdateRepository = get(),
@@ -150,7 +152,12 @@ val componentModule = module {
         )
     }
 
-    factory<ProfileComponent> { (componentContext: ComponentContext, navHandler: INavigationHandler) ->
+    factory<ProfileComponent> { params ->
+        val componentContext: ComponentContext = params.get()
+        val navHandler: INavigationHandler = params.get()
+        val startDestination = runCatching { params.get<ProfileStartDestination>() }
+            .getOrDefault(ProfileStartDestination.HOME)
+
         DefaultProfileComponent(
             componentContext = componentContext,
             userRepository = get(),
@@ -159,6 +166,7 @@ val componentModule = module {
             teamRepository = get(),
             pushNotificationsRepository = get(),
             navigationHandler = navHandler,
+            initialDestination = startDestination,
         )
     }
 

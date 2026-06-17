@@ -42,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.kizitonwose.calendar.compose.HorizontalCalendar
 import com.kizitonwose.calendar.compose.WeekCalendar
 import com.kizitonwose.calendar.compose.rememberCalendarState
@@ -105,6 +106,8 @@ private data class ScheduleEntry(
 @Composable
 fun ProfileMyScheduleScreen(component: ProfileComponent) {
     val state by component.myScheduleState.collectAsState()
+    val childStack by component.childStack.subscribeAsState()
+    val canNavigateBack = childStack.backStack.isNotEmpty()
     var selectedFilter by rememberSaveable { mutableStateOf(ScheduleEntryFilter.BOTH) }
     val scheduleItems = remember(state.events, state.matches, state.teams, state.fields) {
         buildScheduleItems(
@@ -138,6 +141,7 @@ fun ProfileMyScheduleScreen(component: ProfileComponent) {
         title = "My Schedule",
         description = "Shared schedule view for your events and matches.",
         onBack = component::onBackClicked,
+        showBackButton = canNavigateBack,
         onRefresh = component::refreshMySchedule,
         isRefreshing = state.isLoading,
         scrollContent = false,
@@ -176,7 +180,7 @@ fun ProfileMyScheduleScreen(component: ProfileComponent) {
                         showGroupingToggle = false,
                         matchGroupMode = ScheduleMatchGroupMode.EVENT,
                         eventLabelsById = eventLabelsById,
-                        onMatchClick = { match -> component.openScheduleEvent(match.match.eventId) },
+                        onMatchClick = component::openScheduleMatch,
                         onEventClick = { event -> component.openScheduleEvent(event.id) },
                         matchCardContent = { match, onClick ->
                             ProfileScheduleMatchCard(

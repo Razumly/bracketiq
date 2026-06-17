@@ -7,6 +7,10 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 
 interface INavigationHandler {
     fun navigateToMatch(match: MatchWithRelations, event: Event)
+    fun navigateToMatchFromSchedule(match: MatchWithRelations, event: Event) {
+        navigateToMatch(match, event)
+    }
+
     fun navigateToTeams(
         freeAgents: List<String> = listOf(),
         event: Event? = null,

@@ -35,6 +35,7 @@ import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IAppUpdateRepository
 import com.razumly.mvp.core.presentation.composables.NativeViewFactory
+import com.razumly.mvp.eventDetail.data.IMatchRepository
 import com.razumly.mvp.chat.data.IChatGroupRepository
 
 val LocalNativeViewFactory = staticCompositionLocalOf<NativeViewFactory> {
@@ -80,6 +81,7 @@ fun MainViewController(
                         deepLinkNavStart = deepLinkNav,
                         userRepository = getKoin().get<IUserRepository>(),
                         eventRepository = getKoin().get<IEventRepository>(),
+                        matchRepository = getKoin().get<IMatchRepository>(),
                         pushNotificationsRepository = getKoin().get<IPushNotificationsRepository>(),
                         chatGroupRepository = getKoin().get<IChatGroupRepository>(),
                         appUpdateRepository = getKoin().get<IAppUpdateRepository>(),
