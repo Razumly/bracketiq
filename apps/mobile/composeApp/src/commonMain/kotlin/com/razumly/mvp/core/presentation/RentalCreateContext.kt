@@ -16,6 +16,7 @@ data class RentalCreateContext(
     val participantRequiredTemplateIds: List<String> = emptyList(),
     val hostRequiredTemplateIds: List<String> = emptyList(),
     val rentalPriceCents: Int = 0,
+    val rentalBookingId: String? = null,
     val startEpochMillis: Long,
     val endEpochMillis: Long,
 )
@@ -27,6 +28,7 @@ data class LockedRentalSelection(
     val sourceTimeSlotIds: List<String> = emptyList(),
     val requiredTemplateIds: List<String> = emptyList(),
     val hostRequiredTemplateIds: List<String> = emptyList(),
+    val rentalBookingItemId: String? = null,
     val startEpochMillis: Long,
     val endEpochMillis: Long,
 )

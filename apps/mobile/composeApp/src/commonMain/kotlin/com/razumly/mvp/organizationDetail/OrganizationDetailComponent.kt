@@ -9,6 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Product
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.isPaymentPending
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
@@ -16,6 +17,9 @@ import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
+import com.razumly.mvp.core.data.repositories.PurchaseIntentTimeSlotContext
+import com.razumly.mvp.core.data.repositories.RentalOrderItem
+import com.razumly.mvp.core.data.repositories.RentalOrderSelectionRequest
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
 import com.razumly.mvp.core.data.repositories.isActive
@@ -30,6 +34,7 @@ import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
+import com.razumly.mvp.core.util.newId
 import com.razumly.mvp.eventDetail.TextSignaturePromptState
 import com.razumly.mvp.eventDetail.WebSignaturePromptState
 import com.razumly.mvp.eventDetail.data.IMatchRepository
@@ -49,9 +54,24 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.time.Clock
+import kotlin.time.Instant
 
 private fun Product.isSinglePurchase(): Boolean =
     period.trim().equals("SINGLE", ignoreCase = true)
+
+data class RentalReservationComplete(
+    val bookingId: String,
+    val billId: String? = null,
+    val totalCents: Int,
+    val eventContext: RentalCreateContext,
+)
+
+private data class PendingRentalReservation(
+    val publicSlug: String,
+    val context: RentalCreateContext,
+    val selections: List<RentalOrderSelectionRequest>,
+    val paymentIntentId: String?,
+)
 
 interface OrganizationDetailComponent : IPaymentProcessor {
     val initialTab: OrganizationDetailTab
@@ -76,6 +96,8 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     val loadingTeamMemberComplianceId: StateFlow<String?>
     val textSignaturePrompt: StateFlow<TextSignaturePromptState?>
     val webSignaturePrompt: StateFlow<WebSignaturePromptState?>
+    val isReservingRental: StateFlow<Boolean>
+    val completedRentalReservation: StateFlow<RentalReservationComplete?>
 
     fun setLoadingHandler(handler: LoadingHandler)
     fun refreshOrganization(force: Boolean = false)
@@ -94,6 +116,9 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     fun dismissTextSignature()
     fun dismissWebSignaturePrompt()
     fun startRentalCreate(context: RentalCreateContext)
+    fun startRentalReservation(context: RentalCreateContext, selections: List<RentalOrderSelectionRequest>)
+    fun createEventFromCompletedRentalReservation()
+    fun dismissCompletedRentalReservation()
     fun viewEvent(event: Event)
     fun onBackClicked()
 }
@@ -164,6 +189,11 @@ class DefaultOrganizationDetailComponent(
     override val textSignaturePrompt: StateFlow<TextSignaturePromptState?> = _textSignaturePrompt.asStateFlow()
     private val _webSignaturePrompt = MutableStateFlow<WebSignaturePromptState?>(null)
     override val webSignaturePrompt: StateFlow<WebSignaturePromptState?> = _webSignaturePrompt.asStateFlow()
+    private val _isReservingRental = MutableStateFlow(false)
+    override val isReservingRental: StateFlow<Boolean> = _isReservingRental.asStateFlow()
+    private val _completedRentalReservation = MutableStateFlow<RentalReservationComplete?>(null)
+    override val completedRentalReservation: StateFlow<RentalReservationComplete?> =
+        _completedRentalReservation.asStateFlow()
     override val currentUser: StateFlow<UserData> = userRepository.currentUser
         .map { result -> result.getOrNull() ?: UserData() }
         .stateIn(scope, SharingStarted.Eagerly, UserData())
@@ -187,6 +217,7 @@ class DefaultOrganizationDetailComponent(
     private var pendingTeamSignatureTeamId: String? = null
     private var pendingTeamSignaturePollJob: Job? = null
     private var pendingPostSignatureAction: (suspend () -> Unit)? = null
+    private var pendingRentalReservation: PendingRentalReservation? = null
 
     private lateinit var loadingHandler: LoadingHandler
 
@@ -203,6 +234,8 @@ class DefaultOrganizationDetailComponent(
                         _startingTeamRegistrationId.value = null
                         pendingProductPurchase = null
                         pendingTeamRegistration = null
+                        pendingRentalReservation = null
+                        _isReservingRental.value = false
                     }
 
                     is PaymentResult.Failed -> {
@@ -211,14 +244,19 @@ class DefaultOrganizationDetailComponent(
                         _startingTeamRegistrationId.value = null
                         pendingProductPurchase = null
                         pendingTeamRegistration = null
+                        pendingRentalReservation = null
+                        _isReservingRental.value = false
                     }
 
                     PaymentResult.Completed -> {
+                        val pendingRental = pendingRentalReservation
                         val pendingProduct = pendingProductPurchase
                         val pendingTeam = pendingTeamRegistration
                         _startingProductCheckoutId.value = null
                         _startingTeamRegistrationId.value = null
-                        if (pendingProduct != null) {
+                        if (pendingRental != null) {
+                            completePendingRentalReservation(pendingRental)
+                        } else if (pendingProduct != null) {
                             _message.value = if (pendingProduct.isSinglePurchase()) {
                                 "Purchase completed for ${pendingProduct.name}."
                             } else {
@@ -452,6 +490,106 @@ class DefaultOrganizationDetailComponent(
 
     override fun startRentalCreate(context: RentalCreateContext) {
         navigationHandler.navigateToCreate(context)
+    }
+
+    override fun startRentalReservation(
+        context: RentalCreateContext,
+        selections: List<RentalOrderSelectionRequest>,
+    ) {
+        scope.launch {
+            if (_isReservingRental.value) return@launch
+            _completedRentalReservation.value = null
+            _isReservingRental.value = true
+            try {
+                val organization = _organization.value
+                if (organization == null) {
+                    _errorState.value = ErrorMessage("Organization is not available.")
+                    return@launch
+                }
+                val publicSlug = organization.publicSlug?.trim()?.takeIf(String::isNotBlank)
+                if (publicSlug == null || !organization.publicPageEnabled) {
+                    _errorState.value = ErrorMessage("This organization needs a public rental checkout before resources can be reserved.")
+                    return@launch
+                }
+                val user = userRepository.currentUser.value.getOrNull()
+                val account = userRepository.currentAccount.value.getOrNull()
+                if (user == null || user.id.isBlank()) {
+                    _errorState.value = ErrorMessage("Please sign in to reserve resources.")
+                    return@launch
+                }
+                if (selections.isEmpty()) {
+                    _errorState.value = ErrorMessage("Select at least one rental slot.")
+                    return@launch
+                }
+
+                val bookingId = context.rentalBookingId?.trim()?.takeIf(String::isNotBlank) ?: newId()
+                val rentalContext = context.copy(rentalBookingId = bookingId)
+                val orderSelections = selections
+                if (orderSelections.isEmpty()) {
+                    _errorState.value = ErrorMessage("Selected rental slots are no longer available.")
+                    return@launch
+                }
+
+                if (rentalContext.rentalPriceCents > 0 && !ensureBillingAddressOrPrompt {
+                        startRentalReservation(context, selections)
+                    }) {
+                    return@launch
+                }
+
+                val pendingReservation = PendingRentalReservation(
+                    publicSlug = publicSlug,
+                    context = rentalContext,
+                    selections = orderSelections,
+                    paymentIntentId = null,
+                )
+
+                if (rentalContext.rentalPriceCents <= 0) {
+                    completePendingRentalReservation(pendingReservation)
+                    return@launch
+                }
+
+                if (::loadingHandler.isInitialized) {
+                    loadingHandler.showLoading("Preparing rental checkout...")
+                }
+                billingRepository.createPurchaseIntent(
+                    event = buildRentalPaymentEvent(
+                        organization = organization,
+                        context = rentalContext,
+                        userId = user.id,
+                    ),
+                    timeSlotContext = buildRentalPaymentTimeSlotContext(rentalContext),
+                ).onSuccess { intent ->
+                    pendingRentalReservation = pendingReservation.copy(
+                        paymentIntentId = intent.paymentIntent.toPaymentIntentId(),
+                    )
+                    runCatching {
+                        showPaymentSheet(intent, account?.email.orEmpty(), user.fullName)
+                    }.onFailure { error ->
+                        pendingRentalReservation = null
+                        _errorState.value = ErrorMessage(error.userMessage("Unable to start rental payment."))
+                    }
+                }.onFailure { error ->
+                    _errorState.value = ErrorMessage(error.userMessage("Unable to start rental checkout."))
+                }
+            } finally {
+                if (pendingRentalReservation == null) {
+                    _isReservingRental.value = false
+                    if (::loadingHandler.isInitialized) {
+                        loadingHandler.hideLoading()
+                    }
+                }
+            }
+        }
+    }
+
+    override fun createEventFromCompletedRentalReservation() {
+        val completedReservation = _completedRentalReservation.value ?: return
+        _completedRentalReservation.value = null
+        navigationHandler.navigateToCreate(completedReservation.eventContext)
+    }
+
+    override fun dismissCompletedRentalReservation() {
+        _completedRentalReservation.value = null
     }
 
     override fun startTeamRegistration(team: TeamWithPlayers) {
@@ -708,6 +846,113 @@ class DefaultOrganizationDetailComponent(
             loadingHandler.showLoading("Waiting for payment completion...")
         }
         presentPaymentSheet(email, name, billingAddress)
+    }
+
+    private suspend fun completePendingRentalReservation(pending: PendingRentalReservation) {
+        if (::loadingHandler.isInitialized) {
+            loadingHandler.showLoading("Reserving resources...")
+        }
+        billingRepository.createRentalOrder(
+            publicSlug = pending.publicSlug,
+            eventId = pending.context.rentalBookingId?.trim()?.takeIf(String::isNotBlank) ?: newId(),
+            selections = pending.selections,
+            paymentIntentId = pending.paymentIntentId,
+        ).onSuccess { result ->
+            val eventContext = pending.context.withRentalOrderResult(
+                bookingId = result.bookingId,
+                items = result.items,
+            )
+            _completedRentalReservation.value = RentalReservationComplete(
+                bookingId = result.bookingId,
+                billId = result.billId,
+                totalCents = result.totalCents,
+                eventContext = eventContext,
+            )
+            _message.value = "Resources reserved."
+            refreshRentals(force = true)
+        }.onFailure { error ->
+            _errorState.value = ErrorMessage(error.userMessage("Unable to reserve resources."))
+        }
+        pendingRentalReservation = null
+        _isReservingRental.value = false
+        if (::loadingHandler.isInitialized) {
+            loadingHandler.hideLoading()
+        }
+    }
+
+    private fun buildRentalPaymentEvent(
+        organization: Organization,
+        context: RentalCreateContext,
+        userId: String,
+    ): Event {
+        val start = Instant.fromEpochMilliseconds(context.startEpochMillis)
+        val end = Instant.fromEpochMilliseconds(context.endEpochMillis)
+        return Event(
+            id = context.rentalBookingId?.trim()?.takeIf(String::isNotBlank) ?: newId(),
+            name = "${organization.name} rental",
+            description = "Private rental order for ${organization.name}.",
+            hostId = userId,
+            organizationId = organization.id,
+            fieldIds = context.selectedFieldIds,
+            timeSlotIds = listOf("${context.rentalBookingId.orEmpty()}-rental-payment")
+                .filter(String::isNotBlank),
+            start = start,
+            end = end,
+            location = context.organizationLocation ?: organization.location ?: "Rental",
+            address = context.organizationAddress ?: organization.address,
+            coordinates = context.organizationCoordinates ?: organization.coordinates ?: listOf(0.0, 0.0),
+            priceCents = 0,
+            eventType = EventType.EVENT,
+            state = "PRIVATE",
+            noFixedEndDateTime = false,
+        )
+    }
+
+    private fun buildRentalPaymentTimeSlotContext(
+        context: RentalCreateContext,
+    ): PurchaseIntentTimeSlotContext {
+        val bookingId = context.rentalBookingId?.trim()?.takeIf(String::isNotBlank) ?: newId()
+        return PurchaseIntentTimeSlotContext(
+            id = "$bookingId-rental-payment",
+            priceCents = context.rentalPriceCents.coerceAtLeast(0),
+            startDate = Instant.fromEpochMilliseconds(context.startEpochMillis).toString(),
+            endDate = Instant.fromEpochMilliseconds(context.endEpochMillis).toString(),
+            scheduledFieldId = context.selectedFieldIds.firstOrNull(),
+            scheduledFieldIds = context.selectedFieldIds,
+            hostRequiredTemplateIds = context.hostRequiredTemplateIds,
+        )
+    }
+
+    private fun RentalCreateContext.withRentalOrderResult(
+        bookingId: String,
+        items: List<RentalOrderItem>,
+    ): RentalCreateContext {
+        return copy(
+            rentalBookingId = bookingId,
+            lockedSelections = lockedSelections.map { selection ->
+                val item = items.firstOrNull { candidate -> candidate.matchesLockedSelection(selection) }
+                selection.copy(rentalBookingItemId = item?.id)
+            },
+        )
+    }
+
+    private fun RentalOrderItem.matchesLockedSelection(selection: com.razumly.mvp.core.presentation.LockedRentalSelection): Boolean {
+        if (fieldId.trim() != selection.fieldId.trim()) {
+            return false
+        }
+        val itemStart = runCatching { Instant.parse(start).toEpochMilliseconds() }.getOrNull()
+        val itemEnd = runCatching { Instant.parse(end).toEpochMilliseconds() }.getOrNull()
+        return itemStart == selection.startEpochMillis && itemEnd == selection.endEpochMillis
+    }
+
+    private fun String?.toPaymentIntentId(): String? {
+        val normalized = this?.trim()?.takeIf(String::isNotBlank) ?: return null
+        val secretIndex = normalized.indexOf("_secret_")
+        return if (secretIndex > 0) {
+            normalized.take(secretIndex)
+        } else {
+            normalized
+        }.takeIf { value -> value.startsWith("pi_") }
     }
 
     private suspend fun ensureBillingAddressOrPrompt(onReady: () -> Unit): Boolean {

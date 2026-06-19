@@ -1109,6 +1109,7 @@ class DefaultCreateEventComponent(
         )
 
         _newEventState.value = applyRentalConstraints(_newEventState.value.copy(
+            id = context.rentalBookingId?.trim()?.takeIf(String::isNotBlank) ?: _newEventState.value.id,
             name = _newEventState.value.name.ifBlank { "${context.organizationName} Rental Event" },
             location = context.organizationLocation ?: _newEventState.value.location,
             address = context.organizationAddress ?: _newEventState.value.address,
@@ -1170,6 +1171,7 @@ class DefaultCreateEventComponent(
         val currentEvent = _newEventState.value
         val eventTimeZone = currentEvent.resolvedTimeZone()
         val defaultDivisions = defaultFieldDivisions(currentEvent)
+        val rentalBookingId = context.rentalBookingId?.trim()?.takeIf(String::isNotBlank)
         val explicitSlots = context.lockedSelections.mapNotNull { selection ->
             val fieldId = selection.fieldId.trim().takeIf(String::isNotEmpty) ?: return@mapNotNull null
             val requestedStart = Instant.fromEpochMilliseconds(selection.startEpochMillis)
@@ -1197,6 +1199,10 @@ class DefaultCreateEventComponent(
                 price = null,
                 requiredTemplateIds = selection.requiredTemplateIds.normalizeDistinctIds(),
                 hostRequiredTemplateIds = selection.hostRequiredTemplateIds.normalizeDistinctIds(),
+                sourceType = rentalBookingId?.let { "RENTAL_BOOKING" },
+                rentalBookingId = rentalBookingId,
+                rentalBookingItemId = selection.rentalBookingItemId?.trim()?.takeIf(String::isNotBlank),
+                rentalLocked = rentalBookingId != null,
             )
         }
         if (explicitSlots.isNotEmpty()) {
@@ -1225,6 +1231,10 @@ class DefaultCreateEventComponent(
                 price = null,
                 requiredTemplateIds = context.participantRequiredTemplateIds.normalizeDistinctIds(),
                 hostRequiredTemplateIds = context.hostRequiredTemplateIds.normalizeDistinctIds(),
+                sourceType = rentalBookingId?.let { "RENTAL_BOOKING" },
+                rentalBookingId = rentalBookingId,
+                rentalBookingItemId = null,
+                rentalLocked = rentalBookingId != null,
             )
         }
     }

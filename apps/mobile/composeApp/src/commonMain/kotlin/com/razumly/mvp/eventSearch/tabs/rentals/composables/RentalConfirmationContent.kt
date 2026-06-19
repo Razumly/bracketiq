@@ -35,6 +35,7 @@ internal fun RentalConfirmationContent(
     bottomPadding: Dp,
     validationMessage: String?,
     canContinue: Boolean,
+    isSubmitting: Boolean = false,
     onBack: () -> Unit,
     onContinue: () -> Unit,
 ) {
@@ -62,9 +63,14 @@ internal fun RentalConfirmationContent(
             }
 
             Text(
-                text = "Confirm rentals for ${organization.name.ifBlank { "Organization" }}",
+                text = "Reserve resources at ${organization.name.ifBlank { "Organization" }}",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "After checkout, these resources are reserved. You can create an event now or attach them later.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             if (sortedSelections.isEmpty()) {
@@ -155,7 +161,7 @@ internal fun RentalConfirmationContent(
                 onClick = onContinue,
                 enabled = canContinue
             ) {
-                Text("Continue to create event")
+                Text(if (isSubmitting) "Reserving..." else "Reserve resources")
             }
         }
     }

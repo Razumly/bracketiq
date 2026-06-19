@@ -279,7 +279,8 @@ private fun RentalWeekSelector(
     val timeZone = remember(fieldOptions, fallbackTimeZone) {
         fieldOptions.firstOrNull()?.resolvedRentalTimeZone(fallbackTimeZone) ?: fallbackTimeZone
     }
-    val today = remember(timeZone) { Clock.System.now().toLocalDateTime(timeZone).date }
+    val now = remember(timeZone) { Clock.System.now() }
+    val today = remember(timeZone, now) { now.toLocalDateTime(timeZone).date }
     val boundedSelectedDate = remember(selectedDate, today) {
         if (selectedDate < today) today else selectedDate
     }
@@ -299,6 +300,7 @@ private fun RentalWeekSelector(
                 date = date,
                 fieldOptions = fieldOptions,
                 timeZone = timeZone,
+                now = now,
             )
         }
     }
@@ -416,6 +418,7 @@ private fun hasRentalAvailabilityForDate(
     date: LocalDate,
     fieldOptions: List<RentalFieldOption>,
     timeZone: TimeZone,
+    now: Instant,
 ): Boolean {
     return (RENTAL_TIMELINE_START_MINUTES until RENTAL_TIMELINE_END_MINUTES step SLOT_INTERVAL_MINUTES)
         .any { startMinutes ->
@@ -423,13 +426,14 @@ private fun hasRentalAvailabilityForDate(
                 .coerceAtMost(RENTAL_TIMELINE_END_MINUTES)
             fieldOptions.any { option ->
                 val fieldTimeZone = option.resolvedRentalTimeZone(timeZone)
-                isRangeCoveredByRentalAvailability(
-                    option = option,
-                    date = date,
-                    startMinutes = startMinutes,
-                    endMinutes = endMinutes,
-                    timeZone = fieldTimeZone,
-                )
+                !isRentalIntervalInPast(date, startMinutes, endMinutes, fieldTimeZone, now) &&
+                    isRangeCoveredByRentalAvailability(
+                        option = option,
+                        date = date,
+                        startMinutes = startMinutes,
+                        endMinutes = endMinutes,
+                        timeZone = fieldTimeZone,
+                    )
             }
         }
 }
@@ -546,6 +550,7 @@ private fun RentalFieldTimelineColumn(
             .sortedBy { range -> range.startMinutes }
             .toList()
     }
+    val now = remember(selectedDate, timeZone) { Clock.System.now() }
 
     Card(
         modifier = Modifier.width(RENTAL_FIELD_COLUMN_WIDTH),
@@ -593,29 +598,40 @@ private fun RentalFieldTimelineColumn(
                             secondEnd = endMinutes,
                         )
                     }
+                    val isPast = isRentalIntervalInPast(
+                        date = selectedDate,
+                        startMinutes = startMinutes,
+                        endMinutes = endMinutes,
+                        timeZone = timeZone,
+                        now = now,
+                    )
+                    val canSelect = isAvailable && !isBusy && !isPast
 
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(RENTAL_TIMELINE_ROW_HEIGHT)
                             .border(
-                                width = if (isAvailable || isBusy) 1.dp else 0.dp,
-                                color = if (isAvailable || isBusy) {
-                                    MaterialTheme.colorScheme.outlineVariant
-                                } else {
-                                    Color.Transparent
+                                width = when {
+                                    isBusy -> 2.dp
+                                    isAvailable -> 1.dp
+                                    else -> 0.dp
+                                },
+                                color = when {
+                                    isBusy -> MaterialTheme.colorScheme.outline
+                                    isAvailable -> MaterialTheme.colorScheme.outlineVariant
+                                    else -> Color.Transparent
                                 }
                             )
                             .background(
-                                if (isBusy) {
-                                    MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f)
-                                } else if (isAvailable) {
-                                    MaterialTheme.colorScheme.surface
-                                } else {
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)
+                                when {
+                                    isBusy -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)
+                                    isPast && isAvailable -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f)
+                                    isAvailable -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.16f)
+                                    else -> MaterialTheme.colorScheme.surface
                                 }
                             )
-                            .clickable(enabled = isAvailable && !isBusy) {
+                            .clickable(enabled = canSelect) {
                                 onCreateSelection(option.field.id, startMinutes)
                             }
                     )
@@ -983,10 +999,15 @@ private fun RentalBusyOverlayBlock(
             .offset(y = topOffset)
             .padding(horizontal = 4.dp, vertical = 2.dp)
             .fillMaxWidth()
-            .height(height),
+            .height(height)
+            .border(
+                width = 2.dp,
+                color = MaterialTheme.colorScheme.outline,
+                shape = RoundedCornerShape(12.dp),
+            ),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.75f),
-            contentColor = MaterialTheme.colorScheme.onErrorContainer
+            containerColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.82f),
+            contentColor = MaterialTheme.colorScheme.surface
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
@@ -1005,7 +1026,7 @@ private fun RentalBusyOverlayBlock(
             Text(
                 text = "Booked",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

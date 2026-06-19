@@ -724,6 +724,8 @@ class BillingRepositoryHttpTest {
                       "id": "org_1",
                       "name": "Indoor Soccer Arena",
                       "ownerId": "owner_1",
+                      "publicSlug": "indoor-soccer-arena",
+                      "publicPageEnabled": true,
                       "staffMembers": [
                         {
                           "id": "staff_host",
@@ -772,6 +774,8 @@ class BillingRepositoryHttpTest {
 
         assertEquals(listOf("owner_1", "host_staff_1"), organization.activeHostIds())
         assertEquals(listOf("official_staff_1"), organization.activeOfficialIds())
+        assertEquals("indoor-soccer-arena", organization.publicSlug)
+        assertTrue(organization.publicPageEnabled)
         assertEquals("host@example.test", organization.staffEmailsByUserId["host_staff_1"])
         assertTrue(organization.canManageEventsForViewer("viewer_with_permission"))
         assertFalse(organization.activeHostIds().contains("blocked_host_1"))
@@ -1380,6 +1384,79 @@ class BillingRepositoryHttpTest {
         assertTrue(capturedBody.contains("\"scheduledFieldId\":\"field_1\""))
         assertTrue(capturedBody.contains("\"scheduledFieldIds\":[\"field_1\",\"field_2\"]"))
         assertTrue(capturedBody.contains("\"hostRequiredTemplateIds\":[\"host_a\",\"host_b\"]"))
+    }
+
+    @Test
+    fun createRentalOrder_posts_public_slug_payload_and_parses_response() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/public/organizations/summit-sports/rental-orders", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "bookingId": "booking_1",
+                      "billId": "bill_1",
+                      "totalCents": 27500,
+                      "items": [
+                        {
+                          "id": "booking_1__item_1",
+                          "fieldId": "field_1",
+                          "start": "2026-06-22T12:00:00Z",
+                          "end": "2026-06-22T13:00:00Z"
+                        }
+                      ],
+                      "createEventUrl": "/events/booking_1/schedule?create=1&rentalBookingId=booking_1"
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.Created,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val result = repo.createRentalOrder(
+            publicSlug = " summit-sports ",
+            eventId = "booking_1",
+            selections = listOf(
+                RentalOrderSelectionRequest(
+                    key = " selection_1 ",
+                    scheduledFieldIds = listOf(" field_1 ", "field_1"),
+                    dayOfWeek = 0,
+                    daysOfWeek = listOf(0),
+                    startTimeMinutes = 12 * 60,
+                    endTimeMinutes = 13 * 60,
+                    startDate = "2026-06-22T12:00:00Z",
+                    endDate = "2026-06-22T13:00:00Z",
+                    timeZone = "UTC",
+                ),
+            ),
+            paymentIntentId = "pi_rental_1",
+        ).getOrThrow()
+
+        assertTrue(capturedBody.contains("\"eventId\":\"booking_1\""))
+        assertTrue(capturedBody.contains("\"scheduledFieldIds\":[\"field_1\"]"))
+        assertTrue(capturedBody.contains("\"paymentIntentId\":\"pi_rental_1\""))
+        assertEquals("booking_1", result.bookingId)
+        assertEquals("bill_1", result.billId)
+        assertEquals(27500, result.totalCents)
+        assertEquals("booking_1__item_1", result.items.single().id)
     }
 
     @Test

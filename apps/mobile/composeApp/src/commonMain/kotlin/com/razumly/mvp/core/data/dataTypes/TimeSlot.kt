@@ -23,6 +23,10 @@ data class TimeSlot(
     val price: Int?,
     val requiredTemplateIds: List<String> = emptyList(),
     val hostRequiredTemplateIds: List<String> = emptyList(),
+    val sourceType: String? = null,
+    val rentalBookingId: String? = null,
+    val rentalBookingItemId: String? = null,
+    val rentalLocked: Boolean? = null,
 )
 
 @Serializable
@@ -42,6 +46,10 @@ data class TimeSlotDTO(
     val price: Int? = null,
     val requiredTemplateIds: List<String> = emptyList(),
     val hostRequiredTemplateIds: List<String> = emptyList(),
+    val sourceType: String? = null,
+    val rentalBookingId: String? = null,
+    val rentalBookingItemId: String? = null,
+    val rentalLocked: Boolean? = null,
 ) {
     fun toTimeSlot(id: String): TimeSlot =
         TimeSlot(
@@ -73,6 +81,10 @@ data class TimeSlotDTO(
                 .map(String::trim)
                 .filter(String::isNotBlank)
                 .distinct(),
+            sourceType = sourceType?.trim()?.takeIf(String::isNotBlank),
+            rentalBookingId = rentalBookingId?.trim()?.takeIf(String::isNotBlank),
+            rentalBookingItemId = rentalBookingItemId?.trim()?.takeIf(String::isNotBlank),
+            rentalLocked = rentalLocked,
         )
 }
 

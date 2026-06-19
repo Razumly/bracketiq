@@ -243,6 +243,38 @@ data class PurchaseIntentTimeSlotContext(
     val hostRequiredTemplateIds: List<String> = emptyList(),
 )
 
+@Serializable
+data class RentalOrderSelectionRequest(
+    val key: String? = null,
+    val scheduledFieldIds: List<String>,
+    val dayOfWeek: Int? = null,
+    val daysOfWeek: List<Int> = emptyList(),
+    val startTimeMinutes: Int? = null,
+    val endTimeMinutes: Int? = null,
+    val startDate: String,
+    val endDate: String,
+    val timeZone: String? = null,
+    val repeating: Boolean = false,
+)
+
+data class RentalOrderItem(
+    val id: String,
+    val fieldId: String,
+    val start: String,
+    val end: String,
+    val eventId: String? = null,
+    val eventTimeSlotId: String? = null,
+)
+
+data class RentalOrderResult(
+    val bookingId: String,
+    val billId: String? = null,
+    val eventId: String? = null,
+    val totalCents: Int,
+    val items: List<RentalOrderItem> = emptyList(),
+    val createEventUrl: String? = null,
+)
+
 data class RecordSignatureResult(
     val operationId: String? = null,
     val syncStatus: String? = null,
@@ -315,6 +347,14 @@ interface IBillingRepository : IMVPRepository {
         eventId: String? = null,
         organizationId: String? = null,
     ): Result<List<SignStep>>
+    suspend fun createRentalOrder(
+        publicSlug: String,
+        eventId: String,
+        selections: List<RentalOrderSelectionRequest>,
+        paymentIntentId: String? = null,
+        renterOrganizationId: String? = null,
+        sportId: String? = null,
+    ): Result<RentalOrderResult> = Result.failure(UnsupportedOperationException("Rental orders are not supported."))
     suspend fun recordSignature(
         eventId: String,
         templateId: String,
@@ -646,6 +686,54 @@ class BillingRepository(
         } catch (throwable: Throwable) {
             throw throwable.withFriendlyBoldSignMessage()
         }
+    }
+
+    override suspend fun createRentalOrder(
+        publicSlug: String,
+        eventId: String,
+        selections: List<RentalOrderSelectionRequest>,
+        paymentIntentId: String?,
+        renterOrganizationId: String?,
+        sportId: String?,
+    ): Result<RentalOrderResult> = runCatching {
+        val normalizedSlug = publicSlug.trim().takeIf(String::isNotBlank)
+            ?: throw IllegalArgumentException("This organization needs a public rental checkout before resources can be reserved.")
+        val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
+            ?: throw IllegalArgumentException("Rental booking id is required.")
+        val normalizedSelections = selections
+            .mapNotNull { selection ->
+                val fieldIds = selection.scheduledFieldIds
+                    .map(String::trim)
+                    .filter(String::isNotBlank)
+                    .distinct()
+                if (fieldIds.isEmpty()) return@mapNotNull null
+                selection.copy(
+                    key = selection.key?.trim()?.takeIf(String::isNotBlank),
+                    scheduledFieldIds = fieldIds,
+                    daysOfWeek = selection.daysOfWeek.distinct(),
+                    timeZone = selection.timeZone?.trim()?.takeIf(String::isNotBlank),
+                )
+            }
+        if (normalizedSelections.isEmpty()) {
+            throw IllegalArgumentException("Select at least one rental slot.")
+        }
+
+        val response = api.post<CreateRentalOrderRequestDto, RentalOrderResponseDto>(
+            path = "api/public/organizations/${normalizedSlug.encodeURLQueryComponent()}/rental-orders",
+            body = CreateRentalOrderRequestDto(
+                eventId = normalizedEventId,
+                selections = normalizedSelections,
+                sportId = sportId?.trim()?.takeIf(String::isNotBlank),
+                paymentIntentId = paymentIntentId?.trim()?.takeIf(String::isNotBlank),
+                renterOrganizationId = renterOrganizationId?.trim()?.takeIf(String::isNotBlank),
+            ),
+        )
+
+        response.error?.trim()?.takeIf(String::isNotBlank)?.let { errorMessage ->
+            throw Exception(errorMessage)
+        }
+        response.toRentalOrderResultOrNull()
+            ?: throw Exception("Unable to create rental order.")
     }
 
     override suspend fun recordSignature(
@@ -1605,6 +1693,36 @@ private data class OrganizationsResponseDto(
 )
 
 @Serializable
+private data class CreateRentalOrderRequestDto(
+    val eventId: String,
+    val selections: List<RentalOrderSelectionRequest>,
+    val sportId: String? = null,
+    val paymentIntentId: String? = null,
+    val renterOrganizationId: String? = null,
+)
+
+@Serializable
+private data class RentalOrderItemDto(
+    val id: String? = null,
+    val fieldId: String? = null,
+    val start: String? = null,
+    val end: String? = null,
+    val eventId: String? = null,
+    val eventTimeSlotId: String? = null,
+)
+
+@Serializable
+private data class RentalOrderResponseDto(
+    val bookingId: String? = null,
+    val billId: String? = null,
+    val eventId: String? = null,
+    val totalCents: Int? = null,
+    val items: List<RentalOrderItemDto> = emptyList(),
+    val createEventUrl: String? = null,
+    val error: String? = null,
+)
+
+@Serializable
 private data class OrganizationTemplatesResponseDto(
     val templates: List<OrganizationTemplateApiDto> = emptyList(),
     val error: String? = null,
@@ -1877,6 +1995,33 @@ private fun EventTeamPaymentCheckoutResponseDto.toPaymentCheckoutOrNull(): Event
     )
 }
 
+private fun RentalOrderResponseDto.toRentalOrderResultOrNull(): RentalOrderResult? {
+    val resolvedBookingId = bookingId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    return RentalOrderResult(
+        bookingId = resolvedBookingId,
+        billId = billId?.trim()?.takeIf(String::isNotBlank),
+        eventId = eventId?.trim()?.takeIf(String::isNotBlank),
+        totalCents = totalCents ?: 0,
+        items = items.mapNotNull { item -> item.toRentalOrderItemOrNull() },
+        createEventUrl = createEventUrl?.trim()?.takeIf(String::isNotBlank),
+    )
+}
+
+private fun RentalOrderItemDto.toRentalOrderItemOrNull(): RentalOrderItem? {
+    val resolvedId = id?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedFieldId = fieldId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedStart = start?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedEnd = end?.trim()?.takeIf(String::isNotBlank) ?: return null
+    return RentalOrderItem(
+        id = resolvedId,
+        fieldId = resolvedFieldId,
+        start = resolvedStart,
+        end = resolvedEnd,
+        eventId = eventId?.trim()?.takeIf(String::isNotBlank),
+        eventTimeSlotId = eventTimeSlotId?.trim()?.takeIf(String::isNotBlank),
+    )
+}
+
 private fun EventTeamBillingUserDto.toUserOptionOrNull(): EventTeamBillingUserOption? {
     val resolvedId = id?.trim()?.takeIf(String::isNotBlank) ?: return null
     val resolvedDisplayName = displayName?.trim()?.takeIf(String::isNotBlank) ?: resolvedId
@@ -2104,6 +2249,8 @@ private data class OrganizationApiDto(
     val fieldIds: List<String>? = null,
     val productIds: List<String>? = null,
     val teamIds: List<String>? = null,
+    val publicSlug: String? = null,
+    val publicPageEnabled: Boolean? = null,
     val staffMembers: List<OrganizationStaffMember>? = null,
     val staffInvites: List<Invite>? = null,
     val staffEmailsByUserId: Map<String, String>? = null,
@@ -2145,6 +2292,8 @@ private data class OrganizationApiDto(
             fieldIds = fieldIds ?: emptyList(),
             productIds = productIds ?: emptyList(),
             teamIds = teamIds ?: emptyList(),
+            publicSlug = publicSlug?.trim()?.takeIf(String::isNotBlank),
+            publicPageEnabled = publicPageEnabled ?: false,
             staffMembers = staffMembers ?: emptyList(),
             staffInvites = staffInvites ?: emptyList(),
             staffEmailsByUserId = staffEmailsByUserId ?: emptyMap(),

@@ -30,7 +30,7 @@ class RentalAvailabilityLoader(
         }
 
         val fields = fieldRepository.getFields(normalizedFieldIds).getOrThrow()
-            .sortedBy { field -> field.name?.lowercase() ?: "" }
+            .sortedBy { field -> field.displayLabel().lowercase() }
         if (fields.isEmpty()) {
             return@runCatching emptyList()
         }

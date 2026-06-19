@@ -116,6 +116,8 @@ import kotlinx.datetime.toLocalDateTime
 import kotlinx.datetime.toInstant
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlin.math.roundToInt
+import kotlin.time.Clock
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
@@ -188,7 +190,10 @@ internal fun resolveRentalRange(
         ) ?: return null
 
         matchedSlots += matchedSlot
-        totalPriceCents += (matchedSlot.price ?: 0).coerceAtLeast(0)
+        totalPriceCents += proratedRentalPriceCents(
+            priceCents = matchedSlot.price ?: 0,
+            durationMinutes = segmentEndMinutes - segmentStartMinutes,
+        )
         segmentStartMinutes += SLOT_INTERVAL_MINUTES
     }
 
@@ -259,6 +264,30 @@ internal fun rangesOverlap(
     return firstStart < secondEnd && secondStart < firstEnd
 }
 
+internal fun proratedRentalPriceCents(
+    priceCents: Int,
+    durationMinutes: Int,
+): Int {
+    if (priceCents <= 0 || durationMinutes <= 0) {
+        return 0
+    }
+    return ((priceCents * durationMinutes) / 60.0).roundToInt()
+}
+
+internal fun isRentalIntervalInPast(
+    date: LocalDate,
+    startMinutes: Int,
+    endMinutes: Int,
+    timeZone: TimeZone,
+    now: Instant = Clock.System.now(),
+): Boolean {
+    if (endMinutes <= startMinutes) {
+        return true
+    }
+    val intervalStart = date.toInstantAtMinutes(startMinutes, timeZone)
+    return intervalStart <= now
+}
+
 internal fun canApplyRentalSelectionRange(
     selectionId: Long,
     fieldId: String,
@@ -281,6 +310,9 @@ internal fun canApplyRentalSelectionRange(
         option.field.id == fieldId
     } ?: return false
     val fieldTimeZone = fieldOption.resolvedRentalTimeZone(timeZone)
+    if (isRentalIntervalInPast(date, startMinutes, endMinutes, fieldTimeZone)) {
+        return false
+    }
 
     val overlapsSelection = selections.any { selection ->
         selection.id != selectionId &&
@@ -430,10 +462,26 @@ internal fun Instant.toDisplayDateTime(timeZone: TimeZone = TimeZone.currentSyst
 }
 
 internal fun Field.displayLabel(): String {
-    if (!name.isNullOrBlank()) {
-        return name
+    val fieldName = name
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: "Field $fieldNumber"
+    val facilityName = facility
+        ?.name
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+
+    if (facilityName == null) {
+        return fieldName
     }
-    return "Field $fieldNumber"
+
+    val normalizedFieldName = fieldName.lowercase()
+    val normalizedFacilityName = facilityName.lowercase()
+    return if (normalizedFieldName == normalizedFacilityName || normalizedFieldName.contains(normalizedFacilityName)) {
+        fieldName
+    } else {
+        "$facilityName - $fieldName"
+    }
 }
 
 internal fun TimeSlot.matchesRentalSelection(

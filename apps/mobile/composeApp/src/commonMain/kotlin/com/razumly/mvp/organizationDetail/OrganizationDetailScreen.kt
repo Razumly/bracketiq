@@ -30,6 +30,7 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -50,6 +51,7 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.dataTypes.canUsePaidBilling
+import com.razumly.mvp.core.data.repositories.RentalOrderSelectionRequest
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
@@ -64,6 +66,7 @@ import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.composables.TeamDetailsDialog
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.util.moneyFormat
+import com.razumly.mvp.core.util.toTimeZoneOrUtc
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventDetail.TextSignatureDialog
@@ -71,13 +74,17 @@ import com.razumly.mvp.eventSearch.RentalConfirmationContent
 import com.razumly.mvp.eventSearch.RentalDetailsContent
 import com.razumly.mvp.eventSearch.RentalDetailsStep
 import com.razumly.mvp.eventSearch.RentalSelectionDraft
+import com.razumly.mvp.eventSearch.ResolvedRentalSelection
 import com.razumly.mvp.eventSearch.SLOT_INTERVAL_MINUTES
 import com.razumly.mvp.eventSearch.canApplyRentalSelectionRange
+import com.razumly.mvp.eventSearch.displayLabel
+import com.razumly.mvp.eventSearch.isRentalIntervalInPast
 import com.razumly.mvp.eventSearch.isRangeCoveredByRentalAvailability
 import com.razumly.mvp.eventSearch.rangeOverlapsBusyBlockOnDate
 import com.razumly.mvp.eventSearch.rangesOverlap
 import com.razumly.mvp.eventSearch.resolveRentalSelection
 import com.razumly.mvp.eventSearch.resolvedRentalTimeZone
+import com.razumly.mvp.eventSearch.toRentalDayIndex
 import com.razumly.mvp.icons.Indoor
 import com.razumly.mvp.icons.MVPIcons
 import com.razumly.mvp.icons.ProfileActionDetails
@@ -117,6 +124,8 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val loadingTeamMemberComplianceId by component.loadingTeamMemberComplianceId.collectAsState()
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
     val webSignaturePrompt by component.webSignaturePrompt.collectAsState()
+    val isReservingRental by component.isReservingRental.collectAsState()
+    val completedRentalReservation by component.completedRentalReservation.collectAsState()
 
     var selectedTab by remember(component) { mutableStateOf(component.initialTab) }
     var selectedTeam by remember { mutableStateOf<TeamWithPlayers?>(null) }
@@ -186,7 +195,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
         validResolvedSelections.map { resolved ->
             LockedRentalSelection(
                 fieldId = resolved.field.id,
-                fieldName = resolved.field.name,
+                fieldName = resolved.field.displayLabel(),
                 sourceTimeSlotIds = resolved.slots
                     .map { slot -> slot.id }
                     .distinct(),
@@ -237,16 +246,21 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val rentalEndInstant = remember(validResolvedSelections) {
         validResolvedSelections.maxOfOrNull { resolved -> resolved.endInstant }
     }
+    val organizationCanReserveRentals = organization?.let { org ->
+        !org.publicSlug.isNullOrBlank() && org.publicPageEnabled
+    } == true
     val canGoToConfirmation = validResolvedSelections.isNotEmpty() &&
         invalidSelectionCount == 0
-    val canContinueRental = organization != null &&
+    val canContinueRental = organizationCanReserveRentals &&
         rentalStartInstant != null &&
         rentalEndInstant != null &&
         selectedFieldIdsForCreate.isNotEmpty() &&
         selectedTimeSlotIdsForCreate.isNotEmpty() &&
-        invalidSelectionCount == 0
+        invalidSelectionCount == 0 &&
+        !isReservingRental
     val rentalValidationMessage = when {
         organization == null -> "Organization is not available."
+        !organizationCanReserveRentals -> "This organization needs a public rental checkout before resources can be reserved."
         isLoadingRentals && rentalFieldOptions.isEmpty() -> "Loading fields and rental slots..."
         rentalFieldOptions.isEmpty() -> "No fields are configured for this organization."
         rentalSelections.isEmpty() -> "Tap any available 30-minute cell to add a rental selection."
@@ -404,8 +418,22 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
 
                 OrganizationDetailTab.RENTALS -> {
                     val currentOrganization = organization
+                    val completedReservation = completedRentalReservation
                     if (currentOrganization == null) {
                         EmptyState(message = "Organization is not available.")
+                    } else if (completedReservation != null) {
+                        RentalReservationCompleteContent(
+                            organization = currentOrganization,
+                            reservation = completedReservation,
+                            bottomPadding = bottomPadding,
+                            onCreateEventNow = component::createEventFromCompletedRentalReservation,
+                            onAttachLater = {
+                                component.dismissCompletedRentalReservation()
+                                rentalSelections = emptyList()
+                                rentalDetailsStep = RentalDetailsStep.BUILDER
+                                nextRentalSelectionId = 1L
+                            },
+                        )
                     } else if (rentalDetailsStep == RentalDetailsStep.BUILDER) {
                         val selectionsForCurrentDate = remember(rentalSelections, selectedRentalDate) {
                             rentalSelections.filter { selection -> selection.date == selectedRentalDate }
@@ -458,8 +486,14 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                                         endMinutes = endMinutes,
                                         timeZone = fieldTimeZone,
                                     )
+                                val isPastRentalInterval = isRentalIntervalInPast(
+                                    date = selectedRentalDate,
+                                    startMinutes = startMinutes,
+                                    endMinutes = endMinutes,
+                                    timeZone = fieldTimeZone,
+                                )
 
-                                if (!overlapsSelection && !overlapsBusyBlock && isWithinRentalAvailability) {
+                                if (!overlapsSelection && !overlapsBusyBlock && isWithinRentalAvailability && !isPastRentalInterval) {
                                     rentalSelections = rentalSelections + RentalSelectionDraft(
                                         id = nextRentalSelectionId,
                                         fieldId = fieldId,
@@ -535,12 +569,13 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                             bottomPadding = bottomPadding,
                             validationMessage = rentalValidationMessage,
                             canContinue = canContinueRental,
+                            isSubmitting = isReservingRental,
                             onBack = { rentalDetailsStep = RentalDetailsStep.BUILDER },
                             onContinue = {
                                 if (!canContinueRental) return@RentalConfirmationContent
                                 val start = rentalStartInstant
                                 val end = rentalEndInstant
-                                component.startRentalCreate(
+                                component.startRentalReservation(
                                     RentalCreateContext(
                                         organizationId = currentOrganization.id,
                                         organizationName = currentOrganization.name,
@@ -556,7 +591,8 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                                         rentalPriceCents = totalRentalPriceCents,
                                         startEpochMillis = start.toEpochMilliseconds(),
                                         endEpochMillis = end.toEpochMilliseconds(),
-                                    )
+                                    ),
+                                    buildRentalOrderSelectionRequests(validResolvedSelections),
                                 )
                             }
                         )
@@ -672,6 +708,44 @@ private fun Product.priceLabel(): String {
             else -> "month"
         }
         "$formattedPrice / $suffix"
+    }
+}
+
+private fun buildRentalOrderSelectionRequests(
+    selections: List<ResolvedRentalSelection>,
+): List<RentalOrderSelectionRequest> {
+    return selections.mapIndexedNotNull { index, resolved ->
+        val fieldId = resolved.field.id.trim().takeIf(String::isNotBlank) ?: return@mapIndexedNotNull null
+        val selectionTimeZone = resolved.slots
+            .firstOrNull()
+            ?.timeZone
+            .toTimeZoneOrUtc(TimeZone.currentSystemDefault())
+        val startLocal = resolved.startInstant.toLocalDateTime(selectionTimeZone)
+        val endLocal = resolved.endInstant.toLocalDateTime(selectionTimeZone)
+        val dayIndex = startLocal.dayOfWeek.toRentalDayIndex()
+        val startMinutes = startLocal.hour * 60 + startLocal.minute
+        val endMinutes = if (
+            endLocal.date > startLocal.date &&
+            endLocal.hour == 0 &&
+            endLocal.minute == 0
+        ) {
+            24 * 60
+        } else {
+            endLocal.hour * 60 + endLocal.minute
+        }
+
+        RentalOrderSelectionRequest(
+            key = "mobile_${index + 1}",
+            scheduledFieldIds = listOf(fieldId),
+            dayOfWeek = dayIndex,
+            daysOfWeek = listOf(dayIndex),
+            startTimeMinutes = startMinutes,
+            endTimeMinutes = endMinutes,
+            startDate = resolved.startInstant.toString(),
+            endDate = resolved.endInstant.toString(),
+            timeZone = selectionTimeZone.id,
+            repeating = false,
+        )
     }
 }
 
@@ -841,6 +915,76 @@ private fun TeamsTabContent(
                     team = team,
                     modifier = Modifier.clickable { onTeamClick(team) },
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RentalReservationCompleteContent(
+    organization: Organization,
+    reservation: RentalReservationComplete,
+    bottomPadding: androidx.compose.ui.unit.Dp,
+    onCreateEventNow: () -> Unit,
+    onAttachLater: () -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = listTabPadding(bottomPadding),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        text = "Resources reserved",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = "Your rental at ${organization.name.ifBlank { "this organization" }} is reserved.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    if (reservation.totalCents > 0) {
+                        Text(
+                            text = "Total: ${(reservation.totalCents / 100.0).moneyFormat()}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    Text(
+                        text = "Booking ${reservation.bookingId}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TextButton(onClick = onAttachLater) {
+                            Text("Attach later")
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(onClick = onCreateEventNow) {
+                            Text("Create event now")
+                        }
+                    }
+                }
             }
         }
     }

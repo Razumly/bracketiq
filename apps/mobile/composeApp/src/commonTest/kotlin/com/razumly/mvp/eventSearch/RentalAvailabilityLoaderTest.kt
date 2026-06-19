@@ -16,9 +16,40 @@ import kotlinx.datetime.TimeZone
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 class RentalAvailabilityLoaderTest {
+    @Test
+    fun rentalPrice_isProratedByDuration() {
+        assertEquals(1250, proratedRentalPriceCents(priceCents = 2500, durationMinutes = 30))
+        assertEquals(3750, proratedRentalPriceCents(priceCents = 2500, durationMinutes = 90))
+    }
+
+    @Test
+    fun rentalIntervalInPast_rejectsSelectionsThatStartAtOrBeforeNow() {
+        val now = Instant.parse("2026-06-18T10:15:00Z")
+
+        assertTrue(
+            isRentalIntervalInPast(
+                date = LocalDate(2026, 6, 18),
+                startMinutes = 10 * 60,
+                endMinutes = 10 * 60 + SLOT_INTERVAL_MINUTES,
+                timeZone = TimeZone.UTC,
+                now = now,
+            )
+        )
+        assertFalse(
+            isRentalIntervalInPast(
+                date = LocalDate(2026, 6, 18),
+                startMinutes = 10 * 60 + SLOT_INTERVAL_MINUTES,
+                endMinutes = 11 * 60,
+                timeZone = TimeZone.UTC,
+                now = now,
+            )
+        )
+    }
+
     @Test
     fun loadBusyBlocks_convertsLeagueTimeSlotsToRentalBlocks() = runTest {
         val leagueSlot = TimeSlot(
