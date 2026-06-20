@@ -7,9 +7,12 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -17,7 +20,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -26,10 +28,12 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -195,16 +199,15 @@ private fun FilterDropdown(
     ) {
         Surface(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 8.dp,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            tonalElevation = 0.dp,
             shape = RoundedCornerShape(12.dp)
         ) {
             Box {
                 Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Header
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -224,30 +227,20 @@ private fun FilterDropdown(
                         }
                     }
 
-                    HorizontalDivider()
-
-                    // Event Type Filter
                     EventTypeFilterSection(
                         currentFilter = currentFilter, onFilterChange = onFilterChange
                     )
 
-                    HorizontalDivider()
-
-                    // Price Filter
                     PriceFilterSection(
                         currentFilter = currentFilter, onFilterChange = onFilterChange
                     )
 
-                    HorizontalDivider()
-
-                    // Date Filter
                     DateFilterSection(
                         currentFilter = currentFilter,
                         { showStartPicker = true },
                         { showEndPicker = true }
                     )
 
-                    // Apply Button
                     Button(
                         onClick = onDismiss, modifier = Modifier.fillMaxWidth()
                     ) {
@@ -299,35 +292,61 @@ private fun EventTypeFilterSection(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        LazyRow(
+        FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(top = 8.dp)
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
         ) {
-            item {
-                FilterChip(selected = currentFilter.eventType == null,
-                    onClick = { onFilterChange { copy(eventType = null) } },
-                    label = { Text("All") })
-            }
+            EventTypeFilterChip(
+                selected = currentFilter.eventType == null,
+                label = "All",
+                onClick = { onFilterChange { copy(eventType = null) } },
+            )
 
-            item {
-                FilterChip(selected = currentFilter.eventType == EventType.TOURNAMENT,
-                    onClick = { onFilterChange { copy(eventType = EventType.TOURNAMENT) } },
-                    label = { Text("Tournaments") })
-            }
+            EventTypeFilterChip(
+                selected = currentFilter.eventType == EventType.TOURNAMENT,
+                label = "Tournaments",
+                onClick = { onFilterChange { copy(eventType = EventType.TOURNAMENT) } },
+            )
 
-            item {
-                FilterChip(selected = currentFilter.eventType == EventType.EVENT,
-                    onClick = { onFilterChange { copy(eventType = EventType.EVENT) } },
-                    label = { Text("Events") })
-            }
+            EventTypeFilterChip(
+                selected = currentFilter.eventType == EventType.EVENT,
+                label = "Events",
+                onClick = { onFilterChange { copy(eventType = EventType.EVENT) } },
+            )
 
-            item {
-                FilterChip(selected = currentFilter.eventType == EventType.LEAGUE,
-                    onClick = { onFilterChange { copy(eventType = EventType.LEAGUE) } },
-                    label = { Text("Leagues") })
-            }
+            EventTypeFilterChip(
+                selected = currentFilter.eventType == EventType.LEAGUE,
+                label = "Leagues",
+                onClick = { onFilterChange { copy(eventType = EventType.LEAGUE) } },
+            )
         }
     }
+}
+
+@Composable
+private fun EventTypeFilterChip(
+    selected: Boolean,
+    label: String,
+    onClick: () -> Unit,
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label) },
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+            labelColor = MaterialTheme.colorScheme.onSurface,
+            selectedContainerColor = MaterialTheme.colorScheme.primary,
+            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+        ),
+        border = FilterChipDefaults.filterChipBorder(
+            enabled = true,
+            selected = selected,
+            borderColor = MaterialTheme.colorScheme.outline,
+            selectedBorderColor = MaterialTheme.colorScheme.primary,
+        ),
+    )
 }
 
 @Composable
@@ -401,29 +420,57 @@ private fun DateFilterSection(
         }
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            StandardTextField(
+            FilterDateField(
                 value = currentFilter.date.first.toLocalDateTime(
                     TimeZone.currentSystemDefault()
                 ).date.format(dateFormat),
-                onValueChange = {},
                 modifier = Modifier.weight(1f),
-                label = "Start Date & Time",
-                readOnly = true,
-                onTap = onStartDateClicked
+                label = "Start Date",
+                onClick = onStartDateClicked,
             )
-            StandardTextField(
+            FilterDateField(
                 value = currentFilter.date.second?.toLocalDateTime(
                     TimeZone.currentSystemDefault()
                 )?.date?.format(dateFormat) ?: "Select an End Date",
-                onValueChange = {},
                 modifier = Modifier.weight(1f),
                 label = "End Date",
-                readOnly = true,
-                onTap = onEndDateClicked
+                onClick = onEndDateClicked,
             )
         }
+    }
+}
+
+@Composable
+private fun FilterDateField(
+    value: String,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier.clickable(
+            indication = null,
+            interactionSource = remember { MutableInteractionSource() },
+            onClick = onClick,
+        )
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(label) },
+            enabled = false,
+            readOnly = true,
+            singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(
+                disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                disabledBorderColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                disabledLabelColor = MaterialTheme.colorScheme.onSurface,
+            ),
+        )
     }
 }
