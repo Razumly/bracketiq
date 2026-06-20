@@ -339,6 +339,7 @@ interface ProfileComponent : IPaymentProcessor {
     fun editBillingAddress()
 
     fun onLogout()
+    fun createEvent()
     fun manageTeams()
     fun manageEvents()
     fun manageRefunds()
@@ -720,6 +721,10 @@ class DefaultProfileComponent(
             }
             navigationHandler.navigateToLogin()
         }
+    }
+
+    override fun createEvent() {
+        navigationHandler.navigateToCreate()
     }
 
     override fun manageTeams() {
