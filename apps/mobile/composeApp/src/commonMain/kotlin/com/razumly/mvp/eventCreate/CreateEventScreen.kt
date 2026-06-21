@@ -99,6 +99,8 @@ fun CreateEventScreen(
     val localFields by component.localFields.collectAsState()
     val leagueSlots by component.leagueSlots.collectAsState()
     val useManualTimeSlots by component.useManualTimeSlots.collectAsState()
+    val availableRentalResources by component.availableRentalResources.collectAsState()
+    val selectedRentalResourceIds by component.selectedRentalResourceIds.collectAsState()
     val leagueScoringConfig by component.leagueScoringConfig.collectAsState()
     val suggestedUsers by component.suggestedUsers.collectAsState()
     val pendingStaffInvites by component.pendingStaffInvites.collectAsState()
@@ -426,6 +428,9 @@ fun CreateEventScreen(
                             organizationTemplatesError = organizationTemplatesError,
                             editableFields = localFields,
                             leagueTimeSlots = leagueSlots,
+                            availableRentalResources = availableRentalResources,
+                            selectedRentalResourceIds = selectedRentalResourceIds,
+                            onRentalResourceSelectionChange = component::setRentalResourceSelected,
                             leagueScoringConfig = leagueScoringConfig,
                             onHostCreateAccount = component::createAccount,
                             onOpenLocationMap = {

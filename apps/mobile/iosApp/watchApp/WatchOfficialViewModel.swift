@@ -6,9 +6,27 @@ final class WatchOfficialViewModel: ObservableObject {
         case login
         case matches
         case detail
+        case timer
+        case teamPick
+        case actionMenu
+        case incidentList
+        case incidentEditor
         case incidentTypes
+        case incidentTeams
         case players
         case minuteConfirm
+    }
+
+    enum IncidentMode {
+        case create
+        case edit
+    }
+
+    enum IncidentField {
+        case type
+        case team
+        case player
+        case time
     }
 
     @Published var route: Route = .login
@@ -23,16 +41,22 @@ final class WatchOfficialViewModel: ObservableObject {
     @Published var selectedTeamId: String?
     @Published var selectedIncidentCode: String?
     @Published var selectedPlayerUserId: String?
-    @Published var incidentMinute = 0
+    @Published var selectedIncidentId: String?
+    @Published var incidentMinute = 1
+    @Published var incidentClockSeconds = 0
+    @Published var incidentMode: IncidentMode?
     @Published var message: String?
     @Published var error: String?
+    @Published var isDemo = false
 
     private let repository: WatchMatchRepository
 
-    init(repository: WatchMatchRepository) {
+    init(repository: WatchMatchRepository, bootstrapOnInit: Bool = true) {
         self.repository = repository
-        Task {
-            await bootstrap()
+        if bootstrapOnInit {
+            Task {
+                await bootstrap()
+            }
         }
     }
 
@@ -48,6 +72,11 @@ final class WatchOfficialViewModel: ObservableObject {
     var selectedIncidentType: WatchIncidentTypeDefinitionDTO? {
         guard let selectedMatch else { return nil }
         return selectedMatch.rules.incidentTypes.first { $0.code == selectedIncidentCode }
+    }
+
+    var selectedIncident: WatchMatchIncidentDTO? {
+        guard let selectedIncidentId, let selectedMatch else { return nil }
+        return selectedMatch.raw.incidents.first { $0.resolvedId == selectedIncidentId }
     }
 
     var selectedPlayer: WatchPlayer? {
@@ -71,6 +100,25 @@ final class WatchOfficialViewModel: ObservableObject {
                 self.matches = loadedMatches
                 self.selectedMatchId = loadedMatches.first?.id
                 self.route = .matches
+            }
+        }
+    }
+
+    func acceptSyncedSetupToken(_ setupToken: String) {
+        let token = setupToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { return }
+        Task {
+            await self.runBusy {
+                let session = try await self.repository.exchangeWatchSetupToken(token)
+                let loadedMatches = try await self.repository.loadOfficialSchedule()
+                self.isAuthenticated = true
+                self.currentUserId = session.userId
+                self.currentUserLabel = session.label
+                self.password = ""
+                self.matches = loadedMatches
+                self.selectedMatchId = loadedMatches.first?.id
+                self.route = .matches
+                self.message = "Signed in from iPhone."
             }
         }
     }
@@ -104,6 +152,8 @@ final class WatchOfficialViewModel: ObservableObject {
         selectedTeamId = nil
         selectedIncidentCode = nil
         selectedPlayerUserId = nil
+        selectedIncidentId = nil
+        incidentMode = nil
         route = .detail
         clearStatus()
     }
@@ -114,19 +164,39 @@ final class WatchOfficialViewModel: ObservableObject {
             break
         case .detail:
             route = .matches
-        case .incidentTypes:
-            selectedTeamId = nil
+        case .timer:
             route = .detail
+        case .teamPick:
+            route = .timer
+        case .actionMenu:
+            route = .teamPick
+        case .incidentList:
+            route = .actionMenu
+        case .incidentEditor:
+            let nextRoute: Route = incidentMode == .edit ? .incidentList : .teamPick
+            clearIncidentDraft()
+            route = nextRoute
+        case .incidentTypes:
+            route = incidentMode == .create ? .teamPick : .incidentEditor
         case .players:
             selectedPlayerUserId = nil
-            route = .incidentTypes
+            route = incidentMode == .create ? .incidentTypes : .incidentEditor
         case .minuteConfirm:
-            if selectedTeam?.players.isEmpty == false {
+            if incidentMode == .edit {
+                route = .incidentEditor
+            } else if let type = selectedIncidentType,
+                      let match = selectedMatch,
+                      let team = selectedTeam,
+                      type.requiresPlayer(rules: match.rules),
+                      !team.players.isEmpty {
                 route = .players
             } else {
                 route = .incidentTypes
             }
+        case .incidentTeams:
+            route = incidentMode == .create ? .incidentTypes : .incidentEditor
         }
+        clearStatus()
     }
 
     func checkIn() {
@@ -134,7 +204,19 @@ final class WatchOfficialViewModel: ObservableObject {
     }
 
     func startTimer() {
-        runMatchAction(success: "Timer started.") { try await self.repository.startCurrentSegment(match: $0) }
+        runMatchAction(success: nil, route: .timer) { try await self.repository.startCurrentSegment(match: $0) }
+    }
+
+    func openTimer() {
+        guard selectedMatch != nil else { return }
+        route = .timer
+        clearStatus()
+    }
+
+    func returnToTimerIfTeamPicker() {
+        if route == .teamPick {
+            route = .timer
+        }
     }
 
     func resetTimer() {
@@ -146,40 +228,112 @@ final class WatchOfficialViewModel: ObservableObject {
     }
 
     func startNextSegment() {
-        runMatchAction(success: "Next segment started.") { try await self.repository.startNextSegmentOrOvertime(match: $0) }
+        runMatchAction(success: nil, route: .timer) { try await self.repository.startNextSegmentOrOvertime(match: $0) }
     }
 
     func endMatch() {
         runMatchAction(success: "Match ended.") { try await self.repository.endMatch(match: $0) }
     }
 
+    func showTeamPicker() {
+        guard selectedMatch != nil else { return }
+        selectedTeamId = nil
+        selectedIncidentId = nil
+        incidentMode = nil
+        route = .teamPick
+        clearStatus()
+    }
+
+    func showActionMenu() {
+        guard selectedMatch != nil else { return }
+        selectedTeamId = nil
+        selectedIncidentId = nil
+        incidentMode = nil
+        route = .actionMenu
+        clearStatus()
+    }
+
+    func showIncidentList() {
+        guard selectedMatch != nil else { return }
+        selectedIncidentId = nil
+        incidentMode = nil
+        route = .incidentList
+        clearStatus()
+    }
+
     func selectTeam(_ teamId: String) {
-        selectedTeamId = teamId
-        selectedIncidentCode = nil
-        selectedPlayerUserId = nil
-        route = .incidentTypes
+        switch route {
+        case .incidentTeams:
+            selectIncidentTeam(teamId)
+        default:
+            beginIncidentCreate(teamId: teamId)
+        }
+    }
+
+    func openIncidentEditor(_ incidentId: String) {
+        guard let match = selectedMatch,
+              let incident = match.raw.incidents.first(where: { $0.resolvedId == incidentId }) else {
+            return
+        }
+        let clockSeconds = incident.clockSeconds ?? secondsForMinute(incident.minute ?? 1)
+        selectedIncidentId = incident.resolvedId
+        selectedTeamId = incident.eventTeamId.trimmedOrNil
+        selectedIncidentCode = incident.incidentType
+        selectedPlayerUserId = incident.participantUserId.trimmedOrNil
+        incidentMinute = minuteForClockSeconds(clockSeconds)
+        incidentClockSeconds = clockSeconds
+        incidentMode = .edit
+        route = .incidentEditor
+        clearStatus()
+    }
+
+    func editIncidentField(_ field: IncidentField) {
+        guard let match = selectedMatch else { return }
+        switch field {
+        case .type:
+            route = .incidentTypes
+        case .team:
+            route = .incidentTeams
+        case .player:
+            if selectedIncidentType == nil {
+                route = .incidentTypes
+            } else if selectedTeam == nil {
+                route = .incidentTeams
+            } else if selectedIncidentType?.isScoring == true,
+                      selectedIncidentType?.requiresPlayer(rules: match.rules) == false {
+                route = .minuteConfirm
+            } else {
+                route = .players
+            }
+        case .time:
+            route = .minuteConfirm
+        }
         clearStatus()
     }
 
     func selectIncident(_ code: String) {
         guard let match = selectedMatch,
-              let team = selectedTeam,
               let type = match.rules.incidentTypes.first(where: { $0.code == code }) else {
-            return
-        }
-        if type.isScoring && !type.requiresPlayer(rules: match.rules) {
-            confirmIncident(typeOverride: type, playerOverride: nil, skipMinute: true)
-            return
-        }
-        let requiresPlayer = type.requiresPlayer(rules: match.rules)
-        if requiresPlayer && team.players.isEmpty {
-            error = "Selected team has no roster players."
             return
         }
         selectedIncidentCode = type.code
         selectedPlayerUserId = nil
-        incidentMinute = repository.defaultIncidentMinute(match: match)
-        route = team.players.isEmpty ? .minuteConfirm : .players
+        let nextRoute: Route
+        if incidentMode == .create, let team = selectedTeam {
+            if type.isScoring && !type.requiresPlayer(rules: match.rules) {
+                nextRoute = .minuteConfirm
+            } else if type.requiresPlayer(rules: match.rules), team.players.isEmpty {
+                error = "Selected team has no roster players."
+                return
+            } else if team.players.isEmpty {
+                nextRoute = .minuteConfirm
+            } else {
+                nextRoute = .players
+            }
+        } else {
+            nextRoute = .incidentTeams
+        }
+        route = nextRoute
         clearStatus()
     }
 
@@ -190,41 +344,71 @@ final class WatchOfficialViewModel: ObservableObject {
     }
 
     func adjustMinute(_ delta: Int) {
-        incidentMinute = max(0, incidentMinute + delta)
+        let nextMinute = max(1, incidentMinute + delta)
+        incidentMinute = nextMinute
+        incidentClockSeconds = secondsForMinute(nextMinute)
+        clearStatus()
     }
 
-    func confirmIncident(
-        typeOverride: WatchIncidentTypeDefinitionDTO? = nil,
-        playerOverride: WatchPlayer? = nil,
-        skipMinute: Bool = false
-    ) {
+    func returnToIncidentEditor() {
+        route = .incidentEditor
+        clearStatus()
+    }
+
+    func finishIncident() {
         guard let match = selectedMatch,
               let team = selectedTeam,
-              let incidentType = typeOverride ?? selectedIncidentType else {
+              let incidentType = selectedIncidentType else {
             return
         }
-        let player = playerOverride ?? selectedPlayer
+        let player = selectedPlayer
         if incidentType.requiresPlayer(rules: match.rules), player == nil {
             error = "Select a player."
             return
         }
         Task {
             await self.runBusy {
-                _ = try await self.repository.recordIncident(
-                    match: match,
-                    teamId: team.id,
-                    incidentType: incidentType,
-                    player: player,
-                    minute: skipMinute ? self.repository.defaultIncidentMinute(match: match) : self.incidentMinute
-                )
+                if self.incidentMode == .edit {
+                    guard let incident = self.selectedIncident else {
+                        throw WatchAPIError.server(status: 400, message: "Select an incident to edit.")
+                    }
+                    _ = try await self.repository.updateIncident(
+                        match: match,
+                        incident: incident,
+                        teamId: team.id,
+                        incidentType: incidentType,
+                        player: player,
+                        minute: self.incidentMinute,
+                        clockSeconds: self.incidentClockSeconds
+                    )
+                } else {
+                    _ = try await self.repository.recordIncident(
+                        match: match,
+                        teamId: team.id,
+                        incidentType: incidentType,
+                        player: player,
+                        minute: self.incidentMinute,
+                        clockSeconds: self.incidentClockSeconds
+                    )
+                }
+                let wasEditing = self.incidentMode == .edit
                 try await self.reloadMatches(preserveSelection: true)
-                self.route = .detail
+                self.route = wasEditing ? .incidentList : .teamPick
                 self.selectedTeamId = nil
                 self.selectedIncidentCode = nil
                 self.selectedPlayerUserId = nil
+                self.selectedIncidentId = nil
+                self.incidentMode = nil
                 self.message = incidentType.isScoring ? "Score updated." : "Incident saved."
             }
         }
+    }
+
+    func cancelIncident() {
+        let nextRoute: Route = incidentMode == .edit ? .incidentList : .teamPick
+        clearIncidentDraft()
+        route = nextRoute
+        clearStatus()
     }
 
     private func bootstrap() async {
@@ -244,16 +428,71 @@ final class WatchOfficialViewModel: ObservableObject {
         }
     }
 
-    private func runMatchAction(success: String, action: @escaping (WatchMatch) async throws -> WatchMatchDTO) {
+    private func runMatchAction(
+        success: String?,
+        route successRoute: Route = .detail,
+        action: @escaping (WatchMatch) async throws -> WatchMatchDTO
+    ) {
         guard let match = selectedMatch else { return }
         Task {
             await self.runBusy {
-                _ = try await action(match)
-                try await self.reloadMatches(preserveSelection: true)
-                self.route = .detail
+                let updated = try await action(match)
+                self.replaceSelectedMatch(with: updated)
+                self.route = successRoute
                 self.message = success
             }
         }
+    }
+
+    private func replaceSelectedMatch(with raw: WatchMatchDTO) {
+        guard let matchId = raw.resolvedId ?? selectedMatchId else {
+            return
+        }
+        matches = matches.map { match in
+            guard match.id == matchId else { return match }
+            return match.updating(raw: raw, currentUserId: currentUserId)
+        }
+        selectedMatchId = matchId
+    }
+
+    private func beginIncidentCreate(teamId: String) {
+        guard let match = selectedMatch else { return }
+        let clockSeconds = repository.defaultIncidentClockSeconds(match: match)
+        selectedTeamId = teamId
+        selectedIncidentId = nil
+        selectedIncidentCode = nil
+        selectedPlayerUserId = nil
+        incidentMinute = minuteForClockSeconds(clockSeconds)
+        incidentClockSeconds = clockSeconds
+        incidentMode = .create
+        route = .incidentTypes
+        clearStatus()
+    }
+
+    private func selectIncidentTeam(_ teamId: String) {
+        guard let match = selectedMatch,
+              [match.team1, match.team2].compactMap({ $0 }).contains(where: { $0.id == teamId }) else {
+            error = "Select a match team."
+            return
+        }
+        selectedTeamId = teamId
+        selectedPlayerUserId = nil
+        guard let type = selectedIncidentType else {
+            route = incidentMode == .create ? .incidentTypes : .incidentEditor
+            clearStatus()
+            return
+        }
+        if type.isScoring && !type.requiresPlayer(rules: match.rules) {
+            route = .minuteConfirm
+        } else if type.requiresPlayer(rules: match.rules), selectedTeam?.players.isEmpty != false {
+            error = "Selected team has no roster players."
+            return
+        } else if selectedTeam?.players.isEmpty == false {
+            route = .players
+        } else {
+            route = .minuteConfirm
+        }
+        clearStatus()
     }
 
     private func reloadMatches(preserveSelection: Bool) async throws {
@@ -282,4 +521,22 @@ final class WatchOfficialViewModel: ObservableObject {
         error = nil
         message = nil
     }
+
+    private func clearIncidentDraft() {
+        selectedTeamId = nil
+        selectedIncidentCode = nil
+        selectedPlayerUserId = nil
+        selectedIncidentId = nil
+        incidentMinute = 1
+        incidentClockSeconds = 0
+        incidentMode = nil
+    }
+}
+
+private func secondsForMinute(_ minute: Int) -> Int {
+    (max(1, minute) - 1) * 60
+}
+
+private func minuteForClockSeconds(_ seconds: Int) -> Int {
+    (max(0, seconds) / 60) + 1
 }

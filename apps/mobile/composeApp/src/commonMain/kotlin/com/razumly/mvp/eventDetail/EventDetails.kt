@@ -132,6 +132,7 @@ import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.extractDivisionTokenFromId
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabels
+import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.composables.DropdownOption
@@ -329,6 +330,9 @@ fun EventDetails(
     divisionTypeParameters: DivisionTypeParameters = DivisionTypeParameters(),
     editableFields: List<Field> = emptyList(),
     leagueTimeSlots: List<TimeSlot> = emptyList(),
+    availableRentalResources: List<RentalResourceOption> = emptyList(),
+    selectedRentalResourceIds: Set<String> = emptySet(),
+    onRentalResourceSelectionChange: (String, Boolean) -> Unit = { _, _ -> },
     leagueScoringConfig: LeagueScoringConfigDTO = LeagueScoringConfigDTO(),
     organizationTemplates: List<OrganizationTemplateDocument> = emptyList(),
     organizationTemplatesLoading: Boolean = false,
@@ -1581,6 +1585,13 @@ fun EventDetails(
             rentalTimeLocked = rentalTimeLocked,
         )
     }
+    val hasRentalBackedSlots = remember(leagueTimeSlots) {
+        leagueTimeSlots.any { slot -> slot.isRentalBacked() }
+    }
+    val hasAvailableRentalResources = availableRentalResources.isNotEmpty()
+    val allowLockedSlotDivisionEdits = (scheduleTimeLocked || hasRentalBackedSlots) && splitByDivisionScheduling
+    val allowLocalResourceCreationWithRentalResources = editEvent.eventType == EventType.LEAGUE ||
+        editEvent.eventType == EventType.TOURNAMENT
     val supportsOptionalManualTimeSlots = remember(
         isNewEvent,
         scheduleTimeLocked,
@@ -1601,10 +1612,14 @@ fun EventDetails(
     val slotEditorEnabled = remember(
         editEvent.eventType,
         scheduleTimeLocked,
+        hasRentalBackedSlots,
+        hasAvailableRentalResources,
         supportsOptionalManualTimeSlots,
         useManualTimeSlots,
     ) {
         when {
+            hasRentalBackedSlots -> true
+            hasAvailableRentalResources && editEvent.eventType == EventType.EVENT -> false
             editEvent.eventType == EventType.WEEKLY_EVENT -> true
             editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT -> {
                 !supportsOptionalManualTimeSlots || useManualTimeSlots
@@ -2113,10 +2128,17 @@ fun EventDetails(
         resolveReadOnlyFieldCount(event = event, editableFields = editableFields)
     }
     val facilitiesFieldCount = if (editView) fieldCount else readOnlyFieldCount
-    val supportsScheduleConfig = remember(editEvent.eventType, scheduleTimeLocked) {
+    val supportsScheduleConfig = remember(
+        editEvent.eventType,
+        scheduleTimeLocked,
+        hasRentalBackedSlots,
+        hasAvailableRentalResources,
+    ) {
         editEvent.eventType == EventType.LEAGUE ||
             editEvent.eventType == EventType.TOURNAMENT ||
             editEvent.eventType == EventType.WEEKLY_EVENT ||
+            hasRentalBackedSlots ||
+            hasAvailableRentalResources ||
             (scheduleTimeLocked && editEvent.eventType == EventType.EVENT)
     }
     val facilitiesSummaryLine = remember(
@@ -2124,12 +2146,16 @@ fun EventDetails(
         eventWithRelations.timeSlots,
         editEvent.eventType,
         scheduleTimeLocked,
+        hasRentalBackedSlots,
+        hasAvailableRentalResources,
     ) {
-        val fieldSummary = "${facilitiesFieldCount.coerceAtLeast(0)} fields"
+        val fieldSummary = "${facilitiesFieldCount.coerceAtLeast(0)} resources"
         val slotSummary = if (
             editEvent.eventType == EventType.LEAGUE ||
                 editEvent.eventType == EventType.TOURNAMENT ||
                 editEvent.eventType == EventType.WEEKLY_EVENT ||
+                hasRentalBackedSlots ||
+                hasAvailableRentalResources ||
                 (scheduleTimeLocked && editEvent.eventType == EventType.EVENT)
         ) {
             "${eventWithRelations.timeSlots.size} slots"
@@ -4954,6 +4980,9 @@ fun EventDetails(
                                 fieldCount = fieldCount,
                                 fields = editableFields,
                                 slots = leagueTimeSlots,
+                                availableRentalResources = availableRentalResources,
+                                selectedRentalResourceIds = selectedRentalResourceIds,
+                                onRentalResourceSelectionChange = onRentalResourceSelectionChange,
                                 eventStart = editEvent.start,
                                 eventEnd = if (editEvent.noFixedEndDateTime) {
                                     null
@@ -4978,9 +5007,10 @@ fun EventDetails(
                                 showSlotDivisions = splitByDivisionScheduling,
                                 lockSlotDivisions = false,
                                 lockedDivisionIds = editEvent.divisions.normalizeDivisionIdentifiers(),
-                                allowDivisionEditsWhenReadOnly = scheduleTimeLocked && splitByDivisionScheduling,
+                                allowDivisionEditsWhenReadOnly = allowLockedSlotDivisionEdits,
+                                allowLocalResourceCreationWithRentalResources = allowLocalResourceCreationWithRentalResources,
                                 fieldCountError = if (!isFieldCountValid) {
-                                    "Field count must be at least 1."
+                                    "Resource count must be at least 1."
                                 } else {
                                     null
                                 },

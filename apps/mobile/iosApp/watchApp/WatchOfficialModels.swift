@@ -5,6 +5,10 @@ struct WatchLoginRequest: Encodable {
     let password: String
 }
 
+struct WatchExchangeRequest: Encodable {
+    let setupToken: String
+}
+
 struct WatchAuthUserDTO: Decodable {
     let id: String?
     let email: String?
@@ -480,6 +484,10 @@ struct WatchMatchIncidentDTO: Decodable, Identifiable {
         case linkedPointDelta
         case note
     }
+
+    var resolvedId: String {
+        id.trimmedOrNil ?? legacyId.trimmedOrNil ?? id
+    }
 }
 
 struct WatchMatchDTO: Decodable, Identifiable {
@@ -596,6 +604,25 @@ struct WatchMatch: Identifiable, Hashable {
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
+    }
+
+    func updating(raw: WatchMatchDTO, currentUserId: String?) -> WatchMatch {
+        WatchMatch(
+            id: raw.resolvedId ?? id,
+            number: raw.matchId ?? number,
+            eventId: raw.eventId.trimmedOrNil ?? eventId,
+            eventName: eventName,
+            startIso: raw.start ?? startIso,
+            endIso: raw.end ?? endIso,
+            fieldLabel: fieldLabel,
+            division: raw.division ?? division,
+            status: raw.status ?? status,
+            team1: team1,
+            team2: team2,
+            officialCheckedIn: currentUserId.map { raw.isUserCheckedIn(userId: $0) } ?? officialCheckedIn,
+            rules: raw.matchRulesSnapshot ?? raw.resolvedMatchRules ?? rules,
+            raw: raw
+        )
     }
 }
 

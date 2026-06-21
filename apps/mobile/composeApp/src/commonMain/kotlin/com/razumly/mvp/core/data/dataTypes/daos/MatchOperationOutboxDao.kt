@@ -45,6 +45,18 @@ interface MatchOperationOutboxDao {
         syncingStatus: String = MATCH_OPERATION_STATUS_SYNCING,
     ): List<MatchOperationOutboxEntry>
 
+    @Query(
+        """
+        SELECT COUNT(*) FROM MatchOperationOutboxEntry
+        WHERE status IN (:pendingStatus, :failedStatus, :syncingStatus)
+        """,
+    )
+    suspend fun pendingOperationCount(
+        pendingStatus: String = MATCH_OPERATION_STATUS_PENDING,
+        failedStatus: String = MATCH_OPERATION_STATUS_FAILED,
+        syncingStatus: String = MATCH_OPERATION_STATUS_SYNCING,
+    ): Int
+
     @Query("SELECT * FROM MatchOperationOutboxEntry WHERE id IN (:ids)")
     suspend fun getOperationsByIds(ids: List<String>): List<MatchOperationOutboxEntry>
 

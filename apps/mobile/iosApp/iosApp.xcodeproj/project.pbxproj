@@ -20,6 +20,9 @@
 		1ECBBF6B2DD8409D0048A444 /* Secrets.plist in Resources */ = {isa = PBXBuildFile; fileRef = 1ECBBF6A2DD8409D0048A444 /* Secrets.plist */; };
 		2152FB042600AC8F00CF470E /* iOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2152FB032600AC8F00CF470E /* iOSApp.swift */; };
 		27A4C74EAF1211B7339ED786 /* WatchMatchRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37D84E230F9B282FA9736E6C /* WatchMatchRepository.swift */; };
+		2C9A7B012EFD701000C0DE01 /* WatchMatchOperationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C9A7B002EFD701000C0DE01 /* WatchMatchOperationStore.swift */; };
+		2C9A7B032EFD711000C0DE01 /* WatchAuthConnectivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C9A7B022EFD711000C0DE01 /* WatchAuthConnectivity.swift */; };
+		2C9A7B062EFD721000C0DE01 /* WatchOfficialDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C9A7B052EFD721000C0DE01 /* WatchOfficialDemo.swift */; };
 		2FA52BF82F30D57600A1D4E1 /* BIQ.icon in Resources */ = {isa = PBXBuildFile; fileRef = 2FA52BF72F30D57600A1D4E1 /* BIQ.icon */; };
 		418AB6459AEA178BD67A5EBF /* WatchTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73B46168B883F966EC75B1B /* WatchTokenStore.swift */; };
 		468DCFA5FBA5824C3EE07610 /* WatchOfficialViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40829BADB99EB564931F2B4F /* WatchOfficialViewModel.swift */; };
@@ -48,6 +51,9 @@
 		1ECBBF6A2DD8409D0048A444 /* Secrets.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Secrets.plist; sourceTree = "<group>"; };
 		2152FB032600AC8F00CF470E /* iOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp.swift; sourceTree = "<group>"; };
 		2FA52BF72F30D57600A1D4E1 /* BIQ.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = BIQ.icon; sourceTree = "<group>"; };
+		2C9A7B002EFD701000C0DE01 /* WatchMatchOperationStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchMatchOperationStore.swift; sourceTree = "<group>"; };
+		2C9A7B022EFD711000C0DE01 /* WatchAuthConnectivity.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchAuthConnectivity.swift; sourceTree = "<group>"; };
+		2C9A7B052EFD721000C0DE01 /* WatchOfficialDemo.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchOfficialDemo.swift; sourceTree = "<group>"; };
 		37D84E230F9B282FA9736E6C /* WatchMatchRepository.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchMatchRepository.swift; sourceTree = "<group>"; };
 		40829BADB99EB564931F2B4F /* WatchOfficialViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchOfficialViewModel.swift; sourceTree = "<group>"; };
 		64FFA45F07EBEC47E14039BA /* Pods_iosApp.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_iosApp.framework; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -175,9 +181,12 @@
 				0D92A6A08EAEAC9D44329700 /* MVPWatchApp.swift */,
 				1A1B1D1EFC8CC1B55E4FECD5 /* WatchAPIClient.swift */,
 				F73B46168B883F966EC75B1B /* WatchTokenStore.swift */,
+				2C9A7B022EFD711000C0DE01 /* WatchAuthConnectivity.swift */,
 				B945BEB2597AE117643DF5F5 /* WatchOfficialModels.swift */,
+				2C9A7B002EFD701000C0DE01 /* WatchMatchOperationStore.swift */,
 				37D84E230F9B282FA9736E6C /* WatchMatchRepository.swift */,
 				40829BADB99EB564931F2B4F /* WatchOfficialViewModel.swift */,
+				2C9A7B052EFD721000C0DE01 /* WatchOfficialDemo.swift */,
 				ACAD2D64628C104C77EFF545 /* WatchOfficialAppView.swift */,
 				79EF1005F984FB9A5EBEB530 /* Info.plist */,
 			);
@@ -397,9 +406,12 @@
 				5D966777B517B85CA1593475 /* MVPWatchApp.swift in Sources */,
 				AC1C65CA7DF236EC2348C1E7 /* WatchAPIClient.swift in Sources */,
 				418AB6459AEA178BD67A5EBF /* WatchTokenStore.swift in Sources */,
+				2C9A7B032EFD711000C0DE01 /* WatchAuthConnectivity.swift in Sources */,
 				CE5F20450747D0ADC25D6D40 /* WatchOfficialModels.swift in Sources */,
+				2C9A7B012EFD701000C0DE01 /* WatchMatchOperationStore.swift in Sources */,
 				27A4C74EAF1211B7339ED786 /* WatchMatchRepository.swift in Sources */,
 				468DCFA5FBA5824C3EE07610 /* WatchOfficialViewModel.swift in Sources */,
+				2C9A7B062EFD721000C0DE01 /* WatchOfficialDemo.swift in Sources */,
 				09712231395A1EAA54FE9459 /* WatchOfficialAppView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -418,12 +430,11 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = watchApp/Info.plist;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
-				INFOPLIST_KEY_WKWatchOnly = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.razumly.mvp.watch;
 				PRODUCT_NAME = MVPWatch;
 				SDKROOT = watchos;
@@ -665,12 +676,11 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = watchApp/Info.plist;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
-				INFOPLIST_KEY_WKWatchOnly = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.razumly.mvp.watch;
 				PRODUCT_NAME = MVPWatch;
 				SDKROOT = watchos;

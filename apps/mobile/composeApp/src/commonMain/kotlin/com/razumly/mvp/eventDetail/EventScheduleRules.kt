@@ -20,6 +20,10 @@ internal fun isScheduleEditingLocked(
     if (timeSlots.isEmpty()) {
         return false
     }
+    val lockCandidateSlots = timeSlots.filterNot { slot -> slot.isRentalBacked() }
+    if (lockCandidateSlots.isEmpty()) {
+        return false
+    }
     val eventOrganizationId = event.organizationId?.trim().orEmpty()
     val fieldOrganizationById = fields
         .asSequence()
@@ -28,7 +32,7 @@ internal fun isScheduleEditingLocked(
             fieldId to field.organizationId?.trim().orEmpty()
         }
         .toMap()
-    val slotFieldIds = timeSlots
+    val slotFieldIds = lockCandidateSlots
         .asSequence()
         .flatMap { slot -> slot.normalizedScheduledFieldIds().asSequence() }
         .distinct()
@@ -48,6 +52,11 @@ internal fun isScheduleEditingLocked(
             fieldOrganizationId.isNotEmpty() && fieldOrganizationId != eventOrganizationId
         }
 }
+
+internal fun TimeSlot.isRentalBacked(): Boolean =
+    rentalLocked == true ||
+        !rentalBookingId.isNullOrBlank() ||
+        sourceType?.trim()?.equals("RENTAL_BOOKING", ignoreCase = true) == true
 
 internal fun requiresScheduleInputValidation(
     eventType: EventType,

@@ -2,13 +2,15 @@ package com.razumly.mvp.eventCreate
 
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.Facility
+import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.SportOfficialPositionTemplate
 import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.repositories.SignStep
+import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.eventDetail.EventStaffRole
 import kotlinx.datetime.TimeZone
@@ -520,7 +522,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_rental_context_when_updating_event_then_rental_constraints_lock_schedule_and_pricing_but_keep_selected_type() = runTest(testDispatcher) {
+    fun given_rental_context_when_initialized_then_event_is_not_seeded_from_purchase_context() = runTest(testDispatcher) {
         val rentalContext = RentalCreateContext(
             organizationId = "org-1",
             organizationName = "Org One",
@@ -541,259 +543,348 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         val initial = harness.component.newEventState.value
         assertEquals(EventType.EVENT, initial.eventType)
         assertNull(initial.organizationId)
-        assertEquals(listOf("field-a", "field-b"), initial.fieldIds)
-        assertEquals(listOf("slot-a"), initial.timeSlotIds)
-        assertEquals(listOf("template-a", "template-b"), initial.requiredTemplateIds)
-        assertEquals(2500, initial.priceCents)
-        assertEquals(instant(1_700_000_000_000), initial.start)
-        assertEquals(instant(1_700_003_600_000), initial.end)
+        assertTrue(initial.fieldIds.isEmpty())
+        assertTrue(initial.timeSlotIds.isEmpty())
+        assertTrue(initial.requiredTemplateIds.isEmpty())
+        assertEquals(0, initial.priceCents)
+        assertTrue(harness.component.leagueSlots.value.none { slot -> slot.rentalLocked == true })
+        assertEquals(1, harness.billingRepository.rentalResourceOptionCalls.size)
+    }
+
+    @Test
+    fun given_loaded_rental_resource_when_selected_then_create_event_attaches_locked_slot_without_checkout() = runTest(testDispatcher) {
+        val rentalField = Field(
+            fieldNumber = 1,
+            organizationId = "owner-org",
+            id = "field-rental-main",
+            name = "Razumly - Main",
+            location = "2130 N Q St",
+        ).apply {
+            facilityId = "facility-razumly"
+            facility = Facility(
+                id = "facility-razumly",
+                name = "Razumly",
+                location = "2130 N Q St",
+            )
+        }
+        val rentalOption = RentalResourceOption(
+            id = "rental-option-1",
+            bookingId = "booking-1",
+            bookingItemId = "booking-item-1",
+            organizationId = "owner-org",
+            organizationName = "Razumly",
+            field = rentalField,
+            start = instant(1_700_000_000_000),
+            end = instant(1_700_003_600_000),
+            timeZone = "UTC",
+            priceCents = 27500,
+            requiredTemplateIds = listOf("participant-template"),
+            hostRequiredTemplateIds = listOf("host-template"),
+        )
+        val harness = CreateEventHarness(rentalResourceOptions = listOf(rentalOption))
+        advance()
+
+        assertEquals(listOf("rental-option-1"), harness.component.availableRentalResources.value.map { option -> option.id })
+
+        harness.component.selectFieldCount(3)
+        advance()
+
+        assertEquals(emptyList(), harness.component.localFields.value)
+        assertEquals(emptyList(), harness.component.newEventState.value.fieldIds)
+
+        harness.component.setRentalResourceSelected("rental-option-1", true)
+        advance()
+
+        harness.component.selectFieldCount(3)
+        advance()
+
+        val selectedSlot = harness.component.leagueSlots.value.single()
+        assertEquals(setOf("rental-option-1"), harness.component.selectedRentalResourceIds.value)
+        assertEquals(listOf("field-rental-main"), harness.component.localFields.value.map { field -> field.id })
+        assertEquals(listOf("field-rental-main"), harness.component.newEventState.value.fieldIds)
+        assertEquals("RENTAL_BOOKING", selectedSlot.sourceType)
+        assertEquals("booking-1", selectedSlot.rentalBookingId)
+        assertEquals("booking-item-1", selectedSlot.rentalBookingItemId)
+        assertEquals(true, selectedSlot.rentalLocked)
+        assertEquals(listOf("field-rental-main"), selectedSlot.scheduledFieldIds)
+
+        harness.component.createEvent()
+        advance()
+
+        assertEquals(0, harness.billingRepository.purchaseIntentCalls.size)
+        assertEquals(0, harness.billingRepository.rentalSignLinksCalls.size)
+        assertEquals(1, harness.eventRepository.createEventCalls.size)
+        val createCall = harness.eventRepository.createEventCalls.single()
+        val payloadSlot = createCall.timeSlots.orEmpty().single()
+        assertEquals(listOf("field-rental-main"), createCall.event.fieldIds)
+        assertEquals(listOf(payloadSlot.id), createCall.event.timeSlotIds)
+        assertEquals("RENTAL_BOOKING", payloadSlot.sourceType)
+        assertEquals("booking-1", payloadSlot.rentalBookingId)
+        assertEquals("booking-item-1", payloadSlot.rentalBookingItemId)
+        assertEquals(true, payloadSlot.rentalLocked)
+        assertEquals(listOf("participant-template"), payloadSlot.requiredTemplateIds)
+        assertEquals(listOf("host-template"), payloadSlot.hostRequiredTemplateIds)
+    }
+
+    @Test
+    fun given_loaded_rental_resource_for_league_when_field_count_changes_then_local_resources_are_created() = runTest(testDispatcher) {
+        val rentalField = Field(
+            fieldNumber = 1,
+            organizationId = "owner-org",
+            id = "field-rental-main",
+            name = "Razumly - Main",
+            location = "2130 N Q St",
+        ).apply {
+            facilityId = "facility-razumly"
+            facility = Facility(
+                id = "facility-razumly",
+                name = "Razumly",
+                location = "2130 N Q St",
+            )
+        }
+        val rentalOption = RentalResourceOption(
+            id = "rental-option-1",
+            bookingId = "booking-1",
+            bookingItemId = "booking-item-1",
+            organizationId = "owner-org",
+            organizationName = "Razumly",
+            field = rentalField,
+            start = instant(1_700_000_000_000),
+            end = instant(1_700_003_600_000),
+            timeZone = "UTC",
+            priceCents = 27500,
+            requiredTemplateIds = emptyList(),
+            hostRequiredTemplateIds = emptyList(),
+        )
+        val harness = CreateEventHarness(rentalResourceOptions = listOf(rentalOption))
+        advance()
 
         harness.component.onTypeSelected(EventType.LEAGUE)
         advance()
+        harness.component.setRentalResourceSelected("rental-option-1", true)
+        advance()
+        harness.component.selectFieldCount(3)
+        advance()
+
+        val fieldIds = harness.component.localFields.value.map { field -> field.id }
+        assertEquals(3, fieldIds.size)
+        assertTrue(fieldIds.contains("field-rental-main"))
+        assertEquals(2, fieldIds.count { fieldId -> fieldId != "field-rental-main" })
+        assertEquals(fieldIds, harness.component.newEventState.value.fieldIds)
+        assertTrue(harness.component.leagueSlots.value.any { slot -> slot.rentalLocked == true })
+    }
+
+    @Test
+    fun given_loaded_rental_resource_for_league_when_regular_resource_added_to_locked_slot_then_payload_preserves_regular_resource() = runTest(testDispatcher) {
+        val rentalField = Field(
+            fieldNumber = 1,
+            organizationId = "owner-org",
+            id = "field-rental-main",
+            name = "Razumly - Main",
+            location = "2130 N Q St",
+        ).apply {
+            facilityId = "facility-razumly"
+            facility = Facility(
+                id = "facility-razumly",
+                name = "Razumly",
+                location = "2130 N Q St",
+            )
+        }
+        val rentalOption = RentalResourceOption(
+            id = "rental-option-1",
+            bookingId = "booking-1",
+            bookingItemId = "booking-item-1",
+            organizationId = "owner-org",
+            organizationName = "Razumly",
+            field = rentalField,
+            start = instant(1_700_000_000_000),
+            end = instant(1_700_003_600_000),
+            timeZone = "UTC",
+            priceCents = 27500,
+            requiredTemplateIds = emptyList(),
+            hostRequiredTemplateIds = emptyList(),
+        )
+        val harness = CreateEventHarness(rentalResourceOptions = listOf(rentalOption))
+        harness.component.setLoadingHandler(harness.loadingHandler)
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
         harness.component.updateEventField {
             copy(
-                eventType = EventType.TOURNAMENT,
-                organizationId = "org-override",
-                fieldIds = listOf("field-override"),
-                timeSlotIds = listOf("slot-override"),
-                priceCents = 1,
-                start = instant(1_600_000_000_000),
-                end = instant(1_600_003_600_000),
+                name = "Rental Resource League",
+                organizationId = "org-rental-resource-league",
+                divisions = listOf("Open"),
+                start = instant(1_700_000_000_000),
+                end = instant(1_700_086_400_000),
+            )
+        }
+        advance()
+        harness.component.setRentalResourceSelected("rental-option-1", true)
+        harness.component.selectFieldCount(2)
+        advance()
+
+        val regularFieldId = harness.component.localFields.value
+            .first { field -> field.id != "field-rental-main" }
+            .id
+        harness.component.updateLeagueTimeSlot(0) {
+            copy(
+                scheduledFieldId = "field-rental-main",
+                scheduledFieldIds = listOf("field-rental-main", regularFieldId),
             )
         }
         advance()
 
-        val constrained = harness.component.newEventState.value
-        assertEquals(EventType.TOURNAMENT, constrained.eventType)
-        assertFalse(constrained.noFixedEndDateTime)
-        assertNull(constrained.organizationId)
-        assertEquals(listOf("field-a", "field-b"), constrained.fieldIds)
-        assertEquals(listOf("slot-a"), constrained.timeSlotIds)
-        assertEquals(listOf("template-a", "template-b"), constrained.requiredTemplateIds)
-        assertEquals(2500, constrained.priceCents)
-        assertEquals(instant(1_700_000_000_000), constrained.start)
-        assertEquals(instant(1_700_003_600_000), constrained.end)
-    }
-
-    @Test
-    fun given_rental_context_with_locked_selections_when_initialized_then_seeded_slots_match_selection_windows() = runTest(testDispatcher) {
-        val slotOneStart = 1_700_000_000_000L
-        val slotOneEnd = 1_700_001_800_000L
-        val slotTwoStart = 1_700_010_000_000L
-        val slotTwoEnd = 1_700_011_800_000L
-        val rentalContext = RentalCreateContext(
-            organizationId = "org-locked",
-            organizationName = "Locked Org",
-            organizationLocation = "Main Gym",
-            organizationCoordinates = listOf(-122.25, 37.78),
-            organizationFieldIds = listOf("org-field-1"),
-            selectedFieldIds = listOf("field-a", "field-b"),
-            selectedTimeSlotIds = listOf("slot-a", "slot-b"),
-            lockedSelections = listOf(
-                com.razumly.mvp.core.presentation.LockedRentalSelection(
-                    fieldId = "field-a",
-                    fieldName = "Court A",
-                    sourceTimeSlotIds = listOf("slot-a"),
-                    startEpochMillis = slotOneStart,
-                    endEpochMillis = slotOneEnd,
-                ),
-                com.razumly.mvp.core.presentation.LockedRentalSelection(
-                    fieldId = "field-b",
-                    fieldName = "Court B",
-                    sourceTimeSlotIds = listOf("slot-b"),
-                    startEpochMillis = slotTwoStart,
-                    endEpochMillis = slotTwoEnd,
-                ),
-            ),
-            participantRequiredTemplateIds = listOf("participant-template"),
-            hostRequiredTemplateIds = listOf("host-template"),
-            rentalPriceCents = 4000,
-            startEpochMillis = slotOneStart,
-            endEpochMillis = slotTwoEnd,
+        assertEquals(
+            listOf("field-rental-main", regularFieldId),
+            harness.component.leagueSlots.value.first().scheduledFieldIds,
         )
-        val harness = CreateEventHarness(rentalContext = rentalContext)
-        advance()
 
-        assertEquals(2, harness.component.leagueSlots.value.size)
-        val firstSlot = harness.component.leagueSlots.value[0]
-        val secondSlot = harness.component.leagueSlots.value[1]
-
-        assertEquals(false, firstSlot.repeating)
-        assertEquals("field-a", firstSlot.scheduledFieldId)
-        assertEquals(listOf("field-a"), firstSlot.scheduledFieldIds)
-        assertEquals(instant(slotOneStart), firstSlot.startDate)
-        assertEquals(instant(slotOneEnd), firstSlot.endDate)
-
-        assertEquals(false, secondSlot.repeating)
-        assertEquals("field-b", secondSlot.scheduledFieldId)
-        assertEquals(listOf("field-b"), secondSlot.scheduledFieldIds)
-        assertEquals(instant(slotTwoStart), secondSlot.startDate)
-        assertEquals(instant(slotTwoEnd), secondSlot.endDate)
-    }
-
-    @Test
-    fun given_rental_event_with_locked_slots_when_created_then_event_payload_persists_slots_for_event_type() = runTest(testDispatcher) {
-        val rentalContext = RentalCreateContext(
-            organizationId = "org-event-slots",
-            organizationName = "Event Slots Org",
-            organizationLocation = "Court 1",
-            organizationCoordinates = listOf(-122.25, 37.78),
-            organizationFieldIds = listOf("org-field-1"),
-            selectedFieldIds = listOf("field-a"),
-            selectedTimeSlotIds = listOf("slot-a"),
-            lockedSelections = listOf(
-                com.razumly.mvp.core.presentation.LockedRentalSelection(
-                    fieldId = "field-a",
-                    sourceTimeSlotIds = listOf("slot-a"),
-                    startEpochMillis = 1_700_000_000_000,
-                    endEpochMillis = 1_700_003_600_000,
-                ),
-            ),
-            participantRequiredTemplateIds = listOf("participant-template"),
-            hostRequiredTemplateIds = emptyList(),
-            rentalPriceCents = 0,
-            startEpochMillis = 1_700_000_000_000,
-            endEpochMillis = 1_700_003_600_000,
-        )
-        val harness = CreateEventHarness(rentalContext = rentalContext)
-        advance()
-
-        assertEquals(EventType.EVENT, harness.component.newEventState.value.eventType)
         harness.component.createEvent()
         advance()
 
-        assertEquals(1, harness.eventRepository.createEventCalls.size)
         val createCall = harness.eventRepository.createEventCalls.single()
-        val payloadSlots = createCall.timeSlots.orEmpty()
-        assertEquals(EventType.EVENT, createCall.event.eventType)
-        assertEquals(1, payloadSlots.size)
-        assertEquals(payloadSlots.map { it.id }, createCall.event.timeSlotIds)
-        assertEquals("field-a", payloadSlots.single().scheduledFieldId)
-        assertEquals(listOf("field-a"), payloadSlots.single().scheduledFieldIds)
-        assertEquals(false, payloadSlots.single().repeating)
+        val payloadSlot = createCall.timeSlots.orEmpty().single()
+        val createdRegularFieldId = createCall.fields.orEmpty()
+            .first { field -> field.id != "field-rental-main" }
+            .id
+        assertEquals("field-rental-main", payloadSlot.scheduledFieldId)
+        assertEquals(listOf("field-rental-main", createdRegularFieldId), payloadSlot.scheduledFieldIds)
     }
 
     @Test
-    fun given_free_rental_context_when_creating_event_then_price_is_locked_and_payment_is_skipped() = runTest(testDispatcher) {
-        val rentalContext = RentalCreateContext(
-            organizationId = "org-free",
-            organizationName = "Free Gym",
-            organizationLocation = "Court 1",
-            organizationCoordinates = listOf(-122.25, 37.78),
-            organizationFieldIds = listOf("org-field-1"),
-            selectedFieldIds = listOf("field-a"),
-            selectedTimeSlotIds = listOf("slot-a"),
-            participantRequiredTemplateIds = listOf("facility-template"),
-            hostRequiredTemplateIds = emptyList(),
-            rentalPriceCents = 0,
-            startEpochMillis = 1_700_000_000_000,
-            endEpochMillis = 1_700_003_600_000,
+    fun given_mismatched_rental_field_added_to_locked_slot_when_updated_then_mismatched_rental_is_removed() = runTest(testDispatcher) {
+        val mainRentalField = Field(
+            fieldNumber = 1,
+            organizationId = "owner-org",
+            id = "field-rental-main",
+            name = "Razumly - Main",
+            location = "2130 N Q St",
         )
-        val harness = CreateEventHarness(rentalContext = rentalContext)
+        val annexRentalField = Field(
+            fieldNumber = 2,
+            organizationId = "owner-org",
+            id = "field-rental-annex",
+            name = "Razumly - Annex",
+            location = "455 2nd St",
+        )
+        val mainRental = RentalResourceOption(
+            id = "rental-option-1",
+            bookingId = "booking-1",
+            bookingItemId = "booking-item-1",
+            organizationId = "owner-org",
+            field = mainRentalField,
+            start = instant(1_700_000_000_000),
+            end = instant(1_700_003_600_000),
+            timeZone = "UTC",
+            priceCents = 27500,
+        )
+        val annexRental = RentalResourceOption(
+            id = "rental-option-2",
+            bookingId = "booking-2",
+            bookingItemId = "booking-item-2",
+            organizationId = "owner-org",
+            field = annexRentalField,
+            start = instant(1_700_086_400_000),
+            end = instant(1_700_090_000_000),
+            timeZone = "UTC",
+            priceCents = 27500,
+        )
+        val harness = CreateEventHarness(rentalResourceOptions = listOf(mainRental, annexRental))
         advance()
 
-        harness.component.updateEventField { copy(priceCents = 2500) }
+        harness.component.onTypeSelected(EventType.LEAGUE)
         advance()
-        assertEquals(0, harness.component.newEventState.value.priceCents)
-        assertEquals(listOf("facility-template"), harness.component.newEventState.value.requiredTemplateIds)
-        assertEquals(0, harness.billingRepository.rentalSignLinksCalls.size)
+        harness.component.setRentalResourceSelected("rental-option-1", true)
+        harness.component.setRentalResourceSelected("rental-option-2", true)
+        advance()
+
+        val mainSlotIndex = harness.component.leagueSlots.value.indexOfFirst { slot ->
+            slot.rentalBookingItemId == "booking-item-1"
+        }
+        harness.component.updateLeagueTimeSlot(mainSlotIndex) {
+            copy(
+                scheduledFieldId = "field-rental-main",
+                scheduledFieldIds = listOf("field-rental-main", "field-rental-annex"),
+            )
+        }
+        advance()
+
+        val mainSlot = harness.component.leagueSlots.value[mainSlotIndex]
+        assertEquals(listOf("field-rental-main"), mainSlot.scheduledFieldIds)
+        assertFalse(mainSlot.scheduledFieldIds.orEmpty().contains("field-rental-annex"))
+    }
+
+    @Test
+    fun given_rental_resource_when_added_to_custom_timeslot_then_rental_field_is_removed() = runTest(testDispatcher) {
+        val rentalField = Field(
+            fieldNumber = 1,
+            organizationId = "owner-org",
+            id = "field-rental-main",
+            name = "Razumly - Main",
+            location = "2130 N Q St",
+        )
+        val rentalOption = RentalResourceOption(
+            id = "rental-option-1",
+            bookingId = "booking-1",
+            bookingItemId = "booking-item-1",
+            organizationId = "owner-org",
+            field = rentalField,
+            start = instant(1_700_000_000_000),
+            end = instant(1_700_003_600_000),
+            timeZone = "UTC",
+            priceCents = 27500,
+        )
+        val harness = CreateEventHarness(rentalResourceOptions = listOf(rentalOption))
+        harness.component.setLoadingHandler(harness.loadingHandler)
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        harness.component.updateEventField {
+            copy(
+                name = "Rental Resource League",
+                organizationId = "org-rental-resource-league",
+                divisions = listOf("Open"),
+                start = instant(1_700_000_000_000),
+                end = instant(1_700_086_400_000),
+            )
+        }
+        advance()
+        harness.component.setRentalResourceSelected("rental-option-1", true)
+        harness.component.selectFieldCount(2)
+        advance()
+
+        val regularFieldId = harness.component.localFields.value
+            .first { field -> field.id != "field-rental-main" }
+            .id
+        harness.component.addLeagueTimeSlot()
+        val customSlotIndex = harness.component.leagueSlots.value.lastIndex
+        harness.component.updateLeagueTimeSlot(customSlotIndex) {
+            copy(
+                dayOfWeek = 2,
+                daysOfWeek = listOf(2),
+                startTimeMinutes = 8 * 60,
+                endTimeMinutes = 9 * 60,
+                startDate = instant(1_700_172_800_000),
+                endDate = instant(1_700_176_400_000),
+                repeating = false,
+                scheduledFieldId = "field-rental-main",
+                scheduledFieldIds = listOf("field-rental-main", regularFieldId),
+            )
+        }
+        advance()
+
+        val customSlot = harness.component.leagueSlots.value[customSlotIndex]
+        assertNull(customSlot.rentalBookingItemId)
+        assertEquals(listOf(regularFieldId), customSlot.scheduledFieldIds)
 
         harness.component.createEvent()
         advance()
 
-        assertEquals(0, harness.billingRepository.purchaseIntentCalls.size)
-        assertEquals(0, harness.billingRepository.rentalSignLinksCalls.size)
-        assertEquals(1, harness.eventRepository.createEventCalls.size)
-        assertEquals(1, harness.onEventCreatedCount)
-        assertEquals(0, harness.eventRepository.createEventCalls.single().event.priceCents)
-        assertNull(harness.eventRepository.createEventCalls.single().event.organizationId)
-        assertEquals(
-            listOf("facility-template"),
-            harness.eventRepository.createEventCalls.single().requiredTemplateIds,
-        )
-    }
-
-    @Test
-    fun given_free_rental_with_host_documents_when_creating_event_then_text_signature_is_required_before_creation() = runTest(testDispatcher) {
-        val rentalContext = RentalCreateContext(
-            organizationId = "org-host-sign",
-            organizationName = "Host Sign Gym",
-            organizationLocation = "Court 3",
-            organizationCoordinates = listOf(-122.25, 37.78),
-            organizationFieldIds = listOf("org-field-1"),
-            selectedFieldIds = listOf("field-a"),
-            selectedTimeSlotIds = listOf("slot-a"),
-            participantRequiredTemplateIds = emptyList(),
-            hostRequiredTemplateIds = listOf("host-template-a"),
-            rentalPriceCents = 0,
-            startEpochMillis = 1_700_000_000_000,
-            endEpochMillis = 1_700_003_600_000,
-        )
-        val harness = CreateEventHarness(rentalContext = rentalContext)
-        harness.billingRepository.rentalSignLinksResult = listOf(
-            SignStep(
-                templateId = "host-template-a",
-                type = "TEXT",
-                title = "Host Waiver",
-                content = "Please accept host waiver.",
-                documentId = "host-doc-1",
-            ),
-        )
-        advance()
-
-        harness.component.createEvent()
-        advance()
-
-        assertEquals(1, harness.billingRepository.rentalSignLinksCalls.size)
-        assertNull(harness.billingRepository.rentalSignLinksCalls.single().eventId)
-        assertEquals(0, harness.billingRepository.purchaseIntentCalls.size)
-        assertEquals(0, harness.eventRepository.createEventCalls.size)
-        assertTrue(harness.component.textSignaturePrompt.value != null)
-
-        harness.component.confirmTextSignature()
-        advance()
-
-        assertEquals(1, harness.billingRepository.recordSignatureCalls.size)
-        assertEquals("", harness.billingRepository.recordSignatureCalls.single().eventId)
-        assertEquals(0, harness.billingRepository.purchaseIntentCalls.size)
-        assertEquals(1, harness.eventRepository.createEventCalls.size)
-        assertEquals(1, harness.onEventCreatedCount)
-    }
-
-    @Test
-    fun given_paid_rental_context_when_creating_event_then_checkout_sends_host_template_requirements() = runTest(testDispatcher) {
-        val rentalContext = RentalCreateContext(
-            organizationId = "org-paid",
-            organizationName = "Paid Gym",
-            organizationLocation = "Court 2",
-            organizationCoordinates = listOf(-122.25, 37.78),
-            organizationFieldIds = listOf("org-field-1"),
-            selectedFieldIds = listOf("field-a"),
-            selectedTimeSlotIds = listOf("slot-a", "slot-b"),
-            participantRequiredTemplateIds = listOf("participant-template"),
-            hostRequiredTemplateIds = listOf(" host-template-a ", "host-template-a", "host-template-b"),
-            rentalPriceCents = 3500,
-            startEpochMillis = 1_700_000_000_000,
-            endEpochMillis = 1_700_003_600_000,
-        )
-        val harness = CreateEventHarness(rentalContext = rentalContext)
-        advance()
-
-        harness.component.createEvent()
-        advance()
-
-        assertEquals(1, harness.billingRepository.purchaseIntentCalls.size)
-        val checkoutCall = harness.billingRepository.purchaseIntentCalls.single()
-        assertEquals(3500, checkoutCall.event.priceCents)
-        assertEquals("slot-a", checkoutCall.timeSlotContext?.id)
-        assertEquals(3500, checkoutCall.timeSlotContext?.priceCents)
-        assertEquals("field-a", checkoutCall.timeSlotContext?.scheduledFieldId)
-        assertEquals(listOf("field-a"), checkoutCall.timeSlotContext?.scheduledFieldIds)
-        assertEquals(
-            listOf("host-template-a", "host-template-b"),
-            checkoutCall.timeSlotContext?.hostRequiredTemplateIds,
-        )
-        assertEquals(0, harness.eventRepository.createEventCalls.size)
+        val createCall = harness.eventRepository.createEventCalls.single()
+        val customPayloadSlots = createCall.timeSlots.orEmpty()
+            .filterNot { slot -> slot.rentalBookingItemId == "booking-item-1" }
+        assertTrue(customPayloadSlots.isNotEmpty())
+        assertTrue(customPayloadSlots.none { slot -> slot.scheduledFieldIds.orEmpty().contains("field-rental-main") })
     }
 
     @Test

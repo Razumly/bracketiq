@@ -196,6 +196,25 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
             LockedRentalSelection(
                 fieldId = resolved.field.id,
                 fieldName = resolved.field.displayLabel(),
+                facilityId = resolved.field.facilityId
+                    ?.trim()
+                    ?.takeIf(String::isNotEmpty)
+                    ?: resolved.field.facility
+                        ?.resolvedId
+                        ?.trim()
+                        ?.takeIf(String::isNotEmpty),
+                facilityName = resolved.field.facility
+                    ?.name
+                    ?.trim()
+                    ?.takeIf(String::isNotEmpty),
+                facilityLocation = resolved.field.facility
+                    ?.location
+                    ?.trim()
+                    ?.takeIf(String::isNotEmpty)
+                    ?: resolved.field.facility
+                        ?.address
+                        ?.trim()
+                        ?.takeIf(String::isNotEmpty),
                 sourceTimeSlotIds = resolved.slots
                     .map { slot -> slot.id }
                     .distinct(),

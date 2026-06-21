@@ -6,6 +6,8 @@ import com.razumly.mvp.core.data.dataTypes.BillPayment
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.BillingAddressProfile
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Facility
+import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Organization
@@ -42,6 +44,7 @@ import kotlinx.coroutines.delay
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
 private const val BOLD_SIGN_RATE_LIMIT_FRIENDLY_MESSAGE =
     "You opened the BoldSign document too many times. Please wait a minute before trying again."
@@ -275,6 +278,24 @@ data class RentalOrderResult(
     val createEventUrl: String? = null,
 )
 
+data class RentalResourceOption(
+    val id: String,
+    val bookingId: String,
+    val bookingItemId: String,
+    val organizationId: String,
+    val organizationName: String? = null,
+    val renterOrganizationId: String? = null,
+    val field: Field,
+    val start: Instant,
+    val end: Instant,
+    val timeZone: String,
+    val priceCents: Int,
+    val requiredTemplateIds: List<String> = emptyList(),
+    val hostRequiredTemplateIds: List<String> = emptyList(),
+    val eventId: String? = null,
+    val eventTimeSlotId: String? = null,
+)
+
 data class RecordSignatureResult(
     val operationId: String? = null,
     val syncStatus: String? = null,
@@ -355,6 +376,10 @@ interface IBillingRepository : IMVPRepository {
         renterOrganizationId: String? = null,
         sportId: String? = null,
     ): Result<RentalOrderResult> = Result.failure(UnsupportedOperationException("Rental orders are not supported."))
+    suspend fun listRentalResourceOptions(
+        eventId: String? = null,
+        organizationId: String? = null,
+    ): Result<List<RentalResourceOption>> = Result.success(emptyList())
     suspend fun recordSignature(
         eventId: String,
         templateId: String,
@@ -734,6 +759,26 @@ class BillingRepository(
         }
         response.toRentalOrderResultOrNull()
             ?: throw Exception("Unable to create rental order.")
+    }
+
+    override suspend fun listRentalResourceOptions(
+        eventId: String?,
+        organizationId: String?,
+    ): Result<List<RentalResourceOption>> = runCatching {
+        val query = buildList {
+            eventId?.trim()?.takeIf(String::isNotBlank)?.let { id ->
+                add("eventId=${id.encodeURLQueryComponent()}")
+            }
+            organizationId?.trim()?.takeIf(String::isNotBlank)?.let { id ->
+                add("organizationId=${id.encodeURLQueryComponent()}")
+            }
+        }.joinToString("&")
+        val path = if (query.isBlank()) {
+            "api/rentals/bookings"
+        } else {
+            "api/rentals/bookings?$query"
+        }
+        api.get<RentalBookingsResponseDto>(path).toRentalResourceOptions()
     }
 
     override suspend fun recordSignature(
@@ -1723,6 +1768,80 @@ private data class RentalOrderResponseDto(
 )
 
 @Serializable
+private data class RentalBookingsResponseDto(
+    val bookings: List<RentalBookingDto> = emptyList(),
+)
+
+@Serializable
+private data class RentalBookingDto(
+    val id: String? = null,
+    @SerialName("\$id") val legacyId: String? = null,
+    val organizationId: String? = null,
+    val renterOrganizationId: String? = null,
+    val eventId: String? = null,
+    val status: String? = null,
+    val totalAmountCents: Int? = null,
+    val organization: RentalBookingOrganizationDto? = null,
+    val items: List<RentalBookingItemDto> = emptyList(),
+)
+
+@Serializable
+private data class RentalBookingOrganizationDto(
+    val id: String? = null,
+    @SerialName("\$id") val legacyId: String? = null,
+    val name: String? = null,
+    val location: String? = null,
+    val address: String? = null,
+    val coordinates: List<Double>? = null,
+)
+
+@Serializable
+private data class RentalBookingItemDto(
+    val id: String? = null,
+    @SerialName("\$id") val legacyId: String? = null,
+    val bookingId: String? = null,
+    val organizationId: String? = null,
+    val facilityId: String? = null,
+    val fieldId: String? = null,
+    val eventId: String? = null,
+    val eventTimeSlotId: String? = null,
+    val start: String? = null,
+    val end: String? = null,
+    val timeZone: String? = null,
+    val priceCents: Int? = null,
+    val requiredTemplateIds: List<String> = emptyList(),
+    val hostRequiredTemplateIds: List<String> = emptyList(),
+    val field: RentalFieldDto? = null,
+)
+
+@Serializable
+private data class RentalFieldDto(
+    val id: String? = null,
+    @SerialName("\$id") val legacyId: String? = null,
+    val fieldNumber: Int? = null,
+    val divisions: List<String> = emptyList(),
+    val lat: Double? = null,
+    val long: Double? = null,
+    val heading: Double? = null,
+    val inUse: Boolean? = null,
+    val name: String? = null,
+    val rentalSlotIds: List<String> = emptyList(),
+    val location: String? = null,
+    val organizationId: String? = null,
+    val facilityId: String? = null,
+    val facility: RentalFacilityDto? = null,
+)
+
+@Serializable
+private data class RentalFacilityDto(
+    val id: String? = null,
+    @SerialName("\$id") val legacyId: String? = null,
+    val name: String? = null,
+    val location: String? = null,
+    val address: String? = null,
+)
+
+@Serializable
 private data class OrganizationTemplatesResponseDto(
     val templates: List<OrganizationTemplateApiDto> = emptyList(),
     val error: String? = null,
@@ -2021,6 +2140,110 @@ private fun RentalOrderItemDto.toRentalOrderItemOrNull(): RentalOrderItem? {
         eventTimeSlotId = eventTimeSlotId?.trim()?.takeIf(String::isNotBlank),
     )
 }
+
+private fun RentalBookingsResponseDto.toRentalResourceOptions(): List<RentalResourceOption> {
+    return bookings.flatMap { booking -> booking.toRentalResourceOptions() }
+        .sortedBy { option -> option.start }
+}
+
+private fun RentalBookingDto.toRentalResourceOptions(): List<RentalResourceOption> {
+    val resolvedBookingId = (id ?: legacyId)?.trim()?.takeIf(String::isNotBlank) ?: return emptyList()
+    val resolvedOrganizationId = organizationId?.trim()?.takeIf(String::isNotBlank) ?: return emptyList()
+    val organizationName = organization?.name?.trim()?.takeIf(String::isNotBlank)
+    return items.mapNotNull { item ->
+        item.toRentalResourceOptionOrNull(
+            bookingId = resolvedBookingId,
+            bookingOrganizationId = resolvedOrganizationId,
+            organizationName = organizationName,
+            renterOrganizationId = renterOrganizationId?.trim()?.takeIf(String::isNotBlank),
+        )
+    }
+}
+
+private fun RentalBookingItemDto.toRentalResourceOptionOrNull(
+    bookingId: String,
+    bookingOrganizationId: String,
+    organizationName: String?,
+    renterOrganizationId: String?,
+): RentalResourceOption? {
+    val resolvedItemId = (id ?: legacyId)?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedField = field?.toFieldOrNull(fallbackFieldId = fieldId, fallbackOrganizationId = organizationId ?: bookingOrganizationId)
+        ?: return null
+    val resolvedStart = start?.trim()?.takeIf(String::isNotBlank)?.let { value ->
+        runCatching { Instant.parse(value) }.getOrNull()
+    } ?: return null
+    val resolvedEnd = end?.trim()?.takeIf(String::isNotBlank)?.let { value ->
+        runCatching { Instant.parse(value) }.getOrNull()
+    } ?: return null
+    if (resolvedEnd <= resolvedStart) {
+        return null
+    }
+    return RentalResourceOption(
+        id = "$bookingId:$resolvedItemId",
+        bookingId = bookingId,
+        bookingItemId = resolvedItemId,
+        organizationId = bookingOrganizationId,
+        organizationName = organizationName,
+        renterOrganizationId = renterOrganizationId,
+        field = resolvedField,
+        start = resolvedStart,
+        end = resolvedEnd,
+        timeZone = timeZone?.trim()?.takeIf(String::isNotBlank) ?: "UTC",
+        priceCents = priceCents ?: 0,
+        requiredTemplateIds = requiredTemplateIds.normalizeStringList(),
+        hostRequiredTemplateIds = hostRequiredTemplateIds.normalizeStringList(),
+        eventId = eventId?.trim()?.takeIf(String::isNotBlank),
+        eventTimeSlotId = eventTimeSlotId?.trim()?.takeIf(String::isNotBlank),
+    )
+}
+
+private fun RentalFieldDto.toFieldOrNull(
+    fallbackFieldId: String?,
+    fallbackOrganizationId: String?,
+): Field? {
+    val resolvedId = (id ?: legacyId ?: fallbackFieldId)?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedFacility = facility?.toFacilityOrNull()
+    return Field(
+        fieldNumber = fieldNumber ?: 0,
+        divisions = divisions.normalizeStringList(),
+        lat = lat,
+        long = long,
+        heading = heading,
+        inUse = inUse,
+        name = name,
+        rentalSlotIds = rentalSlotIds.normalizeStringList(),
+        location = location,
+        organizationId = organizationId?.trim()?.takeIf(String::isNotBlank)
+            ?: fallbackOrganizationId?.trim()?.takeIf(String::isNotBlank),
+        id = resolvedId,
+    ).also { field ->
+        field.facilityId = facilityId?.trim()?.takeIf(String::isNotBlank)
+            ?: resolvedFacility?.resolvedId?.takeIf(String::isNotBlank)
+        field.facility = resolvedFacility
+    }
+}
+
+private fun RentalFacilityDto.toFacilityOrNull(): Facility? {
+    val resolvedId = (id ?: legacyId)?.trim().orEmpty()
+    val resolvedName = name?.trim()?.takeIf(String::isNotBlank)
+    val resolvedLocation = location?.trim()?.takeIf(String::isNotBlank)
+    val resolvedAddress = address?.trim()?.takeIf(String::isNotBlank)
+    if (resolvedId.isBlank() && resolvedName == null && resolvedLocation == null && resolvedAddress == null) {
+        return null
+    }
+    return Facility(
+        id = resolvedId,
+        legacyId = legacyId?.trim()?.takeIf(String::isNotBlank),
+        name = resolvedName,
+        location = resolvedLocation,
+        address = resolvedAddress,
+    )
+}
+
+private fun List<String>.normalizeStringList(): List<String> =
+    map(String::trim)
+        .filter(String::isNotBlank)
+        .distinct()
 
 private fun EventTeamBillingUserDto.toUserOptionOrNull(): EventTeamBillingUserOption? {
     val resolvedId = id?.trim()?.takeIf(String::isNotBlank) ?: return null

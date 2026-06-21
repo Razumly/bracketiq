@@ -49,6 +49,7 @@ import com.razumly.mvp.core.data.repositories.ProfileDocumentsBundle
 import com.razumly.mvp.core.data.repositories.PurchaseIntentTimeSlotContext
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.RecordSignatureResult
+import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.CreateBillRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
@@ -114,12 +115,15 @@ internal class CreateEventHarness(
     sports: List<Sport> = emptyList(),
     rentalContext: RentalCreateContext? = null,
     existingOrganizationEvents: List<Event> = emptyList(),
+    rentalResourceOptions: List<RentalResourceOption> = emptyList(),
 ) {
     val userRepository = CreateEvent_FakeUserRepository()
     val eventRepository = CreateEvent_FakeEventRepository(existingOrganizationEvents)
     val fieldRepository = CreateEvent_FakeFieldRepository()
     val sportsRepository = CreateEvent_FakeSportsRepository(sports)
-    val billingRepository = CreateEvent_FakeBillingRepository()
+    val billingRepository = CreateEvent_FakeBillingRepository().apply {
+        this.rentalResourceOptions = rentalResourceOptions
+    }
     val imageRepository = CreateEvent_FakeImagesRepository()
     val matchRepository = CreateEvent_FakeMatchRepository()
     val loadingHandler = CreateEvent_FakeLoadingHandler()
@@ -650,6 +654,8 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
     val rentalSignLinksCalls = mutableListOf<RentalSignLinksCall>()
     val recordSignatureCalls = mutableListOf<RecordSignatureCall>()
     val teamRecordSignatureCalls = mutableListOf<TeamRecordSignatureCall>()
+    val rentalResourceOptionCalls = mutableListOf<Pair<String?, String?>>()
+    var rentalResourceOptions: List<RentalResourceOption> = emptyList()
     var rentalSignLinksResult: List<SignStep> = emptyList()
     var teamSignLinksResult: List<SignStep> = emptyList()
     var queuedTeamSignLinksResults: MutableList<List<SignStep>> = mutableListOf()
@@ -724,6 +730,14 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
             organizationId = organizationId,
         )
         return Result.success(rentalSignLinksResult)
+    }
+
+    override suspend fun listRentalResourceOptions(
+        eventId: String?,
+        organizationId: String?,
+    ): Result<List<RentalResourceOption>> {
+        rentalResourceOptionCalls += eventId to organizationId
+        return Result.success(rentalResourceOptions)
     }
 
     override suspend fun recordSignature(

@@ -6,6 +6,7 @@ import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.mmk.kmpnotifier.notification.NotifierManager
 import com.mmk.kmpnotifier.notification.configuration.NotificationPlatformConfiguration
+import com.razumly.mvp.core.auth.MatchOperationNetworkSync
 import com.razumly.mvp.di.KoinInitializer
 import io.github.aakira.napier.DebugAntilog
 import io.github.aakira.napier.Napier
@@ -29,6 +30,7 @@ class MvpApp : Application() {
             Napier.d(message, tag = "Notifier Manager")
         }
         KoinInitializer(applicationContext).init()
+        MatchOperationNetworkSync.start(applicationContext)
     }
 
     private fun initializeFirebase() {

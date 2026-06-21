@@ -86,12 +86,12 @@ class MainActivity : ComponentActivity() {
         if (!packageManager.hasSystemFeature(PackageManager.FEATURE_WATCH)) return false
 
         val wearIntent = Intent()
-            .setClassName("com.razumly.mvp.wear", "com.razumly.mvp.wear.MainActivity")
+            .setClassName("com.razumly.mvp", "com.razumly.mvp.wear.MainActivity")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
             startActivity(wearIntent)
         } catch (_: ActivityNotFoundException) {
-            Toast.makeText(this, "Open MVP Official on this watch.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Open BracketIQ: Officials on this watch.", Toast.LENGTH_LONG).show()
         }
         finish()
         return true

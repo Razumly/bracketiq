@@ -60,6 +60,7 @@ import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
+import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.CreateBillRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
@@ -214,6 +215,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val pendingStaffInvites: StateFlow<List<PendingStaffInviteDraft>>
     val editableLeagueTimeSlots: StateFlow<List<TimeSlot>>
     val editableFields: StateFlow<List<Field>>
+    val availableRentalResources: StateFlow<List<RentalResourceOption>>
+    val selectedRentalResourceIds: StateFlow<Set<String>>
     val editableLeagueScoringConfig: StateFlow<LeagueScoringConfigDTO>
 
 
@@ -298,6 +301,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun onTypeSelected(type: EventType)
     fun selectFieldCount(count: Int)
     fun updateLocalFieldName(index: Int, name: String)
+    fun setRentalResourceSelected(optionId: String, selected: Boolean)
     fun updateLeagueScoringConfig(update: LeagueScoringConfigDTO.() -> LeagueScoringConfigDTO)
     fun addLeagueTimeSlot()
     fun updateLeagueTimeSlot(index: Int, update: TimeSlot.() -> TimeSlot)
@@ -923,6 +927,10 @@ class DefaultEventDetailComponent(
     override val editableLeagueTimeSlots = _editableLeagueTimeSlots.asStateFlow()
     private val _editableFields = MutableStateFlow<List<Field>>(emptyList())
     override val editableFields = _editableFields.asStateFlow()
+    private val _availableRentalResources = MutableStateFlow<List<RentalResourceOption>>(emptyList())
+    override val availableRentalResources = _availableRentalResources.asStateFlow()
+    private val _selectedRentalResourceIds = MutableStateFlow<Set<String>>(emptySet())
+    override val selectedRentalResourceIds = _selectedRentalResourceIds.asStateFlow()
     private val _editableLeagueScoringConfig = MutableStateFlow(LeagueScoringConfigDTO())
     override val editableLeagueScoringConfig = _editableLeagueScoringConfig.asStateFlow()
 
@@ -1683,6 +1691,14 @@ class DefaultEventDetailComponent(
                 .distinctUntilChanged()
                 .collect { organizationId ->
                     loadOrganizationTemplates(organizationId)
+                }
+        }
+        scope.launch {
+            selectedEvent
+                .map { selected -> selected.id.trim() }
+                .distinctUntilChanged()
+                .collectLatest { eventId ->
+                    loadAvailableRentalResources(eventId)
                 }
         }
         scope.launch {
@@ -4577,6 +4593,17 @@ class DefaultEventDetailComponent(
             event = seededEvent,
             timeSlots = eventWithRelations.value.timeSlots,
         )
+        if (enabled) {
+            val selectedRentalIds = resolveAttachedRentalResourceIds(
+                options = _availableRentalResources.value,
+                slots = _editableLeagueTimeSlots.value,
+                eventId = seededEvent.id,
+            )
+            _selectedRentalResourceIds.value = selectedRentalIds
+            if (selectedRentalIds.isNotEmpty()) {
+                syncSelectedRentalResourcesIntoEditDraft()
+            }
+        }
         if (!enabled) {
             _pendingStaffInvites.value = emptyList()
             _suggestedUsers.value = emptyList()
@@ -5660,6 +5687,22 @@ class DefaultEventDetailComponent(
         _editableFields.value = fields
     }
 
+    override fun setRentalResourceSelected(optionId: String, selected: Boolean) {
+        val normalizedOptionId = optionId.trim()
+        if (normalizedOptionId.isEmpty()) return
+        _availableRentalResources.value.firstOrNull { option -> option.id == normalizedOptionId } ?: return
+        val nextSelected = if (selected) {
+            _selectedRentalResourceIds.value + normalizedOptionId
+        } else {
+            _selectedRentalResourceIds.value - normalizedOptionId
+        }
+        if (nextSelected == _selectedRentalResourceIds.value) {
+            return
+        }
+        _selectedRentalResourceIds.value = nextSelected
+        syncSelectedRentalResourcesIntoEditDraft()
+    }
+
     override fun updateLeagueScoringConfig(update: LeagueScoringConfigDTO.() -> LeagueScoringConfigDTO) {
         _editableLeagueScoringConfig.value = _editableLeagueScoringConfig.value.update()
     }
@@ -5671,7 +5714,8 @@ class DefaultEventDetailComponent(
     override fun updateLeagueTimeSlot(index: Int, update: TimeSlot.() -> TimeSlot) {
         val slots = _editableLeagueTimeSlots.value.toMutableList()
         if (index !in slots.indices) return
-        slots[index] = slots[index].update()
+        val validFieldIds = _editableFields.value.map { field -> field.id }.toSet()
+        slots[index] = normalizeRentalSlotResourceSelection(slots[index].update(), validFieldIds)
         _editableLeagueTimeSlots.value = slots
     }
 
@@ -5680,6 +5724,192 @@ class DefaultEventDetailComponent(
         if (index !in slots.indices) return
         slots.removeAt(index)
         _editableLeagueTimeSlots.value = slots
+    }
+
+    private fun loadAvailableRentalResources(eventId: String) {
+        scope.launch {
+            billingRepository.listRentalResourceOptions(eventId = eventId.takeIf(String::isNotBlank))
+                .onSuccess { options ->
+                    _availableRentalResources.value = options
+                    val availableIds = options.map { option -> option.id }.toSet()
+                    val attachedIds = resolveAttachedRentalResourceIds(options, _editableLeagueTimeSlots.value, eventId)
+                    val normalizedSelected = (_selectedRentalResourceIds.value.filter(availableIds::contains) + attachedIds)
+                        .toSet()
+                    if (normalizedSelected != _selectedRentalResourceIds.value) {
+                        _selectedRentalResourceIds.value = normalizedSelected
+                        if (_isEditing.value) {
+                            syncSelectedRentalResourcesIntoEditDraft()
+                        }
+                    }
+                }
+                .onFailure { error ->
+                    Napier.w("Unable to load event rental resources: ${error.message}")
+                }
+        }
+    }
+
+    private fun resolveAttachedRentalResourceIds(
+        options: List<RentalResourceOption>,
+        slots: List<TimeSlot>,
+        eventId: String,
+    ): Set<String> {
+        val rentalSlotItemIds = slots
+            .filter { slot -> slot.isRentalBacked() }
+            .mapNotNull { slot -> slot.rentalBookingItemId?.trim()?.takeIf(String::isNotBlank) }
+            .toSet()
+        val rentalSlotBookingIds = slots
+            .filter { slot -> slot.isRentalBacked() }
+            .mapNotNull { slot -> slot.rentalBookingId?.trim()?.takeIf(String::isNotBlank) }
+            .toSet()
+        return options
+            .filter { option ->
+                option.eventId == eventId ||
+                    rentalSlotItemIds.contains(option.bookingItemId) ||
+                    rentalSlotBookingIds.contains(option.bookingId)
+            }
+            .map { option -> option.id }
+            .toSet()
+    }
+
+    private fun rentalOptionMatchesSlot(option: RentalResourceOption, slot: TimeSlot): Boolean {
+        if (slot.rentalBookingItemId == option.bookingItemId) {
+            return true
+        }
+        return !slot.repeating &&
+            slot.startDate == option.start &&
+            slot.endDate == option.end
+    }
+
+    private fun normalizeRentalSlotResourceSelection(
+        slot: TimeSlot,
+        validFieldIds: Set<String> = _editableFields.value.map { field -> field.id }.toSet(),
+    ): TimeSlot {
+        val availableRentalOptions = _availableRentalResources.value
+        val rentalOptionsByFieldId = availableRentalOptions
+            .mapNotNull { option ->
+                option.field.id.trim().takeIf(String::isNotBlank)?.let { fieldId -> fieldId to option }
+            }
+            .toMap()
+
+        if (!slot.isRentalBacked()) {
+            if (rentalOptionsByFieldId.isEmpty()) {
+                return slot
+            }
+            val retainedFieldIds = slot.normalizedScheduledFieldIds().filter { fieldId ->
+                (validFieldIds.isEmpty() || fieldId in validFieldIds) && !rentalOptionsByFieldId.containsKey(fieldId)
+            }
+            return slot.copy(
+                scheduledFieldId = retainedFieldIds.firstOrNull(),
+                scheduledFieldIds = retainedFieldIds,
+            )
+        }
+
+        val primaryRentalFieldId = availableRentalOptions
+            .firstOrNull { option -> slot.rentalBookingItemId == option.bookingItemId }
+            ?.field
+            ?.id
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: slot.scheduledFieldId?.trim()?.takeIf(String::isNotBlank)
+
+        val retainedFieldIds = slot.normalizedScheduledFieldIds().filter { fieldId ->
+            if (validFieldIds.isNotEmpty() && fieldId !in validFieldIds) {
+                return@filter false
+            }
+            val rentalOption = rentalOptionsByFieldId[fieldId]
+            rentalOption == null || rentalOptionMatchesSlot(rentalOption, slot)
+        }
+        val normalizedFieldIds = (listOfNotNull(primaryRentalFieldId) + retainedFieldIds).distinct()
+        return slot.copy(
+            scheduledFieldId = normalizedFieldIds.firstOrNull(),
+            scheduledFieldIds = normalizedFieldIds,
+        )
+    }
+
+    private fun syncSelectedRentalResourcesIntoEditDraft() {
+        val selectedOptions = selectedRentalResourceOptions()
+        val rentalFields = selectedRentalResourceFields(selectedOptions)
+        val rentalFieldIds = rentalFields.map { field -> field.id.trim() }.filter(String::isNotBlank).toSet()
+        val customFields = _editableFields.value.filterNot { field -> rentalFieldIds.contains(field.id.trim()) }
+        val nextFields = (rentalFields + customFields)
+            .distinctBy { field -> field.id.trim() }
+            .mapIndexed { index, field -> field.copy(fieldNumber = index + 1) }
+
+        val rentalSlots = selectedOptions.map { option -> option.toRentalTimeSlot(_editedEvent.value) }
+        val rentalSlotIds = rentalSlots.map { slot -> slot.id }.toSet()
+        val validFieldIds = nextFields.map { field -> field.id }.toSet()
+        val customSlots = _editableLeagueTimeSlots.value
+            .filterNot { slot -> slot.isRentalBacked() || rentalSlotIds.contains(slot.id) }
+            .map { slot ->
+                val remainingFieldIds = slot.normalizedScheduledFieldIds().filter { fieldId ->
+                    validFieldIds.contains(fieldId) && !rentalFieldIds.contains(fieldId)
+                }
+                slot.copy(
+                    scheduledFieldId = remainingFieldIds.firstOrNull(),
+                    scheduledFieldIds = remainingFieldIds,
+                )
+            }
+            .filter { slot -> slot.normalizedScheduledFieldIds().isNotEmpty() }
+
+        _editableFields.value = nextFields
+        _fieldCount.value = nextFields.size
+        _editableLeagueTimeSlots.value = (rentalSlots + customSlots).sortedWith(
+            compareBy<TimeSlot> { slot -> slot.startDate }
+                .thenBy { slot -> slot.startTimeMinutes ?: Int.MAX_VALUE }
+                .thenBy { slot -> slot.id }
+        )
+        _editedEvent.value = _editedEvent.value.copy(
+            fieldIds = nextFields.map { field -> field.id },
+            timeSlotIds = _editableLeagueTimeSlots.value.map { slot -> slot.id },
+        )
+    }
+
+    private fun selectedRentalResourceOptions(): List<RentalResourceOption> {
+        val selectedIds = _selectedRentalResourceIds.value
+        if (selectedIds.isEmpty()) {
+            return emptyList()
+        }
+        return _availableRentalResources.value.filter { option -> selectedIds.contains(option.id) }
+    }
+
+    private fun selectedRentalResourceFields(
+        options: List<RentalResourceOption> = selectedRentalResourceOptions(),
+    ): List<Field> {
+        return options
+            .map { option -> option.field }
+            .filter { field -> field.id.isNotBlank() }
+            .distinctBy { field -> field.id.trim() }
+            .mapIndexed { index, field -> field.copy(fieldNumber = index + 1) }
+    }
+
+    private fun RentalResourceOption.toRentalTimeSlot(event: Event): TimeSlot {
+        val eventTimeZone = timeZone.toTimeZoneOrUtc(event.resolvedTimeZone())
+        val slotDay = start.toMondayFirstDay(eventTimeZone)
+        val slotId = eventTimeSlotId
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: "rental-slot-${bookingItemId.trim().ifBlank { id }}".replace(Regex("[^A-Za-z0-9_-]"), "-")
+        return TimeSlot(
+            id = slotId,
+            dayOfWeek = slotDay,
+            daysOfWeek = listOf(slotDay),
+            divisions = defaultFieldDivisions(event),
+            startTimeMinutes = start.toMinutesOfDay(eventTimeZone),
+            endTimeMinutes = end.toMinutesOfDay(eventTimeZone),
+            startDate = start,
+            timeZone = timeZone,
+            repeating = false,
+            endDate = end,
+            scheduledFieldId = field.id,
+            scheduledFieldIds = listOf(field.id),
+            price = null,
+            requiredTemplateIds = requiredTemplateIds.normalizeDistinctIds(),
+            hostRequiredTemplateIds = hostRequiredTemplateIds.normalizeDistinctIds(),
+            sourceType = "RENTAL_BOOKING",
+            rentalBookingId = bookingId,
+            rentalBookingItemId = bookingItemId,
+            rentalLocked = true,
+        )
     }
 
     private data class PreparedEventForUpdate(
@@ -5812,16 +6042,27 @@ class DefaultEventDetailComponent(
         val eventDraft = _editedEvent.value.copy(
             matchRulesOverride = matchRulesOverrideWithoutSegmentCount(_editedEvent.value.matchRulesOverride),
         )
+        val hasRentalBackedSlots = _editableLeagueTimeSlots.value.any { slot -> slot.isRentalBacked() }
+        val selectedRentalFieldIds = (
+            selectedRentalResourceFields().map { field -> field.id.trim() } +
+                _editableLeagueTimeSlots.value
+                    .filter { slot -> slot.isRentalBacked() }
+                    .flatMap { slot -> slot.normalizedScheduledFieldIds() }
+            )
+            .filter(String::isNotBlank)
+            .distinct()
+        val selectedRentalFieldIdSet = selectedRentalFieldIds.toSet()
         val shouldPersistFields = eventDraft.eventType == EventType.LEAGUE ||
             eventDraft.eventType == EventType.TOURNAMENT ||
-            eventDraft.eventType == EventType.WEEKLY_EVENT
+            eventDraft.eventType == EventType.WEEKLY_EVENT ||
+            hasRentalBackedSlots
         val preparedFields = if (shouldPersistFields) {
-            buildFieldDrafts(eventDraft)
+            buildFieldDrafts(eventDraft, excludedFieldIds = selectedRentalFieldIdSet)
         } else {
             null
         }
         val preparedEventWithFields = if (preparedFields != null) {
-            eventDraft.copy(fieldIds = preparedFields.map { field -> field.id })
+            eventDraft.copy(fieldIds = selectedRentalFieldIds + preparedFields.map { field -> field.id })
         } else {
             eventDraft
         }
@@ -5832,7 +6073,8 @@ class DefaultEventDetailComponent(
         }
         val shouldPersistTimeSlots = eventDraft.eventType == EventType.LEAGUE ||
             eventDraft.eventType == EventType.TOURNAMENT ||
-            eventDraft.eventType == EventType.WEEKLY_EVENT
+            eventDraft.eventType == EventType.WEEKLY_EVENT ||
+            hasRentalBackedSlots
         if (!shouldPersistTimeSlots) {
             return PreparedEventForUpdate(
                 event = preparedEventWithFields,
@@ -5852,25 +6094,35 @@ class DefaultEventDetailComponent(
         )
     }
 
-    private fun buildFieldDrafts(event: Event): List<Field> {
-        val drafts = _editableFields.value.mapIndexed { index, field ->
-            field.copy(
-                id = if (field.id.isBlank()) newId() else field.id,
-                fieldNumber = index + 1,
-                name = field.name?.takeIf(String::isNotBlank) ?: "Field ${index + 1}",
-                divisions = field.divisions
-                    .normalizeDivisionIdentifiers()
-                    .ifEmpty { defaultFieldDivisions(event) },
-                location = eventFieldLocationDefault(field, event),
-                organizationId = resolveFieldOrganizationId(
-                    fieldOrganizationId = field.organizationId,
-                    eventOrganizationId = event.organizationId,
-                ),
-            )
+    private fun buildFieldDrafts(event: Event, excludedFieldIds: Set<String> = emptySet()): List<Field> {
+        val preservedFields = _editableFields.value.filter { field ->
+            excludedFieldIds.contains(field.id.trim())
         }
-        _editableFields.value = drafts
-        _fieldCount.value = drafts.size
-        _editedEvent.value = _editedEvent.value.copy(fieldIds = drafts.map { field -> field.id })
+        val numberOffset = preservedFields.size
+        val drafts = _editableFields.value
+            .filterNot { field -> excludedFieldIds.contains(field.id.trim()) }
+            .mapIndexed { index, field ->
+                val fieldNumber = numberOffset + index + 1
+                field.copy(
+                    id = if (field.id.isBlank()) newId() else field.id,
+                    fieldNumber = fieldNumber,
+                    name = field.name?.takeIf(String::isNotBlank) ?: "Field $fieldNumber",
+                    divisions = field.divisions
+                        .normalizeDivisionIdentifiers()
+                        .ifEmpty { defaultFieldDivisions(event) },
+                    location = eventFieldLocationDefault(field, event),
+                    organizationId = resolveFieldOrganizationId(
+                        fieldOrganizationId = field.organizationId,
+                        eventOrganizationId = event.organizationId,
+                    ),
+                )
+            }
+        val allFields = (preservedFields + drafts)
+            .distinctBy { field -> field.id.trim() }
+            .mapIndexed { index, field -> field.copy(fieldNumber = index + 1) }
+        _editableFields.value = allFields
+        _fieldCount.value = allFields.size
+        _editedEvent.value = _editedEvent.value.copy(fieldIds = allFields.map { field -> field.id })
         return drafts
     }
 
@@ -5884,7 +6136,8 @@ class DefaultEventDetailComponent(
             .filter(String::isNotBlank)
             .toSet()
 
-        return _editableLeagueTimeSlots.value.mapNotNull { slot ->
+        return _editableLeagueTimeSlots.value.mapNotNull { rawSlot ->
+            val slot = normalizeRentalSlotResourceSelection(rawSlot, validFieldIds)
             val slotTimeZone = slot.timeZone.toTimeZoneOrUtc(event.resolvedTimeZone())
             val normalizedFieldIds = slot.normalizedScheduledFieldIds()
             val mappedFieldIds = if (validFieldIds.isEmpty()) {
@@ -6154,6 +6407,13 @@ class DefaultEventDetailComponent(
     private fun Instant.toMondayFirstDay(timezone: TimeZone): Int {
         val isoDay = toLocalDateTime(timezone).date.dayOfWeek.isoDayNumber
         return (isoDay - 1).mod(7)
+    }
+
+    private fun List<String>.normalizeDistinctIds(): List<String> {
+        return this
+            .map { value -> value.trim() }
+            .filter(String::isNotBlank)
+            .distinct()
     }
 
     private fun buildBracketRounds(

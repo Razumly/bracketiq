@@ -409,7 +409,7 @@ internal fun RentalBusyBlock.toBusyRangeOnDate(
 
     return RentalBusyRange(
         eventId = eventId,
-        eventName = eventName.ifBlank { "Reserved event" },
+        eventName = eventName.ifBlank { RENTAL_UNAVAILABLE_LABEL },
         startMinutes = normalizedStart,
         endMinutes = normalizedEnd,
     )
@@ -444,6 +444,7 @@ internal fun DayOfWeek.toShortLabel(): String {
 }
 
 internal const val SLOT_INTERVAL_MINUTES = 30
+internal const val RENTAL_UNAVAILABLE_LABEL = "Unavailable"
 internal const val RENTAL_TIMELINE_START_MINUTES = 6 * 60
 internal const val RENTAL_TIMELINE_END_MINUTES = 24 * 60
 internal val RENTAL_TIME_COLUMN_WIDTH = 72.dp

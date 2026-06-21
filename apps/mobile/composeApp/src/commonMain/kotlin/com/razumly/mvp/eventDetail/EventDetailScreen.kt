@@ -3348,6 +3348,8 @@ fun EventDetailScreen(
     val pendingStaffInvites by component.pendingStaffInvites.collectAsState()
     val editableLeagueTimeSlots by component.editableLeagueTimeSlots.collectAsState()
     val editableFieldsForDetails by component.editableFields.collectAsState()
+    val availableRentalResources by component.availableRentalResources.collectAsState()
+    val selectedRentalResourceIds by component.selectedRentalResourceIds.collectAsState()
     val editableLeagueScoringConfig by component.editableLeagueScoringConfig.collectAsState()
 
     val isHost by component.isHost.collectAsState()
@@ -4340,6 +4342,9 @@ fun EventDetailScreen(
                             eventRegistrationQuestions = eventRegistrationQuestions,
                             eventRegistrationQuestionAnswers = eventRegistrationQuestionAnswers,
                             eventRegistrationQuestionsExpanded = eventRegistrationQuestionsExpanded,
+                            availableRentalResources = availableRentalResources,
+                            selectedRentalResourceIds = selectedRentalResourceIds,
+                            onRentalResourceSelectionChange = component::setRentalResourceSelected,
                             registrationHoldExpiresAt = registrationHoldExpiresAt,
                             onToggleEventRegistrationQuestions = component::toggleEventRegistrationQuestionsExpanded,
                             onEventRegistrationQuestionAnswerChange = component::updateEventRegistrationQuestionAnswer,

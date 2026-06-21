@@ -94,7 +94,6 @@ class RentalAvailabilityLoader(
         val events = eventRepository.getEventsByOrganization(normalizedOrganizationId, limit = 300).getOrThrow()
 
         val matchBackedEventIds = mutableSetOf<String>()
-        val matchBackedEventNames = mutableMapOf<String, String>()
         val slotBackedEvents = mutableListOf<Event>()
         val directBlocks = mutableListOf<RentalBusyBlock>()
 
@@ -106,7 +105,7 @@ class RentalAvailabilityLoader(
                         directBlocks.add(
                             RentalBusyBlock(
                                 eventId = event.id,
-                                eventName = event.name.ifBlank { "Reserved event" },
+                                eventName = RENTAL_UNAVAILABLE_LABEL,
                                 fieldId = fieldId,
                                 start = event.start,
                                 end = event.end,
@@ -120,7 +119,6 @@ class RentalAvailabilityLoader(
                         return@forEach
                     }
                     matchBackedEventIds.add(event.id)
-                    matchBackedEventNames[event.id] = event.name.ifBlank { "Reserved match" }
                     if (event.timeSlotIds.any { slotId -> slotId.isNotBlank() }) {
                         slotBackedEvents.add(event)
                     }
@@ -145,7 +143,7 @@ class RentalAvailabilityLoader(
 
                     RentalBusyBlock(
                         eventId = match.eventId,
-                        eventName = matchBackedEventNames[match.eventId] ?: "Reserved match",
+                        eventName = RENTAL_UNAVAILABLE_LABEL,
                         fieldId = fieldId,
                         start = matchStart,
                         end = matchEnd,
@@ -241,7 +239,7 @@ class RentalAvailabilityLoader(
         return fieldIds.map { fieldId ->
             RentalBusyBlock(
                 eventId = event.id,
-                eventName = event.name.ifBlank { "Reserved event" },
+                eventName = RENTAL_UNAVAILABLE_LABEL,
                 fieldId = fieldId,
                 start = start,
                 end = end,
@@ -296,7 +294,7 @@ class RentalAvailabilityLoader(
                         blocks.add(
                             RentalBusyBlock(
                                 eventId = event.id,
-                                eventName = event.name.ifBlank { "Reserved event" },
+                                eventName = RENTAL_UNAVAILABLE_LABEL,
                                 fieldId = fieldId,
                                 start = clippedStart,
                                 end = clippedEnd,

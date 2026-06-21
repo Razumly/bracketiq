@@ -25,6 +25,9 @@ data class RentalCreateContext(
 data class LockedRentalSelection(
     val fieldId: String,
     val fieldName: String? = null,
+    val facilityId: String? = null,
+    val facilityName: String? = null,
+    val facilityLocation: String? = null,
     val sourceTimeSlotIds: List<String> = emptyList(),
     val requiredTemplateIds: List<String> = emptyList(),
     val hostRequiredTemplateIds: List<String> = emptyList(),

@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -132,7 +134,7 @@ private fun LoginScreen(
     val focusManager = LocalFocusManager.current
     val passwordFocusRequester = remember { FocusRequester() }
     ScrollableWatchScreen {
-        MiniHeader(title = "MVP", subtitle = "Official")
+        MiniHeader(title = "BracketIQ", subtitle = "Officials")
         WearTextField(
             value = state.email,
             label = "Email",
@@ -174,7 +176,7 @@ private fun MatchListScreen(
     actions: MvpWearActions,
 ) {
     ScrollableWatchScreen {
-        MiniHeader(title = "Upcoming", subtitle = state.currentUserLabel ?: "Official")
+        MiniHeader(title = "Upcoming", subtitle = state.currentUserLabel ?: "Officials")
         if (state.matches.isEmpty()) {
             EmptyText("No matches")
             SecondaryChip(label = "Refresh", onClick = actions.onRefresh)
@@ -333,11 +335,26 @@ private fun TeamScorePickerScreen(
         EmptySelection(actions.onBack)
         return
     }
-    LaunchedEffect(match.id) {
-        delay(5_000)
-        actions.onOpenTimer()
+    LaunchedEffect(match.id, state.isDemo) {
+        if (!state.isDemo) {
+            delay(5_000)
+            actions.onOpenTimer()
+        }
     }
-    Box(modifier = Modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val shortestSide = minOf(maxWidth.value, maxHeight.value)
+        val compact = shortestSide < 180f
+        val nameOffset = (shortestSide * if (compact) 0.34f else 0.39f).dp
+        val scoreOffset = (shortestSide * if (compact) 0.18f else 0.23f).dp
+        val rowPadding = (shortestSide * if (compact) 0.26f else 0.23f).dp
+        val badgeSize = (shortestSide * if (compact) 0.12f else 0.135f).dp
+        val badgeTextSize = (shortestSide * if (compact) 0.065f else 0.073f).sp
+        val teamTextSize = (shortestSide * if (compact) 0.073f else 0.078f).sp
+        val scoreTextSize = (shortestSide * if (compact) 0.18f else 0.198f).sp
+        val actionHeight = (shortestSide * 0.14f).dp
+        val actionIconSize = (shortestSide * 0.104f).dp
+        val actionTextSize = (shortestSide * 0.068f).sp
+        val actionPlusSize = (shortestSide * 0.078f).sp
         Column(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
@@ -360,22 +377,48 @@ private fun TeamScorePickerScreen(
                     ),
             )
         }
-        TeamScoreContent(
+        TeamNameRow(
             team = match.team1,
-            score = match.scoreFor(match.team1?.id),
             fallbackName = "Home",
-            top = true,
-            modifier = Modifier.align(Alignment.TopCenter),
+            horizontalPadding = rowPadding,
+            badgeSize = badgeSize,
+            badgeTextSize = badgeTextSize,
+            fontSize = teamTextSize,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .offset(y = -nameOffset),
         )
-        TeamScoreContent(
-            team = match.team2,
+        ScoreValue(
+            score = match.scoreFor(match.team1?.id),
+            fontSize = scoreTextSize,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .offset(y = -scoreOffset),
+        )
+        ScoreValue(
             score = match.scoreFor(match.team2?.id),
+            fontSize = scoreTextSize,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .offset(y = scoreOffset),
+        )
+        TeamNameRow(
+            team = match.team2,
             fallbackName = "Away",
-            top = false,
-            modifier = Modifier.align(Alignment.BottomCenter),
+            horizontalPadding = rowPadding,
+            badgeSize = badgeSize,
+            badgeTextSize = badgeTextSize,
+            fontSize = teamTextSize,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .offset(y = nameOffset),
         )
         CenterActionPill(
             modifier = Modifier.align(Alignment.Center),
+            height = actionHeight,
+            iconSize = actionIconSize,
+            plusFontSize = actionPlusSize,
+            textFontSize = actionTextSize,
             onClick = actions.onShowActionMenu,
         )
     }
@@ -945,46 +988,19 @@ private fun MatchRow(match: WearMatch, onClick: () -> Unit) {
 }
 
 @Composable
-private fun TeamScoreContent(
-    team: WearTeam?,
+private fun ScoreValue(
     score: Int,
-    fallbackName: String,
-    top: Boolean,
-    modifier: Modifier,
+    fontSize: TextUnit,
+    modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(
-                start = 42.dp,
-                end = 42.dp,
-                top = if (top) 12.dp else 0.dp,
-                bottom = if (top) 0.dp else 22.dp,
-            ),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        if (!top) {
-            ScoreValue(score)
-            Spacer(modifier = Modifier.height(2.dp))
-        }
-        TeamNameRow(team = team, fallbackName = fallbackName)
-        if (top) {
-            Spacer(modifier = Modifier.height(2.dp))
-            ScoreValue(score)
-        }
-    }
-}
-
-@Composable
-private fun ScoreValue(score: Int) {
     BasicText(
         text = score.toString(),
+        modifier = modifier,
         maxLines = 1,
         style = TextStyle(
             color = Color.White,
-            fontSize = 40.sp,
-            lineHeight = 40.sp,
+            fontSize = fontSize,
+            lineHeight = fontSize,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
         ),
@@ -992,21 +1008,32 @@ private fun ScoreValue(score: Int) {
 }
 
 @Composable
-private fun TeamNameRow(team: WearTeam?, fallbackName: String) {
+private fun TeamNameRow(
+    team: WearTeam?,
+    fallbackName: String,
+    horizontalPadding: androidx.compose.ui.unit.Dp,
+    badgeSize: androidx.compose.ui.unit.Dp,
+    badgeTextSize: TextUnit,
+    fontSize: TextUnit,
+    modifier: Modifier = Modifier,
+) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = horizontalPadding),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
-        TeamBadge(label = team?.label ?: fallbackName)
+        TeamBadge(label = team?.label ?: fallbackName, size = badgeSize, fontSize = badgeTextSize)
         Spacer(modifier = Modifier.width(8.dp))
         BasicText(
             text = team?.label ?: fallbackName,
+            modifier = Modifier.weight(1f, fill = false),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = TextStyle(
                 color = Color.White,
-                fontSize = 15.sp,
+                fontSize = fontSize,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
             ),
@@ -1015,17 +1042,17 @@ private fun TeamNameRow(team: WearTeam?, fallbackName: String) {
 }
 
 @Composable
-private fun TeamBadge(label: String) {
+private fun TeamBadge(label: String, size: androidx.compose.ui.unit.Dp, fontSize: TextUnit) {
     Box(
         modifier = Modifier
-            .size(26.dp)
+            .size(size)
             .clip(CircleShape)
             .background(Color.White.copy(alpha = 0.13f)),
         contentAlignment = Alignment.Center,
     ) {
         BasicText(
             text = label.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-            style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold),
+            style = TextStyle(color = Color.White, fontSize = fontSize, fontWeight = FontWeight.Bold),
         )
     }
 }
@@ -1033,39 +1060,43 @@ private fun TeamBadge(label: String) {
 @Composable
 private fun CenterActionPill(
     modifier: Modifier,
+    height: androidx.compose.ui.unit.Dp,
+    iconSize: androidx.compose.ui.unit.Dp,
+    plusFontSize: TextUnit,
+    textFontSize: TextUnit,
     onClick: () -> Unit,
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth(0.72f)
-            .height(36.dp)
-            .clip(RoundedCornerShape(18.dp))
+            .height(height)
+            .clip(RoundedCornerShape(14.dp))
             .background(Color(0xFFF3F5F8))
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
         Box(
             modifier = Modifier
-                .size(24.dp)
+                .size(iconSize)
                 .clip(CircleShape)
                 .background(HomeBlue),
             contentAlignment = Alignment.Center,
         ) {
             BasicText(
                 text = "+",
-                style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
+                style = TextStyle(color = Color.White, fontSize = plusFontSize, fontWeight = FontWeight.Bold),
             )
         }
-        Spacer(modifier = Modifier.width(8.dp))
+        Spacer(modifier = Modifier.width(6.dp))
         BasicText(
             text = "Action",
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = TextStyle(
                 color = HomeBlue,
-                fontSize = 14.sp,
+                fontSize = textFontSize,
                 fontWeight = FontWeight.Bold,
             ),
         )

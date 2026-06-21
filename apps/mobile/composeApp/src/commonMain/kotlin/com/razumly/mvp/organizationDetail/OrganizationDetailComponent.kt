@@ -63,7 +63,6 @@ data class RentalReservationComplete(
     val bookingId: String,
     val billId: String? = null,
     val totalCents: Int,
-    val eventContext: RentalCreateContext,
 )
 
 private data class PendingRentalReservation(
@@ -583,9 +582,9 @@ class DefaultOrganizationDetailComponent(
     }
 
     override fun createEventFromCompletedRentalReservation() {
-        val completedReservation = _completedRentalReservation.value ?: return
+        _completedRentalReservation.value ?: return
         _completedRentalReservation.value = null
-        navigationHandler.navigateToCreate(completedReservation.eventContext)
+        navigationHandler.navigateToCreate()
     }
 
     override fun dismissCompletedRentalReservation() {
@@ -858,15 +857,10 @@ class DefaultOrganizationDetailComponent(
             selections = pending.selections,
             paymentIntentId = pending.paymentIntentId,
         ).onSuccess { result ->
-            val eventContext = pending.context.withRentalOrderResult(
-                bookingId = result.bookingId,
-                items = result.items,
-            )
             _completedRentalReservation.value = RentalReservationComplete(
                 bookingId = result.bookingId,
                 billId = result.billId,
                 totalCents = result.totalCents,
-                eventContext = eventContext,
             )
             _message.value = "Resources reserved."
             refreshRentals(force = true)

@@ -110,6 +110,10 @@ class RentalAvailabilityLoaderTest {
             listOf("2026-06-01T11:00:00Z", "2026-06-08T11:00:00Z"),
             blocks.map { block -> block.end.toString() },
         )
+        assertEquals(
+            listOf(RENTAL_UNAVAILABLE_LABEL, RENTAL_UNAVAILABLE_LABEL),
+            blocks.map { block -> block.eventName },
+        )
 
         val canSelectOverLeagueSlot = canApplyRentalSelectionRange(
             selectionId = 0L,
@@ -129,6 +133,57 @@ class RentalAvailabilityLoaderTest {
         )
 
         assertFalse(canSelectOverLeagueSlot)
+    }
+
+    @Test
+    fun loadBusyBlocks_hidesEventNamesBehindUnavailableRentalBlocks() = runTest {
+        val directEvent = Event(
+            id = "event_1",
+            name = "Private Birthday Party",
+            hostId = "host_1",
+            organizationId = "org_1",
+            fieldIds = listOf("field_1"),
+            start = Instant.parse("2026-06-04T18:00:00Z"),
+            end = Instant.parse("2026-06-04T20:00:00Z"),
+            eventType = EventType.EVENT,
+        )
+        val league = Event(
+            id = "league_1",
+            name = "Secret League Play",
+            hostId = "host_1",
+            organizationId = "org_1",
+            fieldIds = listOf("field_1"),
+            start = Instant.parse("2026-06-04T00:00:00Z"),
+            end = Instant.parse("2026-06-05T00:00:00Z"),
+            eventType = EventType.LEAGUE,
+        )
+        val matchRepository = CreateEvent_FakeMatchRepository().apply {
+            tournamentMatches = listOf(
+                com.razumly.mvp.core.data.dataTypes.MatchMVP(
+                    id = "match_1",
+                    matchId = 1,
+                    eventId = "league_1",
+                    fieldId = "field_1",
+                    start = Instant.parse("2026-06-04T21:00:00Z"),
+                    end = Instant.parse("2026-06-04T22:00:00Z"),
+                )
+            )
+        }
+        val loader = RentalAvailabilityLoader(
+            eventRepository = CreateEvent_FakeEventRepository(listOf(directEvent, league)),
+            matchRepository = matchRepository,
+            fieldRepository = RentalAvailability_FakeFieldRepository(emptyList()),
+        )
+
+        val blocks = loader.loadBusyBlocks(
+            organizationId = "org_1",
+            fieldIds = listOf("field_1"),
+        ).getOrThrow()
+
+        assertEquals(2, blocks.size)
+        assertTrue(blocks.all { block -> block.eventName == RENTAL_UNAVAILABLE_LABEL })
+        assertTrue(blocks.none { block -> block.eventName.contains("Private") })
+        assertTrue(blocks.none { block -> block.eventName.contains("Secret") })
     }
 }
 

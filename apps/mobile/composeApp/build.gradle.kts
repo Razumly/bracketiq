@@ -3,6 +3,7 @@ import co.touchlab.skie.configuration.SuppressSkieWarning
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
+import org.gradle.api.tasks.bundling.Zip
 import java.io.ByteArrayOutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -76,6 +77,8 @@ kotlin {
                 linkerOpts.add("-F$syntheticPodsBuildPath/$podName")
                 linkerOpts.add("-F$syntheticPodsBuildPath/XCFrameworkIntermediates/$podName")
             }
+            linkerOpts.add("-framework")
+            linkerOpts.add("WatchConnectivity")
         }
     }
 
@@ -280,6 +283,27 @@ android {
         unitTests {
             isIncludeAndroidResources = true
         }
+    }
+}
+
+val packageReleaseNativeDebugSymbols by tasks.registering(Zip::class) {
+    group = "build"
+    description = "Packages Play Console native debug symbols for the release Android app."
+    dependsOn("mergeReleaseNativeLibs")
+
+    archiveFileName.set("native-debug-symbols-$mvpVersion-code$mvpVersionCode.zip")
+    destinationDirectory.set(layout.buildDirectory.dir("outputs/native-debug-symbols/release"))
+    from(layout.buildDirectory.dir("intermediates/merged_native_libs/release/mergeReleaseNativeLibs/out/lib")) {
+        include("**/*.so")
+        exclude("**/.DS_Store", "__MACOSX/**", "**/__MACOSX/**", "**/*.zip")
+    }
+    isPreserveFileTimestamps = false
+    isReproducibleFileOrder = true
+}
+
+tasks.configureEach {
+    if (name == "assembleRelease" || name == "bundleRelease") {
+        finalizedBy(packageReleaseNativeDebugSymbols)
     }
 }
 

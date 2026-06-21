@@ -43,12 +43,13 @@ class MvpWearViewModel(application: Application) : AndroidViewModel(application)
 
     private val _state = MutableStateFlow(MvpWearUiState())
     val state: StateFlow<MvpWearUiState> = _state.asStateFlow()
+    private var demoMode = false
 
     init {
         bootstrap()
         viewModelScope.launch {
             WearAuthSyncEvents.tokenUpdates.collect {
-                bootstrap()
+                if (!demoMode) bootstrap()
             }
         }
         viewModelScope.launch {
@@ -56,6 +57,11 @@ class MvpWearViewModel(application: Application) : AndroidViewModel(application)
                 refreshCachedMatch(matchId)
             }
         }
+    }
+
+    internal fun applyDebugDemoState(state: MvpWearUiState) {
+        demoMode = true
+        _state.value = state.copy(isDemo = true)
     }
 
     fun updateEmail(value: String) {
@@ -497,10 +503,12 @@ class MvpWearViewModel(application: Application) : AndroidViewModel(application)
 
     private fun bootstrap() {
         viewModelScope.launch {
+            if (demoMode) return@launch
             _state.update { it.copy(isLoading = true, error = null) }
             val session = try {
                 withContext(Dispatchers.IO) { repository.bootstrapSession() }
             } catch (throwable: Throwable) {
+                if (demoMode) return@launch
                 _state.update {
                     it.copy(
                         route = WearRoute.LOGIN,
@@ -511,6 +519,7 @@ class MvpWearViewModel(application: Application) : AndroidViewModel(application)
                 }
                 return@launch
             }
+            if (demoMode) return@launch
             if (session == null) {
                 _state.update {
                     it.copy(
@@ -646,6 +655,7 @@ enum class WearIncidentField {
 
 data class MvpWearUiState(
     val route: WearRoute = WearRoute.LOGIN,
+    val isDemo: Boolean = false,
     val isLoading: Boolean = false,
     val isAuthenticated: Boolean = false,
     val email: String = "",

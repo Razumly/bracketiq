@@ -1,5 +1,8 @@
 import java.util.Properties
 
+val wearVersion = "0.1.0"
+val wearVersionCode = 100001
+
 plugins {
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.kotlinAndroid)
@@ -31,11 +34,11 @@ android {
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
     defaultConfig {
-        applicationId = "com.razumly.mvp.wear"
+        applicationId = "com.razumly.mvp"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = wearVersionCode
+        versionName = wearVersion
 
         buildConfigField(
             "String",

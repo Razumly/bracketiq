@@ -156,6 +156,13 @@ private class MatchRepositoryHttp_FakeOutboxDao : MatchOperationOutboxDao {
     ): List<MatchOperationOutboxEntry> =
         pendingOperationsFor(matchId, pendingStatus, failedStatus, syncingStatus)
 
+    override suspend fun pendingOperationCount(
+        pendingStatus: String,
+        failedStatus: String,
+        syncingStatus: String,
+    ): Int =
+        pendingOperationsFor(matchId = null, pendingStatus, failedStatus, syncingStatus).size
+
     override suspend fun getOperationsByIds(ids: List<String>): List<MatchOperationOutboxEntry> =
         ids.mapNotNull(operationsById::get)
 
