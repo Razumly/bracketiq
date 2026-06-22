@@ -3081,11 +3081,6 @@ class DefaultEventDetailComponent(
         }
     }
 
-    private enum class PaymentPlanBillStatus {
-        CREATED,
-        ALREADY_EXISTS,
-    }
-
     private suspend fun createPaymentPlanBillForOwner(
         ownerType: String,
         ownerId: String,
@@ -3287,11 +3282,10 @@ class DefaultEventDetailComponent(
                         )
                         clearCurrentRegistrationProgress()
                         _errorState.value = ErrorMessage(
-                            if (status == PaymentPlanBillStatus.ALREADY_EXISTS) {
-                                "Joined. Payment plan already exists. You can manage installments from your Profile."
-                            } else {
-                                "Joined. Payment plan started. A bill was created for you. Pay installments from your Profile."
-                            }
+                            registrationFlowCoordinator.paymentPlanBillSuccessMessage(
+                                status = status,
+                                forTeamJoin = false,
+                            ),
                         )
                     }.onFailure { throwable ->
                         if (joinedByThisFlow) {
@@ -3392,12 +3386,13 @@ class DefaultEventDetailComponent(
                         preferredDivisionId = selectedDivision.value,
                         occurrence = weeklyOccurrence,
                     )
-                    if (joinResult.isSuccess) {
-                        joinedByThisFlow = true
+                    val joinDecision = registrationFlowCoordinator.teamJoinBeforePaymentPlanDecision(joinResult)
+                    joinedByThisFlow = joinDecision.joinedByThisFlow
+                    joinDecision.failure?.let { failure ->
+                        _errorState.value = ErrorMessage(failure.userMessage())
+                        return
                     }
-                    val joinFailure = joinResult.exceptionOrNull()
-                    if (joinFailure != null && !joinFailure.isAlreadyRegisteredJoinError()) {
-                        _errorState.value = ErrorMessage(joinFailure.userMessage())
+                    if (!joinDecision.shouldContinueToPaymentPlan) {
                         return
                     }
 
@@ -3416,11 +3411,10 @@ class DefaultEventDetailComponent(
                         )
                         clearCurrentRegistrationProgress()
                         _errorState.value = ErrorMessage(
-                            if (status == PaymentPlanBillStatus.ALREADY_EXISTS) {
-                                "Team joined. Payment plan already exists. Manage installments from your Profile."
-                            } else {
-                                "Team joined. Payment plan started. A bill was created. Manage installments from your Profile."
-                            }
+                            registrationFlowCoordinator.paymentPlanBillSuccessMessage(
+                                status = status,
+                                forTeamJoin = true,
+                            ),
                         )
                     }.onFailure { throwable ->
                         if (joinedByThisFlow) {

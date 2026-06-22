@@ -69,6 +69,12 @@ internal data class SelfJoinBeforePaymentPlanDecision(
     val failure: Throwable? = null,
 )
 
+internal data class TeamJoinBeforePaymentPlanDecision(
+    val joinedByThisFlow: Boolean,
+    val shouldContinueToPaymentPlan: Boolean,
+    val failure: Throwable? = null,
+)
+
 internal data class SignatureFlowTarget(
     val signerContext: SignerContext,
     val child: JoinChildOption?,
@@ -93,6 +99,11 @@ internal enum class JoinExecutionAction {
     START_PAYMENT_PLAN,
     JOIN_DIRECTLY,
     CREATE_PURCHASE_INTENT,
+}
+
+internal enum class PaymentPlanBillStatus {
+    CREATED,
+    ALREADY_EXISTS,
 }
 
 internal enum class TeamJoinPolicyKind {
@@ -561,6 +572,50 @@ internal class EventRegistrationFlowCoordinator {
             joinedByThisFlow = false,
             shouldContinueToPaymentPlan = true,
         )
+    }
+
+    fun teamJoinBeforePaymentPlanDecision(
+        result: Result<Unit>,
+    ): TeamJoinBeforePaymentPlanDecision {
+        if (result.isSuccess) {
+            return TeamJoinBeforePaymentPlanDecision(
+                joinedByThisFlow = true,
+                shouldContinueToPaymentPlan = true,
+            )
+        }
+
+        val failure = result.exceptionOrNull()
+        if (failure != null && !failure.isAlreadyRegisteredJoinError()) {
+            return TeamJoinBeforePaymentPlanDecision(
+                joinedByThisFlow = false,
+                shouldContinueToPaymentPlan = false,
+                failure = failure,
+            )
+        }
+
+        return TeamJoinBeforePaymentPlanDecision(
+            joinedByThisFlow = false,
+            shouldContinueToPaymentPlan = true,
+        )
+    }
+
+    fun paymentPlanBillSuccessMessage(
+        status: PaymentPlanBillStatus,
+        forTeamJoin: Boolean,
+    ): String {
+        return if (forTeamJoin) {
+            if (status == PaymentPlanBillStatus.ALREADY_EXISTS) {
+                "Team joined. Payment plan already exists. Manage installments from your Profile."
+            } else {
+                "Team joined. Payment plan started. A bill was created. Manage installments from your Profile."
+            }
+        } else {
+            if (status == PaymentPlanBillStatus.ALREADY_EXISTS) {
+                "Joined. Payment plan already exists. You can manage installments from your Profile."
+            } else {
+                "Joined. Payment plan started. A bill was created for you. Pay installments from your Profile."
+            }
+        }
     }
 
     fun determineJoinExecutionAction(

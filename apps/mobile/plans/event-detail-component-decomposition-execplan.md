@@ -38,7 +38,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Move team registration continuation branching into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move child-registration result message classification into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move self/minor join result and payment-plan pre-join decisions into `EventRegistrationFlowCoordinator` with focused tests.
-  - [ ] Move self, team, child, and minor join orchestration around the existing repository callbacks.
+  - [x] (2026-06-22) Move self, team, child, and minor join orchestration decisions around the existing repository callbacks into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move payment-plan preview dialog and continuation state into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move billing-address prompt and continuation state into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move pending join-confirmation target state into `EventRegistrationFlowCoordinator` with focused tests.
@@ -223,6 +223,8 @@ The twenty-ninth implementation milestone moves team registration continuation b
 The thirtieth implementation milestone moves child-registration result message classification into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now turns a `ChildRegistrationResult` into the user-facing completion, waitlist, parent-approval, child-email, consent-status, pending-status, default pending, and first-warning message. `DefaultEventDetailComponent` still owns registration, event refresh, loading/error state mutation, and repository failure handling. `EventDetailComponent.kt` dropped to 6,538 lines after this milestone.
 
 The thirty-first implementation milestone moves self/minor join result and payment-plan pre-join decisions into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now classifies parent-approval and waitlist messages for self/minor join results, determines whether self payment-plan pre-join should continue, reload the event, report a non-duplicate failure, or remember that rollback is required. `DefaultEventDetailComponent` still owns repository calls, billing creation, rollback execution, event refresh, loading/error mutation, and payment purchase-intent flow. `EventDetailComponent.kt` dropped to 6,524 lines after this milestone.
+
+The thirty-second implementation milestone completes the current self/team/child/minor join orchestration decision slice. `EventRegistrationFlowCoordinator.kt` now classifies team join-before-payment-plan results, treats duplicate already-registered errors as resumable payment-plan paths, preserves rollback intent, owns user/team payment-plan success copy, and exposes the shared `PaymentPlanBillStatus` used by billing creation. `DefaultEventDetailComponent` still owns repository calls, billing creation, rollback execution, event refresh, loading/error mutation, and purchase-intent processing. `EventDetailComponent.kt` dropped to 6,518 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining coordinator work is to finish join orchestration around repository callbacks, then run the final coordinator regression suite and extract participant/invite coordination.
 
@@ -1028,6 +1030,25 @@ Thirty-first milestone line-count evidence:
     1304 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
     1091 plans/event-detail-component-decomposition-execplan.md
 
+Team join payment-plan coordinator slice focused tests passed:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventRegistrationFlowCoordinatorTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 1m 33s; 43 actionable tasks: 9 executed, 34 up-to-date.
+
+Team join payment-plan coordinator slice common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 11s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Thirty-second milestone line-count evidence:
+
+    6518 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+    1008 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
+    1366 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
+    1113 plans/event-detail-component-decomposition-execplan.md
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -1089,3 +1110,4 @@ Revision Note (2026-06-22): Recorded the team registration result decision coord
 Revision Note (2026-06-22): Recorded the team registration continuation coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the child-registration result message coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the self/minor join result coordinator slice, focused tests, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded the team join payment-plan coordinator slice, focused tests, compile checks, and line-count impact, and marked the self/team/child/minor orchestration decision subtask complete.

@@ -563,6 +563,68 @@ class EventRegistrationFlowCoordinatorTest {
     }
 
     @Test
+    fun team_join_before_payment_plan_decision_classifies_success_duplicate_and_failure() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val failure = IllegalStateException("Team capacity check failed")
+
+        assertEquals(
+            TeamJoinBeforePaymentPlanDecision(
+                joinedByThisFlow = true,
+                shouldContinueToPaymentPlan = true,
+            ),
+            coordinator.teamJoinBeforePaymentPlanDecision(Result.success(Unit)),
+        )
+        assertEquals(
+            TeamJoinBeforePaymentPlanDecision(
+                joinedByThisFlow = false,
+                shouldContinueToPaymentPlan = true,
+            ),
+            coordinator.teamJoinBeforePaymentPlanDecision(
+                Result.failure(IllegalStateException("Team already a participant")),
+            ),
+        )
+
+        val decision = coordinator.teamJoinBeforePaymentPlanDecision(Result.failure(failure))
+        assertFalse(decision.joinedByThisFlow)
+        assertFalse(decision.shouldContinueToPaymentPlan)
+        assertSame(failure, decision.failure)
+    }
+
+    @Test
+    fun payment_plan_bill_success_message_preserves_user_and_team_copy() {
+        val coordinator = EventRegistrationFlowCoordinator()
+
+        assertEquals(
+            "Joined. Payment plan already exists. You can manage installments from your Profile.",
+            coordinator.paymentPlanBillSuccessMessage(
+                status = PaymentPlanBillStatus.ALREADY_EXISTS,
+                forTeamJoin = false,
+            ),
+        )
+        assertEquals(
+            "Joined. Payment plan started. A bill was created for you. Pay installments from your Profile.",
+            coordinator.paymentPlanBillSuccessMessage(
+                status = PaymentPlanBillStatus.CREATED,
+                forTeamJoin = false,
+            ),
+        )
+        assertEquals(
+            "Team joined. Payment plan already exists. Manage installments from your Profile.",
+            coordinator.paymentPlanBillSuccessMessage(
+                status = PaymentPlanBillStatus.ALREADY_EXISTS,
+                forTeamJoin = true,
+            ),
+        )
+        assertEquals(
+            "Team joined. Payment plan started. A bill was created. Manage installments from your Profile.",
+            coordinator.paymentPlanBillSuccessMessage(
+                status = PaymentPlanBillStatus.CREATED,
+                forTeamJoin = true,
+            ),
+        )
+    }
+
+    @Test
     fun join_execution_action_preserves_self_join_branching() {
         val coordinator = EventRegistrationFlowCoordinator()
 
