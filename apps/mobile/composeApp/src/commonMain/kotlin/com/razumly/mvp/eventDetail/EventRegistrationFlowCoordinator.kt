@@ -10,6 +10,7 @@ import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
+import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
@@ -58,6 +59,14 @@ internal data class TeamRegistrationContinuationDecision(
     val action: TeamRegistrationContinuationAction,
     val teamId: String,
     val message: String? = null,
+)
+
+internal data class SelfJoinBeforePaymentPlanDecision(
+    val joinedByThisFlow: Boolean,
+    val shouldContinueToPaymentPlan: Boolean,
+    val shouldReloadEvent: Boolean = false,
+    val message: String? = null,
+    val failure: Throwable? = null,
 )
 
 internal data class SignatureFlowTarget(
@@ -505,6 +514,53 @@ internal class EventRegistrationFlowCoordinator {
         }
         val warning = registration.warnings.firstOrNull()?.takeIf(String::isNotBlank)
         return listOfNotNull(message, warning).joinToString(" ")
+    }
+
+    fun selfRegistrationResultMessage(
+        registration: SelfRegistrationResult,
+        defaultMessage: String? = null,
+    ): String? {
+        return when {
+            registration.requiresParentApproval ->
+                "Join request sent. A parent/guardian must approve before registration can continue."
+            registration.joinedWaitlist -> "Added to event waitlist."
+            else -> defaultMessage
+        }
+    }
+
+    fun selfJoinBeforePaymentPlanDecision(
+        result: Result<SelfRegistrationResult>,
+    ): SelfJoinBeforePaymentPlanDecision {
+        val registration = result.getOrNull()
+        if (registration != null) {
+            val message = selfRegistrationResultMessage(registration)
+            if (message != null) {
+                return SelfJoinBeforePaymentPlanDecision(
+                    joinedByThisFlow = false,
+                    shouldContinueToPaymentPlan = false,
+                    shouldReloadEvent = true,
+                    message = message,
+                )
+            }
+            return SelfJoinBeforePaymentPlanDecision(
+                joinedByThisFlow = true,
+                shouldContinueToPaymentPlan = true,
+            )
+        }
+
+        val failure = result.exceptionOrNull()
+        if (failure != null && !failure.isAlreadyRegisteredJoinError()) {
+            return SelfJoinBeforePaymentPlanDecision(
+                joinedByThisFlow = false,
+                shouldContinueToPaymentPlan = false,
+                failure = failure,
+            )
+        }
+
+        return SelfJoinBeforePaymentPlanDecision(
+            joinedByThisFlow = false,
+            shouldContinueToPaymentPlan = true,
+        )
     }
 
     fun determineJoinExecutionAction(

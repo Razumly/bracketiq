@@ -10,6 +10,7 @@ import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
+import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
@@ -492,6 +493,73 @@ class EventRegistrationFlowCoordinatorTest {
                 ),
             ),
         )
+    }
+
+    @Test
+    fun self_registration_result_message_classifies_minor_waitlist_and_default_states() {
+        val coordinator = EventRegistrationFlowCoordinator()
+
+        assertEquals(
+            "Join request sent. A parent/guardian must approve before registration can continue.",
+            coordinator.selfRegistrationResultMessage(
+                SelfRegistrationResult(requiresParentApproval = true),
+            ),
+        )
+        assertEquals(
+            "Added to event waitlist.",
+            coordinator.selfRegistrationResultMessage(
+                SelfRegistrationResult(joinedWaitlist = true),
+            ),
+        )
+        assertEquals(
+            "Join request submitted.",
+            coordinator.selfRegistrationResultMessage(
+                registration = SelfRegistrationResult(),
+                defaultMessage = "Join request submitted.",
+            ),
+        )
+        assertNull(coordinator.selfRegistrationResultMessage(SelfRegistrationResult()))
+    }
+
+    @Test
+    fun self_join_before_payment_plan_decision_classifies_registration_result_and_duplicate_errors() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val failure = IllegalStateException("Backend unavailable")
+
+        assertEquals(
+            SelfJoinBeforePaymentPlanDecision(
+                joinedByThisFlow = true,
+                shouldContinueToPaymentPlan = true,
+            ),
+            coordinator.selfJoinBeforePaymentPlanDecision(
+                Result.success(SelfRegistrationResult()),
+            ),
+        )
+        assertEquals(
+            SelfJoinBeforePaymentPlanDecision(
+                joinedByThisFlow = false,
+                shouldContinueToPaymentPlan = false,
+                shouldReloadEvent = true,
+                message = "Added to event waitlist.",
+            ),
+            coordinator.selfJoinBeforePaymentPlanDecision(
+                Result.success(SelfRegistrationResult(joinedWaitlist = true)),
+            ),
+        )
+        assertEquals(
+            SelfJoinBeforePaymentPlanDecision(
+                joinedByThisFlow = false,
+                shouldContinueToPaymentPlan = true,
+            ),
+            coordinator.selfJoinBeforePaymentPlanDecision(
+                Result.failure(IllegalStateException("Already registered for event")),
+            ),
+        )
+
+        val decision = coordinator.selfJoinBeforePaymentPlanDecision(Result.failure(failure))
+        assertFalse(decision.joinedByThisFlow)
+        assertFalse(decision.shouldContinueToPaymentPlan)
+        assertSame(failure, decision.failure)
     }
 
     @Test

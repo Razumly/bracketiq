@@ -3201,14 +3201,10 @@ class DefaultEventDetailComponent(
                 warningMessage = "Failed to refresh event after submitting child join request.",
             )
             _errorState.value = ErrorMessage(
-                when {
-                    registration.requiresParentApproval ->
-                        "Join request sent. A parent/guardian must approve before registration can continue."
-                    registration.joinedWaitlist ->
-                        "Added to event waitlist."
-                    else ->
-                        "Join request submitted."
-                },
+                registrationFlowCoordinator.selfRegistrationResultMessage(
+                    registration = registration,
+                    defaultMessage = "Join request submitted.",
+                ) ?: "Join request submitted.",
             )
         }.onFailure { throwable ->
             _errorState.value = ErrorMessage(throwable.userMessage())
@@ -3254,28 +3250,25 @@ class DefaultEventDetailComponent(
                         preferredDivisionId = selectedDivision.value,
                         occurrence = weeklyOccurrence,
                     )
-                    val registration = registrationResult.getOrNull()
-                    if (registration != null) {
-                        joinedByThisFlow = !registration.requiresParentApproval && !registration.joinedWaitlist
-                        if (registration.requiresParentApproval) {
-                            _errorState.value = ErrorMessage(
-                                "Join request sent. A parent/guardian must approve before registration can continue."
-                            )
-                        } else if (registration.joinedWaitlist) {
-                            _errorState.value = ErrorMessage("Added to event waitlist.")
-                        }
+                    val registrationDecision =
+                        registrationFlowCoordinator.selfJoinBeforePaymentPlanDecision(registrationResult)
+                    joinedByThisFlow = registrationDecision.joinedByThisFlow
+                    registrationDecision.message?.let { message ->
+                        _errorState.value = ErrorMessage(message)
                     }
-                    val registrationFailure = registrationResult.exceptionOrNull()
-                    if (registrationFailure != null && !registrationFailure.isAlreadyRegisteredJoinError()) {
-                        _errorState.value = ErrorMessage(registrationFailure.userMessage())
+                    registrationDecision.failure?.let { failure ->
+                        _errorState.value = ErrorMessage(failure.userMessage())
                         return
                     }
-                    if (registration?.requiresParentApproval == true || registration?.joinedWaitlist == true) {
+                    if (registrationDecision.shouldReloadEvent) {
                         loadingHandler.showLoading("Reloading Event")
                         refreshEventAfterParticipantMutation(
                             eventId = selectedEvent.value.id,
                             warningMessage = "Failed to refresh event after joining waitlist.",
                         )
+                        return
+                    }
+                    if (!registrationDecision.shouldContinueToPaymentPlan) {
                         return
                     }
 
@@ -3321,15 +3314,8 @@ class DefaultEventDetailComponent(
                             warningMessage = "Failed to refresh event after joining.",
                         )
                         clearCurrentRegistrationProgress()
-                        when {
-                            registration.requiresParentApproval -> {
-                                _errorState.value = ErrorMessage(
-                                    "Join request sent. A parent/guardian must approve before registration can continue."
-                                )
-                            }
-                            registration.joinedWaitlist -> {
-                                _errorState.value = ErrorMessage("Added to event waitlist.")
-                            }
+                        registrationFlowCoordinator.selfRegistrationResultMessage(registration)?.let { message ->
+                            _errorState.value = ErrorMessage(message)
                         }
                     }.onFailure {
                         _errorState.value = ErrorMessage(it.userMessage())
