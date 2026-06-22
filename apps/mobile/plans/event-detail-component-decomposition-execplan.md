@@ -22,6 +22,7 @@ After this refactor, the app should behave the same for users, but the code will
 - [x] (2026-06-22) Extracted join-confirmation target construction, event snapshot/cache matching, and registration-cache membership predicates into `EventRegistrationFlowHelpers.kt` with focused tests.
 - [x] (2026-06-22) Extracted payment-plan preview state, selected-division resolution, and effective payment-plan normalization into `EventPaymentPlanHelpers.kt` with focused tests.
 - [x] (2026-06-22) Extracted deterministic signature context queue and pending-step matching helpers into `EventSignatureFlowHelpers.kt` with focused tests.
+- [x] (2026-06-22) Extracted event registration question answer normalization, missing-required detection, and request filtering into `EventRegistrationFlowHelpers.kt` with focused tests.
 - [ ] Extract registration, join, withdraw, refund, payment preview, and signature flow state into a cohesive coordinator without changing public behavior.
 - [ ] Extract participant management and invite/search coordination where it can be tested independently.
 - [ ] Thin `DefaultEventDetailComponent` so it owns Decompose lifecycle, public state exposure, and delegation, while helpers own domain-specific transformations.
@@ -55,6 +56,9 @@ After this refactor, the app should behave the same for users, but the code will
 
 - Observation: The first safe signature extraction is queue and step matching logic; polling, prompt mutation, and repository calls are still component-owned.
   Evidence: `EventSignatureFlowHelpersTest` covers child-context chaining, fallback context selection, and pending signature step matching by template/document id. `EventDetailMobileJoinFlowTest` still covers required-document signing and post-signature checkout behavior.
+
+- Observation: Event registration question answer handling has a deterministic core separate from dialog continuation and persistence.
+  Evidence: `EventRegistrationQuestionHelpersTest` covers answer-id normalization, all-dialog-question answer maps, missing required answer selection, request filtering, and empty-question fallback behavior without constructing `DefaultEventDetailComponent`.
 
 ## Decision Log
 
@@ -94,6 +98,10 @@ After this refactor, the app should behave the same for users, but the code will
   Rationale: Context queue building and step matching are deterministic and directly testable. Polling and prompt mutation depend on coroutine jobs, repositories, loading/error state, and pending continuation actions, so they should move only after the helper boundary is stable.
   Date/Author: 2026-06-22 / Codex
 
+- Decision: Extract event registration question answer normalization while leaving dialog state, continuations, and registration-progress persistence in `DefaultEventDetailComponent`.
+  Rationale: The helper can preserve the existing answer filtering contract with direct tests. The component still owns UI state and side effects, which keeps this milestone low risk and prepares the eventual registration coordinator extraction.
+  Date/Author: 2026-06-22 / Codex
+
 ## Outcomes & Retrospective
 
 The first implementation milestone is complete. `EventEditPayloadBuilder.kt` now owns event update payload preparation, editable field draft normalization, league slot draft normalization, default field helpers, default league slot creation, league scoring DTO conversion, and recurring slot date-boundary helpers. `DefaultEventDetailComponent` still owns public state, lifecycle, repository calls, and state assignment after helper output. `EventDetailComponent.kt` dropped from 7,904 lines to 7,492 lines after this milestone.
@@ -106,7 +114,9 @@ The fourth implementation milestone is another partial registration-flow extract
 
 The fifth implementation milestone is a partial signature-flow extraction. `EventSignatureFlowHelpers.kt` now owns signature context queue construction, indexed context fallback, and pending signature step matching. `DefaultEventDetailComponent` still owns signature step loading, prompt state, polling, text signature submission, purchase intent document prompts, billing side effects, repository calls, and UI-facing state. `EventDetailComponent.kt` dropped further to 7,077 lines after this milestone.
 
-Focused helper tests and related schedule/weekly/match/join/payment/signature regression tests pass. The remaining plan work is to extract the side-effectful registration/payment/signature coordinator, then participant/invite coordination.
+The sixth implementation milestone is another partial registration-flow extraction. `EventRegistrationFlowHelpers.kt` now also owns event registration question answer updates, dialog answer normalization, missing required question detection, and request-answer filtering. `DefaultEventDetailComponent` still owns dialog state, continuation execution, registration-progress persistence, repository calls, and UI-facing state. `EventDetailComponent.kt` dropped further to 7,067 lines after this milestone.
+
+Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining plan work is to extract the side-effectful registration/payment/signature coordinator, then participant/invite coordination.
 
 ## Context and Orientation
 
@@ -404,6 +414,35 @@ Fifth milestone whitespace audit passed:
     git diff --check
     Exit code: 0
 
+Registration question helper extraction focused tests passed:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventRegistrationQuestionHelpersTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 1m 49s; 43 actionable tasks: 9 executed, 34 up-to-date.
+
+Related mobile join/question flow regression tests passed after registration question helper extraction:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 13s; 43 actionable tasks: 5 executed, 38 up-to-date.
+
+Milestone common metadata compilation passed after registration question helper tests:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 18s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Sixth milestone line-count evidence:
+
+    7067 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     153 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowHelpers.kt
+     112 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationQuestionHelpersTest.kt
+
+Sixth milestone whitespace audit passed:
+
+    git diff --check
+    Exit code: 0
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -440,3 +479,4 @@ Revision Note (2026-06-22): Recorded completion of the pure match/bracket helper
 Revision Note (2026-06-22): Recorded completion of the join-confirmation helper extraction, focused and broader join-flow tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded completion of the payment-plan helper extraction, focused and broader join-flow tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded completion of the signature helper extraction, focused and broader join-flow tests, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded completion of the registration-question helper extraction, focused and broader join-flow tests, compile checks, and line-count impact.

@@ -3,6 +3,7 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventRegistrationCacheEntry
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
+import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 
 internal enum class JoinConfirmationRegistrantType {
     SELF,
@@ -107,3 +108,46 @@ internal fun EventRegistrationCacheEntry.isPaymentPending(): Boolean =
 
 internal fun EventRegistrationCacheEntry.isPaymentFailed(): Boolean =
     normalizedStatus() == "PAYMENT_FAILED"
+
+internal fun registrationQuestionAnswerUpdate(
+    questionId: String,
+    answer: String,
+): Pair<String, String>? {
+    val normalizedQuestionId = questionId.trim().takeIf(String::isNotBlank) ?: return null
+    return normalizedQuestionId to answer
+}
+
+internal fun registrationQuestionDialogAnswers(
+    questions: List<TeamJoinQuestion>,
+    submittedAnswers: Map<String, String>,
+): Map<String, String> {
+    return questions.associate { question ->
+        question.id to submittedAnswers[question.id].orEmpty()
+    }
+}
+
+internal fun firstMissingRequiredRegistrationQuestion(
+    questions: List<TeamJoinQuestion>,
+    answers: Map<String, String>,
+): TeamJoinQuestion? {
+    return questions.firstOrNull { question ->
+        question.required && answers[question.id].orEmpty().trim().isBlank()
+    }
+}
+
+internal fun registrationAnswersForRequest(
+    questions: List<TeamJoinQuestion>,
+    answers: Map<String, String>,
+): Map<String, String> {
+    val questionIds = questions
+        .mapNotNull { question -> question.id.trim().takeIf(String::isNotBlank) }
+        .toSet()
+    return answers
+        .filter { (questionId, answer) ->
+            val normalizedQuestionId = questionId.trim()
+            normalizedQuestionId.isNotBlank() &&
+                answer.trim().isNotBlank() &&
+                (questionIds.isEmpty() || normalizedQuestionId in questionIds)
+        }
+        .mapKeys { (questionId, _) -> questionId.trim() }
+}

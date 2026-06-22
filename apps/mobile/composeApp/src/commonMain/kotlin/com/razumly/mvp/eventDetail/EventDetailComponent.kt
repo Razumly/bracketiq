@@ -760,8 +760,8 @@ class DefaultEventDetailComponent(
     }
 
     override fun updateEventRegistrationQuestionAnswer(questionId: String, answer: String) {
-        val normalizedQuestionId = questionId.trim().takeIf(String::isNotBlank) ?: return
-        _eventRegistrationQuestionAnswers.value = _eventRegistrationQuestionAnswers.value + (normalizedQuestionId to answer)
+        val answerUpdate = registrationQuestionAnswerUpdate(questionId, answer) ?: return
+        _eventRegistrationQuestionAnswers.value = _eventRegistrationQuestionAnswers.value + answerUpdate
         scope.launch {
             saveCurrentRegistrationProgress(step = "questions")
         }
@@ -778,12 +778,8 @@ class DefaultEventDetailComponent(
 
     override fun submitEventRegistrationQuestionDialogAnswers(answers: Map<String, String>) {
         val dialog = _eventRegistrationQuestionDialog.value ?: return
-        val normalizedAnswers = dialog.questions.associate { question ->
-            question.id to answers[question.id].orEmpty()
-        }
-        val missingQuestion = dialog.questions.firstOrNull { question ->
-            question.required && normalizedAnswers[question.id].orEmpty().trim().isBlank()
-        }
+        val normalizedAnswers = registrationQuestionDialogAnswers(dialog.questions, answers)
+        val missingQuestion = firstMissingRequiredRegistrationQuestion(dialog.questions, normalizedAnswers)
         if (missingQuestion != null) {
             _errorState.value = ErrorMessage("Answer \"${missingQuestion.prompt}\" before continuing.")
             return
@@ -1467,9 +1463,10 @@ class DefaultEventDetailComponent(
     }
 
     private fun missingEventRegistrationQuestion(): TeamJoinQuestion? =
-        _eventRegistrationQuestions.value.firstOrNull { question ->
-            question.required && _eventRegistrationQuestionAnswers.value[question.id].orEmpty().trim().isBlank()
-        }
+        firstMissingRequiredRegistrationQuestion(
+            questions = _eventRegistrationQuestions.value,
+            answers = _eventRegistrationQuestionAnswers.value,
+        )
 
     private fun ensureEventRegistrationQuestionsAnswered(onReady: () -> Unit): Boolean {
         val questions = _eventRegistrationQuestions.value
@@ -1490,17 +1487,10 @@ class DefaultEventDetailComponent(
     }
 
     private fun eventRegistrationAnswersForRequest(): Map<String, String> {
-        val questionIds = _eventRegistrationQuestions.value
-            .mapNotNull { question -> question.id.trim().takeIf(String::isNotBlank) }
-            .toSet()
-        return _eventRegistrationQuestionAnswers.value
-            .filter { (questionId, answer) ->
-                val normalizedQuestionId = questionId.trim()
-                normalizedQuestionId.isNotBlank() &&
-                    answer.trim().isNotBlank() &&
-                    (questionIds.isEmpty() || normalizedQuestionId in questionIds)
-            }
-            .mapKeys { (questionId, _) -> questionId.trim() }
+        return registrationAnswersForRequest(
+            questions = _eventRegistrationQuestions.value,
+            answers = _eventRegistrationQuestionAnswers.value,
+        )
     }
 
     private suspend fun addCurrentUserToEventWithRegistrationAnswers(
