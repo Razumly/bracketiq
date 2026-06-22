@@ -51,6 +51,14 @@ internal enum class WithdrawalActionKind {
     LEAVE,
 }
 
+internal enum class JoinExecutionAction {
+    REQUEST_PARENT_APPROVAL,
+    REQUIRE_PRICE,
+    START_PAYMENT_PLAN,
+    JOIN_DIRECTLY,
+    CREATE_PURCHASE_INTENT,
+}
+
 internal data class WithdrawalActionDecision(
     val targetUserId: String,
     val membership: WithdrawTargetMembership?,
@@ -427,6 +435,33 @@ internal class EventRegistrationFlowCoordinator {
     fun findJoinableChild(userId: String): JoinChildOption? {
         val normalizedUserId = userId.trim().takeIf(String::isNotBlank) ?: return null
         return currentJoinableChildren().firstOrNull { child -> child.userId == normalizedUserId }
+    }
+
+    fun determineJoinExecutionAction(
+        paymentPlan: EffectivePaymentPlan,
+        currentUserIsMinor: Boolean,
+        isEventFull: Boolean,
+        isTeamSignup: Boolean,
+        forTeamJoin: Boolean,
+    ): JoinExecutionAction {
+        if (currentUserIsMinor) {
+            return JoinExecutionAction.REQUEST_PARENT_APPROVAL
+        }
+        if (paymentPlan.priceCents == null) {
+            return JoinExecutionAction.REQUIRE_PRICE
+        }
+        if (
+            paymentPlan.allowPaymentPlans &&
+            paymentPlan.configuredPriceCents > 0 &&
+            !isEventFull &&
+            (forTeamJoin || !isTeamSignup)
+        ) {
+            return JoinExecutionAction.START_PAYMENT_PLAN
+        }
+        if (paymentPlan.configuredPriceCents <= 0 || isEventFull || (!forTeamJoin && isTeamSignup)) {
+            return JoinExecutionAction.JOIN_DIRECTLY
+        }
+        return JoinExecutionAction.CREATE_PURCHASE_INTENT
     }
 
     fun showTeamJoinQuestionDialog(

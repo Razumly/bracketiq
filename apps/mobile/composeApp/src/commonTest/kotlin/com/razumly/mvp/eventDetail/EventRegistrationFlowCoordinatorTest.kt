@@ -433,6 +433,108 @@ class EventRegistrationFlowCoordinatorTest {
     }
 
     @Test
+    fun join_execution_action_preserves_self_join_branching() {
+        val coordinator = EventRegistrationFlowCoordinator()
+
+        assertEquals(
+            JoinExecutionAction.REQUEST_PARENT_APPROVAL,
+            coordinator.determineJoinExecutionAction(
+                paymentPlan = effectivePaymentPlan(priceCents = null, allowPaymentPlans = true),
+                currentUserIsMinor = true,
+                isEventFull = false,
+                isTeamSignup = false,
+                forTeamJoin = false,
+            ),
+        )
+        assertEquals(
+            JoinExecutionAction.REQUIRE_PRICE,
+            coordinator.determineJoinExecutionAction(
+                paymentPlan = effectivePaymentPlan(priceCents = null, allowPaymentPlans = true),
+                currentUserIsMinor = false,
+                isEventFull = false,
+                isTeamSignup = false,
+                forTeamJoin = false,
+            ),
+        )
+        assertEquals(
+            JoinExecutionAction.START_PAYMENT_PLAN,
+            coordinator.determineJoinExecutionAction(
+                paymentPlan = effectivePaymentPlan(priceCents = 4500, allowPaymentPlans = true),
+                currentUserIsMinor = false,
+                isEventFull = false,
+                isTeamSignup = false,
+                forTeamJoin = false,
+            ),
+        )
+        assertEquals(
+            JoinExecutionAction.JOIN_DIRECTLY,
+            coordinator.determineJoinExecutionAction(
+                paymentPlan = effectivePaymentPlan(priceCents = 4500, allowPaymentPlans = true),
+                currentUserIsMinor = false,
+                isEventFull = false,
+                isTeamSignup = true,
+                forTeamJoin = false,
+            ),
+        )
+        assertEquals(
+            JoinExecutionAction.CREATE_PURCHASE_INTENT,
+            coordinator.determineJoinExecutionAction(
+                paymentPlan = effectivePaymentPlan(priceCents = 4500, allowPaymentPlans = false),
+                currentUserIsMinor = false,
+                isEventFull = false,
+                isTeamSignup = false,
+                forTeamJoin = false,
+            ),
+        )
+    }
+
+    @Test
+    fun join_execution_action_preserves_team_join_branching() {
+        val coordinator = EventRegistrationFlowCoordinator()
+
+        assertEquals(
+            JoinExecutionAction.START_PAYMENT_PLAN,
+            coordinator.determineJoinExecutionAction(
+                paymentPlan = effectivePaymentPlan(priceCents = 4500, allowPaymentPlans = true),
+                currentUserIsMinor = false,
+                isEventFull = false,
+                isTeamSignup = true,
+                forTeamJoin = true,
+            ),
+        )
+        assertEquals(
+            JoinExecutionAction.JOIN_DIRECTLY,
+            coordinator.determineJoinExecutionAction(
+                paymentPlan = effectivePaymentPlan(priceCents = 4500, allowPaymentPlans = true),
+                currentUserIsMinor = false,
+                isEventFull = true,
+                isTeamSignup = false,
+                forTeamJoin = true,
+            ),
+        )
+        assertEquals(
+            JoinExecutionAction.JOIN_DIRECTLY,
+            coordinator.determineJoinExecutionAction(
+                paymentPlan = effectivePaymentPlan(priceCents = 0, allowPaymentPlans = false),
+                currentUserIsMinor = false,
+                isEventFull = false,
+                isTeamSignup = false,
+                forTeamJoin = true,
+            ),
+        )
+        assertEquals(
+            JoinExecutionAction.CREATE_PURCHASE_INTENT,
+            coordinator.determineJoinExecutionAction(
+                paymentPlan = effectivePaymentPlan(priceCents = 4500, allowPaymentPlans = false),
+                currentUserIsMinor = false,
+                isEventFull = false,
+                isTeamSignup = false,
+                forTeamJoin = true,
+            ),
+        )
+    }
+
+    @Test
     fun team_join_question_submit_requires_answers_then_returns_dialog_and_team() {
         val coordinator = EventRegistrationFlowCoordinator()
         val requiredQuestion = question("q1", required = true)
@@ -840,6 +942,19 @@ class EventRegistrationFlowCoordinatorTest {
                     price = 1000,
                 )
             ),
+        )
+    }
+
+    private fun effectivePaymentPlan(
+        priceCents: Int?,
+        allowPaymentPlans: Boolean,
+    ): EffectivePaymentPlan {
+        return EffectivePaymentPlan(
+            priceCents = priceCents,
+            allowPaymentPlans = allowPaymentPlans,
+            installmentAmounts = emptyList(),
+            installmentDueDates = emptyList(),
+            installmentDueRelativeDays = emptyList(),
         )
     }
 
