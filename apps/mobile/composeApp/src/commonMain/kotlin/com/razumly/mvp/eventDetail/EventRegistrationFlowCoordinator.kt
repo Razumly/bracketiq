@@ -12,6 +12,10 @@ import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
+import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
+import com.razumly.mvp.core.data.repositories.requiresAdditionalSigning
+import com.razumly.mvp.core.data.repositories.requiresChildEmail
+import com.razumly.mvp.core.data.repositories.userMessage
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,6 +47,11 @@ internal data class TeamJoinPolicyDecision(
         get() = kind != TeamJoinPolicyKind.CLOSED
 }
 
+internal data class TeamRegistrationResultDecision(
+    val action: TeamRegistrationResultAction,
+    val message: String? = null,
+)
+
 internal data class SignatureFlowTarget(
     val signerContext: SignerContext,
     val child: JoinChildOption?,
@@ -73,6 +82,13 @@ internal enum class TeamJoinPolicyKind {
     OPEN_REGISTRATION,
     REQUEST_TO_JOIN,
     CLOSED,
+}
+
+internal enum class TeamRegistrationResultAction {
+    WAIT_FOR_PARENT_APPROVAL,
+    REQUIRE_CHILD_EMAIL,
+    REQUIRE_ADDITIONAL_SIGNING,
+    CONTINUE,
 }
 
 internal data class WithdrawalActionDecision(
@@ -515,6 +531,27 @@ internal class EventRegistrationFlowCoordinator {
 
     fun registrationTargetTeamId(team: Team): String =
         team.parentTeamId?.trim()?.takeIf(String::isNotBlank) ?: team.id.trim()
+
+    fun teamRegistrationResultDecision(result: TeamRegistrationResult): TeamRegistrationResultDecision {
+        if (result.requiresParentApproval) {
+            return TeamRegistrationResultDecision(
+                action = TeamRegistrationResultAction.WAIT_FOR_PARENT_APPROVAL,
+                message = result.userMessage(
+                    "A parent or guardian must approve this team request before registration can continue.",
+                ),
+            )
+        }
+        if (result.requiresChildEmail()) {
+            return TeamRegistrationResultDecision(
+                action = TeamRegistrationResultAction.REQUIRE_CHILD_EMAIL,
+                message = result.userMessage("Add the child's email before continuing."),
+            )
+        }
+        if (result.requiresAdditionalSigning()) {
+            return TeamRegistrationResultDecision(TeamRegistrationResultAction.REQUIRE_ADDITIONAL_SIGNING)
+        }
+        return TeamRegistrationResultDecision(TeamRegistrationResultAction.CONTINUE)
+    }
 
     fun submitTeamJoinQuestionAnswers(answers: Map<String, String>): TeamJoinQuestionSubmitResult? {
         val dialog = _teamJoinQuestionDialog.value ?: return null

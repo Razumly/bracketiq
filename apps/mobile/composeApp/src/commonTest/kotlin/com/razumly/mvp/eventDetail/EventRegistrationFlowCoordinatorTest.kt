@@ -12,6 +12,8 @@ import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
+import com.razumly.mvp.core.data.repositories.TeamRegistrationConsent
+import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -596,6 +598,53 @@ class EventRegistrationFlowCoordinatorTest {
     }
 
     @Test
+    fun team_registration_result_decision_classifies_follow_up_actions() {
+        val coordinator = EventRegistrationFlowCoordinator()
+
+        assertEquals(
+            TeamRegistrationResultDecision(
+                action = TeamRegistrationResultAction.WAIT_FOR_PARENT_APPROVAL,
+                message = "A parent must approve this roster.",
+            ),
+            coordinator.teamRegistrationResultDecision(
+                teamRegistrationResult(
+                    requiresParentApproval = true,
+                    message = "A parent must approve this roster.",
+                ),
+            ),
+        )
+        assertEquals(
+            TeamRegistrationResultDecision(
+                action = TeamRegistrationResultAction.REQUIRE_CHILD_EMAIL,
+                message = "Add child email.",
+            ),
+            coordinator.teamRegistrationResultDecision(
+                teamRegistrationResult(
+                    warnings = listOf("Add child email."),
+                    consent = TeamRegistrationConsent(requiresChildEmail = true),
+                ),
+            ),
+        )
+        assertEquals(
+            TeamRegistrationResultDecision(TeamRegistrationResultAction.REQUIRE_ADDITIONAL_SIGNING),
+            coordinator.teamRegistrationResultDecision(
+                teamRegistrationResult(
+                    consent = TeamRegistrationConsent(
+                        documentId = "document-1",
+                        status = "sent",
+                    ),
+                ),
+            ),
+        )
+        assertEquals(
+            TeamRegistrationResultDecision(TeamRegistrationResultAction.CONTINUE),
+            coordinator.teamRegistrationResultDecision(
+                teamRegistrationResult(registrationStatus = "ACTIVE"),
+            ),
+        )
+    }
+
+    @Test
     fun team_join_question_submit_requires_answers_then_returns_dialog_and_team() {
         val coordinator = EventRegistrationFlowCoordinator()
         val requiredQuestion = question("q1", required = true)
@@ -1030,6 +1079,23 @@ class EventRegistrationFlowCoordinatorTest {
                     price = 1000,
                 )
             ),
+        )
+    }
+
+    private fun teamRegistrationResult(
+        registrationStatus: String? = null,
+        consent: TeamRegistrationConsent? = null,
+        warnings: List<String> = emptyList(),
+        requiresParentApproval: Boolean = false,
+        message: String? = null,
+    ): TeamRegistrationResult {
+        return TeamRegistrationResult(
+            team = Team(captainId = "captain-1").copy(id = "team-1"),
+            registrationStatus = registrationStatus,
+            consent = consent,
+            warnings = warnings,
+            requiresParentApproval = requiresParentApproval,
+            message = message,
         )
     }
 

@@ -74,8 +74,6 @@ import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.data.repositories.isActive
-import com.razumly.mvp.core.data.repositories.requiresAdditionalSigning
-import com.razumly.mvp.core.data.repositories.requiresChildEmail
 import com.razumly.mvp.core.data.repositories.userMessage
 import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
@@ -2698,42 +2696,46 @@ class DefaultEventDetailComponent(
         result: TeamRegistrationResult,
         answers: Map<String, String> = emptyMap(),
     ) {
-        if (result.requiresParentApproval) {
-            _errorState.value = ErrorMessage(
-                result.userMessage("A parent or guardian must approve this team request before registration can continue."),
-            )
-            refreshEventDetails()
-            return
-        }
-
-        if (result.requiresChildEmail()) {
-            _errorState.value = ErrorMessage(
-                result.userMessage("Add the child's email before continuing."),
-            )
-            return
-        }
-
-        if (result.requiresAdditionalSigning()) {
-            runActionAfterRequiredSigning(teamId = team.team.id) {
-                scope.launch {
-                    registrationFlowCoordinator.setStartingTeamRegistrationId(team.team.id)
-                    loadingHandler.showLoading("Refreshing team registration...")
-                    teamRepository.requestTeamRegistration(team.team.id, answers)
-                        .onSuccess { refreshedResult ->
-                            continueTeamRegistration(team, refreshedResult)
-                        }.onFailure { throwable ->
-                            _errorState.value = ErrorMessage(
-                                throwable.userMessage("Unable to refresh team registration."),
-                            )
-                        }
-                    loadingHandler.hideLoading()
-                    registrationFlowCoordinator.clearStartingTeamRegistrationIfNoPendingTeam()
-                }
+        val decision = registrationFlowCoordinator.teamRegistrationResultDecision(result)
+        when (decision.action) {
+            TeamRegistrationResultAction.WAIT_FOR_PARENT_APPROVAL -> {
+                _errorState.value = ErrorMessage(
+                    decision.message ?: result.userMessage(
+                        "A parent or guardian must approve this team request before registration can continue.",
+                    ),
+                )
+                refreshEventDetails()
+                return
             }
-            return
+            TeamRegistrationResultAction.REQUIRE_CHILD_EMAIL -> {
+                _errorState.value = ErrorMessage(
+                    decision.message ?: result.userMessage("Add the child's email before continuing."),
+                )
+                return
+            }
+            TeamRegistrationResultAction.REQUIRE_ADDITIONAL_SIGNING -> {
+                runActionAfterRequiredSigning(teamId = team.team.id) {
+                    scope.launch {
+                        registrationFlowCoordinator.setStartingTeamRegistrationId(team.team.id)
+                        loadingHandler.showLoading("Refreshing team registration...")
+                        teamRepository.requestTeamRegistration(team.team.id, answers)
+                            .onSuccess { refreshedResult ->
+                                continueTeamRegistration(team, refreshedResult)
+                            }.onFailure { throwable ->
+                                _errorState.value = ErrorMessage(
+                                    throwable.userMessage("Unable to refresh team registration."),
+                                )
+                            }
+                        loadingHandler.hideLoading()
+                        registrationFlowCoordinator.clearStartingTeamRegistrationIfNoPendingTeam()
+                    }
+                }
+                return
+            }
+            TeamRegistrationResultAction.CONTINUE -> {
+                continueTeamRegistration(team, result)
+            }
         }
-
-        continueTeamRegistration(team, result)
     }
 
     private suspend fun continueTeamRegistration(
