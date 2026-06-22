@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.RegistrationProgressDraft
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
+import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
@@ -511,6 +512,9 @@ internal class EventRegistrationFlowCoordinator {
 
     fun isRequestToJoinPolicy(joinPolicy: String?): Boolean =
         teamJoinPolicyDecision(joinPolicy).kind == TeamJoinPolicyKind.REQUEST_TO_JOIN
+
+    fun registrationTargetTeamId(team: Team): String =
+        team.parentTeamId?.trim()?.takeIf(String::isNotBlank) ?: team.id.trim()
 
     fun submitTeamJoinQuestionAnswers(answers: Map<String, String>): TeamJoinQuestionSubmitResult? {
         val dialog = _teamJoinQuestionDialog.value ?: return null

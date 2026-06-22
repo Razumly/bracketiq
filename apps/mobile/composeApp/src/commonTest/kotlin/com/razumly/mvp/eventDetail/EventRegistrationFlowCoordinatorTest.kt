@@ -572,6 +572,30 @@ class EventRegistrationFlowCoordinatorTest {
     }
 
     @Test
+    fun registration_target_team_id_prefers_non_blank_parent_team_id() {
+        val coordinator = EventRegistrationFlowCoordinator()
+
+        assertEquals(
+            "parent-team",
+            coordinator.registrationTargetTeamId(
+                Team(captainId = "captain-1").copy(
+                    id = " child-team ",
+                    parentTeamId = " parent-team ",
+                ),
+            ),
+        )
+        assertEquals(
+            "team-1",
+            coordinator.registrationTargetTeamId(
+                Team(captainId = "captain-1").copy(
+                    id = " team-1 ",
+                    parentTeamId = " ",
+                ),
+            ),
+        )
+    }
+
+    @Test
     fun team_join_question_submit_requires_answers_then_returns_dialog_and_team() {
         val coordinator = EventRegistrationFlowCoordinator()
         val requiredQuestion = question("q1", required = true)

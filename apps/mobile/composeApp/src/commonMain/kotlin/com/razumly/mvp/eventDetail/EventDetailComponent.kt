@@ -2552,7 +2552,7 @@ class DefaultEventDetailComponent(
 
     override fun startTeamRegistration(team: TeamWithPlayers) {
         scope.launch {
-            val teamId = team.team.registrationTargetTeamId()
+            val teamId = registrationFlowCoordinator.registrationTargetTeamId(team.team)
             if (teamId.isBlank() || registrationFlowCoordinator.startingTeamRegistrationId.value != null) return@launch
 
             if (currentUser.value.id.isBlank()) {
@@ -2629,7 +2629,8 @@ class DefaultEventDetailComponent(
 
         val dialog = result.dialog ?: return
         scope.launch {
-            val teamId = dialog.teamId.trim().takeIf(String::isNotBlank) ?: team.team.registrationTargetTeamId()
+            val teamId = dialog.teamId.trim().takeIf(String::isNotBlank)
+                ?: registrationFlowCoordinator.registrationTargetTeamId(team.team)
             if (!registrationFlowCoordinator.startTeamRegistration(teamId)) return@launch
             try {
                 loadingHandler.showLoading(
@@ -2656,7 +2657,7 @@ class DefaultEventDetailComponent(
         joinPolicy: String,
         answers: Map<String, String>,
     ) {
-        val teamId = team.team.registrationTargetTeamId()
+        val teamId = registrationFlowCoordinator.registrationTargetTeamId(team.team)
         if (registrationFlowCoordinator.isRequestToJoinPolicy(joinPolicy)) {
             teamRepository.submitTeamJoinRequest(teamId, answers)
                 .onSuccess {
@@ -2680,11 +2681,8 @@ class DefaultEventDetailComponent(
             }
     }
 
-    private fun Team.registrationTargetTeamId(): String =
-        parentTeamId?.trim()?.takeIf { it.isNotBlank() } ?: id.trim()
-
     private suspend fun resolveTeamRegistrationTarget(team: TeamWithPlayers): Result<TeamWithPlayers> = runCatching {
-        val targetTeamId = team.team.registrationTargetTeamId()
+        val targetTeamId = registrationFlowCoordinator.registrationTargetTeamId(team.team)
         if (targetTeamId.isBlank()) {
             error("Team id is missing.")
         }

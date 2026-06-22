@@ -33,6 +33,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Move pending joinable-child selection state into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move self/team join execution action selection into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move team join-policy classification and submit loading selection into `EventRegistrationFlowCoordinator` with focused tests.
+  - [x] (2026-06-22) Move team registration target-id normalization into `EventRegistrationFlowCoordinator` with focused tests.
   - [ ] Move self, team, child, and minor join orchestration around the existing repository callbacks.
   - [x] (2026-06-22) Move payment-plan preview dialog and continuation state into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move billing-address prompt and continuation state into `EventRegistrationFlowCoordinator` with focused tests.
@@ -208,6 +209,8 @@ The twenty-fourth implementation milestone moves self/team join execution action
 The twenty-fifth implementation milestone moves signature polling job lifecycle into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now owns poll-job replacement, cancellation, and clearing as part of the pending signature flow, while `DefaultEventDetailComponent` still owns the coroutine body, signature polling repository calls, prompt progression, error handling, and refresh continuations. `EventDetailComponent.kt` dropped to 6,564 lines after this milestone.
 
 The twenty-sixth implementation milestone moves team join-policy classification into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now decides whether a team join policy is open, request-to-join, or closed, owns the closed-policy error message, and supplies the submit loading label for team join-question continuations. `DefaultEventDetailComponent` still loads team join context, shows question dialogs, and executes team join/request repository calls. `EventDetailComponent.kt` dropped to 6,557 lines after this milestone.
+
+The twenty-seventh implementation milestone moves team registration target-id normalization into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now owns the parent-team fallback rule used by team registration start, join-question submission, team join/request submission, and registration target resolution. `DefaultEventDetailComponent` still fetches parent team data when needed and owns all team repository calls. `EventDetailComponent.kt` dropped to 6,555 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining coordinator work is to finish join orchestration around repository callbacks, then run the final coordinator regression suite and extract participant/invite coordination.
 
@@ -913,6 +916,31 @@ Twenty-sixth milestone line-count evidence:
      788 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
     1036 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
 
+Team registration target-id coordinator slice first focused test run caught a fixture issue:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventRegistrationFlowCoordinatorTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 1
+    Result: `EventRegistrationFlowCoordinatorTest` failed to compile because direct `Team(...)` construction omitted required `division`, `name`, and `teamSize` fields.
+    Fix: the test now uses the existing `Team(captainId = ...).copy(...)` fixture pattern.
+
+Team registration target-id coordinator slice focused tests passed after fixture correction:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventRegistrationFlowCoordinatorTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 33s; 43 actionable tasks: 6 executed, 37 up-to-date.
+
+Team registration target-id coordinator slice common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 13s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Twenty-seventh milestone line-count evidence:
+
+    6555 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     792 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
+    1060 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -969,3 +997,4 @@ Revision Note (2026-06-22): Recorded the joinable-child selection state coordina
 Revision Note (2026-06-22): Recorded the self/team join execution action coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the signature poll-job lifecycle coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the team join-policy coordinator slice, focused tests, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded the team registration target-id coordinator slice, focused tests, compile checks, and line-count impact.
