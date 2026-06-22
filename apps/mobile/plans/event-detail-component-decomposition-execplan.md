@@ -18,7 +18,7 @@ After this refactor, the app should behave the same for users, but the code will
 - [x] (2026-06-22) Added the implementation rule that every code update must be followed by relevant tests, and progress is not accepted unless those tests pass or a blocker is documented.
 - [x] (2026-06-22) Recorded a clean baseline with focused event-detail tests and common metadata compilation before moving component logic.
 - [x] (2026-06-22) Extracted event edit payload, field draft, and timeslot draft preparation into `EventEditPayloadBuilder.kt` with direct focused tests.
-- [ ] Extract match and bracket editing helpers that are pure or nearly pure.
+- [x] (2026-06-22) Extracted pure match/bracket graph normalization, editable match validation, and bracket reset helpers into `EventMatchEditHelpers.kt` with direct focused tests.
 - [ ] Extract registration, join, withdraw, refund, payment preview, and signature flow state into a cohesive coordinator without changing public behavior.
 - [ ] Extract participant management and invite/search coordination where it can be tested independently.
 - [ ] Thin `DefaultEventDetailComponent` so it owns Decompose lifecycle, public state exposure, and delegation, while helpers own domain-specific transformations.
@@ -40,6 +40,9 @@ After this refactor, the app should behave the same for users, but the code will
 
 - Observation: Event division defaults are normalized before being assigned to field drafts.
   Evidence: `EventEditPayloadBuilderTest.buildEditableFieldDrafts_defaults_empty_field_divisions_to_event_divisions` initially expected `division-a`; the code correctly returned the existing normalized identifier `division_a`, so the test was corrected and passed.
+
+- Observation: The bracket round layout logic is not purely a graph helper because it still depends on component UI state for the losers bracket toggle.
+  Evidence: `buildBracketRounds(...)` and `shouldIncludeInCurrentBracket(...)` still read `losersBracket.value`, so the second extraction moved bracket node construction, graph normalization, validation, and reset rules but left round layout inside `DefaultEventDetailComponent`.
 
 ## Decision Log
 
@@ -63,11 +66,17 @@ After this refactor, the app should behave the same for users, but the code will
   Rationale: This preserves existing component state semantics and avoids moving mutable `StateFlow` ownership into the helper. The helper now returns both the prepared payload and the normalized editable field list for the component to apply.
   Date/Author: 2026-06-22 / Codex
 
+- Decision: Extract match/bracket graph normalization and validation first, but leave staged-match creation and round layout in `DefaultEventDetailComponent`.
+  Rationale: Graph normalization, overlap validation, schedule-match requirements, tournament-link requirements, and bracket reset decisions are deterministic and directly testable. Staged-match creation still depends on component state, generated IDs, current time, selected division, dialog opening, and editable-round refreshes, so it should move only after the pure helpers are stable.
+  Date/Author: 2026-06-22 / Codex
+
 ## Outcomes & Retrospective
 
 The first implementation milestone is complete. `EventEditPayloadBuilder.kt` now owns event update payload preparation, editable field draft normalization, league slot draft normalization, default field helpers, default league slot creation, league scoring DTO conversion, and recurring slot date-boundary helpers. `DefaultEventDetailComponent` still owns public state, lifecycle, repository calls, and state assignment after helper output. `EventDetailComponent.kt` dropped from 7,904 lines to 7,492 lines after this milestone.
 
-Focused helper tests and related schedule/weekly regression tests pass. The remaining plan work is to extract match/bracket editing helpers, then registration/payment/signature workflow state, then participant/invite coordination.
+The second implementation milestone is complete. `EventMatchEditHelpers.kt` now owns editable bracket node construction, bracket graph normalization, editable match validation, bracket match detection, and reset-to-empty-bracket-match behavior. `DefaultEventDetailComponent` still owns staged-match creation, edit-mode state, repository calls, and UI round layout. `EventDetailComponent.kt` dropped further to 7,322 lines after this milestone.
+
+Focused helper tests and related schedule/weekly/match regression tests pass. The remaining plan work is to extract registration/payment/signature workflow state, then participant/invite coordination.
 
 ## Context and Orientation
 
@@ -243,6 +252,41 @@ Whitespace audit passed:
     git diff --check
     Exit code: 0
 
+Match/bracket helper extraction compile passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 27s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Direct match/bracket helper tests passed:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventMatchEditHelpersTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 1m 55s; 43 actionable tasks: 10 executed, 33 up-to-date.
+
+Related match/bracket regression tests passed:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*BracketGraphValidatorTest*" --tests "*MatchRepositoryHttpTest*" --tests "*EventDetailsMatchRulesTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 15s; 43 actionable tasks: 5 executed, 38 up-to-date.
+
+Milestone common metadata compilation passed after match/bracket tests:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 2s; 11 actionable tasks: 2 executed, 9 up-to-date.
+
+Second milestone line-count evidence:
+
+    7322 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     190 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventMatchEditHelpers.kt
+     246 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventMatchEditHelpersTest.kt
+
+Second milestone whitespace audit passed:
+
+    git diff --check
+    Exit code: 0
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -275,3 +319,4 @@ Revision Note (2026-06-22): Initial plan created to track decomposition of `Defa
 Revision Note (2026-06-22): Added explicit test-after-every-update discipline and acceptance language requiring relevant tests to pass before progress is marked complete.
 Revision Note (2026-06-22): Recorded passing baseline focused event-detail tests and common metadata compilation before source extraction.
 Revision Note (2026-06-22): Recorded completion of the event edit payload helper extraction, direct tests, regression tests, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded completion of the pure match/bracket helper extraction, direct tests, related regression tests, compile checks, and line-count impact.

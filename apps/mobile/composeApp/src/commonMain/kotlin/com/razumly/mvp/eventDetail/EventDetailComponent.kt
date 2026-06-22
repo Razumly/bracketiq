@@ -103,7 +103,6 @@ import com.razumly.mvp.core.util.toTimeZoneOrUtc
 import com.razumly.mvp.eventDetail.data.BracketNode
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import com.razumly.mvp.eventDetail.data.StagedMatchCreate
-import com.razumly.mvp.eventDetail.data.validateAndNormalizeBracketGraph
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import io.github.aakira.napier.Napier
 import io.ktor.http.encodeURLQueryComponent
@@ -6771,65 +6770,6 @@ class DefaultEventDetailComponent(
         _editableRounds.value = buildBracketRounds(matchesById)
     }
 
-    private fun buildBracketNodes(matches: List<MatchWithRelations>): List<BracketNode> {
-        return matches.map { relation ->
-            val match = relation.match
-            BracketNode(
-                id = match.id,
-                matchId = match.matchId,
-                previousLeftId = normalizeToken(match.previousLeftId),
-                previousRightId = normalizeToken(match.previousRightId),
-                winnerNextMatchId = normalizeToken(match.winnerNextMatchId),
-                loserNextMatchId = normalizeToken(match.loserNextMatchId),
-            )
-        }
-    }
-
-    private fun normalizeEditableBracketGraph(matches: List<MatchWithRelations>): List<MatchWithRelations> {
-        if (matches.isEmpty()) {
-            return matches
-        }
-        val graphValidation = validateAndNormalizeBracketGraph(buildBracketNodes(matches))
-        if (!graphValidation.ok) {
-            return matches
-        }
-
-        val withNormalizedPrevious = matches.map { relation ->
-            val match = relation.match
-            val normalizedNode = graphValidation.normalizedById[match.id] ?: return@map relation
-            val normalizedPreviousLeftId = normalizeToken(normalizedNode.previousLeftId)
-            val normalizedPreviousRightId = normalizeToken(normalizedNode.previousRightId)
-            val currentPreviousLeftId = normalizeToken(match.previousLeftId)
-            val currentPreviousRightId = normalizeToken(match.previousRightId)
-
-            if (currentPreviousLeftId == normalizedPreviousLeftId &&
-                currentPreviousRightId == normalizedPreviousRightId
-            ) {
-                relation
-            } else {
-                relation.copy(
-                    match = match.copy(
-                        previousLeftId = normalizedPreviousLeftId,
-                        previousRightId = normalizedPreviousRightId,
-                    ),
-                    previousLeftMatch = null,
-                    previousRightMatch = null,
-                )
-            }
-        }
-
-        val matchesById = withNormalizedPrevious.associateBy { relation -> relation.match.id }
-        return withNormalizedPrevious.map { relation ->
-            val match = relation.match
-            relation.copy(
-                winnerNextMatch = normalizeToken(match.winnerNextMatchId)?.let { id -> matchesById[id]?.match },
-                loserNextMatch = normalizeToken(match.loserNextMatchId)?.let { id -> matchesById[id]?.match },
-                previousLeftMatch = normalizeToken(match.previousLeftId)?.let { id -> matchesById[id]?.match },
-                previousRightMatch = normalizeToken(match.previousRightId)?.let { id -> matchesById[id]?.match },
-            )
-        }
-    }
-
     private fun nextEditableMatchNumber(): Int {
         val maxMatchId = _editableMatches.value.maxOfOrNull { relation -> relation.match.matchId } ?: 0
         return maxMatchId + 1
@@ -6961,7 +6901,12 @@ class DefaultEventDetailComponent(
         scope.launch {
             val matches = _editableMatches.value
 
-            val validationResult = validateMatches(matches)
+            val validationResult = validateEditableMatches(
+                matches = matches,
+                isTournament = selectedEvent.value.eventType == EventType.TOURNAMENT,
+                stagedCreates = _stagedMatchCreates.value,
+                isClientMatchId = ::isClientMatchId,
+            )
             if (!validationResult.isValid) {
                 _errorState.value = ErrorMessage(validationResult.errorMessage)
                 return@launch
@@ -7108,94 +7053,6 @@ class DefaultEventDetailComponent(
         _showTeamSelectionDialog.value = null
     }
 
-    private fun validateMatches(matches: List<MatchWithRelations>): ValidationResult {
-        for (i in matches.indices) {
-            for (j in i + 1 until matches.size) {
-                val match1 = matches[i].match
-                val match2 = matches[j].match
-
-                if (doMatchesOverlap(match1, match2)) {
-                    if (match1.fieldId != null && match1.fieldId == match2.fieldId) {
-                        return ValidationResult(
-                            isValid = false,
-                            errorMessage = "Matches #${match1.matchId} and #${match2.matchId} overlap on the same field"
-                        )
-                    }
-
-                    val match1Teams = setOfNotNull(match1.team1Id, match1.team2Id, match1.teamOfficialId)
-                    val match2Teams = setOfNotNull(match2.team1Id, match2.team2Id, match2.teamOfficialId)
-                    val sharedTeams = match1Teams.intersect(match2Teams)
-
-                    if (sharedTeams.isNotEmpty()) {
-                        return ValidationResult(
-                            isValid = false,
-                            errorMessage = "Matches #${match1.matchId} and #${match2.matchId} have overlapping participants"
-                        )
-                    }
-                }
-            }
-        }
-        val graphValidation = validateAndNormalizeBracketGraph(buildBracketNodes(matches))
-        if (!graphValidation.ok) {
-            return ValidationResult(
-                isValid = false,
-                errorMessage = graphValidation.errors.firstOrNull()?.message
-                    ?: "Invalid bracket graph.",
-            )
-        }
-
-        val isTournament = selectedEvent.value.eventType == EventType.TOURNAMENT
-        val stagedCreates = _stagedMatchCreates.value
-        matches.forEach { relation ->
-            val match = relation.match
-            if (!isClientMatchId(match.id)) {
-                return@forEach
-            }
-            val createMeta = stagedCreates[match.id] ?: return@forEach
-
-            if (createMeta.creationContext == MatchCreateContext.SCHEDULE) {
-                val start = match.start
-                val end = match.end
-                if (normalizeToken(match.fieldId) == null || start == null || end == null) {
-                    return ValidationResult(
-                        isValid = false,
-                        errorMessage = "Schedule match #${match.matchId} requires field, start, and end.",
-                    )
-                }
-                if (end <= start) {
-                    return ValidationResult(
-                        isValid = false,
-                        errorMessage = "Schedule match #${match.matchId} requires end after start.",
-                    )
-                }
-            }
-
-            if (isTournament) {
-                val normalizedNode = graphValidation.normalizedById[match.id]
-                val hasAnyLink = !normalizeToken(match.winnerNextMatchId).isNullOrBlank() ||
-                    !normalizeToken(match.loserNextMatchId).isNullOrBlank() ||
-                    !normalizeToken(normalizedNode?.previousLeftId).isNullOrBlank() ||
-                    !normalizeToken(normalizedNode?.previousRightId).isNullOrBlank()
-                if (!hasAnyLink) {
-                    return ValidationResult(
-                        isValid = false,
-                        errorMessage = "Tournament match #${match.matchId} must include at least one bracket link.",
-                    )
-                }
-            }
-        }
-        return ValidationResult(isValid = true, errorMessage = "")
-    }
-
-    private fun doMatchesOverlap(match1: MatchMVP, match2: MatchMVP): Boolean {
-        val match1Start = match1.start ?: return false
-        val match2Start = match2.start ?: return false
-        val match1End = match1.end ?: return false
-        val match2End = match2.end ?: return false
-
-        return match1Start < match2End && match2Start < match1End
-    }
-
     override fun showMatchEditDialog(
         match: MatchWithRelations,
         creationContext: MatchCreateContext,
@@ -7307,30 +7164,6 @@ class DefaultEventDetailComponent(
 
         dismissMatchEditDialog()
     }
-
-    private fun shouldResetBracketMatch(event: Event, match: MatchMVP): Boolean {
-        return when {
-            event.eventType == EventType.TOURNAMENT -> true
-            event.eventType == EventType.LEAGUE && event.includePlayoffs -> isBracketMatch(match)
-            else -> false
-        }
-    }
-
-    private fun isBracketMatch(match: MatchMVP): Boolean {
-        return !match.previousLeftId.isNullOrBlank() ||
-            !match.previousRightId.isNullOrBlank() ||
-            !match.winnerNextMatchId.isNullOrBlank() ||
-            !match.loserNextMatchId.isNullOrBlank()
-    }
-
-    private fun MatchMVP.toEmptyBracketMatch(): MatchMVP = copy(
-        officialId = null,
-        teamOfficialId = null,
-        team1Points = emptyList(),
-        team2Points = emptyList(),
-        setResults = emptyList(),
-        locked = false,
-    )
 
     private suspend fun refreshUiForJoinConfirmation(
         syncResult: EventParticipantsSyncResult,
@@ -7474,9 +7307,6 @@ class DefaultEventDetailComponent(
         return false
     }
 
-    data class ValidationResult(
-        val isValid: Boolean, val errorMessage: String
-    )
 }
 
 private fun addTemplateSuffix(name: String): String {
