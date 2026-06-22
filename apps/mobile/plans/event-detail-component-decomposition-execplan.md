@@ -53,7 +53,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Wire remaining public registration actions through the coordinator and run the final coordinator regression suite.
 - [ ] Extract participant management and invite/search coordination where it can be tested independently.
   - [x] (2026-06-22) Move invite suggestions, team-invite loading, and pending staff-invite draft state into `EventInviteCoordinator` with focused tests.
-  - [ ] Move participant management snapshot/compliance loading state and request-token coordination into a tested participant coordinator.
+  - [x] (2026-06-22) Move participant management snapshot/compliance loading state and request-token coordination into `EventParticipantManagementCoordinator` with focused tests.
   - [ ] Move participant invite/add/remove preflight decisions into helpers or coordinator methods with focused tests.
 - [ ] Thin `DefaultEventDetailComponent` so it owns Decompose lifecycle, public state exposure, and delegation, while helpers own domain-specific transformations.
 - [ ] Run focused event-detail regression tests and final compile/build validation.
@@ -232,6 +232,8 @@ The thirty-second implementation milestone completes the current self/team/child
 The thirty-third implementation milestone closes the registration coordinator parent task. Public registration, join, withdraw/refund, payment preview, billing-address, payment-sheet, fee-breakdown, and signature prompt state now route through `EventRegistrationFlowCoordinator`, while `DefaultEventDetailComponent` remains responsible for Decompose lifecycle, repository and billing side effects, refreshes, coroutine execution, and UI-facing public state exposure. The final coordinator regression suite passed across coordinator, mobile join-flow, payment-plan helper, signature helper, registration-question helper, and withdraw/refund helper tests. `EventDetailComponent.kt` remains 6,518 lines after this close-out.
 
 The thirty-fourth implementation milestone starts participant/invite coordination extraction. `EventInviteCoordinator.kt` now owns suggested-user state, team invite suggestion state, team invite loading state, and pending staff-invite draft state. `DefaultEventDetailComponent` still owns user/team/staff repository calls, email membership checks, event mutation, refresh behavior, and loading/error state, but delegates invite UI state mutations and pending staff-invite merging/removal to the coordinator. `EventDetailComponent.kt` dropped to 6,481 lines after this milestone.
+
+The thirty-fifth implementation milestone moves participant management state and request-token coordination into a coordinator. `EventParticipantManagementCoordinator.kt` now owns event team/participant loading state, participant management snapshots, division warnings, team/user compliance summaries, participant management and compliance loading flags, managed-detail bootstrap suppression, and stale request-token handling. `DefaultEventDetailComponent` still owns repository calls, Room observations, permission checks, selected occurrence resolution, and error/logging behavior. `EventDetailComponent.kt` dropped to 6,411 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining coordinator work is to finish join orchestration around repository callbacks, then run the final coordinator regression suite and extract participant/invite coordination.
 
@@ -1088,6 +1090,32 @@ Thirty-fourth milestone line-count evidence:
      152 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventInviteCoordinatorTest.kt
     1154 plans/event-detail-component-decomposition-execplan.md
 
+Participant management coordinator slice first focused test run caught a compile issue:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventParticipantManagementCoordinatorTest*" --tests "*EventInviteCoordinatorTest*" --tests "*EventInviteHelpersTest*" --tests "*EventStaffPersistenceTest*"
+    Exit code: 1
+    Result: `EventDetailComponent.kt` failed to compile because `target` was nullable after coordinator bootstrap gating.
+    Fix: bind a non-null `bootstrapTarget` before using `toOccurrence()` and clearing bootstrap state.
+
+Participant management coordinator slice focused tests passed after compile fix:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventParticipantManagementCoordinatorTest*" --tests "*EventInviteCoordinatorTest*" --tests "*EventInviteHelpersTest*" --tests "*EventStaffPersistenceTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 1m 34s; 43 actionable tasks: 9 executed, 34 up-to-date.
+
+Participant management coordinator slice common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 14s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Thirty-fifth milestone line-count evidence:
+
+    6411 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     154 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventParticipantManagementCoordinator.kt
+     153 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventParticipantManagementCoordinatorTest.kt
+    1183 plans/event-detail-component-decomposition-execplan.md
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -1152,3 +1180,4 @@ Revision Note (2026-06-22): Recorded the self/minor join result coordinator slic
 Revision Note (2026-06-22): Recorded the team join payment-plan coordinator slice, focused tests, compile checks, and line-count impact, and marked the self/team/child/minor orchestration decision subtask complete.
 Revision Note (2026-06-22): Recorded the final registration coordinator regression suite and marked the registration coordinator parent task complete.
 Revision Note (2026-06-22): Recorded the first invite coordinator slice, focused tests, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded the participant management coordinator slice, focused tests, compile checks, and line-count impact.

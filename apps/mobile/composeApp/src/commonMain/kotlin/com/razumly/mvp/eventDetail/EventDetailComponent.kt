@@ -447,28 +447,6 @@ private fun FamilyChild.toJoinChildOption(): JoinChildOption {
     )
 }
 
-private data class ParticipantManagementRoomTarget(
-    val eventId: String,
-    val slotId: String?,
-    val occurrenceDate: String?,
-    val teamSignup: Boolean,
-) {
-    fun toOccurrence(): EventOccurrenceSelection? {
-        val resolvedSlotId = slotId ?: return null
-        val resolvedOccurrenceDate = occurrenceDate ?: return null
-        return EventOccurrenceSelection(
-            slotId = resolvedSlotId,
-            occurrenceDate = resolvedOccurrenceDate,
-        )
-    }
-}
-
-private data class ParticipantManagementLocalState(
-    val snapshot: EventParticipantManagementSnapshot = EventParticipantManagementSnapshot(),
-    val teamSummaries: Map<String, EventTeamComplianceSummary> = emptyMap(),
-    val userSummaries: Map<String, EventComplianceUserSummary> = emptyMap(),
-)
-
 private data class EventScopedValue<T>(
     val eventId: String,
     val value: T,
@@ -661,7 +639,6 @@ class DefaultEventDetailComponent(
     private val _bootstrappedEventIds = MutableStateFlow<Set<String>>(emptySet())
     private val _bootstrapTimeSlots = MutableStateFlow<EventScopedValue<List<TimeSlot>>?>(null)
     private val _bootstrapLeagueScoringConfig = MutableStateFlow<EventScopedValue<LeagueScoringConfig?>?>(null)
-    private var managedDetailBootstrapRequest: ParticipantManagementRoomTarget? = null
 
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
@@ -1102,28 +1079,16 @@ class DefaultEventDetailComponent(
     private val _showDetails = MutableStateFlow(false)
     override val showDetails = _showDetails.asStateFlow()
 
-    private val _eventTeamsAndParticipantsLoading = MutableStateFlow(
-        event.id.isNotBlank() && event.eventType != EventType.WEEKLY_EVENT
+    private val participantManagementCoordinator = EventParticipantManagementCoordinator(
+        eventTeamsAndParticipantsLoadingInitially = event.id.isNotBlank() && event.eventType != EventType.WEEKLY_EVENT,
     )
-    override val eventTeamsAndParticipantsLoading = _eventTeamsAndParticipantsLoading.asStateFlow()
-
-    private val _participantManagementSnapshot = MutableStateFlow(EventParticipantManagementSnapshot())
-    override val participantManagementSnapshot = _participantManagementSnapshot.asStateFlow()
-
-    private val _participantDivisionWarnings = MutableStateFlow<List<EventParticipantDivisionWarning>>(emptyList())
-    override val participantDivisionWarnings = _participantDivisionWarnings.asStateFlow()
-
-    private val _participantManagementLoading = MutableStateFlow(false)
-    override val participantManagementLoading = _participantManagementLoading.asStateFlow()
-
-    private val _teamComplianceSummaries = MutableStateFlow<Map<String, EventTeamComplianceSummary>>(emptyMap())
-    override val teamComplianceSummaries = _teamComplianceSummaries.asStateFlow()
-
-    private val _userComplianceSummaries = MutableStateFlow<Map<String, EventComplianceUserSummary>>(emptyMap())
-    override val userComplianceSummaries = _userComplianceSummaries.asStateFlow()
-
-    private val _participantComplianceLoading = MutableStateFlow(false)
-    override val participantComplianceLoading = _participantComplianceLoading.asStateFlow()
+    override val eventTeamsAndParticipantsLoading = participantManagementCoordinator.eventTeamsAndParticipantsLoading
+    override val participantManagementSnapshot = participantManagementCoordinator.participantManagementSnapshot
+    override val participantDivisionWarnings = participantManagementCoordinator.participantDivisionWarnings
+    override val participantManagementLoading = participantManagementCoordinator.participantManagementLoading
+    override val teamComplianceSummaries = participantManagementCoordinator.teamComplianceSummaries
+    override val userComplianceSummaries = participantManagementCoordinator.userComplianceSummaries
+    override val participantComplianceLoading = participantManagementCoordinator.participantComplianceLoading
 
     private val _eventMatchesLoading = MutableStateFlow(false)
     override val eventMatchesLoading = _eventMatchesLoading.asStateFlow()
@@ -1131,8 +1096,6 @@ class DefaultEventDetailComponent(
     private var eventDetailHydrationJob: Job? = null
     private var eventDetailHydrationToken: Long = 0L
     private var weeklyOccurrenceSummaryPrefetchJob: Job? = null
-    private var participantManagementRequestToken: Long = 0L
-    private var participantComplianceRequestToken: Long = 0L
 
     override val showFeeBreakdown = registrationFlowCoordinator.showFeeBreakdown
     override val currentFeeBreakdown = registrationFlowCoordinator.currentFeeBreakdown
@@ -1472,15 +1435,15 @@ class DefaultEventDetailComponent(
                 .distinctUntilChanged()
                 .collectLatest { (eventId, weeklyParent) ->
                     if (eventId.isEmpty() || weeklyParent) {
-                        _eventTeamsAndParticipantsLoading.value = false
+                        participantManagementCoordinator.setEventTeamsAndParticipantsLoading(false)
                         return@collectLatest
                     }
                     _overviewParticipantSummary.value = null
-                    _eventTeamsAndParticipantsLoading.value = true
+                    participantManagementCoordinator.setEventTeamsAndParticipantsLoading(true)
                     try {
                         prefetchNonWeeklyParticipants(selectedEvent.value)
                     } finally {
-                        _eventTeamsAndParticipantsLoading.value = false
+                        participantManagementCoordinator.setEventTeamsAndParticipantsLoading(false)
                     }
                 }
         }
@@ -1498,13 +1461,13 @@ class DefaultEventDetailComponent(
                                 slotId = occurrence.slotId,
                                 occurrenceDate = occurrence.occurrenceDate,
                             )?.let(_weeklyOccurrenceSummaries.value::get)
-                        }
+                    }
                     refreshCurrentUserMembershipState(targetEvent)
-                    _eventTeamsAndParticipantsLoading.value = true
+                    participantManagementCoordinator.setEventTeamsAndParticipantsLoading(true)
                     try {
                         syncSelectedWeeklyOccurrenceParticipants(targetEvent)
                     } finally {
-                        _eventTeamsAndParticipantsLoading.value = false
+                        participantManagementCoordinator.setEventTeamsAndParticipantsLoading(false)
                     }
                 }
         }
@@ -1556,9 +1519,7 @@ class DefaultEventDetailComponent(
                     }
                 }
                 .collect { localState ->
-                    _participantManagementSnapshot.value = localState.snapshot
-                    _teamComplianceSummaries.value = localState.teamSummaries
-                    _userComplianceSummaries.value = localState.userSummaries
+                    participantManagementCoordinator.applyLocalState(localState)
                 }
         }
         scope.launch {
@@ -1586,35 +1547,21 @@ class DefaultEventDetailComponent(
             }
                 .distinctUntilChanged()
                 .collectLatest { target ->
-                    if (target == null) {
-                        _participantManagementLoading.value = false
-                        _participantComplianceLoading.value = false
-                        return@collectLatest
-                    }
-                    if (target == managedDetailBootstrapRequest) {
-                        _participantManagementLoading.value = false
-                        _participantComplianceLoading.value = false
-                        return@collectLatest
-                    }
-                    managedDetailBootstrapRequest = target
-                    _participantManagementLoading.value = true
-                    _participantComplianceLoading.value = true
+                    if (!participantManagementCoordinator.beginManagedDetailBootstrap(target)) return@collectLatest
+                    val bootstrapTarget = target ?: return@collectLatest
                     try {
                         eventRepository.syncEventDetail(
                             event = selectedEvent.value,
-                            occurrence = target.toOccurrence(),
+                            occurrence = bootstrapTarget.toOccurrence(),
                             manage = true,
                         ).onSuccess { result ->
                             applyEventDetailSyncResult(result)
                         }.onFailure { throwable ->
-                            if (managedDetailBootstrapRequest == target) {
-                                managedDetailBootstrapRequest = null
-                            }
+                            participantManagementCoordinator.clearManagedBootstrapRequestIfCurrent(bootstrapTarget)
                             Napier.w("Failed to refresh event detail management bootstrap.", throwable)
                         }
                     } finally {
-                        _participantManagementLoading.value = false
-                        _participantComplianceLoading.value = false
+                        participantManagementCoordinator.finishManagedDetailBootstrap()
                     }
                 }
         }
@@ -1883,7 +1830,7 @@ class DefaultEventDetailComponent(
     }
 
     private fun applyParticipantSyncResult(result: EventParticipantsSyncResult) {
-        _participantDivisionWarnings.value = result.divisionWarnings
+        participantManagementCoordinator.replaceParticipantDivisionWarnings(result.divisionWarnings)
         _overviewParticipantSummary.value = if (
             isWeeklyParentEvent(result.event) ||
             result.weeklySelectionRequired
@@ -1903,12 +1850,12 @@ class DefaultEventDetailComponent(
         occurrence: EventOccurrenceSelection?,
         manage: Boolean,
     ) {
-        if (!manage) {
-            return
-        }
-        managedDetailBootstrapRequest = participantManagementRoomTarget(
-            event = event,
-            occurrence = occurrence,
+        participantManagementCoordinator.markManagedBootstrapRequested(
+            target = participantManagementRoomTarget(
+                event = event,
+                occurrence = occurrence,
+            ),
+            manage = manage,
         )
     }
 
@@ -1916,13 +1863,12 @@ class DefaultEventDetailComponent(
         event: Event,
         occurrence: EventOccurrenceSelection?,
     ) {
-        val target = participantManagementRoomTarget(
-            event = event,
-            occurrence = occurrence,
+        participantManagementCoordinator.clearManagedBootstrapRequestIfCurrent(
+            participantManagementRoomTarget(
+                event = event,
+                occurrence = occurrence,
+            ),
         )
-        if (managedDetailBootstrapRequest == target) {
-            managedDetailBootstrapRequest = null
-        }
     }
 
     private fun applyEventDetailSyncResult(result: EventDetailSyncResult) {
@@ -2245,20 +2191,16 @@ class DefaultEventDetailComponent(
         reportErrors: Boolean = true,
     ) {
         val normalizedEventId = eventId.trim()
-        if (normalizedEventId.isEmpty()) {
-            _participantManagementLoading.value = false
-            return
-        }
-
-        participantManagementRequestToken += 1
-        val requestToken = participantManagementRequestToken
-        _participantManagementLoading.value = true
+        val requestToken = participantManagementCoordinator.beginParticipantManagementRequest(normalizedEventId)
+            ?: return
         try {
             eventRepository.getEventParticipantManagementSnapshot(
                 eventId = normalizedEventId,
                 occurrence = occurrence,
             ).onFailure { throwable ->
-                if (requestToken != participantManagementRequestToken) return@onFailure
+                if (!participantManagementCoordinator.isCurrentParticipantManagementRequest(requestToken)) {
+                    return@onFailure
+                }
                 if (reportErrors) {
                     _errorState.value = ErrorMessage(
                         throwable.userMessage("Failed to load participant registrations."),
@@ -2268,9 +2210,7 @@ class DefaultEventDetailComponent(
                 }
             }
         } finally {
-            if (requestToken == participantManagementRequestToken) {
-                _participantManagementLoading.value = false
-            }
+            participantManagementCoordinator.finishParticipantManagementRequest(requestToken)
         }
     }
 
@@ -2281,14 +2221,8 @@ class DefaultEventDetailComponent(
         reportErrors: Boolean = true,
     ) {
         val normalizedEventId = eventId.trim()
-        if (normalizedEventId.isEmpty()) {
-            _participantComplianceLoading.value = false
-            return
-        }
-
-        participantComplianceRequestToken += 1
-        val requestToken = participantComplianceRequestToken
-        _participantComplianceLoading.value = true
+        val requestToken = participantManagementCoordinator.beginParticipantComplianceRequest(normalizedEventId)
+            ?: return
 
         try {
             val result = if (teamSignup) {
@@ -2297,7 +2231,9 @@ class DefaultEventDetailComponent(
                 eventRepository.getEventUserCompliance(normalizedEventId, occurrence).map { }
             }
             result.onFailure { throwable ->
-                if (requestToken != participantComplianceRequestToken) return@onFailure
+                if (!participantManagementCoordinator.isCurrentParticipantComplianceRequest(requestToken)) {
+                    return@onFailure
+                }
                 if (reportErrors) {
                     _errorState.value = ErrorMessage(
                         throwable.userMessage("Failed to load participant payment and document status."),
@@ -2307,9 +2243,7 @@ class DefaultEventDetailComponent(
                 }
             }
         } finally {
-            if (requestToken == participantComplianceRequestToken) {
-                _participantComplianceLoading.value = false
-            }
+            participantManagementCoordinator.finishParticipantComplianceRequest(requestToken)
         }
     }
 
@@ -2875,11 +2809,7 @@ class DefaultEventDetailComponent(
 
     override fun clearSelectedWeeklySession() {
         _selectedWeeklyOccurrence.value = null
-        _participantManagementSnapshot.value = EventParticipantManagementSnapshot()
-        _participantManagementLoading.value = false
-        _teamComplianceSummaries.value = emptyMap()
-        _userComplianceSummaries.value = emptyMap()
-        _participantComplianceLoading.value = false
+        participantManagementCoordinator.clearParticipantManagementState()
     }
 
     private suspend fun resumePendingSignatureFlowIfNeeded(): Boolean {
@@ -4002,7 +3932,7 @@ class DefaultEventDetailComponent(
         eventDetailHydrationToken += 1
         val requestToken = eventDetailHydrationToken
         eventDetailHydrationJob?.cancel()
-        _eventTeamsAndParticipantsLoading.value = true
+        participantManagementCoordinator.setEventTeamsAndParticipantsLoading(true)
         _eventMatchesLoading.value = true
 
         eventDetailHydrationJob = scope.launch {
@@ -4045,7 +3975,7 @@ class DefaultEventDetailComponent(
                     )
                 }
 
-                _eventTeamsAndParticipantsLoading.value = false
+                participantManagementCoordinator.setEventTeamsAndParticipantsLoading(false)
 
                 matchRepository.getMatchesOfTournament(eventId).onFailure { throwable ->
                     if (requestToken != eventDetailHydrationToken) return@onFailure
@@ -4059,7 +3989,7 @@ class DefaultEventDetailComponent(
                 }
             } finally {
                 if (requestToken == eventDetailHydrationToken) {
-                    _eventTeamsAndParticipantsLoading.value = false
+                    participantManagementCoordinator.setEventTeamsAndParticipantsLoading(false)
                     _eventMatchesLoading.value = false
                 }
             }
