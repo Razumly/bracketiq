@@ -7,7 +7,6 @@ import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.CurrentUserDataSource
-import com.razumly.mvp.core.data.RegistrationProgressDraft
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
@@ -693,39 +692,30 @@ class DefaultEventDetailComponent(
     }
 
     override fun updateEventRegistrationQuestionAnswer(questionId: String, answer: String) {
-        val answerUpdate = registrationQuestionAnswerUpdate(questionId, answer) ?: return
-        _eventRegistrationQuestionAnswers.value = _eventRegistrationQuestionAnswers.value + answerUpdate
+        if (!registrationFlowCoordinator.updateQuestionAnswer(questionId, answer)) return
         scope.launch {
             saveCurrentRegistrationProgress(step = "questions")
         }
     }
 
     override fun toggleEventRegistrationQuestionsExpanded() {
-        _eventRegistrationQuestionsExpanded.value = !_eventRegistrationQuestionsExpanded.value
+        registrationFlowCoordinator.toggleQuestionsExpanded()
     }
 
     override fun dismissEventRegistrationQuestionDialog() {
-        _eventRegistrationQuestionDialog.value = null
-        pendingEventRegistrationQuestionContinuation = null
+        registrationFlowCoordinator.dismissQuestionDialog()
     }
 
     override fun submitEventRegistrationQuestionDialogAnswers(answers: Map<String, String>) {
-        val dialog = _eventRegistrationQuestionDialog.value ?: return
-        val normalizedAnswers = registrationQuestionDialogAnswers(dialog.questions, answers)
-        val missingQuestion = firstMissingRequiredRegistrationQuestion(dialog.questions, normalizedAnswers)
-        if (missingQuestion != null) {
+        val result = registrationFlowCoordinator.submitQuestionDialogAnswers(answers) ?: return
+        result.missingQuestion?.let { missingQuestion ->
             _errorState.value = ErrorMessage("Answer \"${missingQuestion.prompt}\" before continuing.")
             return
         }
 
-        _eventRegistrationQuestionAnswers.value = _eventRegistrationQuestionAnswers.value + normalizedAnswers
-        eventRegistrationQuestionsConfirmed = true
-        _eventRegistrationQuestionDialog.value = null
-        val continuation = pendingEventRegistrationQuestionContinuation
-        pendingEventRegistrationQuestionContinuation = null
         scope.launch {
             saveCurrentRegistrationProgress(step = "questions")
-            continuation?.invoke()
+            result.continuation?.invoke()
         }
     }
 
@@ -734,8 +724,7 @@ class DefaultEventDetailComponent(
             clearCurrentRegistrationProgress()
             pendingTeamRegistration = null
             pendingJoinConfirmationTarget = null
-            pendingEventRegistrationQuestionContinuation = null
-            _eventRegistrationQuestionDialog.value = null
+            registrationFlowCoordinator.clearAfterRegistrationHoldExpired()
             _startingTeamRegistrationId.value = null
             _errorState.value = ErrorMessage("Registration hold expired. Start registration again to reserve a new spot.")
         }
@@ -1280,16 +1269,12 @@ class DefaultEventDetailComponent(
     override val teamJoinQuestionDialog = _teamJoinQuestionDialog.asStateFlow()
     private var pendingTeamJoinQuestionTeam: TeamWithPlayers? = null
 
-    private val _eventRegistrationQuestionDialog = MutableStateFlow<EventRegistrationQuestionDialogState?>(null)
-    override val eventRegistrationQuestionDialog = _eventRegistrationQuestionDialog.asStateFlow()
-    private val _eventRegistrationQuestions = MutableStateFlow<List<TeamJoinQuestion>>(emptyList())
-    override val eventRegistrationQuestions = _eventRegistrationQuestions.asStateFlow()
-    private val _eventRegistrationQuestionAnswers = MutableStateFlow<Map<String, String>>(emptyMap())
-    override val eventRegistrationQuestionAnswers = _eventRegistrationQuestionAnswers.asStateFlow()
-    private val _eventRegistrationQuestionsExpanded = MutableStateFlow(false)
-    override val eventRegistrationQuestionsExpanded = _eventRegistrationQuestionsExpanded.asStateFlow()
-    private val _registrationHoldExpiresAt = MutableStateFlow<String?>(null)
-    override val registrationHoldExpiresAt = _registrationHoldExpiresAt.asStateFlow()
+    private val registrationFlowCoordinator = EventRegistrationFlowCoordinator()
+    override val eventRegistrationQuestionDialog = registrationFlowCoordinator.questionDialog
+    override val eventRegistrationQuestions = registrationFlowCoordinator.questions
+    override val eventRegistrationQuestionAnswers = registrationFlowCoordinator.answers
+    override val eventRegistrationQuestionsExpanded = registrationFlowCoordinator.questionsExpanded
+    override val registrationHoldExpiresAt = registrationFlowCoordinator.holdExpiresAt
 
     private val _paymentPlanPreviewDialog = MutableStateFlow<PaymentPlanPreviewDialogState?>(null)
     override val paymentPlanPreviewDialog = _paymentPlanPreviewDialog.asStateFlow()
@@ -1317,113 +1302,67 @@ class DefaultEventDetailComponent(
     private var pendingSignatureTeamId: String? = null
     private var pendingPdfSignaturePollJob: Job? = null
     private var pendingPaymentPlanPreviewAction: (() -> Unit)? = null
-    private var pendingEventRegistrationQuestionContinuation: (() -> Unit)? = null
-    private var eventRegistrationQuestionsConfirmed = false
 
     private val shareServiceProvider = ShareServiceProvider()
 
-    private fun currentRegistrationProgressKey(): String? {
-        val userId = currentUser.value.id.trim().takeIf(String::isNotBlank) ?: return null
-        val eventId = selectedEvent.value.id.trim().takeIf(String::isNotBlank) ?: return null
-        val occurrence = currentWeeklyOccurrenceSelection()
-        return listOf(
-            "event",
-            userId,
-            eventId,
-            occurrence?.slotId?.trim()?.takeIf(String::isNotBlank) ?: "none",
-            occurrence?.occurrenceDate?.trim()?.takeIf(String::isNotBlank) ?: "none",
-        ).joinToString(":")
-    }
+    private fun currentRegistrationProgressScope(): EventRegistrationProgressScope =
+        EventRegistrationProgressScope(
+            userId = currentUser.value.id,
+            eventId = selectedEvent.value.id,
+            occurrence = currentWeeklyOccurrenceSelection(),
+        )
 
     private suspend fun saveCurrentRegistrationProgress(
         step: String? = null,
         registrationId: String? = null,
-        holdExpiresAt: String? = _registrationHoldExpiresAt.value,
+        holdExpiresAt: String? = registrationFlowCoordinator.holdExpiresAt.value,
     ) {
-        val key = currentRegistrationProgressKey() ?: return
-        val userId = currentUser.value.id.trim().takeIf(String::isNotBlank) ?: return
-        val eventId = selectedEvent.value.id.trim().takeIf(String::isNotBlank) ?: return
-        val occurrence = currentWeeklyOccurrenceSelection()
+        val scope = currentRegistrationProgressScope()
+        val key = registrationFlowCoordinator.registrationProgressKey(scope) ?: return
+        val draft = registrationFlowCoordinator.buildRegistrationProgressDraft(
+            scope = scope,
+            selectedDivisionId = selectedDivision.value,
+            step = step,
+            registrationId = registrationId,
+            holdExpiresAt = holdExpiresAt,
+        ) ?: return
         currentUserDataSource?.saveRegistrationProgress(
             key = key,
-            draft = RegistrationProgressDraft(
-                scope = "event",
-                userId = userId,
-                eventId = eventId,
-                step = step,
-                answers = _eventRegistrationQuestionAnswers.value,
-                selectedDivisionId = selectedDivision.value,
-                slotId = occurrence?.slotId,
-                occurrenceDate = occurrence?.occurrenceDate,
-                registrationId = registrationId,
-                holdExpiresAt = holdExpiresAt,
-                updatedAt = Clock.System.now().toString(),
-            ),
+            draft = draft,
         )
     }
 
     private suspend fun loadCurrentRegistrationProgress() {
-        val key = currentRegistrationProgressKey() ?: run {
-            _registrationHoldExpiresAt.value = null
+        val key = registrationFlowCoordinator.registrationProgressKey(currentRegistrationProgressScope()) ?: run {
+            registrationFlowCoordinator.clearRegistrationProgressState()
             return
         }
         val draft = currentUserDataSource?.loadRegistrationProgress(key)
-        if (draft == null) {
-            _registrationHoldExpiresAt.value = null
-            eventRegistrationQuestionsConfirmed = false
-            return
-        }
-        eventRegistrationQuestionsConfirmed = draft.step == "checkout" ||
-            !draft.holdExpiresAt.isNullOrBlank()
-        if (draft.answers.isNotEmpty()) {
-            _eventRegistrationQuestionAnswers.value = _eventRegistrationQuestionAnswers.value + draft.answers
-        }
-        draft.selectedDivisionId
-            ?.trim()
-            ?.takeIf(String::isNotBlank)
+        registrationFlowCoordinator.applyRegistrationProgressDraft(draft)
             ?.let { restoredDivisionId ->
                 _selectedDivision.value = restoredDivisionId
             }
-        _registrationHoldExpiresAt.value = draft.holdExpiresAt
     }
 
     private suspend fun clearCurrentRegistrationProgress() {
-        currentRegistrationProgressKey()?.let { key ->
+        registrationFlowCoordinator.registrationProgressKey(currentRegistrationProgressScope())?.let { key ->
             currentUserDataSource?.clearRegistrationProgress(key)
         }
-        _registrationHoldExpiresAt.value = null
-        eventRegistrationQuestionsConfirmed = false
+        registrationFlowCoordinator.clearRegistrationProgressState()
     }
 
     private fun missingEventRegistrationQuestion(): TeamJoinQuestion? =
-        firstMissingRequiredRegistrationQuestion(
-            questions = _eventRegistrationQuestions.value,
-            answers = _eventRegistrationQuestionAnswers.value,
-        )
+        registrationFlowCoordinator.missingRegistrationQuestion()
 
     private fun ensureEventRegistrationQuestionsAnswered(onReady: () -> Unit): Boolean {
-        val questions = _eventRegistrationQuestions.value
-        if (questions.isEmpty()) return true
-        val missingQuestion = missingEventRegistrationQuestion()
-        if (missingQuestion == null && eventRegistrationQuestionsConfirmed) {
-            return true
-        }
-
-        _eventRegistrationQuestionsExpanded.value = true
-        _eventRegistrationQuestionDialog.value = EventRegistrationQuestionDialogState(
-            eventName = selectedEvent.value.name.ifBlank { "this event" },
-            questions = questions,
-            answers = _eventRegistrationQuestionAnswers.value,
+        return registrationFlowCoordinator.ensureQuestionsAnswered(
+            eventName = selectedEvent.value.name,
+            onReady = onReady,
         )
-        pendingEventRegistrationQuestionContinuation = onReady
-        return false
     }
 
     private fun eventRegistrationAnswersForRequest(): Map<String, String> {
-        return registrationAnswersForRequest(
-            questions = _eventRegistrationQuestions.value,
-            answers = _eventRegistrationQuestionAnswers.value,
-        )
+        return registrationFlowCoordinator.answersForRequest()
     }
 
     private suspend fun addCurrentUserToEventWithRegistrationAnswers(
@@ -1541,31 +1480,16 @@ class DefaultEventDetailComponent(
                 .distinctUntilChanged()
                 .collectLatest { (eventId, userId, _) ->
                     if (eventId.isBlank() || userId.isBlank()) {
-                        _eventRegistrationQuestions.value = emptyList()
-                        _eventRegistrationQuestionAnswers.value = emptyMap()
-                        _registrationHoldExpiresAt.value = null
-                        eventRegistrationQuestionsConfirmed = false
+                        registrationFlowCoordinator.clearForMissingRegistrationScope()
                         return@collectLatest
                     }
                     eventRepository.getRegistrationQuestions("EVENT", eventId)
                         .onSuccess { questions ->
-                            val previousQuestionIds = _eventRegistrationQuestions.value.map { question -> question.id }
-                            val nextQuestionIds = questions.map { question -> question.id }
-                            if (previousQuestionIds != nextQuestionIds) {
-                                eventRegistrationQuestionsConfirmed = false
-                            }
-                            _eventRegistrationQuestions.value = questions
-                            _eventRegistrationQuestionAnswers.value = _eventRegistrationQuestionAnswers.value.filterKeys { questionId ->
-                                questions.any { question -> question.id == questionId }
-                            } + questions.associate { question ->
-                                question.id to _eventRegistrationQuestionAnswers.value[question.id].orEmpty()
-                            }
+                            registrationFlowCoordinator.replaceRegistrationQuestions(questions)
                         }
                         .onFailure { throwable ->
                             Napier.w("Failed to load event registration questions.", throwable)
-                            _eventRegistrationQuestions.value = emptyList()
-                            _eventRegistrationQuestionAnswers.value = emptyMap()
-                            eventRegistrationQuestionsConfirmed = false
+                            registrationFlowCoordinator.clearRegistrationQuestionsAfterLoadFailure()
                         }
                     loadCurrentRegistrationProgress()
                 }
@@ -2898,7 +2822,7 @@ class DefaultEventDetailComponent(
                         ?.trim()
                         ?.takeIf(String::isNotBlank)
                         ?.let { holdExpiresAt ->
-                            _registrationHoldExpiresAt.value = holdExpiresAt
+                            registrationFlowCoordinator.setRegistrationHoldExpiresAt(holdExpiresAt)
                             saveCurrentRegistrationProgress(
                                 step = "checkout",
                                 registrationId = intent.registrationId,
@@ -3840,7 +3764,7 @@ class DefaultEventDetailComponent(
             ?.trim()
             ?.takeIf(String::isNotBlank)
             ?.let { holdExpiresAt ->
-                _registrationHoldExpiresAt.value = holdExpiresAt
+                registrationFlowCoordinator.setRegistrationHoldExpiresAt(holdExpiresAt)
                 scope.launch {
                     saveCurrentRegistrationProgress(
                         step = "checkout",

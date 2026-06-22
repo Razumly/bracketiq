@@ -27,6 +27,12 @@ After this refactor, the app should behave the same for users, but the code will
 - [x] (2026-06-22) Extracted event invite search normalization, invite context resolution, participant exclusion sets, and player invite DTO construction into `EventInviteHelpers.kt` with focused tests.
 - [x] (2026-06-22) Extracted event sport-rule normalization for league and tournament set/timed scoring into `EventSportRulesHelpers.kt` with focused tests.
 - [ ] Extract registration, join, withdraw, refund, payment preview, and signature flow state into a cohesive coordinator without changing public behavior.
+  - [x] (2026-06-22) Move registration question dialog, answer, expanded, hold, and registration-progress state into `EventRegistrationFlowCoordinator` with focused tests.
+  - [ ] Move self, team, child, and minor join orchestration around the existing repository callbacks.
+  - [ ] Move payment preview, billing prompt, and purchase-intent UI state.
+  - [ ] Move signature prompt, polling, and post-signature continuation state.
+  - [ ] Move withdraw, refund, and leave-target UI state.
+  - [ ] Wire remaining public registration actions through the coordinator and run the final coordinator regression suite.
 - [ ] Extract participant management and invite/search coordination where it can be tested independently.
 - [ ] Thin `DefaultEventDetailComponent` so it owns Decompose lifecycle, public state exposure, and delegation, while helpers own domain-specific transformations.
 - [ ] Run focused event-detail regression tests and final compile/build validation.
@@ -71,6 +77,9 @@ After this refactor, the app should behave the same for users, but the code will
 
 - Observation: Sport-based league/tournament scoring normalization is deterministic once the available sports list is passed explicitly.
   Evidence: `EventSportRulesHelpersTest` covers non-competitive event no-op behavior, set-based league normalization, timed league normalization, and tournament bracket set/point normalization without constructing `DefaultEventDetailComponent`.
+
+- Observation: The first coordinator slice can own registration question and progress state without owning repository persistence.
+  Evidence: `EventRegistrationFlowCoordinator.kt` now owns question dialog state, answer state, expanded state, hold expiration state, registration progress key construction, draft construction, and draft restoration. `DefaultEventDetailComponent` still calls `CurrentUserDataSource` to save, load, and clear progress.
 
 ## Decision Log
 
@@ -126,6 +135,10 @@ After this refactor, the app should behave the same for users, but the code will
   Rationale: League/tournament set/timed scoring normalization is pure when given `Event` plus the current sports list. Official-staff syncing still depends on comparing previous and next component state and should move separately only with direct staffing coverage.
   Date/Author: 2026-06-22 / Codex
 
+- Decision: Start the side-effectful registration coordinator as a state owner before moving repository or payment side effects.
+  Rationale: Registration question prompts, answer normalization, hold state, and progress draft/key handling are cohesive and directly testable, while join, payment, signature, refund, and withdraw flows still depend on several repositories and continuation callbacks. Moving the state boundary first reduces component responsibility without changing public behavior.
+  Date/Author: 2026-06-22 / Codex
+
 ## Outcomes & Retrospective
 
 The first implementation milestone is complete. `EventEditPayloadBuilder.kt` now owns event update payload preparation, editable field draft normalization, league slot draft normalization, default field helpers, default league slot creation, league scoring DTO conversion, and recurring slot date-boundary helpers. `DefaultEventDetailComponent` still owns public state, lifecycle, repository calls, and state assignment after helper output. `EventDetailComponent.kt` dropped from 7,904 lines to 7,492 lines after this milestone.
@@ -146,7 +159,9 @@ The eighth implementation milestone starts the participant/invite extraction. `E
 
 The ninth implementation milestone extracts event sport-rule normalization. `EventSportRulesHelpers.kt` now owns set/timed scoring normalization for league and tournament events, including division-level league rules and nested playoff tournament config rules. `DefaultEventDetailComponent` still owns sport list state, official-staff sport transitions, edit-mode state, and repository calls. `EventDetailComponent.kt` dropped further to 6,731 lines after this milestone.
 
-Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining plan work is to extract the side-effectful registration/payment/signature coordinator, then participant/invite coordination.
+The tenth implementation milestone starts the cohesive registration coordinator. `EventRegistrationFlowCoordinator.kt` now owns event registration question dialog state, answer state, expanded state, hold expiration state, registration progress key construction, draft construction, and draft restoration. `DefaultEventDetailComponent` still owns `CurrentUserDataSource`, event/user/occurrence selection, repository calls, payment processing, signature polling, withdraw/refund mutations, and public actions. `EventDetailComponent.kt` dropped further to 6,655 lines after this milestone.
+
+Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining coordinator work is to move join orchestration, payment preview/billing/purchase-intent state, signature prompt/polling state, and withdraw/refund/leave-target state, then extract participant/invite coordination.
 
 ## Context and Orientation
 
@@ -521,6 +536,24 @@ Ninth milestone whitespace audit passed:
     git diff --check
     Exit code: 0
 
+Registration coordinator first slice focused tests passed:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventRegistrationFlowCoordinatorTest*" --tests "*EventRegistrationQuestionHelpersTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 16s; 43 actionable tasks: 5 executed, 38 up-to-date.
+
+Registration coordinator first slice common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 2s; 11 actionable tasks: 2 executed, 9 up-to-date.
+
+Tenth milestone line-count evidence:
+
+    6655 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     207 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
+     167 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -559,3 +592,4 @@ Revision Note (2026-06-22): Recorded completion of the payment-plan helper extra
 Revision Note (2026-06-22): Recorded completion of the signature helper extraction, focused and broader join-flow tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded completion of the registration-question helper extraction, focused and broader join-flow tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded completion of the sport-rule helper extraction, focused and related edit validation tests, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded the first registration coordinator slice, added remaining coordinator substeps, focused tests, compile checks, and line-count impact.
