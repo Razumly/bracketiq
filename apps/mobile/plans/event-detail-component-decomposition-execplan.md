@@ -52,6 +52,9 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Move refund and leave action preflight decisions into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Wire remaining public registration actions through the coordinator and run the final coordinator regression suite.
 - [ ] Extract participant management and invite/search coordination where it can be tested independently.
+  - [x] (2026-06-22) Move invite suggestions, team-invite loading, and pending staff-invite draft state into `EventInviteCoordinator` with focused tests.
+  - [ ] Move participant management snapshot/compliance loading state and request-token coordination into a tested participant coordinator.
+  - [ ] Move participant invite/add/remove preflight decisions into helpers or coordinator methods with focused tests.
 - [ ] Thin `DefaultEventDetailComponent` so it owns Decompose lifecycle, public state exposure, and delegation, while helpers own domain-specific transformations.
 - [ ] Run focused event-detail regression tests and final compile/build validation.
 
@@ -227,6 +230,8 @@ The thirty-first implementation milestone moves self/minor join result and payme
 The thirty-second implementation milestone completes the current self/team/child/minor join orchestration decision slice. `EventRegistrationFlowCoordinator.kt` now classifies team join-before-payment-plan results, treats duplicate already-registered errors as resumable payment-plan paths, preserves rollback intent, owns user/team payment-plan success copy, and exposes the shared `PaymentPlanBillStatus` used by billing creation. `DefaultEventDetailComponent` still owns repository calls, billing creation, rollback execution, event refresh, loading/error mutation, and purchase-intent processing. `EventDetailComponent.kt` dropped to 6,518 lines after this milestone.
 
 The thirty-third implementation milestone closes the registration coordinator parent task. Public registration, join, withdraw/refund, payment preview, billing-address, payment-sheet, fee-breakdown, and signature prompt state now route through `EventRegistrationFlowCoordinator`, while `DefaultEventDetailComponent` remains responsible for Decompose lifecycle, repository and billing side effects, refreshes, coroutine execution, and UI-facing public state exposure. The final coordinator regression suite passed across coordinator, mobile join-flow, payment-plan helper, signature helper, registration-question helper, and withdraw/refund helper tests. `EventDetailComponent.kt` remains 6,518 lines after this close-out.
+
+The thirty-fourth implementation milestone starts participant/invite coordination extraction. `EventInviteCoordinator.kt` now owns suggested-user state, team invite suggestion state, team invite loading state, and pending staff-invite draft state. `DefaultEventDetailComponent` still owns user/team/staff repository calls, email membership checks, event mutation, refresh behavior, and loading/error state, but delegates invite UI state mutations and pending staff-invite merging/removal to the coordinator. `EventDetailComponent.kt` dropped to 6,481 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining coordinator work is to finish join orchestration around repository callbacks, then run the final coordinator regression suite and extract participant/invite coordination.
 
@@ -1064,6 +1069,25 @@ Final registration coordinator close-out line-count evidence:
     1366 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
     1129 plans/event-detail-component-decomposition-execplan.md
 
+Invite coordinator slice focused tests passed:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventInviteCoordinatorTest*" --tests "*EventInviteHelpersTest*" --tests "*EventStaffPersistenceTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 1m 50s; 43 actionable tasks: 9 executed, 34 up-to-date.
+
+Invite coordinator slice common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 20s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Thirty-fourth milestone line-count evidence:
+
+    6481 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     117 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventInviteCoordinator.kt
+     152 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventInviteCoordinatorTest.kt
+    1154 plans/event-detail-component-decomposition-execplan.md
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -1127,3 +1151,4 @@ Revision Note (2026-06-22): Recorded the child-registration result message coord
 Revision Note (2026-06-22): Recorded the self/minor join result coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the team join payment-plan coordinator slice, focused tests, compile checks, and line-count impact, and marked the self/team/child/minor orchestration decision subtask complete.
 Revision Note (2026-06-22): Recorded the final registration coordinator regression suite and marked the registration coordinator parent task complete.
+Revision Note (2026-06-22): Recorded the first invite coordinator slice, focused tests, compile checks, and line-count impact.
