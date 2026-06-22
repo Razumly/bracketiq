@@ -5,6 +5,7 @@ import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
+import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
@@ -100,6 +101,7 @@ internal class EventRegistrationFlowCoordinator {
     private var pendingJoinConfirmationTarget: JoinConfirmationTarget? = null
     private var pendingFeeBreakdownAction: (() -> Unit)? = null
     private var pendingTeamRegistration: TeamWithPlayers? = null
+    private var pendingPaymentSheetIntent: PurchaseIntent? = null
     private var pendingSignatureSteps: List<SignStep> = emptyList()
     private var pendingSignatureStepIndex = 0
     private var pendingPostSignatureAction: (suspend () -> Unit)? = null
@@ -228,11 +230,14 @@ internal class EventRegistrationFlowCoordinator {
         _showFeeBreakdown.value = false
         _currentFeeBreakdown.value = null
         pendingFeeBreakdownAction = null
+        clearPendingPaymentSheetIntent()
     }
 
     fun confirmFeeBreakdown(): (() -> Unit)? {
         val action = pendingFeeBreakdownAction
-        dismissFeeBreakdown()
+        _showFeeBreakdown.value = false
+        _currentFeeBreakdown.value = null
+        pendingFeeBreakdownAction = null
         return action
     }
 
@@ -388,6 +393,20 @@ internal class EventRegistrationFlowCoordinator {
     fun clearTeamRegistrationState() {
         _startingTeamRegistrationId.value = null
         pendingTeamRegistration = null
+    }
+
+    fun setPendingPaymentSheetIntent(intent: PurchaseIntent) {
+        pendingPaymentSheetIntent = intent
+    }
+
+    fun consumePendingPaymentSheetIntent(): PurchaseIntent? {
+        val intent = pendingPaymentSheetIntent
+        pendingPaymentSheetIntent = null
+        return intent
+    }
+
+    fun clearPendingPaymentSheetIntent() {
+        pendingPaymentSheetIntent = null
     }
 
     fun showTextSignaturePrompt(prompt: TextSignaturePromptState) {

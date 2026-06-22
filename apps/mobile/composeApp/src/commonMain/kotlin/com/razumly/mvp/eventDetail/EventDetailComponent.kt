@@ -3711,11 +3711,13 @@ class DefaultEventDetailComponent(
             }
 
         intent.feeBreakdown?.let { feeBreakdown ->
+            registrationFlowCoordinator.setPendingPaymentSheetIntent(intent)
             showFeeBreakdown(feeBreakdown, onConfirm = {
                 scope.launch {
-                    showPaymentSheet(intent)
+                    showPendingPaymentSheet()
                 }
             }, onCancel = {
+                registrationFlowCoordinator.clearPendingPaymentSheetIntent()
                 loadingHandler.hideLoading()
             })
         } ?: run {
@@ -3752,6 +3754,12 @@ class DefaultEventDetailComponent(
     }
 
     private suspend fun showPaymentSheet(intent: PurchaseIntent) {
+        registrationFlowCoordinator.setPendingPaymentSheetIntent(intent)
+        showPendingPaymentSheet()
+    }
+
+    private suspend fun showPendingPaymentSheet() {
+        val intent = registrationFlowCoordinator.consumePendingPaymentSheetIntent() ?: return
         clearPaymentResult()
         setPaymentIntent(intent)
         val billingAddress = loadSavedBillingAddress()

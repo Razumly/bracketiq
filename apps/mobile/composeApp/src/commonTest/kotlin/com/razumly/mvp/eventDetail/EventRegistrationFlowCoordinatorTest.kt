@@ -6,6 +6,7 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
+import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
@@ -370,10 +371,12 @@ class EventRegistrationFlowCoordinatorTest {
     fun fee_breakdown_confirm_returns_continuation_and_clears_state() {
         val coordinator = EventRegistrationFlowCoordinator()
         val feeBreakdown = feeBreakdown()
+        val purchaseIntent = purchaseIntent("registration-1")
         var continued = false
 
+        coordinator.setPendingPaymentSheetIntent(purchaseIntent)
         coordinator.showFeeBreakdown(feeBreakdown) {
-            continued = true
+            continued = coordinator.consumePendingPaymentSheetIntent() == purchaseIntent
         }
 
         assertTrue(coordinator.showFeeBreakdown.value)
@@ -388,6 +391,7 @@ class EventRegistrationFlowCoordinatorTest {
         continuation?.invoke()
 
         assertTrue(continued)
+        assertNull(coordinator.consumePendingPaymentSheetIntent())
         assertNull(coordinator.confirmFeeBreakdown())
     }
 
@@ -401,6 +405,33 @@ class EventRegistrationFlowCoordinatorTest {
         assertFalse(coordinator.showFeeBreakdown.value)
         assertNull(coordinator.currentFeeBreakdown.value)
         assertNull(coordinator.confirmFeeBreakdown())
+    }
+
+    @Test
+    fun payment_sheet_intent_can_be_consumed_once_or_cleared() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val purchaseIntent = purchaseIntent("registration-1")
+
+        coordinator.setPendingPaymentSheetIntent(purchaseIntent)
+
+        assertEquals(purchaseIntent, coordinator.consumePendingPaymentSheetIntent())
+        assertNull(coordinator.consumePendingPaymentSheetIntent())
+
+        coordinator.setPendingPaymentSheetIntent(purchaseIntent)
+        coordinator.clearPendingPaymentSheetIntent()
+
+        assertNull(coordinator.consumePendingPaymentSheetIntent())
+    }
+
+    @Test
+    fun fee_breakdown_dismiss_clears_pending_payment_sheet_intent() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        coordinator.setPendingPaymentSheetIntent(purchaseIntent("registration-1"))
+        coordinator.showFeeBreakdown(feeBreakdown()) {}
+
+        coordinator.dismissFeeBreakdown()
+
+        assertNull(coordinator.consumePendingPaymentSheetIntent())
     }
 
     @Test
@@ -644,6 +675,13 @@ class EventRegistrationFlowCoordinatorTest {
             totalCharge = 10800,
             hostReceives = 9500,
             feePercentage = 5f,
+        )
+    }
+
+    private fun purchaseIntent(registrationId: String): PurchaseIntent {
+        return PurchaseIntent(
+            paymentIntent = "pi_$registrationId",
+            registrationId = registrationId,
         )
     }
 

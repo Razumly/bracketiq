@@ -36,7 +36,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Move pending join-confirmation target state into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move purchase-intent fee-breakdown UI state into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move starting team registration and pending paid team-registration state into `EventRegistrationFlowCoordinator` with focused tests.
-  - [ ] Move remaining purchase-intent/payment-sheet presentation state.
+  - [x] (2026-06-22) Move pending payment-sheet purchase-intent state into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move text/web signature prompt state into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move signature context, pending-step, child/team target, and post-signature continuation state into `EventRegistrationFlowCoordinator` with focused tests.
   - [ ] Move remaining signature polling job lifecycle if the coordinator takes signature side effects.
@@ -194,7 +194,9 @@ The nineteenth implementation milestone moves starting team registration and pen
 
 The twentieth implementation milestone moves signature flow state into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now owns the pending signature context queue, current step metadata, child/team signature target, and post-signature continuation. `DefaultEventDetailComponent` still owns signature repository calls, loading/error handling, and the coroutine poll job tied to component scope. `EventDetailComponent.kt` dropped further to 6,587 lines after this milestone.
 
-Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining coordinator work is to move join orchestration, remaining purchase-intent/payment-sheet presentation state, remaining signature polling job lifecycle if appropriate, and refund/leave action state, then extract participant/invite coordination.
+The twenty-first implementation milestone moves pending payment-sheet purchase-intent state into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now owns the pending checkout intent, consumes it once when the component presents the payment sheet, preserves it through fee-breakdown confirmation, and clears it when fee breakdown is dismissed. `DefaultEventDetailComponent` still owns Stripe payment processor calls, billing-address loading, loading/error state, and payment result handling. `EventDetailComponent.kt` is now 6,595 lines after this milestone.
+
+Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining coordinator work is to move join orchestration, remaining signature polling job lifecycle if appropriate, and refund/leave action state, then extract participant/invite coordination.
 
 ## Context and Orientation
 
@@ -767,6 +769,24 @@ Twentieth milestone line-count evidence:
      562 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
      661 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
 
+Payment-sheet intent coordinator slice focused tests passed:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventRegistrationFlowCoordinatorTest*" --tests "*EventPaymentPlanHelpersTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 1m 38s; 43 actionable tasks: 9 executed, 34 up-to-date.
+
+Payment-sheet intent coordinator slice common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 17s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Twenty-first milestone line-count evidence:
+
+    6595 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     581 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
+     699 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
+
 Full debug unit suite currently blocked:
 
     ./gradlew :composeApp:testDebugUnitTest
@@ -833,3 +853,4 @@ Revision Note (2026-06-22): Recorded the pending join-confirmation target coordi
 Revision Note (2026-06-22): Recorded the purchase-intent fee-breakdown coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the starting team registration coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the signature flow state coordinator slice, focused tests, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded the payment-sheet intent coordinator slice, focused tests, compile checks, and line-count impact.
