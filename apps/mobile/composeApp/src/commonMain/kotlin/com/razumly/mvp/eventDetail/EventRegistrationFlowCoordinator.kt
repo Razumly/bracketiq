@@ -2,6 +2,7 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.RegistrationProgressDraft
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,6 +19,12 @@ internal data class EventRegistrationProgressScope(
 internal data class EventRegistrationQuestionSubmitResult(
     val missingQuestion: TeamJoinQuestion?,
     val continuation: (() -> Unit)?,
+)
+
+internal data class TeamJoinQuestionSubmitResult(
+    val missingQuestion: TeamJoinQuestion?,
+    val dialog: TeamJoinQuestionDialogState?,
+    val team: TeamWithPlayers?,
 )
 
 @OptIn(ExperimentalTime::class)
@@ -52,6 +59,9 @@ internal class EventRegistrationFlowCoordinator {
     private val _childJoinSelectionDialog = MutableStateFlow<ChildJoinSelectionDialogState?>(null)
     val childJoinSelectionDialog = _childJoinSelectionDialog.asStateFlow()
 
+    private val _teamJoinQuestionDialog = MutableStateFlow<TeamJoinQuestionDialogState?>(null)
+    val teamJoinQuestionDialog = _teamJoinQuestionDialog.asStateFlow()
+
     private val _textSignaturePrompt = MutableStateFlow<TextSignaturePromptState?>(null)
     val textSignaturePrompt = _textSignaturePrompt.asStateFlow()
 
@@ -62,6 +72,7 @@ internal class EventRegistrationFlowCoordinator {
     private var questionsConfirmed = false
     private var pendingPaymentPlanPreviewAction: (() -> Unit)? = null
     private var pendingBillingAddressAction: (() -> Unit)? = null
+    private var pendingTeamJoinQuestionTeam: TeamWithPlayers? = null
 
     fun updateQuestionAnswer(questionId: String, answer: String): Boolean {
         val answerUpdate = registrationQuestionAnswerUpdate(questionId, answer) ?: return false
@@ -237,6 +248,42 @@ internal class EventRegistrationFlowCoordinator {
     fun clearJoinDialogs() {
         _joinChoiceDialog.value = null
         _childJoinSelectionDialog.value = null
+    }
+
+    fun showTeamJoinQuestionDialog(
+        dialog: TeamJoinQuestionDialogState,
+        team: TeamWithPlayers,
+    ) {
+        pendingTeamJoinQuestionTeam = team
+        _teamJoinQuestionDialog.value = dialog
+    }
+
+    fun submitTeamJoinQuestionAnswers(answers: Map<String, String>): TeamJoinQuestionSubmitResult? {
+        val dialog = _teamJoinQuestionDialog.value ?: return null
+        val missingQuestion = dialog.questions.firstOrNull { question ->
+            question.required && answers[question.id].orEmpty().trim().isBlank()
+        }
+        if (missingQuestion != null) {
+            return TeamJoinQuestionSubmitResult(
+                missingQuestion = missingQuestion,
+                dialog = dialog,
+                team = pendingTeamJoinQuestionTeam,
+            )
+        }
+
+        val team = pendingTeamJoinQuestionTeam
+        _teamJoinQuestionDialog.value = null
+        pendingTeamJoinQuestionTeam = null
+        return TeamJoinQuestionSubmitResult(
+            missingQuestion = null,
+            dialog = dialog,
+            team = team,
+        )
+    }
+
+    fun dismissTeamJoinQuestionDialog() {
+        _teamJoinQuestionDialog.value = null
+        pendingTeamJoinQuestionTeam = null
     }
 
     fun showTextSignaturePrompt(prompt: TextSignaturePromptState) {

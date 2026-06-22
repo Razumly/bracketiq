@@ -1262,9 +1262,7 @@ class DefaultEventDetailComponent(
     override val joinChoiceDialog = registrationFlowCoordinator.joinChoiceDialog
     override val childJoinSelectionDialog = registrationFlowCoordinator.childJoinSelectionDialog
 
-    private val _teamJoinQuestionDialog = MutableStateFlow<TeamJoinQuestionDialogState?>(null)
-    override val teamJoinQuestionDialog = _teamJoinQuestionDialog.asStateFlow()
-    private var pendingTeamJoinQuestionTeam: TeamWithPlayers? = null
+    override val teamJoinQuestionDialog = registrationFlowCoordinator.teamJoinQuestionDialog
 
     override val eventRegistrationQuestionDialog = registrationFlowCoordinator.questionDialog
     override val eventRegistrationQuestions = registrationFlowCoordinator.questions
@@ -2612,12 +2610,14 @@ class DefaultEventDetailComponent(
                 }
 
                 if (context.questions.isNotEmpty()) {
-                    pendingTeamJoinQuestionTeam = registrationTeam
-                    _teamJoinQuestionDialog.value = TeamJoinQuestionDialogState(
-                        teamId = context.teamId,
-                        teamName = registrationTeam.team.name.ifBlank { "this team" },
-                        joinPolicy = joinPolicy,
-                        questions = context.questions,
+                    registrationFlowCoordinator.showTeamJoinQuestionDialog(
+                        dialog = TeamJoinQuestionDialogState(
+                            teamId = context.teamId,
+                            teamName = registrationTeam.team.name.ifBlank { "this team" },
+                            joinPolicy = joinPolicy,
+                            questions = context.questions,
+                        ),
+                        team = registrationTeam,
                     )
                     loadingHandler.hideLoading()
                     return@launch
@@ -2638,23 +2638,18 @@ class DefaultEventDetailComponent(
     }
 
     override fun submitTeamJoinQuestionAnswers(answers: Map<String, String>) {
-        val dialog = _teamJoinQuestionDialog.value ?: return
-        val missingQuestion = dialog.questions.firstOrNull { question ->
-            question.required && answers[question.id].orEmpty().trim().isBlank()
-        }
-        if (missingQuestion != null) {
+        val result = registrationFlowCoordinator.submitTeamJoinQuestionAnswers(answers) ?: return
+        result.missingQuestion?.let { missingQuestion ->
             _errorState.value = ErrorMessage("Answer \"${missingQuestion.prompt}\" before continuing.")
             return
         }
-        val team = pendingTeamJoinQuestionTeam
+        val team = result.team
         if (team == null) {
-            _teamJoinQuestionDialog.value = null
             _errorState.value = ErrorMessage("Unable to continue team registration.")
             return
         }
 
-        _teamJoinQuestionDialog.value = null
-        pendingTeamJoinQuestionTeam = null
+        val dialog = result.dialog ?: return
         scope.launch {
             val teamId = dialog.teamId.trim().takeIf(String::isNotBlank) ?: team.team.registrationTargetTeamId()
             if (teamId.isBlank() || _startingTeamRegistrationId.value != null) return@launch
@@ -2682,8 +2677,7 @@ class DefaultEventDetailComponent(
     }
 
     override fun dismissTeamJoinQuestionDialog() {
-        _teamJoinQuestionDialog.value = null
-        pendingTeamJoinQuestionTeam = null
+        registrationFlowCoordinator.dismissTeamJoinQuestionDialog()
     }
 
     private suspend fun submitTeamJoin(

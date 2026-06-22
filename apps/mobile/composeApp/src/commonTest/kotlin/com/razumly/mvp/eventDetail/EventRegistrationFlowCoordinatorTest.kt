@@ -2,6 +2,8 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.RegistrationProgressDraft
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
+import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
@@ -283,6 +285,55 @@ class EventRegistrationFlowCoordinatorTest {
     }
 
     @Test
+    fun team_join_question_submit_requires_answers_then_returns_dialog_and_team() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val requiredQuestion = question("q1", required = true)
+        val dialog = TeamJoinQuestionDialogState(
+            teamId = "team-1",
+            teamName = "Team One",
+            joinPolicy = "OPEN_REGISTRATION",
+            questions = listOf(requiredQuestion),
+        )
+        val team = teamWithPlayers("team-1")
+
+        coordinator.showTeamJoinQuestionDialog(dialog, team)
+
+        assertEquals(dialog, coordinator.teamJoinQuestionDialog.value)
+
+        val missingResult = coordinator.submitTeamJoinQuestionAnswers(mapOf("q1" to " "))
+
+        assertSame(requiredQuestion, missingResult?.missingQuestion)
+        assertEquals(dialog, coordinator.teamJoinQuestionDialog.value)
+
+        val submittedResult = coordinator.submitTeamJoinQuestionAnswers(mapOf("q1" to "Ready"))
+
+        assertNull(submittedResult?.missingQuestion)
+        assertEquals(dialog, submittedResult?.dialog)
+        assertEquals(team, submittedResult?.team)
+        assertNull(coordinator.teamJoinQuestionDialog.value)
+        assertNull(coordinator.submitTeamJoinQuestionAnswers(mapOf("q1" to "Ready")))
+    }
+
+    @Test
+    fun team_join_question_dismiss_clears_dialog_and_pending_team() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        coordinator.showTeamJoinQuestionDialog(
+            dialog = TeamJoinQuestionDialogState(
+                teamId = "team-1",
+                teamName = "Team One",
+                joinPolicy = "REQUEST_TO_JOIN",
+                questions = listOf(question("q1")),
+            ),
+            team = teamWithPlayers("team-1"),
+        )
+
+        coordinator.dismissTeamJoinQuestionDialog()
+
+        assertNull(coordinator.teamJoinQuestionDialog.value)
+        assertNull(coordinator.submitTeamJoinQuestionAnswers(mapOf("q1" to "Ready")))
+    }
+
+    @Test
     fun signature_prompts_can_be_shown_and_cleared_independently() {
         val coordinator = EventRegistrationFlowCoordinator()
         val textPrompt = TextSignaturePromptState(
@@ -354,6 +405,18 @@ class EventRegistrationFlowCoordinatorTest {
             fullName = "Child $userId",
             email = "child@example.com",
             hasEmail = true,
+        )
+    }
+
+    private fun teamWithPlayers(teamId: String): TeamWithPlayers {
+        return TeamWithPlayers(
+            team = Team(captainId = "captain-1").copy(
+                id = teamId,
+                name = "Team One",
+            ),
+            captain = null,
+            players = emptyList(),
+            pendingPlayers = emptyList(),
         )
     }
 
