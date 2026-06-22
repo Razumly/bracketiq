@@ -37,7 +37,6 @@ import com.razumly.mvp.core.data.dataTypes.isPaymentPending
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
-import com.razumly.mvp.core.data.dataTypes.resolvedDivisionPriceCents
 import com.razumly.mvp.core.data.dataTypes.shouldReplaceOfficialPositionsWithSportDefaults
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
@@ -81,7 +80,6 @@ import com.razumly.mvp.core.data.repositories.requiresAdditionalSigning
 import com.razumly.mvp.core.data.repositories.requiresChildEmail
 import com.razumly.mvp.core.data.repositories.userMessage
 import com.razumly.mvp.core.data.util.isPlaceholderSlot
-import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.network.MvpApiClient
@@ -404,15 +402,6 @@ data class EventRegistrationQuestionDialogState(
     val eventName: String,
     val questions: List<TeamJoinQuestion>,
     val answers: Map<String, String>,
-)
-
-data class PaymentPlanPreviewDialogState(
-    val ownerLabel: String,
-    val totalAmountCents: Int,
-    val installmentAmounts: List<Int>,
-    val installmentDueDates: List<String>,
-    val installmentDueRelativeDays: List<Int> = emptyList(),
-    val divisionLabel: String? = null,
 )
 
 data class SelectedWeeklyOccurrenceState(
@@ -3140,8 +3129,12 @@ class DefaultEventDetailComponent(
             _childJoinSelectionDialog.value = null
 
             buildPaymentPlanPreviewDialogState(
+                event = selectedEvent.value,
                 ownerLabel = team.team.name.trim().ifBlank { "Your team" },
                 forTeamJoin = true,
+                preferredDivisionId = selectedDivision.value,
+                currentUserIsMinor = currentUser.value.isMinor,
+                isEventFull = isEventFull.value,
             )?.let { preview ->
                 showPaymentPlanPreviewDialog(preview) {
                     scope.launch {
@@ -3225,8 +3218,12 @@ class DefaultEventDetailComponent(
         }
         if (!skipPaymentPlanPreview) {
             buildPaymentPlanPreviewDialogState(
+                event = selectedEvent.value,
                 ownerLabel = "You",
                 forTeamJoin = false,
+                preferredDivisionId = selectedDivision.value,
+                currentUserIsMinor = currentUser.value.isMinor,
+                isEventFull = isEventFull.value,
             )?.let { preview ->
                 showPaymentPlanPreviewDialog(preview) {
                     scope.launch {
@@ -3242,46 +3239,6 @@ class DefaultEventDetailComponent(
         ) {
             executeJoinEvent()
         }
-    }
-
-    private fun buildPaymentPlanPreviewDialogState(
-        ownerLabel: String,
-        forTeamJoin: Boolean,
-    ): PaymentPlanPreviewDialogState? {
-        val event = selectedEvent.value
-        if (currentUser.value.isMinor) return null
-        val preferredDivisionId = selectedDivision.value
-        val paymentPlan = resolveEffectivePaymentPlan(
-            event = event,
-            preferredDivisionId = preferredDivisionId,
-        )
-        val shouldPreview = if (forTeamJoin) {
-            paymentPlan.allowPaymentPlans && paymentPlan.configuredPriceCents > 0 && !isEventFull.value
-        } else {
-            paymentPlan.allowPaymentPlans &&
-                paymentPlan.configuredPriceCents > 0 &&
-                !isEventFull.value &&
-                !event.teamSignup
-        }
-        if (!shouldPreview) return null
-
-        val divisionLabel = if (event.singleDivision) {
-            null
-        } else {
-            resolveSelectedDivisionDetail(event, preferredDivisionId)
-                ?.name
-                ?.trim()
-                ?.takeIf(String::isNotBlank)
-        }
-
-        return PaymentPlanPreviewDialogState(
-            ownerLabel = ownerLabel,
-            totalAmountCents = paymentPlan.configuredPriceCents,
-            installmentAmounts = paymentPlan.installmentAmounts,
-            installmentDueDates = paymentPlan.installmentDueDates,
-            installmentDueRelativeDays = paymentPlan.installmentDueRelativeDays,
-            divisionLabel = divisionLabel,
-        )
     }
 
     private fun showPaymentPlanPreviewDialog(
@@ -6422,83 +6379,6 @@ class DefaultEventDetailComponent(
             ?.trim()
             ?.takeIf(String::isNotBlank)
         return (teamIdsFromProfile + listOfNotNull(activeTeamId)).toSet()
-    }
-
-    private data class EffectivePaymentPlan(
-        val priceCents: Int?,
-        val allowPaymentPlans: Boolean,
-        val installmentAmounts: List<Int>,
-        val installmentDueDates: List<String>,
-        val installmentDueRelativeDays: List<Int>,
-    ) {
-        val configuredPriceCents: Int get() = priceCents ?: 0
-    }
-
-    private fun resolveSelectedDivisionDetail(
-        event: Event,
-        preferredDivisionId: String?,
-    ): DivisionDetail? {
-        if (event.divisions.isEmpty()) {
-            return null
-        }
-        val normalizedPreferredDivision = preferredDivisionId
-            ?.normalizeDivisionIdentifier()
-            ?.ifEmpty { null }
-        val divisionDetails = mergeDivisionDetailsForDivisions(
-            divisions = event.divisions,
-            existingDetails = event.divisionDetails,
-            eventId = event.id,
-        )
-        if (divisionDetails.isEmpty()) {
-            return null
-        }
-        return if (!normalizedPreferredDivision.isNullOrBlank()) {
-            divisionDetails.firstOrNull { detail ->
-                detail.id.normalizeDivisionIdentifier() == normalizedPreferredDivision
-            } ?: divisionDetails.firstOrNull()
-        } else {
-            divisionDetails.firstOrNull()
-        }
-    }
-
-    private fun resolveEffectivePaymentPlan(
-        event: Event,
-        preferredDivisionId: String?,
-    ): EffectivePaymentPlan {
-        val selectedDivision = resolveSelectedDivisionDetail(event, preferredDivisionId)
-        val allowPaymentPlans = selectedDivision?.allowPaymentPlans == true
-        val useRelativeDueDates = isWeeklyParentEvent(event)
-
-        return EffectivePaymentPlan(
-            priceCents = event.resolvedDivisionPriceCents(preferredDivisionId),
-            allowPaymentPlans = allowPaymentPlans,
-            installmentAmounts = if (allowPaymentPlans) {
-                val configuredAmounts = selectedDivision?.installmentAmounts
-                    ?.takeIf { amounts -> amounts.isNotEmpty() }
-                    ?: emptyList()
-                configuredAmounts.map { amount -> amount.coerceAtLeast(0) }
-            } else {
-                emptyList()
-            },
-            installmentDueDates = if (allowPaymentPlans && !useRelativeDueDates) {
-                val configuredDueDates = selectedDivision?.installmentDueDates
-                    ?.takeIf { dueDates -> dueDates.isNotEmpty() }
-                    ?: emptyList()
-                configuredDueDates
-                    .map { dueDate -> dueDate.trim() }
-                    .filter(String::isNotBlank)
-            } else {
-                emptyList()
-            },
-            installmentDueRelativeDays = if (allowPaymentPlans && useRelativeDueDates) {
-                val configuredRelativeDays = selectedDivision?.installmentDueRelativeDays
-                    ?.takeIf { dueDays -> dueDays.isNotEmpty() }
-                    ?: emptyList()
-                configuredRelativeDays
-            } else {
-                emptyList()
-            },
-        )
     }
 
     private fun checkEventIsFull(
