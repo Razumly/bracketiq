@@ -82,7 +82,6 @@ import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.network.MvpApiClient
-import com.razumly.mvp.core.network.dto.InviteCreateDto
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
@@ -4377,8 +4376,8 @@ class DefaultEventDetailComponent(
     }
 
     override fun searchUsers(query: String) {
-        val normalizedQuery = query.trim()
-        if (normalizedQuery.isEmpty()) {
+        val normalizedQuery = normalizedInviteSearchQuery(query)
+        if (normalizedQuery == null) {
             _suggestedUsers.value = emptyList()
             return
         }
@@ -4393,8 +4392,8 @@ class DefaultEventDetailComponent(
     }
 
     override fun searchInviteTeams(query: String) {
-        val normalizedQuery = query.trim()
-        if (normalizedQuery.length < 2) {
+        val normalizedQuery = normalizedInviteSearchQuery(query, minLength = 2)
+        if (normalizedQuery == null) {
             _inviteTeamSuggestions.value = emptyList()
             _inviteTeamsLoading.value = false
             return
@@ -4553,40 +4552,30 @@ class DefaultEventDetailComponent(
     }
 
     private fun currentInviteOrganizationId(event: Event = selectedEvent.value): String? {
-        return event.organizationId
-            ?.trim()
-            ?.takeIf(String::isNotBlank)
-            ?: eventWithRelations.value.organization?.id?.trim()?.takeIf(String::isNotBlank)
+        return resolveEventInviteOrganizationId(
+            event = event,
+            relationOrganizationId = eventWithRelations.value.organization?.id,
+        )
     }
 
     private fun currentInviteSportName(event: Event = selectedEvent.value): String? {
-        return eventWithRelations.value.sport?.name
-            ?.trim()
-            ?.takeIf(String::isNotBlank)
-            ?: event.sportId?.trim()?.takeIf(String::isNotBlank)
+        return resolveEventInviteSportName(
+            event = event,
+            relationSportName = eventWithRelations.value.sport?.name,
+        )
     }
 
-    private fun eventParticipantTeamIdsForInviteSearch(event: Event = selectedEvent.value): Set<String> = buildSet {
-        event.teamIds
-            .map(String::trim)
-            .filter(String::isNotBlank)
-            .forEach(::add)
-        eventWithRelations.value.teams.forEach { teamWithPlayers ->
-            val team = teamWithPlayers.team
-            team.id.trim().takeIf(String::isNotBlank)?.let(::add)
-            team.parentTeamId?.trim()?.takeIf(String::isNotBlank)?.let(::add)
-        }
-    }
+    private fun eventParticipantTeamIdsForInviteSearch(event: Event = selectedEvent.value): Set<String> =
+        eventParticipantTeamIdsForInviteSearch(
+            event = event,
+            teams = eventWithRelations.value.teams,
+        )
 
-    private fun eventParticipantUserIdsForInviteSearch(event: Event = selectedEvent.value): Set<String> = buildSet {
-        addAll(event.playerIds.map(String::trim).filter(String::isNotBlank))
-        addAll(event.waitListIds.map(String::trim).filter(String::isNotBlank))
-        addAll(event.freeAgentIds.map(String::trim).filter(String::isNotBlank))
-        eventWithRelations.value.players
-            .map { player -> player.id.trim() }
-            .filter(String::isNotBlank)
-            .forEach(::add)
-    }
+    private fun eventParticipantUserIdsForInviteSearch(event: Event = selectedEvent.value): Set<String> =
+        eventParticipantUserIdsForInviteSearch(
+            event = event,
+            players = eventWithRelations.value.players,
+        )
 
     private suspend fun createEventPlayerInvite(
         event: Event,
@@ -4595,25 +4584,19 @@ class DefaultEventDetailComponent(
         firstName: String?,
         lastName: String?,
     ): Result<List<Invite>> {
-        val eventId = event.id.trim()
-        if (eventId.isBlank()) {
-            return Result.failure(IllegalArgumentException("Event id is required."))
+        val invite = buildEventPlayerInviteRequest(
+            event = event,
+            organizationId = currentInviteOrganizationId(event),
+            userId = userId,
+            email = email,
+            firstName = firstName,
+            lastName = lastName,
+            createdBy = currentUser.value.id,
+        ).getOrElse { throwable ->
+            return Result.failure(throwable)
         }
-        val creatorId = currentUser.value.id.trim().takeIf(String::isNotBlank)
         return userRepository.createInvites(
-            invites = listOf(
-                InviteCreateDto(
-                    type = "EVENT",
-                    status = "PENDING",
-                    eventId = eventId,
-                    organizationId = currentInviteOrganizationId(event),
-                    userId = userId?.trim()?.takeIf(String::isNotBlank),
-                    email = email?.trim()?.lowercase()?.takeIf(String::isNotBlank),
-                    firstName = firstName?.trim()?.takeIf(String::isNotBlank),
-                    lastName = lastName?.trim()?.takeIf(String::isNotBlank),
-                    createdBy = creatorId,
-                ),
-            ),
+            invites = listOf(invite),
         )
     }
 
