@@ -23,6 +23,7 @@ After this refactor, the app should behave the same for users, but the code will
 - [x] (2026-06-22) Extracted payment-plan preview state, selected-division resolution, and effective payment-plan normalization into `EventPaymentPlanHelpers.kt` with focused tests.
 - [x] (2026-06-22) Extracted deterministic signature context queue and pending-step matching helpers into `EventSignatureFlowHelpers.kt` with focused tests.
 - [x] (2026-06-22) Extracted event registration question answer normalization, missing-required detection, and request filtering into `EventRegistrationFlowHelpers.kt` with focused tests.
+- [x] (2026-06-22) Extracted current-user registration cache membership, withdraw-target classification, refund eligibility, team-withdrawal decision, and registration/payment error predicates into `EventRegistrationFlowHelpers.kt` with focused tests.
 - [ ] Extract registration, join, withdraw, refund, payment preview, and signature flow state into a cohesive coordinator without changing public behavior.
 - [ ] Extract participant management and invite/search coordination where it can be tested independently.
 - [ ] Thin `DefaultEventDetailComponent` so it owns Decompose lifecycle, public state exposure, and delegation, while helpers own domain-specific transformations.
@@ -59,6 +60,9 @@ After this refactor, the app should behave the same for users, but the code will
 
 - Observation: Event registration question answer handling has a deterministic core separate from dialog continuation and persistence.
   Evidence: `EventRegistrationQuestionHelpersTest` covers answer-id normalization, all-dialog-question answer maps, missing required answer selection, request filtering, and empty-question fallback behavior without constructing `DefaultEventDetailComponent`.
+
+- Observation: Withdraw and refund flow still has a deterministic membership core separate from repository calls and UI state.
+  Evidence: `EventWithdrawTargetHelpersTest` covers cached SELF/TEAM registration membership, weekly occurrence filtering, current-user cached-state precedence, event snapshot membership, paid-refund eligibility, team-withdrawal decisions, and server-message predicates without constructing `DefaultEventDetailComponent`.
 
 ## Decision Log
 
@@ -102,6 +106,10 @@ After this refactor, the app should behave the same for users, but the code will
   Rationale: The helper can preserve the existing answer filtering contract with direct tests. The component still owns UI state and side effects, which keeps this milestone low risk and prepares the eventual registration coordinator extraction.
   Date/Author: 2026-06-22 / Codex
 
+- Decision: Extract withdraw/refund membership rules before a side-effectful registration coordinator.
+  Rationale: Cached registration classification, snapshot membership resolution, paid-refund eligibility, team-withdrawal selection, and known server-message predicates are pure decisions. Repository calls, selected profile refresh, loading/error state, and payment/refund mutations remain in `DefaultEventDetailComponent` until a coordinator can own them coherently.
+  Date/Author: 2026-06-22 / Codex
+
 ## Outcomes & Retrospective
 
 The first implementation milestone is complete. `EventEditPayloadBuilder.kt` now owns event update payload preparation, editable field draft normalization, league slot draft normalization, default field helpers, default league slot creation, league scoring DTO conversion, and recurring slot date-boundary helpers. `DefaultEventDetailComponent` still owns public state, lifecycle, repository calls, and state assignment after helper output. `EventDetailComponent.kt` dropped from 7,904 lines to 7,492 lines after this milestone.
@@ -115,6 +123,8 @@ The fourth implementation milestone is another partial registration-flow extract
 The fifth implementation milestone is a partial signature-flow extraction. `EventSignatureFlowHelpers.kt` now owns signature context queue construction, indexed context fallback, and pending signature step matching. `DefaultEventDetailComponent` still owns signature step loading, prompt state, polling, text signature submission, purchase intent document prompts, billing side effects, repository calls, and UI-facing state. `EventDetailComponent.kt` dropped further to 7,077 lines after this milestone.
 
 The sixth implementation milestone is another partial registration-flow extraction. `EventRegistrationFlowHelpers.kt` now also owns event registration question answer updates, dialog answer normalization, missing required question detection, and request-answer filtering. `DefaultEventDetailComponent` still owns dialog state, continuation execution, registration-progress persistence, repository calls, and UI-facing state. `EventDetailComponent.kt` dropped further to 7,067 lines after this milestone.
+
+The seventh implementation milestone is another partial registration/withdraw/refund extraction. `EventRegistrationFlowHelpers.kt` now also owns current-user registration-cache membership resolution, event snapshot membership helpers, withdraw-target membership classification, paid-refund eligibility, registered-team withdrawal decisions, and duplicate/already-registered error predicates. `DefaultEventDetailComponent` still owns selected weekly occurrence state, child target loading, repository calls, payment/refund mutations, loading/error state, and UI-facing state. `EventDetailComponent.kt` dropped further to 6,910 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining plan work is to extract the side-effectful registration/payment/signature coordinator, then participant/invite coordination.
 
@@ -237,6 +247,17 @@ Existing direct component test evidence:
 Baseline focused tests passed before source extraction:
 
     ./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailMobileJoinFlowTest*" --tests "*EventDetailWeeklyBehaviorTest*" --tests "*LeagueSlotValidationTest*" --tests "*EventDetailsScheduleLockingTest*" --tests "*EventDetailDivisionOptionsTest*"
+    Exit code: 0
+
+Withdraw/refund helper extraction tests passed:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventWithdrawTargetHelpersTest*"
+    Exit code: 0
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventRegistrationQuestionHelpersTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 0
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
     Exit code: 0
     Result: BUILD SUCCESSFUL in 49s; 43 actionable tasks: 5 executed, 38 up-to-date.
     Notes: Gradle started the local backend from `/Users/elesesy/StudioProjects/mvp-site`; `adb` was not found, so emulator port reverse was skipped.

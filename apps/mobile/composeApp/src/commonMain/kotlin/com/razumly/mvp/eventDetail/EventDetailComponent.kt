@@ -15,7 +15,6 @@ import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
-import com.razumly.mvp.core.data.dataTypes.EventRegistrationCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
@@ -426,19 +425,6 @@ internal fun weeklyOccurrenceSummaryKey(
     return "$normalizedSlotId|$normalizedOccurrenceDate"
 }
 
-enum class WithdrawTargetMembership {
-    PARTICIPANT,
-    WAITLIST,
-    FREE_AGENT,
-}
-
-data class WithdrawTargetOption(
-    val userId: String,
-    val fullName: String,
-    val membership: WithdrawTargetMembership,
-    val isSelf: Boolean,
-)
-
 private data class WithdrawTargetsRefreshKey(
     val eventId: String,
     val occurrenceKey: String?,
@@ -465,58 +451,6 @@ private fun FamilyChild.toJoinChildOption(): JoinChildOption {
         hasEmail = hasEmail ?: (normalizedEmail != null),
     )
 }
-
-internal fun matchingParticipantTeamId(
-    event: Event,
-    currentUserTeamIds: Set<String>,
-): String? {
-    if (!event.teamSignup || currentUserTeamIds.isEmpty()) {
-        return null
-    }
-    return event.teamIds
-        .asSequence()
-        .map(String::trim)
-        .filter(String::isNotBlank)
-        .firstOrNull { teamId -> currentUserTeamIds.contains(teamId) }
-}
-
-internal fun isUserParticipantInEventSnapshot(
-    event: Event,
-    currentUserId: String,
-    currentUserTeamIds: Set<String>,
-): Boolean {
-    val normalizedUserId = currentUserId.trim()
-    if (normalizedUserId.isNotBlank() && event.playerIds.any { playerId -> playerId == normalizedUserId }) {
-        return true
-    }
-    return matchingParticipantTeamId(event, currentUserTeamIds) != null
-}
-
-private fun EventRegistrationCacheEntry.matchesCurrentUserTeamIds(currentUserTeamIds: Set<String>): Boolean {
-    if (currentUserTeamIds.isEmpty()) {
-        return false
-    }
-    return sequenceOf(
-        parentId,
-        eventTeamId,
-        registrantId,
-    )
-        .mapNotNull { value -> value?.trim()?.takeIf(String::isNotBlank) }
-        .any(currentUserTeamIds::contains)
-}
-
-private fun EventRegistrationCacheEntry.resolvedEventTeamId(): String? =
-    eventTeamId?.trim()?.takeIf(String::isNotBlank)
-        ?: registrantId.trim().takeIf(String::isNotBlank)
-
-private data class CurrentUserRegistrationMembershipState(
-    val participant: Boolean = false,
-    val waitlist: Boolean = false,
-    val freeAgent: Boolean = false,
-    val paymentPending: Boolean = false,
-    val paymentFailed: Boolean = false,
-    val teamId: String? = null,
-)
 
 private data class ParticipantManagementRoomTarget(
     val eventId: String,
@@ -2389,16 +2323,6 @@ class DefaultEventDetailComponent(
         return Clock.System.now() >= selection.sessionStart
     }
 
-    private fun shouldUseRegisteredTeamWithdrawal(
-        event: Event,
-        targetUserId: String,
-        membership: WithdrawTargetMembership,
-    ): Boolean =
-        membership == WithdrawTargetMembership.PARTICIPANT &&
-            event.teamSignup &&
-            targetUserId == currentUser.value.id &&
-            !checkIsUserFreeAgent(event)
-
     private fun isJoinBlockedByStart(event: Event = selectedEvent.value): Boolean {
         if (isWeeklyParentEvent(event)) {
             return hasSelectedWeeklyOccurrenceStarted(event)
@@ -2722,9 +2646,6 @@ class DefaultEventDetailComponent(
             errorMessage = "Select an occurrence before joining or managing registrations.",
         ) != null
     }
-
-    private fun canRequestPaidRefund(event: Event, membership: WithdrawTargetMembership): Boolean =
-        event.hasAnyPaidDivision() && membership == WithdrawTargetMembership.PARTICIPANT
 
     override fun joinEvent() {
         scope.launch {
@@ -3323,18 +3244,6 @@ class DefaultEventDetailComponent(
     private enum class PaymentPlanBillStatus {
         CREATED,
         ALREADY_EXISTS,
-    }
-
-    private fun Throwable.isAlreadyRegisteredJoinError(): Boolean {
-        val normalized = message?.lowercase() ?: return false
-        return normalized.contains("already registered") ||
-            normalized.contains("already in event") ||
-            normalized.contains("already a participant")
-    }
-
-    private fun Throwable.isDuplicatePaymentPlanError(): Boolean {
-        val normalized = message?.lowercase() ?: return false
-        return normalized.contains("payment plan already exists")
     }
 
     private suspend fun createPaymentPlanBillForOwner(
@@ -4051,10 +3960,12 @@ class DefaultEventDetailComponent(
                 )
                 return@launch
             }
-            val useTeamWithdrawal = shouldUseRegisteredTeamWithdrawal(
+            val useTeamWithdrawal = usesRegisteredTeamWithdrawal(
                 event = event,
                 targetUserId = normalizedTargetUserId,
+                currentUserId = currentUser.value.id,
                 membership = membership,
+                currentUserIsFreeAgent = checkIsUserFreeAgent(event),
             )
             if (weeklyOccurrence != null && !useTeamWithdrawal) {
                 _errorState.value = ErrorMessage(
@@ -4133,10 +4044,12 @@ class DefaultEventDetailComponent(
                 _errorState.value = ErrorMessage("Automatic refunds are no longer available after the event starts.")
                 return@launch
             }
-            val useTeamWithdrawal = shouldUseRegisteredTeamWithdrawal(
+            val useTeamWithdrawal = usesRegisteredTeamWithdrawal(
                 event = event,
                 targetUserId = normalizedTargetUserId,
+                currentUserId = currentUser.value.id,
                 membership = membership,
+                currentUserIsFreeAgent = checkIsUserFreeAgent(event),
             )
             if (weeklyOccurrence != null && !useTeamWithdrawal) {
                 _errorState.value = ErrorMessage(
@@ -4218,10 +4131,12 @@ class DefaultEventDetailComponent(
                 WithdrawTargetMembership.PARTICIPANT -> {
                     if (
                         leavingSelf &&
-                        shouldUseRegisteredTeamWithdrawal(
+                        usesRegisteredTeamWithdrawal(
                             event = event,
                             targetUserId = normalizedTargetUserId,
+                            currentUserId = currentUser.value.id,
                             membership = membership,
+                            currentUserIsFreeAgent = checkIsUserFreeAgent(event),
                         )
                     ) {
                         loadingHandler.showLoading("Team Leaving Event ...")
@@ -6198,65 +6113,12 @@ class DefaultEventDetailComponent(
     private fun resolveCachedCurrentUserRegistrationMembership(
         event: Event,
     ): CurrentUserRegistrationMembershipState? {
-        val registrations = cachedCurrentUserRegistrations.value
-        if (registrations.isEmpty()) {
-            return null
-        }
-
-        val selectedOccurrence = currentWeeklyOccurrenceSelection()
-        val currentUserId = currentUser.value.id.trim()
-        val currentUserTeamIds = currentUserTeamIds()
-        val matchingRegistrations = registrations.filter { registration ->
-            val matchesRegistrant = when (registration.registrantType.trim().uppercase()) {
-                "SELF" -> currentUserId.isNotBlank() && registration.registrantId == currentUserId
-                "TEAM" -> registration.matchesCurrentUserTeamIds(currentUserTeamIds)
-                else -> false
-            }
-            if (!matchesRegistrant) {
-                return@filter false
-            }
-
-            if (isWeeklyParentEvent(event)) {
-                selectedOccurrence != null &&
-                    registration.slotId == selectedOccurrence.slotId &&
-                    registration.occurrenceDate == selectedOccurrence.occurrenceDate
-            } else {
-                registration.slotId.isNullOrBlank() && registration.occurrenceDate.isNullOrBlank()
-            }
-        }
-        if (matchingRegistrations.isEmpty()) {
-            return CurrentUserRegistrationMembershipState()
-        }
-
-        val activeRegistrations = matchingRegistrations.filter { registration ->
-            registration.isActiveForMembership()
-        }
-        val participant = activeRegistrations.any { registration ->
-            registration.normalizedRosterRole() == "PARTICIPANT"
-        }
-        val waitlist = activeRegistrations.any { registration ->
-            registration.normalizedRosterRole() == "WAITLIST"
-        }
-        val freeAgent = activeRegistrations.any { registration ->
-            registration.normalizedRosterRole() == "FREE_AGENT"
-        }
-        val paymentPending = activeRegistrations.any { registration ->
-            registration.isPaymentPending()
-        }
-        val paymentFailed = matchingRegistrations.any { registration ->
-            registration.isPaymentFailed()
-        }
-        val teamId = activeRegistrations
-            .firstOrNull { registration -> registration.registrantType.trim().uppercase() == "TEAM" }
-            ?.resolvedEventTeamId()
-
-        return CurrentUserRegistrationMembershipState(
-            participant = participant,
-            waitlist = waitlist,
-            freeAgent = freeAgent,
-            paymentPending = paymentPending,
-            paymentFailed = paymentFailed,
-            teamId = teamId,
+        return resolveCurrentUserRegistrationMembership(
+            registrations = cachedCurrentUserRegistrations.value,
+            selectedOccurrence = currentWeeklyOccurrenceSelection(),
+            currentUserId = currentUser.value.id,
+            currentUserTeamIds = currentUserTeamIds(),
+            isWeeklyParentEvent = isWeeklyParentEvent(event),
         )
     }
 
@@ -6305,37 +6167,18 @@ class DefaultEventDetailComponent(
         event: Event,
         userId: String,
     ): WithdrawTargetMembership? {
-        if (isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() == null) {
-            return null
-        }
-        if (userId == currentUser.value.id) {
-            resolveCachedCurrentUserRegistrationMembership(event)?.let { cachedState ->
-                return when {
-                    cachedState.participant -> WithdrawTargetMembership.PARTICIPANT
-                    cachedState.waitlist -> WithdrawTargetMembership.WAITLIST
-                    cachedState.freeAgent -> WithdrawTargetMembership.FREE_AGENT
-                    else -> null
-                }
-            }
-        }
-        return when {
-            event.playerIds.contains(userId) -> WithdrawTargetMembership.PARTICIPANT
-            event.waitList.contains(userId) -> WithdrawTargetMembership.WAITLIST
-            event.freeAgents.contains(userId) -> WithdrawTargetMembership.FREE_AGENT
-            event.teamSignup && userId == currentUser.value.id -> {
-                val userTeamIds = currentUserTeamIds()
-                when {
-                    matchingParticipantTeamId(event, userTeamIds) != null ->
-                        WithdrawTargetMembership.PARTICIPANT
-                    event.waitList.any { teamId -> userTeamIds.contains(teamId) } ->
-                        WithdrawTargetMembership.WAITLIST
-                    event.freeAgents.any { teamId -> userTeamIds.contains(teamId) } ->
-                        WithdrawTargetMembership.FREE_AGENT
-                    else -> null
-                }
-            }
-            else -> null
-        }
+        return resolveWithdrawTargetMembershipFromEvent(
+            event = event,
+            targetUserId = userId,
+            currentUserId = currentUser.value.id,
+            currentUserTeamIds = currentUserTeamIds(),
+            currentUserMembership = if (userId == currentUser.value.id) {
+                resolveCachedCurrentUserRegistrationMembership(event)
+            } else {
+                null
+            },
+            weeklyParentWithoutSelection = isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() == null,
+        )
     }
 
     private fun currentUserTeamIds(): Set<String> {
