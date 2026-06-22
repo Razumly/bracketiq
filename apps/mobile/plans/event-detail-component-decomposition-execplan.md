@@ -19,6 +19,7 @@ After this refactor, the app should behave the same for users, but the code will
 - [x] (2026-06-22) Recorded a clean baseline with focused event-detail tests and common metadata compilation before moving component logic.
 - [x] (2026-06-22) Extracted event edit payload, field draft, and timeslot draft preparation into `EventEditPayloadBuilder.kt` with direct focused tests.
 - [x] (2026-06-22) Extracted pure match/bracket graph normalization, editable match validation, and bracket reset helpers into `EventMatchEditHelpers.kt` with direct focused tests.
+- [x] (2026-06-22) Extracted join-confirmation target construction, event snapshot/cache matching, and registration-cache membership predicates into `EventRegistrationFlowHelpers.kt` with focused tests.
 - [ ] Extract registration, join, withdraw, refund, payment preview, and signature flow state into a cohesive coordinator without changing public behavior.
 - [ ] Extract participant management and invite/search coordination where it can be tested independently.
 - [ ] Thin `DefaultEventDetailComponent` so it owns Decompose lifecycle, public state exposure, and delegation, while helpers own domain-specific transformations.
@@ -43,6 +44,9 @@ After this refactor, the app should behave the same for users, but the code will
 
 - Observation: The bracket round layout logic is not purely a graph helper because it still depends on component UI state for the losers bracket toggle.
   Evidence: `buildBracketRounds(...)` and `shouldIncludeInCurrentBracket(...)` still read `losersBracket.value`, so the second extraction moved bracket node construction, graph normalization, validation, and reset rules but left round layout inside `DefaultEventDetailComponent`.
+
+- Observation: The first safe registration extraction is the join-confirmation boundary, not the full registration workflow.
+  Evidence: `registrationMatchesJoinConfirmationTarget(...)`, `eventSnapshotMatchesJoinConfirmationTarget(...)`, and registration-cache membership predicates are deterministic, while payment preview, purchase intent processing, signature queues, and withdraw/refund flows still coordinate repositories, state flows, and UI prompts.
 
 ## Decision Log
 
@@ -70,13 +74,19 @@ After this refactor, the app should behave the same for users, but the code will
   Rationale: Graph normalization, overlap validation, schedule-match requirements, tournament-link requirements, and bracket reset decisions are deterministic and directly testable. Staged-match creation still depends on component state, generated IDs, current time, selected division, dialog opening, and editable-round refreshes, so it should move only after the pure helpers are stable.
   Date/Author: 2026-06-22 / Codex
 
+- Decision: Split the registration/payment milestone into a pure join-confirmation helper first, leaving a coordinator extraction for a later step.
+  Rationale: The join-confirmation helpers have clear input/output contracts and already had direct weekly behavior coverage. Moving them first reduces component size without changing the side-effectful payment, signature, withdraw, or refund flows.
+  Date/Author: 2026-06-22 / Codex
+
 ## Outcomes & Retrospective
 
 The first implementation milestone is complete. `EventEditPayloadBuilder.kt` now owns event update payload preparation, editable field draft normalization, league slot draft normalization, default field helpers, default league slot creation, league scoring DTO conversion, and recurring slot date-boundary helpers. `DefaultEventDetailComponent` still owns public state, lifecycle, repository calls, and state assignment after helper output. `EventDetailComponent.kt` dropped from 7,904 lines to 7,492 lines after this milestone.
 
 The second implementation milestone is complete. `EventMatchEditHelpers.kt` now owns editable bracket node construction, bracket graph normalization, editable match validation, bracket match detection, and reset-to-empty-bracket-match behavior. `DefaultEventDetailComponent` still owns staged-match creation, edit-mode state, repository calls, and UI round layout. `EventDetailComponent.kt` dropped further to 7,322 lines after this milestone.
 
-Focused helper tests and related schedule/weekly/match regression tests pass. The remaining plan work is to extract registration/payment/signature workflow state, then participant/invite coordination.
+The third implementation milestone is a partial registration-flow extraction. `EventRegistrationFlowHelpers.kt` now owns join-confirmation target construction, event snapshot matching, registration-cache matching, and registration-cache status/role predicates. `DefaultEventDetailComponent` still owns payment previews, purchase intent processing, signature queues, withdraw/refund flows, repository calls, and UI-facing state. `EventDetailComponent.kt` dropped further to 7,220 lines after this milestone.
+
+Focused helper tests and related schedule/weekly/match/join regression tests pass. The remaining plan work is to extract the side-effectful registration/payment/signature coordinator, then participant/invite coordination.
 
 ## Context and Orientation
 
@@ -287,6 +297,34 @@ Second milestone whitespace audit passed:
     git diff --check
     Exit code: 0
 
+Join-confirmation helper extraction focused tests passed:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailWeeklyBehaviorTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 2m 7s; 43 actionable tasks: 10 executed, 33 up-to-date.
+
+Related mobile join flow regression tests passed:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 23s; 43 actionable tasks: 5 executed, 38 up-to-date.
+
+Milestone common metadata compilation passed after join-confirmation tests:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 18s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Third milestone line-count evidence:
+
+    7220 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     109 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowHelpers.kt
+
+Third milestone whitespace audit passed:
+
+    git diff --check
+    Exit code: 0
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -320,3 +358,4 @@ Revision Note (2026-06-22): Added explicit test-after-every-update discipline an
 Revision Note (2026-06-22): Recorded passing baseline focused event-detail tests and common metadata compilation before source extraction.
 Revision Note (2026-06-22): Recorded completion of the event edit payload helper extraction, direct tests, regression tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded completion of the pure match/bracket helper extraction, direct tests, related regression tests, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded completion of the join-confirmation helper extraction, focused and broader join-flow tests, compile checks, and line-count impact.

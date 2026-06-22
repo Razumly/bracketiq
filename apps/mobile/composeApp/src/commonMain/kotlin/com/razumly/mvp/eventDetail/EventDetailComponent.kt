@@ -428,18 +428,6 @@ data class WeeklyOccurrenceSummary(
     val participantCapacity: Int?,
 )
 
-internal enum class JoinConfirmationRegistrantType {
-    SELF,
-    TEAM,
-}
-
-internal data class JoinConfirmationTarget(
-    val eventId: String,
-    val registrantType: JoinConfirmationRegistrantType,
-    val registrantId: String,
-    val occurrence: EventOccurrenceSelection? = null,
-)
-
 internal fun weeklyOccurrenceSummaryKey(
     slotId: String?,
     occurrenceDate: String?,
@@ -514,79 +502,6 @@ internal fun isUserParticipantInEventSnapshot(
     }
     return matchingParticipantTeamId(event, currentUserTeamIds) != null
 }
-
-internal fun registrationMatchesJoinConfirmationTarget(
-    registration: EventRegistrationCacheEntry,
-    target: JoinConfirmationTarget,
-): Boolean {
-    if (registration.eventId != target.eventId || !registration.isActiveForMembership()) {
-        return false
-    }
-    if (registration.normalizedRosterRole() != "PARTICIPANT") {
-        return false
-    }
-    val expectedRegistrantType = target.registrantType.name
-    if (!registration.registrantType.trim().equals(expectedRegistrantType, ignoreCase = true)) {
-        return false
-    }
-    val registrationMatchesRegistrant = when (expectedRegistrantType) {
-        "TEAM" -> setOf(
-            registration.registrantId,
-            registration.parentId,
-            registration.eventTeamId,
-        ).any { value -> value?.trim() == target.registrantId }
-
-        else -> registration.registrantId == target.registrantId
-    }
-    if (!registrationMatchesRegistrant) {
-        return false
-    }
-    return if (target.occurrence != null) {
-        registration.slotId == target.occurrence.slotId &&
-            registration.occurrenceDate == target.occurrence.occurrenceDate
-    } else {
-        registration.slotId.isNullOrBlank() && registration.occurrenceDate.isNullOrBlank()
-    }
-}
-
-internal fun eventSnapshotMatchesJoinConfirmationTarget(
-    event: Event,
-    target: JoinConfirmationTarget,
-): Boolean {
-    val registrantId = target.registrantId.trim()
-    if (registrantId.isBlank()) {
-        return false
-    }
-    return when (target.registrantType) {
-        JoinConfirmationRegistrantType.SELF -> event.playerIds.any { playerId ->
-            playerId.trim() == registrantId
-        }
-
-        JoinConfirmationRegistrantType.TEAM -> event.teamIds.any { teamId ->
-            teamId.trim() == registrantId
-        }
-    }
-}
-
-private fun EventRegistrationCacheEntry.normalizedRosterRole(): String =
-    rosterRole?.trim()?.uppercase().orEmpty()
-
-private fun EventRegistrationCacheEntry.normalizedStatus(): String =
-    status?.trim()?.uppercase().orEmpty()
-
-private fun EventRegistrationCacheEntry.isCancelledLike(): Boolean =
-    normalizedStatus() == "CANCELLED"
-
-private fun EventRegistrationCacheEntry.isActiveForMembership(): Boolean =
-    !isCancelledLike() &&
-        normalizedStatus() != "CONSENTFAILED" &&
-        normalizedStatus() != "PAYMENT_FAILED"
-
-private fun EventRegistrationCacheEntry.isPaymentPending(): Boolean =
-    normalizedStatus() == "PENDING"
-
-private fun EventRegistrationCacheEntry.isPaymentFailed(): Boolean =
-    normalizedStatus() == "PAYMENT_FAILED"
 
 private fun EventRegistrationCacheEntry.matchesCurrentUserTeamIds(currentUserTeamIds: Set<String>): Boolean {
     if (currentUserTeamIds.isEmpty()) {
@@ -2689,25 +2604,6 @@ class DefaultEventDetailComponent(
         }
     }
 
-    private fun buildJoinConfirmationTarget(
-        registrantType: JoinConfirmationRegistrantType,
-        registrantId: String,
-        occurrence: EventOccurrenceSelection? = null,
-        eventId: String = selectedEvent.value.id,
-    ): JoinConfirmationTarget? {
-        val normalizedRegistrantId = registrantId.trim()
-        val normalizedEventId = eventId.trim()
-        if (normalizedRegistrantId.isBlank() || normalizedEventId.isBlank()) {
-            return null
-        }
-        return JoinConfirmationTarget(
-            eventId = normalizedEventId,
-            registrantType = registrantType,
-            registrantId = normalizedRegistrantId,
-            occurrence = occurrence,
-        )
-    }
-
     private fun rememberWeeklyOccurrenceSummary(
         occurrence: EventOccurrenceSelection,
         summary: WeeklyOccurrenceSummary,
@@ -3751,6 +3647,7 @@ class DefaultEventDetailComponent(
                 )
                     .onSuccess { purchaseIntent ->
                         pendingJoinConfirmationTarget = buildJoinConfirmationTarget(
+                            eventId = selectedEvent.value.id,
                             registrantType = JoinConfirmationRegistrantType.SELF,
                             registrantId = currentUser.value.id,
                             occurrence = weeklyOccurrence,
@@ -3869,6 +3766,7 @@ class DefaultEventDetailComponent(
                 )
                     .onSuccess { purchaseIntent ->
                         pendingJoinConfirmationTarget = buildJoinConfirmationTarget(
+                            eventId = selectedEvent.value.id,
                             registrantType = JoinConfirmationRegistrantType.TEAM,
                             registrantId = team.team.id,
                             occurrence = weeklyOccurrence,

@@ -8,6 +8,7 @@ import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Instant
 
@@ -131,6 +132,47 @@ class EventDetailWeeklyBehaviorTest {
     }
 
     @Test
+    fun join_confirmation_target_trims_event_and_registrant_ids() {
+        val occurrence = EventOccurrenceSelection(
+            slotId = "slot-1",
+            occurrenceDate = "2026-04-14",
+        )
+
+        assertEquals(
+            JoinConfirmationTarget(
+                eventId = "weekly-event",
+                registrantType = JoinConfirmationRegistrantType.TEAM,
+                registrantId = "team-1",
+                occurrence = occurrence,
+            ),
+            buildJoinConfirmationTarget(
+                eventId = " weekly-event ",
+                registrantType = JoinConfirmationRegistrantType.TEAM,
+                registrantId = " team-1 ",
+                occurrence = occurrence,
+            ),
+        )
+    }
+
+    @Test
+    fun join_confirmation_target_requires_event_and_registrant_ids() {
+        assertNull(
+            buildJoinConfirmationTarget(
+                eventId = " ",
+                registrantType = JoinConfirmationRegistrantType.SELF,
+                registrantId = "user-1",
+            ),
+        )
+        assertNull(
+            buildJoinConfirmationTarget(
+                eventId = "weekly-event",
+                registrantType = JoinConfirmationRegistrantType.SELF,
+                registrantId = " ",
+            ),
+        )
+    }
+
+    @Test
     fun cached_join_confirmation_requires_exact_weekly_occurrence_match() {
         val target = JoinConfirmationTarget(
             eventId = "weekly-event",
@@ -172,6 +214,44 @@ class EventDetailWeeklyBehaviorTest {
                 target = target,
             ),
         )
+    }
+
+    @Test
+    fun cached_join_confirmation_requires_active_participant_registration() {
+        val target = JoinConfirmationTarget(
+            eventId = "weekly-event",
+            registrantType = JoinConfirmationRegistrantType.SELF,
+            registrantId = "user-1",
+        )
+        val activeParticipant = EventRegistrationCacheEntry(
+            id = "reg-1",
+            eventId = "weekly-event",
+            registrantId = "user-1",
+            registrantType = "SELF",
+            rosterRole = "PARTICIPANT",
+            status = "ACTIVE",
+        )
+
+        assertTrue(
+            registrationMatchesJoinConfirmationTarget(
+                registration = activeParticipant,
+                target = target,
+            ),
+        )
+        assertFalse(
+            registrationMatchesJoinConfirmationTarget(
+                registration = activeParticipant.copy(rosterRole = "WAITLIST"),
+                target = target,
+            ),
+        )
+        listOf("CANCELLED", "CONSENTFAILED", "PAYMENT_FAILED").forEach { status ->
+            assertFalse(
+                registrationMatchesJoinConfirmationTarget(
+                    registration = activeParticipant.copy(status = status),
+                    target = target,
+                ),
+            )
+        }
     }
 
     @Test
