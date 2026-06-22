@@ -2071,7 +2071,7 @@ class DefaultEventDetailComponent(
                     if (_isEditing.value) {
                         _editedEvent.value = syncOfficialStaffingForSportTransition(
                             previous = _editedEvent.value,
-                            updated = _editedEvent.value.withSportRules(),
+                            updated = _editedEvent.value.withSportRules(_sports.value),
                         )
                     }
                 }
@@ -4305,7 +4305,7 @@ class DefaultEventDetailComponent(
         val seededEvent = if (enabled && _sports.value.isNotEmpty()) {
             syncOfficialStaffingForSportTransition(
                 previous = selected,
-                updated = selected.withSportRules(),
+                updated = selected.withSportRules(_sports.value),
             )
         } else {
             selected
@@ -4347,7 +4347,7 @@ class DefaultEventDetailComponent(
             previous = previous,
             updated = previous
                 .update()
-                .withSportRules(),
+                .withSportRules(_sports.value),
         )
         _editedEvent.value = updated
         _editableFields.value = syncEditableFieldsForEvent(previous, updated, _editableFields.value)
@@ -4364,7 +4364,7 @@ class DefaultEventDetailComponent(
             previous = previous,
             updated = previous
                 .update()
-                .withSportRules(),
+                .withSportRules(_sports.value),
         )
         _editedEvent.value = updated
         _editableFields.value = syncEditableFieldsForEvent(previous, updated, _editableFields.value)
@@ -5162,11 +5162,6 @@ class DefaultEventDetailComponent(
         editEventField { copy(eventType = type) }
     }
 
-    private fun usesSetScoringForSport(sportId: String?): Boolean = sportId
-        ?.let { selectedSportId -> _sports.value.firstOrNull { it.id == selectedSportId } }
-        ?.usePointsPerSetWin
-        ?: false
-
     private fun resolveSport(sportId: String?): Sport? = sportId
         ?.trim()
         ?.takeIf(String::isNotBlank)
@@ -5184,163 +5179,6 @@ class DefaultEventDetailComponent(
             sport = nextSport,
             replacePositionsWithSportDefaults = shouldReplaceDefaults,
         )
-    }
-
-    private fun Event.withSportRules(): Event {
-        val requiresSets = usesSetScoringForSport(sportId)
-        return when (eventType) {
-            EventType.EVENT, EventType.WEEKLY_EVENT -> this
-            EventType.LEAGUE -> applyLeagueSportRules(requiresSets)
-            EventType.TOURNAMENT -> applyTournamentSportRules(requiresSets)
-        }
-    }
-
-    private fun Event.applyLeagueSportRules(requiresSets: Boolean): Event {
-        return if (requiresSets) {
-            val allowedSetCounts = setOf(1, 3, 5)
-            val normalizedSets = setsPerMatch?.takeIf { allowedSetCounts.contains(it) } ?: 1
-            val normalizedPoints = pointsToVictory
-                .take(normalizedSets)
-                .toMutableList()
-                .apply {
-                    while (size < normalizedSets) add(21)
-                }
-            copy(
-                usesSets = true,
-                setsPerMatch = normalizedSets,
-                setDurationMinutes = setDurationMinutes,
-                pointsToVictory = normalizedPoints,
-                matchDurationMinutes = null,
-                divisionDetails = divisionDetails.map { detail ->
-                    detail.applyLeagueDivisionSportRules(requiresSets = true)
-                },
-            )
-        } else {
-            copy(
-                usesSets = false,
-                setsPerMatch = null,
-                setDurationMinutes = null,
-                pointsToVictory = emptyList(),
-                matchDurationMinutes = matchDurationMinutes,
-                winnerSetCount = 1,
-                loserSetCount = 1,
-                winnerBracketPointsToVictory = winnerBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
-                loserBracketPointsToVictory = loserBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
-                divisionDetails = divisionDetails.map { detail ->
-                    detail.applyLeagueDivisionSportRules(requiresSets = false)
-                },
-            )
-        }
-    }
-
-    private fun Event.applyTournamentSportRules(requiresSets: Boolean): Event {
-        return if (!requiresSets) {
-            copy(
-                usesSets = false,
-                setDurationMinutes = null,
-                matchDurationMinutes = matchDurationMinutes,
-                winnerSetCount = 1,
-                loserSetCount = 1,
-                winnerBracketPointsToVictory = winnerBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
-                loserBracketPointsToVictory = loserBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
-                divisionDetails = divisionDetails.map { detail ->
-                    detail.copy(playoffConfig = detail.playoffConfig?.applyTournamentSportRules(requiresSets = false))
-                },
-            )
-        } else {
-            val allowedSetCounts = setOf(1, 3, 5)
-            val winnerSets = winnerSetCount.takeIf { allowedSetCounts.contains(it) } ?: 1
-            val loserSets = loserSetCount.takeIf { allowedSetCounts.contains(it) } ?: 1
-            copy(
-                usesSets = true,
-                setDurationMinutes = setDurationMinutes,
-                matchDurationMinutes = null,
-                winnerSetCount = winnerSets,
-                loserSetCount = loserSets,
-                winnerBracketPointsToVictory = winnerBracketPointsToVictory
-                    .take(winnerSets)
-                    .toMutableList()
-                    .apply {
-                        while (size < winnerSets) add(21)
-                    },
-                loserBracketPointsToVictory = loserBracketPointsToVictory
-                    .take(loserSets)
-                    .toMutableList()
-                    .apply {
-                        while (size < loserSets) add(21)
-                    },
-                divisionDetails = divisionDetails.map { detail ->
-                    detail.copy(playoffConfig = detail.playoffConfig?.applyTournamentSportRules(requiresSets = true))
-                },
-            )
-        }
-    }
-
-    private fun DivisionDetail.applyLeagueDivisionSportRules(requiresSets: Boolean): DivisionDetail {
-        return if (requiresSets) {
-            val allowedSetCounts = setOf(1, 3, 5)
-            val normalizedSets = setsPerMatch?.takeIf { count -> count in allowedSetCounts } ?: 1
-            val normalizedPoints = pointsToVictory
-                .take(normalizedSets)
-                .toMutableList()
-                .apply {
-                    while (size < normalizedSets) add(21)
-                }
-            copy(
-                usesSets = true,
-                setsPerMatch = normalizedSets,
-                setDurationMinutes = setDurationMinutes,
-                pointsToVictory = normalizedPoints,
-                matchDurationMinutes = null,
-                playoffConfig = playoffConfig?.applyTournamentSportRules(requiresSets = true),
-            )
-        } else {
-            copy(
-                usesSets = false,
-                setsPerMatch = null,
-                setDurationMinutes = null,
-                pointsToVictory = emptyList(),
-                matchDurationMinutes = matchDurationMinutes,
-                playoffConfig = playoffConfig?.applyTournamentSportRules(requiresSets = false),
-            )
-        }
-    }
-
-    private fun TournamentConfig.applyTournamentSportRules(requiresSets: Boolean): TournamentConfig {
-        return if (requiresSets) {
-            val allowedSetCounts = setOf(1, 3, 5)
-            val winnerSets = winnerSetCount.takeIf { count -> count in allowedSetCounts } ?: 1
-            val loserSets = loserSetCount.takeIf { count -> count in allowedSetCounts } ?: 1
-            copy(
-                usesSets = true,
-                setDurationMinutes = setDurationMinutes,
-                matchDurationMinutes = null,
-                winnerSetCount = winnerSets,
-                loserSetCount = loserSets,
-                winnerBracketPointsToVictory = winnerBracketPointsToVictory
-                    .take(winnerSets)
-                    .toMutableList()
-                    .apply {
-                        while (size < winnerSets) add(21)
-                    },
-                loserBracketPointsToVictory = loserBracketPointsToVictory
-                    .take(loserSets)
-                    .toMutableList()
-                    .apply {
-                        while (size < loserSets) add(21)
-                    },
-            )
-        } else {
-            copy(
-                usesSets = false,
-                setDurationMinutes = null,
-                matchDurationMinutes = matchDurationMinutes,
-                winnerSetCount = 1,
-                loserSetCount = 1,
-                winnerBracketPointsToVictory = winnerBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
-                loserBracketPointsToVictory = loserBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
-            )
-        }
     }
 
     private fun generateRounds() {
