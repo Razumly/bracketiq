@@ -5,6 +5,7 @@ import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
+import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import kotlin.test.Test
@@ -364,6 +365,43 @@ class EventRegistrationFlowCoordinatorTest {
     }
 
     @Test
+    fun fee_breakdown_confirm_returns_continuation_and_clears_state() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val feeBreakdown = feeBreakdown()
+        var continued = false
+
+        coordinator.showFeeBreakdown(feeBreakdown) {
+            continued = true
+        }
+
+        assertTrue(coordinator.showFeeBreakdown.value)
+        assertEquals(feeBreakdown, coordinator.currentFeeBreakdown.value)
+
+        val continuation = coordinator.confirmFeeBreakdown()
+
+        assertFalse(coordinator.showFeeBreakdown.value)
+        assertNull(coordinator.currentFeeBreakdown.value)
+        assertFalse(continued)
+
+        continuation?.invoke()
+
+        assertTrue(continued)
+        assertNull(coordinator.confirmFeeBreakdown())
+    }
+
+    @Test
+    fun fee_breakdown_dismiss_clears_state_and_pending_continuation() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        coordinator.showFeeBreakdown(feeBreakdown()) {}
+
+        coordinator.dismissFeeBreakdown()
+
+        assertFalse(coordinator.showFeeBreakdown.value)
+        assertNull(coordinator.currentFeeBreakdown.value)
+        assertNull(coordinator.confirmFeeBreakdown())
+    }
+
+    @Test
     fun signature_prompts_can_be_shown_and_cleared_independently() {
         val coordinator = EventRegistrationFlowCoordinator()
         val textPrompt = TextSignaturePromptState(
@@ -456,6 +494,17 @@ class EventRegistrationFlowCoordinatorTest {
             totalAmountCents = 10000,
             installmentAmounts = listOf(5000, 5000),
             installmentDueDates = listOf("2026-07-01", "2026-08-01"),
+        )
+    }
+
+    private fun feeBreakdown(): FeeBreakdown {
+        return FeeBreakdown(
+            eventPrice = 10000,
+            stripeFee = 300,
+            processingFee = 500,
+            totalCharge = 10800,
+            hostReceives = 9500,
+            feePercentage = 5f,
         )
     }
 

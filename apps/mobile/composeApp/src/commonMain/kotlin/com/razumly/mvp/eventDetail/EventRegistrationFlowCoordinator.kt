@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.RegistrationProgressDraft
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
+import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -44,6 +45,12 @@ internal class EventRegistrationFlowCoordinator {
     private val _holdExpiresAt = MutableStateFlow<String?>(null)
     val holdExpiresAt = _holdExpiresAt.asStateFlow()
 
+    private val _showFeeBreakdown = MutableStateFlow(false)
+    val showFeeBreakdown = _showFeeBreakdown.asStateFlow()
+
+    private val _currentFeeBreakdown = MutableStateFlow<FeeBreakdown?>(null)
+    val currentFeeBreakdown = _currentFeeBreakdown.asStateFlow()
+
     private val _paymentPlanPreviewDialog = MutableStateFlow<PaymentPlanPreviewDialogState?>(null)
     val paymentPlanPreviewDialog = _paymentPlanPreviewDialog.asStateFlow()
 
@@ -74,6 +81,7 @@ internal class EventRegistrationFlowCoordinator {
     private var pendingBillingAddressAction: (() -> Unit)? = null
     private var pendingTeamJoinQuestionTeam: TeamWithPlayers? = null
     private var pendingJoinConfirmationTarget: JoinConfirmationTarget? = null
+    private var pendingFeeBreakdownAction: (() -> Unit)? = null
 
     fun updateQuestionAnswer(questionId: String, answer: String): Boolean {
         val answerUpdate = registrationQuestionAnswerUpdate(questionId, answer) ?: return false
@@ -179,6 +187,27 @@ internal class EventRegistrationFlowCoordinator {
 
     fun setRegistrationHoldExpiresAt(holdExpiresAt: String?) {
         _holdExpiresAt.value = holdExpiresAt?.trim()?.takeIf(String::isNotBlank)
+    }
+
+    fun showFeeBreakdown(
+        feeBreakdown: FeeBreakdown,
+        onConfirm: () -> Unit,
+    ) {
+        _currentFeeBreakdown.value = feeBreakdown
+        _showFeeBreakdown.value = true
+        pendingFeeBreakdownAction = onConfirm
+    }
+
+    fun dismissFeeBreakdown() {
+        _showFeeBreakdown.value = false
+        _currentFeeBreakdown.value = null
+        pendingFeeBreakdownAction = null
+    }
+
+    fun confirmFeeBreakdown(): (() -> Unit)? {
+        val action = pendingFeeBreakdownAction
+        dismissFeeBreakdown()
+        return action
     }
 
     fun showPaymentPlanPreviewDialog(

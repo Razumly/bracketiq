@@ -1142,13 +1142,8 @@ class DefaultEventDetailComponent(
     private var participantManagementRequestToken: Long = 0L
     private var participantComplianceRequestToken: Long = 0L
 
-    private val _showFeeBreakdown = MutableStateFlow(false)
-    override val showFeeBreakdown = _showFeeBreakdown.asStateFlow()
-
-    private val _currentFeeBreakdown = MutableStateFlow<FeeBreakdown?>(null)
-    override val currentFeeBreakdown = _currentFeeBreakdown.asStateFlow()
-
-    private var pendingPaymentAction: (() -> Unit)? = null
+    override val showFeeBreakdown = registrationFlowCoordinator.showFeeBreakdown
+    override val currentFeeBreakdown = registrationFlowCoordinator.currentFeeBreakdown
 
     private val _userTeams = currentUser.flatMapLatest {
         teamRepository.getTeamsWithPlayersFlow(it.id).map { result ->
@@ -5955,20 +5950,18 @@ class DefaultEventDetailComponent(
     override fun showFeeBreakdown(
         feeBreakdown: FeeBreakdown, onConfirm: () -> Unit, onCancel: () -> Unit
     ) {
-        _currentFeeBreakdown.value = feeBreakdown
-        _showFeeBreakdown.value = true
-        pendingPaymentAction = onConfirm
+        registrationFlowCoordinator.showFeeBreakdown(
+            feeBreakdown = feeBreakdown,
+            onConfirm = onConfirm,
+        )
     }
 
     override fun dismissFeeBreakdown() {
-        _showFeeBreakdown.value = false
-        _currentFeeBreakdown.value = null
-        pendingPaymentAction = null
+        registrationFlowCoordinator.dismissFeeBreakdown()
     }
 
     override fun confirmFeeBreakdown() {
-        pendingPaymentAction?.invoke()
-        dismissFeeBreakdown()
+        registrationFlowCoordinator.confirmFeeBreakdown()?.invoke()
     }
 
     override fun dismissPaymentPlanPreviewDialog() {

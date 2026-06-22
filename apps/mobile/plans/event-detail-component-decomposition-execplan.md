@@ -34,7 +34,8 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Move payment-plan preview dialog and continuation state into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move billing-address prompt and continuation state into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move pending join-confirmation target state into `EventRegistrationFlowCoordinator` with focused tests.
-  - [ ] Move purchase-intent UI state.
+  - [x] (2026-06-22) Move purchase-intent fee-breakdown UI state into `EventRegistrationFlowCoordinator` with focused tests.
+  - [ ] Move remaining purchase-intent/payment-sheet presentation state.
   - [x] (2026-06-22) Move text/web signature prompt state into `EventRegistrationFlowCoordinator` with focused tests.
   - [ ] Move signature polling and post-signature continuation state.
   - [x] (2026-06-22) Move withdraw-target list state into `EventRegistrationFlowCoordinator` with focused tests.
@@ -185,7 +186,9 @@ The sixteenth implementation milestone moves team join-question dialog state int
 
 The seventeenth implementation milestone moves pending join-confirmation target state into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now owns the post-payment confirmation target used after self/team purchase intents complete, while `DefaultEventDetailComponent` still builds targets, waits for registration confirmation, refreshes event/user state, and owns payment result handling. `EventDetailComponent.kt` is now 6,635 lines after this milestone.
 
-Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining coordinator work is to move join orchestration, purchase-intent UI state, signature polling/post-signature continuation state, and refund/leave action state, then extract participant/invite coordination.
+The eighteenth implementation milestone moves purchase-intent fee-breakdown UI state into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now owns fee-breakdown visibility, current fee-breakdown data, and pending fee-confirm continuation. `DefaultEventDetailComponent` still processes purchase intents, shows the payment sheet, and handles payment results. `EventDetailComponent.kt` dropped further to 6,628 lines after this milestone.
+
+Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining coordinator work is to move join orchestration, remaining purchase-intent/payment-sheet presentation state, signature polling/post-signature continuation state, and refund/leave action state, then extract participant/invite coordination.
 
 ## Context and Orientation
 
@@ -704,6 +707,24 @@ Seventeenth milestone line-count evidence:
      381 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
      473 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
 
+Fee-breakdown coordinator slice focused tests passed:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventRegistrationFlowCoordinatorTest*" --tests "*EventPaymentPlanHelpersTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 1m 41s; 43 actionable tasks: 9 executed, 34 up-to-date.
+
+Fee-breakdown coordinator slice common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 16s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Eighteenth milestone line-count evidence:
+
+    6628 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     410 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
+     522 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
+
 Full debug unit suite currently blocked:
 
     ./gradlew :composeApp:testDebugUnitTest
@@ -767,3 +788,4 @@ Revision Note (2026-06-22): Recorded the signature prompt coordinator slice, foc
 Revision Note (2026-06-22): Recorded the join dialog coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the team join-question coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the pending join-confirmation target coordinator slice, focused tests, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded the purchase-intent fee-breakdown coordinator slice, focused tests, compile checks, and line-count impact.
