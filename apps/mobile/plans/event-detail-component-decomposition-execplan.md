@@ -30,6 +30,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Move registration question dialog, answer, expanded, hold, and registration-progress state into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move join-choice and child-selection dialog state into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move team join-question dialog and pending-team state into `EventRegistrationFlowCoordinator` with focused tests.
+  - [x] (2026-06-22) Move pending joinable-child selection state into `EventRegistrationFlowCoordinator` with focused tests.
   - [ ] Move self, team, child, and minor join orchestration around the existing repository callbacks.
   - [x] (2026-06-22) Move payment-plan preview dialog and continuation state into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move billing-address prompt and continuation state into `EventRegistrationFlowCoordinator` with focused tests.
@@ -197,6 +198,8 @@ The twentieth implementation milestone moves signature flow state into the regis
 The twenty-first implementation milestone moves pending payment-sheet purchase-intent state into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now owns the pending checkout intent, consumes it once when the component presents the payment sheet, preserves it through fee-breakdown confirmation, and clears it when fee breakdown is dismissed. `DefaultEventDetailComponent` still owns Stripe payment processor calls, billing-address loading, loading/error state, and payment result handling. `EventDetailComponent.kt` is now 6,595 lines after this milestone.
 
 The twenty-second implementation milestone moves refund and leave action preflight decisions into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now owns withdraw/refund target normalization, membership error messages, paid-refund eligibility messaging, started-event rejection messaging, weekly individual-refund rejection, and team-withdrawal selection. `DefaultEventDetailComponent` still owns resolving membership from the current event/cache, repository calls, loading/error state mutation, and event refresh after mutation. `EventDetailComponent.kt` dropped further to 6,558 lines after this milestone.
+
+The twenty-third implementation milestone moves pending joinable-child selection state into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now retains the joinable child list across join-choice and child-selection dialog transitions and resolves selected child ids for the component. `DefaultEventDetailComponent` still loads linked children, validates registration availability/questions, runs signature checks, and executes child registration repository calls. `EventDetailComponent.kt` dropped further to 6,554 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining coordinator work is to move join orchestration and remaining signature polling job lifecycle if appropriate, then run the final coordinator regression suite and extract participant/invite coordination.
 
@@ -830,6 +833,24 @@ Targeted rerun of the full-suite failures reproduced the same failures:
     Exit code: 1
     Result: 6 tests completed, 3 failed.
 
+Joinable-child selection coordinator slice focused tests passed:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventRegistrationFlowCoordinatorTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 1m 33s; 43 actionable tasks: 9 executed, 34 up-to-date.
+
+Joinable-child selection coordinator slice common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 17s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Twenty-third milestone line-count evidence:
+
+    6554 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     699 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
+     857 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -882,3 +903,4 @@ Revision Note (2026-06-22): Recorded the starting team registration coordinator 
 Revision Note (2026-06-22): Recorded the signature flow state coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the payment-sheet intent coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the refund and leave preflight coordinator slice, focused tests, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded the joinable-child selection state coordinator slice, focused tests, compile checks, and line-count impact.

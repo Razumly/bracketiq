@@ -1267,7 +1267,6 @@ class DefaultEventDetailComponent(
     override val textSignaturePrompt = registrationFlowCoordinator.textSignaturePrompt
     override val webSignaturePrompt = registrationFlowCoordinator.webSignaturePrompt
 
-    private var joinableChildren: List<JoinChildOption> = emptyList()
     private var pendingPdfSignaturePollJob: Job? = null
 
     private val shareServiceProvider = ShareServiceProvider()
@@ -2545,7 +2544,6 @@ class DefaultEventDetailComponent(
             if (!selectedEvent.value.teamSignup) {
                 val children = loadJoinableChildren()
                 if (children.isNotEmpty()) {
-                    joinableChildren = children
                     registrationFlowCoordinator.showJoinChoiceDialog(children)
                     return@launch
                 }
@@ -2944,9 +2942,7 @@ class DefaultEventDetailComponent(
     }
 
     override fun showChildJoinSelection() {
-        val children = joinableChildren.ifEmpty {
-            registrationFlowCoordinator.joinChoiceDialog.value?.children.orEmpty()
-        }
+        val children = registrationFlowCoordinator.currentJoinableChildren()
         registrationFlowCoordinator.dismissJoinChoiceDialog()
         if (children.isEmpty()) {
             _errorState.value = ErrorMessage("No linked children are available for registration.")
@@ -2961,7 +2957,7 @@ class DefaultEventDetailComponent(
             registrationFlowCoordinator.clearJoinDialogs()
             return
         }
-        val selectedChild = joinableChildren.firstOrNull { it.userId == childUserId }
+        val selectedChild = registrationFlowCoordinator.findJoinableChild(childUserId)
         if (selectedChild == null) {
             _errorState.value = ErrorMessage("Unable to find that child profile.")
             return

@@ -416,6 +416,23 @@ class EventRegistrationFlowCoordinatorTest {
     }
 
     @Test
+    fun joinable_children_are_retained_for_child_selection() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val child = joinChild("child-1")
+
+        coordinator.showJoinChoiceDialog(listOf(child))
+        coordinator.dismissJoinChoiceDialog()
+
+        assertEquals(listOf(child), coordinator.currentJoinableChildren())
+        assertEquals(child, coordinator.findJoinableChild(" child-1 "))
+
+        coordinator.showChildJoinSelectionDialog(listOf(child))
+
+        assertEquals(listOf(child), coordinator.currentJoinableChildren())
+        assertNull(coordinator.findJoinableChild("missing-child"))
+    }
+
+    @Test
     fun team_join_question_submit_requires_answers_then_returns_dialog_and_team() {
         val coordinator = EventRegistrationFlowCoordinator()
         val requiredQuestion = question("q1", required = true)

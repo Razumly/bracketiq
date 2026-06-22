@@ -112,6 +112,7 @@ internal class EventRegistrationFlowCoordinator {
     private var questionsConfirmed = false
     private var pendingPaymentPlanPreviewAction: (() -> Unit)? = null
     private var pendingBillingAddressAction: (() -> Unit)? = null
+    private var pendingJoinableChildren: List<JoinChildOption> = emptyList()
     private var pendingTeamJoinQuestionTeam: TeamWithPlayers? = null
     private var pendingJoinConfirmationTarget: JoinConfirmationTarget? = null
     private var pendingFeeBreakdownAction: (() -> Unit)? = null
@@ -394,6 +395,7 @@ internal class EventRegistrationFlowCoordinator {
     }
 
     fun showJoinChoiceDialog(children: List<JoinChildOption>) {
+        pendingJoinableChildren = children
         _joinChoiceDialog.value = JoinChoiceDialogState(children = children)
         _childJoinSelectionDialog.value = null
     }
@@ -403,6 +405,7 @@ internal class EventRegistrationFlowCoordinator {
     }
 
     fun showChildJoinSelectionDialog(children: List<JoinChildOption>) {
+        pendingJoinableChildren = children
         _joinChoiceDialog.value = null
         _childJoinSelectionDialog.value = ChildJoinSelectionDialogState(children = children)
     }
@@ -414,6 +417,16 @@ internal class EventRegistrationFlowCoordinator {
     fun clearJoinDialogs() {
         _joinChoiceDialog.value = null
         _childJoinSelectionDialog.value = null
+    }
+
+    fun currentJoinableChildren(): List<JoinChildOption> =
+        pendingJoinableChildren.ifEmpty {
+            _joinChoiceDialog.value?.children.orEmpty()
+        }
+
+    fun findJoinableChild(userId: String): JoinChildOption? {
+        val normalizedUserId = userId.trim().takeIf(String::isNotBlank) ?: return null
+        return currentJoinableChildren().firstOrNull { child -> child.userId == normalizedUserId }
     }
 
     fun showTeamJoinQuestionDialog(
