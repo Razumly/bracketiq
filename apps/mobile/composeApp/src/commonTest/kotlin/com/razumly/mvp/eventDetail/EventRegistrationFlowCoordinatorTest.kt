@@ -12,6 +12,7 @@ import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -831,6 +832,7 @@ class EventRegistrationFlowCoordinatorTest {
         val coordinator = EventRegistrationFlowCoordinator()
         val child = joinChild("child-1")
         val step = signStep("text-template")
+        val pollJob = Job()
 
         coordinator.startRequiredSignatureFlow(
             signerContext = SignerContext.PARENT_GUARDIAN,
@@ -855,11 +857,14 @@ class EventRegistrationFlowCoordinatorTest {
                 totalSteps = 1,
             )
         )
+        coordinator.replacePendingSignaturePollJob(pollJob)
 
         coordinator.clearPendingSignatureFlow()
 
         assertFalse(coordinator.hasPendingSignatureFlow())
         assertFalse(coordinator.hasSignatureContexts())
+        assertFalse(coordinator.hasPendingSignaturePollJob())
+        assertTrue(pollJob.isCancelled)
         assertNull(coordinator.currentPendingSignatureStep())
         assertNull(coordinator.textSignaturePrompt.value)
         assertNull(coordinator.webSignaturePrompt.value)
@@ -871,6 +876,29 @@ class EventRegistrationFlowCoordinatorTest {
             ),
             coordinator.currentSignatureRecordingTarget(),
         )
+    }
+
+    @Test
+    fun signature_poll_job_replacement_cancels_previous_job() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val firstJob = Job()
+        val secondJob = Job()
+
+        coordinator.replacePendingSignaturePollJob(firstJob)
+
+        assertTrue(coordinator.hasPendingSignaturePollJob())
+        assertTrue(firstJob.isActive)
+
+        coordinator.replacePendingSignaturePollJob(secondJob)
+
+        assertTrue(firstJob.isCancelled)
+        assertTrue(secondJob.isActive)
+        assertTrue(coordinator.hasPendingSignaturePollJob())
+
+        coordinator.clearPendingSignaturePollJob()
+
+        assertTrue(secondJob.isCancelled)
+        assertFalse(coordinator.hasPendingSignaturePollJob())
     }
 
     private fun signStep(

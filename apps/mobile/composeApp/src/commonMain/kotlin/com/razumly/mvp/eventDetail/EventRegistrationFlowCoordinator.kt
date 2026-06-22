@@ -11,6 +11,7 @@ import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.time.Clock
@@ -134,6 +135,7 @@ internal class EventRegistrationFlowCoordinator {
     private var pendingSignatureContextIndex = 0
     private var pendingSignatureChild: JoinChildOption? = null
     private var pendingSignatureTeamId: String? = null
+    private var pendingSignaturePollJob: Job? = null
 
     fun updateQuestionAnswer(questionId: String, answer: String): Boolean {
         val answerUpdate = registrationQuestionAnswerUpdate(questionId, answer) ?: return false
@@ -583,6 +585,19 @@ internal class EventRegistrationFlowCoordinator {
         _webSignaturePrompt.value = null
     }
 
+    fun replacePendingSignaturePollJob(job: Job?) {
+        pendingSignaturePollJob?.cancel()
+        pendingSignaturePollJob = job
+    }
+
+    fun clearPendingSignaturePollJob() {
+        pendingSignaturePollJob?.cancel()
+        pendingSignaturePollJob = null
+    }
+
+    fun hasPendingSignaturePollJob(): Boolean =
+        pendingSignaturePollJob != null
+
     fun startRequiredSignatureFlow(
         signerContext: SignerContext,
         child: JoinChildOption?,
@@ -661,6 +676,7 @@ internal class EventRegistrationFlowCoordinator {
     }
 
     fun clearPendingSignatureFlow() {
+        clearPendingSignaturePollJob()
         pendingSignatureSteps = emptyList()
         pendingSignatureStepIndex = 0
         pendingSignatureContext = SignerContext.PARTICIPANT

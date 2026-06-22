@@ -1267,8 +1267,6 @@ class DefaultEventDetailComponent(
     override val textSignaturePrompt = registrationFlowCoordinator.textSignaturePrompt
     override val webSignaturePrompt = registrationFlowCoordinator.webSignaturePrompt
 
-    private var pendingPdfSignaturePollJob: Job? = null
-
     private val shareServiceProvider = ShareServiceProvider()
 
     private fun currentRegistrationProgressScope(): EventRegistrationProgressScope =
@@ -3646,8 +3644,7 @@ class DefaultEventDetailComponent(
     }
 
     private suspend fun processNextSignatureStep() {
-        pendingPdfSignaturePollJob?.cancel()
-        pendingPdfSignaturePollJob = null
+        registrationFlowCoordinator.clearPendingSignaturePollJob()
 
         val currentStepState = registrationFlowCoordinator.currentPendingSignatureStep()
         if (currentStepState == null) {
@@ -3686,17 +3683,17 @@ class DefaultEventDetailComponent(
         )
 
         _errorState.value = ErrorMessage("Waiting for signature sync...")
-        pendingPdfSignaturePollJob = scope.launch {
-            if (awaitSignatureStepClearance(currentStep)) {
-                registrationFlowCoordinator.clearWebSignaturePrompt()
-                processNextSignatureStep()
+        registrationFlowCoordinator.replacePendingSignaturePollJob(
+            scope.launch {
+                if (awaitSignatureStepClearance(currentStep)) {
+                    registrationFlowCoordinator.clearWebSignaturePrompt()
+                    processNextSignatureStep()
+                }
             }
-        }
+        )
     }
 
     private fun clearPendingSignatureFlow() {
-        pendingPdfSignaturePollJob?.cancel()
-        pendingPdfSignaturePollJob = null
         registrationFlowCoordinator.clearPendingSignatureFlow()
     }
 
