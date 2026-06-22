@@ -7,7 +7,9 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.repositories.SignStep
+import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -491,6 +493,107 @@ class EventRegistrationFlowCoordinatorTest {
 
         assertNull(coordinator.textSignaturePrompt.value)
         assertNull(coordinator.webSignaturePrompt.value)
+    }
+
+    @Test
+    fun signature_flow_state_tracks_targets_steps_and_continuation() = runTest {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val child = joinChild("child-1")
+        val firstStep = signStep("text-template")
+        val secondStep = signStep("web-template", type = "PDF")
+        var continued = false
+
+        coordinator.startRequiredSignatureFlow(
+            signerContext = SignerContext.PARENT_GUARDIAN,
+            child = child,
+            currentAccountEmail = " child@example.com ",
+            teamId = " team-1 ",
+            onReady = { continued = true },
+        )
+
+        assertTrue(coordinator.hasPendingSignatureFlow())
+        assertTrue(coordinator.hasSignatureContexts())
+
+        val firstTarget = coordinator.currentSignatureFetchTarget()
+
+        assertEquals(SignerContext.PARENT_GUARDIAN, firstTarget.signerContext)
+        assertEquals(child, firstTarget.child)
+        assertEquals("team-1", firstTarget.teamId)
+        assertEquals(firstTarget, coordinator.currentSignatureRecordingTarget())
+
+        coordinator.replacePendingSignatureSteps(listOf(firstStep, secondStep))
+
+        assertEquals(
+            PendingSignatureStepState(
+                step = firstStep,
+                currentStep = 1,
+                totalSteps = 2,
+            ),
+            coordinator.currentPendingSignatureStep(),
+        )
+
+        coordinator.clearPendingSignatureSteps()
+
+        assertNull(coordinator.currentPendingSignatureStep())
+        assertTrue(coordinator.advanceSignatureContext())
+
+        val secondTarget = coordinator.currentSignatureFetchTarget()
+
+        assertEquals(SignerContext.CHILD, secondTarget.signerContext)
+        assertFalse(continued)
+
+        coordinator.completePendingSignatureFlow()?.invoke()
+
+        assertTrue(continued)
+        assertFalse(coordinator.hasPendingSignatureFlow())
+        assertFalse(coordinator.hasSignatureContexts())
+    }
+
+    @Test
+    fun signature_flow_clear_resets_state_and_prompts() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val child = joinChild("child-1")
+        val step = signStep("text-template")
+
+        coordinator.startRequiredSignatureFlow(
+            signerContext = SignerContext.PARENT_GUARDIAN,
+            child = child,
+            currentAccountEmail = "parent@example.com",
+            teamId = "team-1",
+            onReady = {},
+        )
+        coordinator.replacePendingSignatureSteps(listOf(step))
+        coordinator.showTextSignaturePrompt(
+            TextSignaturePromptState(
+                step = step,
+                currentStep = 1,
+                totalSteps = 1,
+            )
+        )
+        coordinator.showWebSignaturePrompt(
+            WebSignaturePromptState(
+                step = null,
+                url = "https://example.com/sign",
+                currentStep = 1,
+                totalSteps = 1,
+            )
+        )
+
+        coordinator.clearPendingSignatureFlow()
+
+        assertFalse(coordinator.hasPendingSignatureFlow())
+        assertFalse(coordinator.hasSignatureContexts())
+        assertNull(coordinator.currentPendingSignatureStep())
+        assertNull(coordinator.textSignaturePrompt.value)
+        assertNull(coordinator.webSignaturePrompt.value)
+        assertEquals(
+            SignatureFlowTarget(
+                signerContext = SignerContext.PARTICIPANT,
+                child = null,
+                teamId = null,
+            ),
+            coordinator.currentSignatureRecordingTarget(),
+        )
     }
 
     private fun signStep(

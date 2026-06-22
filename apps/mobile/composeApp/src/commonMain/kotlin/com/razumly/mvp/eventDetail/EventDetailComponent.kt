@@ -1268,14 +1268,6 @@ class DefaultEventDetailComponent(
     override val webSignaturePrompt = registrationFlowCoordinator.webSignaturePrompt
 
     private var joinableChildren: List<JoinChildOption> = emptyList()
-    private var pendingSignatureSteps: List<SignStep> = emptyList()
-    private var pendingSignatureStepIndex = 0
-    private var pendingPostSignatureAction: (suspend () -> Unit)? = null
-    private var pendingSignatureContext: SignerContext = SignerContext.PARTICIPANT
-    private var pendingSignatureContexts: List<SignerContext> = emptyList()
-    private var pendingSignatureContextIndex = 0
-    private var pendingSignatureChild: JoinChildOption? = null
-    private var pendingSignatureTeamId: String? = null
     private var pendingPdfSignaturePollJob: Job? = null
 
     private val shareServiceProvider = ShareServiceProvider()
@@ -2905,7 +2897,7 @@ class DefaultEventDetailComponent(
     }
 
     private suspend fun resumePendingSignatureFlowIfNeeded(): Boolean {
-        if (pendingPostSignatureAction == null || pendingSignatureContexts.isEmpty()) {
+        if (!registrationFlowCoordinator.hasPendingSignatureFlow()) {
             return false
         }
 
@@ -3527,41 +3519,36 @@ class DefaultEventDetailComponent(
         teamId: String? = null,
         onReady: suspend () -> Unit,
     ) {
-        pendingSignatureContexts = buildSignatureContextQueue(
-            baseContext = signerContext,
+        registrationFlowCoordinator.startRequiredSignatureFlow(
+            signerContext = signerContext,
             child = child,
             currentAccountEmail = userRepository.currentAccount.value.getOrNull()?.email,
+            teamId = teamId,
+            onReady = onReady,
         )
-        pendingSignatureContextIndex = 0
-        pendingSignatureChild = child
-        pendingSignatureTeamId = teamId?.trim()?.takeIf(String::isNotBlank)
-        pendingPostSignatureAction = onReady
         loadSignatureStepsForCurrentContext()
     }
 
-    private fun currentSignatureContext(): SignerContext =
-        signatureContextAt(pendingSignatureContexts, pendingSignatureContextIndex)
-
     private suspend fun fetchRequiredSignatureStepsForCurrentContext(): Result<List<SignStep>> {
-        if (pendingSignatureContexts.isEmpty()) {
+        if (!registrationFlowCoordinator.hasSignatureContexts()) {
             return Result.success(emptyList())
         }
 
-        val context = currentSignatureContext()
-        pendingSignatureContext = context
+        val target = registrationFlowCoordinator.currentSignatureFetchTarget()
+        val context = target.signerContext
 
-        return pendingSignatureTeamId?.let { teamId ->
+        return target.teamId?.let { teamId ->
             billingRepository.getRequiredTeamSignLinks(
                 teamId = teamId,
                 signerContext = context,
-                childUserId = pendingSignatureChild?.userId,
-                childUserEmail = pendingSignatureChild?.email,
+                childUserId = target.child?.userId,
+                childUserEmail = target.child?.email,
             )
         } ?: billingRepository.getRequiredSignLinks(
             eventId = selectedEvent.value.id,
             signerContext = context,
-            childUserId = pendingSignatureChild?.userId,
-            childUserEmail = pendingSignatureChild?.email,
+            childUserId = target.child?.userId,
+            childUserEmail = target.child?.email,
         )
     }
 
@@ -3598,8 +3585,7 @@ class DefaultEventDetailComponent(
             }
 
             if (refreshedSteps.none { refreshedStep -> pendingSignatureStepsMatch(refreshedStep, step) }) {
-                pendingSignatureSteps = refreshedSteps
-                pendingSignatureStepIndex = 0
+                registrationFlowCoordinator.replacePendingSignatureSteps(refreshedSteps)
                 return true
             }
 
@@ -3617,7 +3603,7 @@ class DefaultEventDetailComponent(
     }
 
     private suspend fun loadSignatureStepsForCurrentContext() {
-        if (pendingSignatureContexts.isEmpty()) {
+        if (!registrationFlowCoordinator.hasSignatureContexts()) {
             clearPendingSignatureFlow()
             return
         }
@@ -3633,27 +3619,20 @@ class DefaultEventDetailComponent(
                 return@onSuccess
             }
 
-            pendingSignatureSteps = allSteps
-            pendingSignatureStepIndex = 0
+            registrationFlowCoordinator.replacePendingSignatureSteps(allSteps)
             processNextSignatureStep()
         }
     }
 
     private suspend fun advanceSigningContextOrComplete() {
-        pendingSignatureSteps = emptyList()
-        pendingSignatureStepIndex = 0
+        registrationFlowCoordinator.clearPendingSignatureSteps()
 
-        if (
-            pendingSignatureContexts.isNotEmpty() &&
-            pendingSignatureContextIndex < pendingSignatureContexts.lastIndex
-        ) {
-            pendingSignatureContextIndex += 1
+        if (registrationFlowCoordinator.advanceSignatureContext()) {
             loadSignatureStepsForCurrentContext()
             return
         }
 
-        val action = pendingPostSignatureAction
-        clearPendingSignatureFlow()
+        val action = registrationFlowCoordinator.completePendingSignatureFlow()
         action?.invoke()
     }
 
@@ -3661,18 +3640,19 @@ class DefaultEventDetailComponent(
         pendingPdfSignaturePollJob?.cancel()
         pendingPdfSignaturePollJob = null
 
-        val currentStep = pendingSignatureSteps.getOrNull(pendingSignatureStepIndex)
-        if (currentStep == null) {
+        val currentStepState = registrationFlowCoordinator.currentPendingSignatureStep()
+        if (currentStepState == null) {
             advanceSigningContextOrComplete()
             return
         }
+        val currentStep = currentStepState.step
 
         if (currentStep.isTextStep()) {
             registrationFlowCoordinator.showTextSignaturePrompt(
                 TextSignaturePromptState(
                     step = currentStep,
-                    currentStep = pendingSignatureStepIndex + 1,
-                    totalSteps = pendingSignatureSteps.size,
+                    currentStep = currentStepState.currentStep,
+                    totalSteps = currentStepState.totalSteps,
                 )
             )
             return
@@ -3691,8 +3671,8 @@ class DefaultEventDetailComponent(
             WebSignaturePromptState(
                 step = currentStep,
                 url = signingUrl,
-                currentStep = pendingSignatureStepIndex + 1,
-                totalSteps = pendingSignatureSteps.size,
+                currentStep = currentStepState.currentStep,
+                totalSteps = currentStepState.totalSteps,
             )
         )
 
@@ -3708,15 +3688,7 @@ class DefaultEventDetailComponent(
     private fun clearPendingSignatureFlow() {
         pendingPdfSignaturePollJob?.cancel()
         pendingPdfSignaturePollJob = null
-        pendingSignatureSteps = emptyList()
-        pendingSignatureStepIndex = 0
-        pendingSignatureContext = SignerContext.PARTICIPANT
-        pendingSignatureContexts = emptyList()
-        pendingSignatureContextIndex = 0
-        pendingSignatureChild = null
-        pendingSignatureTeamId = null
-        pendingPostSignatureAction = null
-        registrationFlowCoordinator.clearSignaturePrompts()
+        registrationFlowCoordinator.clearPendingSignatureFlow()
     }
 
     private fun processPurchaseIntent(intent: PurchaseIntent) {
@@ -5967,14 +5939,15 @@ class DefaultEventDetailComponent(
             val documentId = prompt.step.resolvedDocumentId()
                 ?: "mobile-text-${prompt.step.templateId}-${Clock.System.now().toEpochMilliseconds()}"
 
-            val recordSignatureResult = pendingSignatureTeamId?.let { teamId ->
+            val signatureTarget = registrationFlowCoordinator.currentSignatureRecordingTarget()
+            val recordSignatureResult = signatureTarget.teamId?.let { teamId ->
                 billingRepository.recordTeamSignature(
                     teamId = teamId,
                     templateId = prompt.step.templateId,
                     documentId = documentId,
                     type = prompt.step.type,
-                    signerContext = pendingSignatureContext,
-                    childUserId = pendingSignatureChild?.userId,
+                    signerContext = signatureTarget.signerContext,
+                    childUserId = signatureTarget.child?.userId,
                 )
             } ?: billingRepository.recordSignature(
                 eventId = selectedEvent.value.id,

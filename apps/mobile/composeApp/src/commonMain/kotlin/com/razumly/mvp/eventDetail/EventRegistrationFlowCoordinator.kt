@@ -5,6 +5,8 @@ import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
+import com.razumly.mvp.core.data.repositories.SignStep
+import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,6 +28,18 @@ internal data class TeamJoinQuestionSubmitResult(
     val missingQuestion: TeamJoinQuestion?,
     val dialog: TeamJoinQuestionDialogState?,
     val team: TeamWithPlayers?,
+)
+
+internal data class SignatureFlowTarget(
+    val signerContext: SignerContext,
+    val child: JoinChildOption?,
+    val teamId: String?,
+)
+
+internal data class PendingSignatureStepState(
+    val step: SignStep,
+    val currentStep: Int,
+    val totalSteps: Int,
 )
 
 @OptIn(ExperimentalTime::class)
@@ -86,6 +100,14 @@ internal class EventRegistrationFlowCoordinator {
     private var pendingJoinConfirmationTarget: JoinConfirmationTarget? = null
     private var pendingFeeBreakdownAction: (() -> Unit)? = null
     private var pendingTeamRegistration: TeamWithPlayers? = null
+    private var pendingSignatureSteps: List<SignStep> = emptyList()
+    private var pendingSignatureStepIndex = 0
+    private var pendingPostSignatureAction: (suspend () -> Unit)? = null
+    private var pendingSignatureContext: SignerContext = SignerContext.PARTICIPANT
+    private var pendingSignatureContexts: List<SignerContext> = emptyList()
+    private var pendingSignatureContextIndex = 0
+    private var pendingSignatureChild: JoinChildOption? = null
+    private var pendingSignatureTeamId: String? = null
 
     fun updateQuestionAnswer(questionId: String, answer: String): Boolean {
         val answerUpdate = registrationQuestionAnswerUpdate(questionId, answer) ?: return false
@@ -387,6 +409,95 @@ internal class EventRegistrationFlowCoordinator {
     fun clearSignaturePrompts() {
         _textSignaturePrompt.value = null
         _webSignaturePrompt.value = null
+    }
+
+    fun startRequiredSignatureFlow(
+        signerContext: SignerContext,
+        child: JoinChildOption?,
+        currentAccountEmail: String?,
+        teamId: String?,
+        onReady: suspend () -> Unit,
+    ) {
+        pendingSignatureContexts = buildSignatureContextQueue(
+            baseContext = signerContext,
+            child = child,
+            currentAccountEmail = currentAccountEmail,
+        )
+        pendingSignatureContextIndex = 0
+        pendingSignatureChild = child
+        pendingSignatureTeamId = teamId?.trim()?.takeIf(String::isNotBlank)
+        pendingPostSignatureAction = onReady
+    }
+
+    fun hasPendingSignatureFlow(): Boolean =
+        pendingPostSignatureAction != null && pendingSignatureContexts.isNotEmpty()
+
+    fun hasSignatureContexts(): Boolean =
+        pendingSignatureContexts.isNotEmpty()
+
+    fun currentSignatureFetchTarget(): SignatureFlowTarget {
+        val context = signatureContextAt(pendingSignatureContexts, pendingSignatureContextIndex)
+        pendingSignatureContext = context
+        return SignatureFlowTarget(
+            signerContext = context,
+            child = pendingSignatureChild,
+            teamId = pendingSignatureTeamId,
+        )
+    }
+
+    fun currentSignatureRecordingTarget(): SignatureFlowTarget =
+        SignatureFlowTarget(
+            signerContext = pendingSignatureContext,
+            child = pendingSignatureChild,
+            teamId = pendingSignatureTeamId,
+        )
+
+    fun replacePendingSignatureSteps(steps: List<SignStep>) {
+        pendingSignatureSteps = steps
+        pendingSignatureStepIndex = 0
+    }
+
+    fun clearPendingSignatureSteps() {
+        pendingSignatureSteps = emptyList()
+        pendingSignatureStepIndex = 0
+    }
+
+    fun currentPendingSignatureStep(): PendingSignatureStepState? {
+        val step = pendingSignatureSteps.getOrNull(pendingSignatureStepIndex) ?: return null
+        return PendingSignatureStepState(
+            step = step,
+            currentStep = pendingSignatureStepIndex + 1,
+            totalSteps = pendingSignatureSteps.size,
+        )
+    }
+
+    fun advanceSignatureContext(): Boolean {
+        if (
+            pendingSignatureContexts.isNotEmpty() &&
+            pendingSignatureContextIndex < pendingSignatureContexts.lastIndex
+        ) {
+            pendingSignatureContextIndex += 1
+            return true
+        }
+        return false
+    }
+
+    fun completePendingSignatureFlow(): (suspend () -> Unit)? {
+        val action = pendingPostSignatureAction
+        clearPendingSignatureFlow()
+        return action
+    }
+
+    fun clearPendingSignatureFlow() {
+        pendingSignatureSteps = emptyList()
+        pendingSignatureStepIndex = 0
+        pendingSignatureContext = SignerContext.PARTICIPANT
+        pendingSignatureContexts = emptyList()
+        pendingSignatureContextIndex = 0
+        pendingSignatureChild = null
+        pendingSignatureTeamId = null
+        pendingPostSignatureAction = null
+        clearSignaturePrompts()
     }
 
     fun applyRegistrationProgressDraft(draft: RegistrationProgressDraft?): String? {
