@@ -2580,8 +2580,11 @@ class DefaultEventDetailComponent(
                 }
 
                 val joinPolicy = context.joinPolicy
-                if (!joinPolicy.isOpenTeamJoinPolicy() && !joinPolicy.isRequestToJoinPolicy()) {
-                    _errorState.value = ErrorMessage("This team is not accepting registrations.")
+                val joinPolicyDecision = registrationFlowCoordinator.teamJoinPolicyDecision(joinPolicy)
+                if (!joinPolicyDecision.isAccepted) {
+                    _errorState.value = ErrorMessage(
+                        joinPolicyDecision.errorMessage ?: "This team is not accepting registrations.",
+                    )
                     loadingHandler.hideLoading()
                     return@launch
                 }
@@ -2630,11 +2633,7 @@ class DefaultEventDetailComponent(
             if (!registrationFlowCoordinator.startTeamRegistration(teamId)) return@launch
             try {
                 loadingHandler.showLoading(
-                    if (dialog.joinPolicy.isRequestToJoinPolicy()) {
-                        "Submitting join request..."
-                    } else {
-                        "Starting team registration..."
-                    },
+                    registrationFlowCoordinator.teamJoinSubmitLoadingMessage(dialog.joinPolicy),
                 )
                 submitTeamJoin(
                     team = team,
@@ -2658,7 +2657,7 @@ class DefaultEventDetailComponent(
         answers: Map<String, String>,
     ) {
         val teamId = team.team.registrationTargetTeamId()
-        if (joinPolicy.isRequestToJoinPolicy()) {
+        if (registrationFlowCoordinator.isRequestToJoinPolicy(joinPolicy)) {
             teamRepository.submitTeamJoinRequest(teamId, answers)
                 .onSuccess {
                     refreshEventDetails()
@@ -2680,12 +2679,6 @@ class DefaultEventDetailComponent(
                 )
             }
     }
-
-    private fun String?.isRequestToJoinPolicy(): Boolean =
-        equals("REQUEST_TO_JOIN", ignoreCase = true)
-
-    private fun String?.isOpenTeamJoinPolicy(): Boolean =
-        equals("OPEN_REGISTRATION", ignoreCase = true)
 
     private fun Team.registrationTargetTeamId(): String =
         parentTeamId?.trim()?.takeIf { it.isNotBlank() } ?: id.trim()

@@ -536,6 +536,42 @@ class EventRegistrationFlowCoordinatorTest {
     }
 
     @Test
+    fun team_join_policy_decision_classifies_open_request_and_closed_policies() {
+        val coordinator = EventRegistrationFlowCoordinator()
+
+        assertEquals(
+            TeamJoinPolicyDecision(TeamJoinPolicyKind.OPEN_REGISTRATION),
+            coordinator.teamJoinPolicyDecision("OPEN_REGISTRATION"),
+        )
+        assertEquals(
+            TeamJoinPolicyDecision(TeamJoinPolicyKind.REQUEST_TO_JOIN),
+            coordinator.teamJoinPolicyDecision("request_to_join"),
+        )
+
+        val closedDecision = coordinator.teamJoinPolicyDecision("INVITE_ONLY")
+
+        assertEquals(TeamJoinPolicyKind.CLOSED, closedDecision.kind)
+        assertFalse(closedDecision.isAccepted)
+        assertEquals("This team is not accepting registrations.", closedDecision.errorMessage)
+    }
+
+    @Test
+    fun team_join_policy_controls_submit_loading_message_and_request_detection() {
+        val coordinator = EventRegistrationFlowCoordinator()
+
+        assertEquals(
+            "Submitting join request...",
+            coordinator.teamJoinSubmitLoadingMessage("REQUEST_TO_JOIN"),
+        )
+        assertEquals(
+            "Starting team registration...",
+            coordinator.teamJoinSubmitLoadingMessage("OPEN_REGISTRATION"),
+        )
+        assertTrue(coordinator.isRequestToJoinPolicy("request_to_join"))
+        assertFalse(coordinator.isRequestToJoinPolicy("OPEN_REGISTRATION"))
+    }
+
+    @Test
     fun team_join_question_submit_requires_answers_then_returns_dialog_and_team() {
         val coordinator = EventRegistrationFlowCoordinator()
         val requiredQuestion = question("q1", required = true)

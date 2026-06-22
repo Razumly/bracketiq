@@ -34,6 +34,14 @@ internal data class TeamJoinQuestionSubmitResult(
     val team: TeamWithPlayers?,
 )
 
+internal data class TeamJoinPolicyDecision(
+    val kind: TeamJoinPolicyKind,
+    val errorMessage: String? = null,
+) {
+    val isAccepted: Boolean
+        get() = kind != TeamJoinPolicyKind.CLOSED
+}
+
 internal data class SignatureFlowTarget(
     val signerContext: SignerContext,
     val child: JoinChildOption?,
@@ -58,6 +66,12 @@ internal enum class JoinExecutionAction {
     START_PAYMENT_PLAN,
     JOIN_DIRECTLY,
     CREATE_PURCHASE_INTENT,
+}
+
+internal enum class TeamJoinPolicyKind {
+    OPEN_REGISTRATION,
+    REQUEST_TO_JOIN,
+    CLOSED,
 }
 
 internal data class WithdrawalActionDecision(
@@ -473,6 +487,30 @@ internal class EventRegistrationFlowCoordinator {
         pendingTeamJoinQuestionTeam = team
         _teamJoinQuestionDialog.value = dialog
     }
+
+    fun teamJoinPolicyDecision(joinPolicy: String?): TeamJoinPolicyDecision {
+        return when {
+            joinPolicy.equals("OPEN_REGISTRATION", ignoreCase = true) ->
+                TeamJoinPolicyDecision(TeamJoinPolicyKind.OPEN_REGISTRATION)
+            joinPolicy.equals("REQUEST_TO_JOIN", ignoreCase = true) ->
+                TeamJoinPolicyDecision(TeamJoinPolicyKind.REQUEST_TO_JOIN)
+            else ->
+                TeamJoinPolicyDecision(
+                    kind = TeamJoinPolicyKind.CLOSED,
+                    errorMessage = "This team is not accepting registrations.",
+                )
+        }
+    }
+
+    fun teamJoinSubmitLoadingMessage(joinPolicy: String?): String =
+        if (teamJoinPolicyDecision(joinPolicy).kind == TeamJoinPolicyKind.REQUEST_TO_JOIN) {
+            "Submitting join request..."
+        } else {
+            "Starting team registration..."
+        }
+
+    fun isRequestToJoinPolicy(joinPolicy: String?): Boolean =
+        teamJoinPolicyDecision(joinPolicy).kind == TeamJoinPolicyKind.REQUEST_TO_JOIN
 
     fun submitTeamJoinQuestionAnswers(answers: Map<String, String>): TeamJoinQuestionSubmitResult? {
         val dialog = _teamJoinQuestionDialog.value ?: return null
