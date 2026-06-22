@@ -2,6 +2,8 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.RegistrationProgressDraft
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
@@ -41,6 +43,19 @@ internal data class PendingSignatureStepState(
     val step: SignStep,
     val currentStep: Int,
     val totalSteps: Int,
+)
+
+internal enum class WithdrawalActionKind {
+    REQUEST_REFUND,
+    WITHDRAW_AND_REFUND,
+    LEAVE,
+}
+
+internal data class WithdrawalActionDecision(
+    val targetUserId: String,
+    val membership: WithdrawTargetMembership?,
+    val useTeamWithdrawal: Boolean = false,
+    val errorMessage: String? = null,
 )
 
 @OptIn(ExperimentalTime::class)
@@ -266,6 +281,96 @@ internal class EventRegistrationFlowCoordinator {
 
     fun clearWithdrawTargets() {
         _withdrawTargets.value = emptyList()
+    }
+
+    fun normalizedWithdrawalTargetUserId(
+        targetUserId: String?,
+        currentUserId: String,
+    ): String =
+        targetUserId
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: currentUserId
+
+    fun prepareWithdrawalAction(
+        event: Event,
+        action: WithdrawalActionKind,
+        targetUserId: String,
+        currentUserId: String,
+        membership: WithdrawTargetMembership?,
+        weeklyOccurrence: EventOccurrenceSelection?,
+        currentUserIsFreeAgent: Boolean,
+        eventOrOccurrenceStarted: Boolean,
+    ): WithdrawalActionDecision {
+        val normalizedTargetUserId = normalizedWithdrawalTargetUserId(targetUserId, currentUserId)
+        if (membership == null) {
+            return WithdrawalActionDecision(
+                targetUserId = normalizedTargetUserId,
+                membership = null,
+                errorMessage = "Selected profile is not registered for this event.",
+            )
+        }
+
+        val canRequestRefund = canRequestPaidRefund(event, membership)
+        if (action == WithdrawalActionKind.REQUEST_REFUND || action == WithdrawalActionKind.WITHDRAW_AND_REFUND) {
+            if (!canRequestRefund) {
+                return WithdrawalActionDecision(
+                    targetUserId = normalizedTargetUserId,
+                    membership = membership,
+                    errorMessage = if (!event.hasAnyPaidDivision()) {
+                        "Refund requests are only available for paid events."
+                    } else {
+                        "Only registered participants can request refunds."
+                    },
+                )
+            }
+        }
+
+        if (action == WithdrawalActionKind.WITHDRAW_AND_REFUND && eventOrOccurrenceStarted) {
+            return WithdrawalActionDecision(
+                targetUserId = normalizedTargetUserId,
+                membership = membership,
+                errorMessage = "Automatic refunds are no longer available after the event starts.",
+            )
+        }
+
+        if (action == WithdrawalActionKind.LEAVE && eventOrOccurrenceStarted) {
+            return WithdrawalActionDecision(
+                targetUserId = normalizedTargetUserId,
+                membership = membership,
+                errorMessage = if (canRequestRefund) {
+                    "This event has already started. Leaving is disabled. Request a refund instead."
+                } else {
+                    "This event has already started. Leaving is no longer available."
+                },
+            )
+        }
+
+        val useTeamWithdrawal = usesRegisteredTeamWithdrawal(
+            event = event,
+            targetUserId = normalizedTargetUserId,
+            currentUserId = currentUserId,
+            membership = membership,
+            currentUserIsFreeAgent = currentUserIsFreeAgent,
+        )
+
+        if (
+            (action == WithdrawalActionKind.REQUEST_REFUND || action == WithdrawalActionKind.WITHDRAW_AND_REFUND) &&
+            weeklyOccurrence != null &&
+            !useTeamWithdrawal
+        ) {
+            return WithdrawalActionDecision(
+                targetUserId = normalizedTargetUserId,
+                membership = membership,
+                errorMessage = "Refunds for individual weekly registrations are not available here yet. Contact the host for help.",
+            )
+        }
+
+        return WithdrawalActionDecision(
+            targetUserId = normalizedTargetUserId,
+            membership = membership,
+            useTeamWithdrawal = useTeamWithdrawal,
+        )
     }
 
     fun showBillingAddressPrompt(

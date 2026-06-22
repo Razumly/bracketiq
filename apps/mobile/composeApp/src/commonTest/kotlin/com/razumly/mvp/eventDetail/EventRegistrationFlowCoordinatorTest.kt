@@ -2,6 +2,8 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.RegistrationProgressDraft
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
@@ -212,6 +214,131 @@ class EventRegistrationFlowCoordinatorTest {
         coordinator.clearWithdrawTargets()
 
         assertEquals(emptyList(), coordinator.withdrawTargets.value)
+    }
+
+    @Test
+    fun withdrawal_action_preflight_normalizes_target_and_reports_membership_errors() {
+        val coordinator = EventRegistrationFlowCoordinator()
+
+        assertEquals(
+            "user-1",
+            coordinator.normalizedWithdrawalTargetUserId(
+                targetUserId = " ",
+                currentUserId = "user-1",
+            ),
+        )
+
+        val decision = coordinator.prepareWithdrawalAction(
+            event = paidEvent(),
+            action = WithdrawalActionKind.LEAVE,
+            targetUserId = " user-2 ",
+            currentUserId = "user-1",
+            membership = null,
+            weeklyOccurrence = null,
+            currentUserIsFreeAgent = false,
+            eventOrOccurrenceStarted = false,
+        )
+
+        assertEquals("user-2", decision.targetUserId)
+        assertEquals("Selected profile is not registered for this event.", decision.errorMessage)
+    }
+
+    @Test
+    fun withdrawal_action_preflight_handles_refund_and_started_event_messages() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val paidEvent = paidEvent()
+        val freeEvent = Event(id = "event-1")
+
+        assertEquals(
+            "Refund requests are only available for paid events.",
+            coordinator.prepareWithdrawalAction(
+                event = freeEvent,
+                action = WithdrawalActionKind.REQUEST_REFUND,
+                targetUserId = "user-1",
+                currentUserId = "user-1",
+                membership = WithdrawTargetMembership.PARTICIPANT,
+                weeklyOccurrence = null,
+                currentUserIsFreeAgent = false,
+                eventOrOccurrenceStarted = false,
+            ).errorMessage,
+        )
+        assertEquals(
+            "Only registered participants can request refunds.",
+            coordinator.prepareWithdrawalAction(
+                event = paidEvent,
+                action = WithdrawalActionKind.REQUEST_REFUND,
+                targetUserId = "user-1",
+                currentUserId = "user-1",
+                membership = WithdrawTargetMembership.WAITLIST,
+                weeklyOccurrence = null,
+                currentUserIsFreeAgent = false,
+                eventOrOccurrenceStarted = false,
+            ).errorMessage,
+        )
+        assertEquals(
+            "Automatic refunds are no longer available after the event starts.",
+            coordinator.prepareWithdrawalAction(
+                event = paidEvent,
+                action = WithdrawalActionKind.WITHDRAW_AND_REFUND,
+                targetUserId = "user-1",
+                currentUserId = "user-1",
+                membership = WithdrawTargetMembership.PARTICIPANT,
+                weeklyOccurrence = null,
+                currentUserIsFreeAgent = false,
+                eventOrOccurrenceStarted = true,
+            ).errorMessage,
+        )
+        assertEquals(
+            "This event has already started. Leaving is disabled. Request a refund instead.",
+            coordinator.prepareWithdrawalAction(
+                event = paidEvent,
+                action = WithdrawalActionKind.LEAVE,
+                targetUserId = "user-1",
+                currentUserId = "user-1",
+                membership = WithdrawTargetMembership.PARTICIPANT,
+                weeklyOccurrence = null,
+                currentUserIsFreeAgent = false,
+                eventOrOccurrenceStarted = true,
+            ).errorMessage,
+        )
+    }
+
+    @Test
+    fun withdrawal_action_preflight_selects_team_withdrawal_and_blocks_individual_weekly_refunds() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val event = paidEvent(teamSignup = true)
+        val occurrence = EventOccurrenceSelection(
+            slotId = "slot-1",
+            occurrenceDate = "2026-07-01",
+        )
+
+        val teamDecision = coordinator.prepareWithdrawalAction(
+            event = event,
+            action = WithdrawalActionKind.REQUEST_REFUND,
+            targetUserId = "user-1",
+            currentUserId = "user-1",
+            membership = WithdrawTargetMembership.PARTICIPANT,
+            weeklyOccurrence = occurrence,
+            currentUserIsFreeAgent = false,
+            eventOrOccurrenceStarted = false,
+        )
+
+        assertNull(teamDecision.errorMessage)
+        assertTrue(teamDecision.useTeamWithdrawal)
+
+        assertEquals(
+            "Refunds for individual weekly registrations are not available here yet. Contact the host for help.",
+            coordinator.prepareWithdrawalAction(
+                event = event.copy(teamSignup = false),
+                action = WithdrawalActionKind.REQUEST_REFUND,
+                targetUserId = "user-1",
+                currentUserId = "user-1",
+                membership = WithdrawTargetMembership.PARTICIPANT,
+                weeklyOccurrence = occurrence,
+                currentUserIsFreeAgent = false,
+                eventOrOccurrenceStarted = false,
+            ).errorMessage,
+        )
     }
 
     @Test
@@ -682,6 +809,20 @@ class EventRegistrationFlowCoordinatorTest {
         return PurchaseIntent(
             paymentIntent = "pi_$registrationId",
             registrationId = registrationId,
+        )
+    }
+
+    private fun paidEvent(teamSignup: Boolean = false): Event {
+        return Event(
+            id = "event-1",
+            teamSignup = teamSignup,
+            divisions = listOf("open"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "open",
+                    price = 1000,
+                )
+            ),
         )
     }
 

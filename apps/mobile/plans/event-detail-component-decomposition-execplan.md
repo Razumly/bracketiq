@@ -41,7 +41,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Move signature context, pending-step, child/team target, and post-signature continuation state into `EventRegistrationFlowCoordinator` with focused tests.
   - [ ] Move remaining signature polling job lifecycle if the coordinator takes signature side effects.
   - [x] (2026-06-22) Move withdraw-target list state into `EventRegistrationFlowCoordinator` with focused tests.
-  - [ ] Move refund and leave action UI/continuation state.
+  - [x] (2026-06-22) Move refund and leave action preflight decisions into `EventRegistrationFlowCoordinator` with focused tests.
   - [ ] Wire remaining public registration actions through the coordinator and run the final coordinator regression suite.
 - [ ] Extract participant management and invite/search coordination where it can be tested independently.
 - [ ] Thin `DefaultEventDetailComponent` so it owns Decompose lifecycle, public state exposure, and delegation, while helpers own domain-specific transformations.
@@ -196,7 +196,9 @@ The twentieth implementation milestone moves signature flow state into the regis
 
 The twenty-first implementation milestone moves pending payment-sheet purchase-intent state into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now owns the pending checkout intent, consumes it once when the component presents the payment sheet, preserves it through fee-breakdown confirmation, and clears it when fee breakdown is dismissed. `DefaultEventDetailComponent` still owns Stripe payment processor calls, billing-address loading, loading/error state, and payment result handling. `EventDetailComponent.kt` is now 6,595 lines after this milestone.
 
-Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining coordinator work is to move join orchestration, remaining signature polling job lifecycle if appropriate, and refund/leave action state, then extract participant/invite coordination.
+The twenty-second implementation milestone moves refund and leave action preflight decisions into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now owns withdraw/refund target normalization, membership error messages, paid-refund eligibility messaging, started-event rejection messaging, weekly individual-refund rejection, and team-withdrawal selection. `DefaultEventDetailComponent` still owns resolving membership from the current event/cache, repository calls, loading/error state mutation, and event refresh after mutation. `EventDetailComponent.kt` dropped further to 6,558 lines after this milestone.
+
+Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining coordinator work is to move join orchestration and remaining signature polling job lifecycle if appropriate, then run the final coordinator regression suite and extract participant/invite coordination.
 
 ## Context and Orientation
 
@@ -787,6 +789,31 @@ Twenty-first milestone line-count evidence:
      581 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
      699 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
 
+Withdraw/refund preflight coordinator slice first focused test run caught a fixture issue:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventRegistrationFlowCoordinatorTest*" --tests "*EventWithdrawTargetHelpersTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 1
+    Result: 55 tests completed, 2 failed.
+    Fix: `EventRegistrationFlowCoordinatorTest.paidEvent()` now includes the matching `divisions = listOf("open")` entry so `hasAnyPaidDivision()` sees the test division price.
+
+Withdraw/refund preflight coordinator slice focused tests passed after fixture correction:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventRegistrationFlowCoordinatorTest*" --tests "*EventWithdrawTargetHelpersTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 26s; 43 actionable tasks: 6 executed, 37 up-to-date.
+
+Withdraw/refund preflight coordinator slice common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 16s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Twenty-second milestone line-count evidence:
+
+    6558 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     686 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
+     840 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
+
 Full debug unit suite currently blocked:
 
     ./gradlew :composeApp:testDebugUnitTest
@@ -854,3 +881,4 @@ Revision Note (2026-06-22): Recorded the purchase-intent fee-breakdown coordinat
 Revision Note (2026-06-22): Recorded the starting team registration coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the signature flow state coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the payment-sheet intent coordinator slice, focused tests, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded the refund and leave preflight coordinator slice, focused tests, compile checks, and line-count impact.

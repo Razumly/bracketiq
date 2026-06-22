@@ -3809,41 +3809,29 @@ class DefaultEventDetailComponent(
             } else {
                 null
             }
-            val normalizedTargetUserId = targetUserId
-                ?.trim()
-                ?.takeIf(String::isNotBlank)
-                ?: currentUser.value.id
+            val normalizedTargetUserId = registrationFlowCoordinator.normalizedWithdrawalTargetUserId(
+                targetUserId = targetUserId,
+                currentUserId = currentUser.value.id,
+            )
             val membership = resolveWithdrawTargetMembership(
                 event = event,
                 userId = normalizedTargetUserId,
             )
-            if (membership == null) {
-                _errorState.value = ErrorMessage("Selected profile is not registered for this event.")
-                return@launch
-            }
-            if (!canRequestPaidRefund(event, membership)) {
-                _errorState.value = ErrorMessage(
-                    if (!event.hasAnyPaidDivision()) {
-                        "Refund requests are only available for paid events."
-                    } else {
-                        "Only registered participants can request refunds."
-                    }
-                )
-                return@launch
-            }
-            val useTeamWithdrawal = usesRegisteredTeamWithdrawal(
+            val decision = registrationFlowCoordinator.prepareWithdrawalAction(
                 event = event,
+                action = WithdrawalActionKind.REQUEST_REFUND,
                 targetUserId = normalizedTargetUserId,
                 currentUserId = currentUser.value.id,
                 membership = membership,
+                weeklyOccurrence = weeklyOccurrence,
                 currentUserIsFreeAgent = checkIsUserFreeAgent(event),
+                eventOrOccurrenceStarted = false,
             )
-            if (weeklyOccurrence != null && !useTeamWithdrawal) {
-                _errorState.value = ErrorMessage(
-                    "Refunds for individual weekly registrations are not available here yet. Contact the host for help.",
-                )
+            decision.errorMessage?.let { message ->
+                _errorState.value = ErrorMessage(message)
                 return@launch
             }
+            val useTeamWithdrawal = decision.useTeamWithdrawal
             loadingHandler.showLoading("Requesting Refund ...")
             val refundResult = if (useTeamWithdrawal) {
                 val team = _usersTeam.value
@@ -3889,45 +3877,29 @@ class DefaultEventDetailComponent(
             } else {
                 null
             }
-            val normalizedTargetUserId = targetUserId
-                ?.trim()
-                ?.takeIf(String::isNotBlank)
-                ?: currentUser.value.id
+            val normalizedTargetUserId = registrationFlowCoordinator.normalizedWithdrawalTargetUserId(
+                targetUserId = targetUserId,
+                currentUserId = currentUser.value.id,
+            )
             val membership = resolveWithdrawTargetMembership(
                 event = event,
                 userId = normalizedTargetUserId,
             )
-            if (membership == null) {
-                _errorState.value = ErrorMessage("Selected profile is not registered for this event.")
-                return@launch
-            }
-            if (!canRequestPaidRefund(event, membership)) {
-                _errorState.value = ErrorMessage(
-                    if (!event.hasAnyPaidDivision()) {
-                        "Refund requests are only available for paid events."
-                    } else {
-                        "Only registered participants can request refunds."
-                    }
-                )
-                return@launch
-            }
-            if (hasSelectedEventOrOccurrenceStarted(event)) {
-                _errorState.value = ErrorMessage("Automatic refunds are no longer available after the event starts.")
-                return@launch
-            }
-            val useTeamWithdrawal = usesRegisteredTeamWithdrawal(
+            val decision = registrationFlowCoordinator.prepareWithdrawalAction(
                 event = event,
+                action = WithdrawalActionKind.WITHDRAW_AND_REFUND,
                 targetUserId = normalizedTargetUserId,
                 currentUserId = currentUser.value.id,
                 membership = membership,
+                weeklyOccurrence = weeklyOccurrence,
                 currentUserIsFreeAgent = checkIsUserFreeAgent(event),
+                eventOrOccurrenceStarted = hasSelectedEventOrOccurrenceStarted(event),
             )
-            if (weeklyOccurrence != null && !useTeamWithdrawal) {
-                _errorState.value = ErrorMessage(
-                    "Refunds for individual weekly registrations are not available here yet. Contact the host for help.",
-                )
+            decision.errorMessage?.let { message ->
+                _errorState.value = ErrorMessage(message)
                 return@launch
             }
+            val useTeamWithdrawal = decision.useTeamWithdrawal
 
             loadingHandler.showLoading("Withdrawing and Refunding ...")
             val refundResult = if (useTeamWithdrawal) {
@@ -3974,42 +3946,33 @@ class DefaultEventDetailComponent(
             } else {
                 null
             }
-            val normalizedTargetUserId = targetUserId
-                ?.trim()
-                ?.takeIf(String::isNotBlank)
-                ?: currentUser.value.id
+            val normalizedTargetUserId = registrationFlowCoordinator.normalizedWithdrawalTargetUserId(
+                targetUserId = targetUserId,
+                currentUserId = currentUser.value.id,
+            )
             val membership = resolveWithdrawTargetMembership(
                 event = event,
                 userId = normalizedTargetUserId,
             )
-            if (membership == null) {
-                _errorState.value = ErrorMessage("Selected profile is not registered for this event.")
+            val decision = registrationFlowCoordinator.prepareWithdrawalAction(
+                event = event,
+                action = WithdrawalActionKind.LEAVE,
+                targetUserId = normalizedTargetUserId,
+                currentUserId = currentUser.value.id,
+                membership = membership,
+                weeklyOccurrence = weeklyOccurrence,
+                currentUserIsFreeAgent = checkIsUserFreeAgent(event),
+                eventOrOccurrenceStarted = hasSelectedEventOrOccurrenceStarted(event),
+            )
+            decision.errorMessage?.let { message ->
+                _errorState.value = ErrorMessage(message)
                 return@launch
             }
-            if (hasSelectedEventOrOccurrenceStarted(event)) {
-                _errorState.value = ErrorMessage(
-                    if (canRequestPaidRefund(event, membership)) {
-                        "This event has already started. Leaving is disabled. Request a refund instead."
-                    } else {
-                        "This event has already started. Leaving is no longer available."
-                    }
-                )
-                return@launch
-            }
+            val resolvedMembership = decision.membership ?: return@launch
 
-            val leavingSelf = normalizedTargetUserId == currentUser.value.id
-            val result = when (membership) {
+            val result = when (resolvedMembership) {
                 WithdrawTargetMembership.PARTICIPANT -> {
-                    if (
-                        leavingSelf &&
-                        usesRegisteredTeamWithdrawal(
-                            event = event,
-                            targetUserId = normalizedTargetUserId,
-                            currentUserId = currentUser.value.id,
-                            membership = membership,
-                            currentUserIsFreeAgent = checkIsUserFreeAgent(event),
-                        )
-                    ) {
+                    if (decision.useTeamWithdrawal) {
                         loadingHandler.showLoading("Team Leaving Event ...")
                         val team = _usersTeam.value
                         if (team == null) {
