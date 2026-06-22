@@ -88,6 +88,118 @@ class EventInviteHelpersTest {
     }
 
     @Test
+    fun team_invite_preflight_preserves_team_signup_and_duplicate_messages() {
+        val team = Team(captainId = "captain-1").copy(
+            id = " team-1 ",
+            name = "Team One",
+        )
+
+        assertEquals(
+            ParticipantMutationPreflight(normalizedId = "team-1"),
+            inviteTeamToEventPreflight(
+                team = team,
+                event = Event(teamSignup = true),
+                existingTeamIds = emptySet(),
+            ),
+        )
+        assertEquals(
+            ParticipantMutationPreflight(
+                normalizedId = "",
+                errorMessage = "Team id is required.",
+            ),
+            inviteTeamToEventPreflight(
+                team = team.copy(id = " "),
+                event = Event(teamSignup = true),
+                existingTeamIds = emptySet(),
+            ),
+        )
+        assertEquals(
+            ParticipantMutationPreflight(
+                normalizedId = "team-1",
+                errorMessage = "This event accepts individual players, not teams.",
+            ),
+            inviteTeamToEventPreflight(
+                team = team,
+                event = Event(teamSignup = false),
+                existingTeamIds = emptySet(),
+            ),
+        )
+        assertEquals(
+            ParticipantMutationPreflight(
+                normalizedId = "team-1",
+                errorMessage = "Team One is already in this event.",
+            ),
+            inviteTeamToEventPreflight(
+                team = team,
+                event = Event(teamSignup = true),
+                existingTeamIds = setOf("team-1"),
+            ),
+        )
+    }
+
+    @Test
+    fun player_invite_preflight_preserves_team_event_and_duplicate_messages() {
+        val player = user(" player-1 ").copy(firstName = "Player", lastName = "One")
+
+        assertEquals(
+            ParticipantMutationPreflight(normalizedId = "player-1"),
+            invitePlayerToEventPreflight(
+                user = player,
+                event = Event(teamSignup = false),
+                existingUserIds = emptySet(),
+            ),
+        )
+        assertEquals(
+            ParticipantMutationPreflight(
+                normalizedId = "",
+                errorMessage = "User id is required.",
+            ),
+            invitePlayerToEventPreflight(
+                user = player.copy(id = " "),
+                event = Event(teamSignup = false),
+                existingUserIds = emptySet(),
+            ),
+        )
+        assertEquals(
+            ParticipantMutationPreflight(
+                normalizedId = "player-1",
+                errorMessage = "This event accepts teams, not individual players.",
+            ),
+            invitePlayerToEventPreflight(
+                user = player,
+                event = Event(teamSignup = true),
+                existingUserIds = emptySet(),
+            ),
+        )
+        assertEquals(
+            ParticipantMutationPreflight(
+                normalizedId = "player-1",
+                errorMessage = "Player One is already in this event.",
+            ),
+            invitePlayerToEventPreflight(
+                user = player,
+                event = Event(teamSignup = false),
+                existingUserIds = setOf("player-1"),
+            ),
+        )
+    }
+
+    @Test
+    fun remove_user_participant_preflight_requires_user_id() {
+        assertEquals(
+            ParticipantMutationPreflight(normalizedId = "user-1"),
+            removeUserParticipantPreflight(" user-1 "),
+        )
+        assertEquals(
+            ParticipantMutationPreflight(
+                normalizedId = "",
+                errorMessage = "User id is required.",
+            ),
+            removeUserParticipantPreflight(" "),
+        )
+    }
+
+    @Test
     fun event_player_invite_request_normalizes_fields() {
         val request = buildEventPlayerInviteRequest(
             event = Event(id = " event-1 "),

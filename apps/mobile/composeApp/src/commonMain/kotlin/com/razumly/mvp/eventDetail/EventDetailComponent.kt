@@ -4145,22 +4145,18 @@ class DefaultEventDetailComponent(
     }
 
     override fun inviteTeamToEvent(team: Team) {
-        val normalizedTeamId = team.id.trim()
-        if (normalizedTeamId.isBlank()) {
-            _errorState.value = ErrorMessage("Team id is required.")
-            return
-        }
-
         scope.launch {
             val event = selectedEvent.value
-            if (!event.teamSignup) {
-                _errorState.value = ErrorMessage("This event accepts individual players, not teams.")
+            val preflight = inviteTeamToEventPreflight(
+                team = team,
+                event = event,
+                existingTeamIds = eventParticipantTeamIdsForInviteSearch(event),
+            )
+            if (!preflight.isAccepted) {
+                _errorState.value = ErrorMessage(preflight.errorMessage ?: "Unable to add team.")
                 return@launch
             }
-            if (eventParticipantTeamIdsForInviteSearch(event).contains(normalizedTeamId)) {
-                _errorState.value = ErrorMessage("${team.name.ifBlank { "Team" }} is already in this event.")
-                return@launch
-            }
+            val normalizedTeamId = preflight.normalizedId
             val occurrence = if (isWeeklyParentEvent(event)) {
                 requireSelectedWeeklyOccurrence(
                     event = event,
@@ -4191,22 +4187,18 @@ class DefaultEventDetailComponent(
     }
 
     override fun invitePlayerToEvent(user: UserData) {
-        val normalizedUserId = user.id.trim()
-        if (normalizedUserId.isBlank()) {
-            _errorState.value = ErrorMessage("User id is required.")
-            return
-        }
-
         scope.launch {
             val event = selectedEvent.value
-            if (event.teamSignup) {
-                _errorState.value = ErrorMessage("This event accepts teams, not individual players.")
+            val preflight = invitePlayerToEventPreflight(
+                user = user,
+                event = event,
+                existingUserIds = eventParticipantUserIdsForInviteSearch(event),
+            )
+            if (!preflight.isAccepted) {
+                _errorState.value = ErrorMessage(preflight.errorMessage ?: "Unable to add player.")
                 return@launch
             }
-            if (eventParticipantUserIdsForInviteSearch(event).contains(normalizedUserId)) {
-                _errorState.value = ErrorMessage("${user.fullName.ifBlank { "Player" }} is already in this event.")
-                return@launch
-            }
+            val normalizedUserId = preflight.normalizedId
             val occurrence = if (isWeeklyParentEvent(event)) {
                 requireSelectedWeeklyOccurrence(
                     event = event,
@@ -4732,11 +4724,12 @@ class DefaultEventDetailComponent(
             } else {
                 null
             }
-            val normalizedUserId = userId.trim().takeIf(String::isNotBlank)
-            if (normalizedUserId == null) {
-                _errorState.value = ErrorMessage("User id is required.")
+            val preflight = removeUserParticipantPreflight(userId)
+            if (!preflight.isAccepted) {
+                _errorState.value = ErrorMessage(preflight.errorMessage ?: "Failed to remove participant.")
                 return@launch
             }
+            val normalizedUserId = preflight.normalizedId
             loadingHandler.showLoading("Removing participant...")
             eventRepository.removeCurrentUserFromEvent(
                 event,
