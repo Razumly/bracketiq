@@ -82,7 +82,6 @@ import com.razumly.mvp.core.data.repositories.requiresChildEmail
 import com.razumly.mvp.core.data.repositories.userMessage
 import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
-import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.network.MvpApiClient
@@ -129,10 +128,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
-import kotlinx.datetime.isoDayNumber
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.atStartOfDayIn
-import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.hours
@@ -4620,10 +4615,11 @@ class DefaultEventDetailComponent(
                 .withSportRules(),
         )
         _editedEvent.value = updated
-        syncEditableFieldsForEvent(previous, updated)
-        syncEditableLeagueSlotBoundaries(
+        _editableFields.value = syncEditableFieldsForEvent(previous, updated, _editableFields.value)
+        _editableLeagueTimeSlots.value = syncEditableLeagueSlotBoundaries(
             previousEvent = previous,
             updatedEvent = updated,
+            slots = _editableLeagueTimeSlots.value,
         )
     }
 
@@ -4636,10 +4632,11 @@ class DefaultEventDetailComponent(
                 .withSportRules(),
         )
         _editedEvent.value = updated
-        syncEditableFieldsForEvent(previous, updated)
-        syncEditableLeagueSlotBoundaries(
+        _editableFields.value = syncEditableFieldsForEvent(previous, updated, _editableFields.value)
+        _editableLeagueTimeSlots.value = syncEditableLeagueSlotBoundaries(
             previousEvent = previous,
             updatedEvent = updated,
+            slots = _editableLeagueTimeSlots.value,
         )
     }
 
@@ -5708,7 +5705,7 @@ class DefaultEventDetailComponent(
     }
 
     override fun addLeagueTimeSlot() {
-        _editableLeagueTimeSlots.value = _editableLeagueTimeSlots.value + createDefaultLeagueSlot()
+        _editableLeagueTimeSlots.value = _editableLeagueTimeSlots.value + createDefaultLeagueSlot(_editedEvent.value)
     }
 
     override fun updateLeagueTimeSlot(index: Int, update: TimeSlot.() -> TimeSlot) {
@@ -5912,13 +5909,6 @@ class DefaultEventDetailComponent(
         )
     }
 
-    private data class PreparedEventForUpdate(
-        val event: Event,
-        val fields: List<Field>? = null,
-        val timeSlots: List<TimeSlot>? = null,
-        val leagueScoringConfig: LeagueScoringConfigDTO? = null,
-    )
-
     private data class PreparedTemplateForCreate(
         val event: Event,
         val fields: List<Field>? = null,
@@ -6039,303 +6029,27 @@ class DefaultEventDetailComponent(
     }
 
     private fun prepareEventForUpdate(): PreparedEventForUpdate {
-        val eventDraft = _editedEvent.value.copy(
-            matchRulesOverride = matchRulesOverrideWithoutSegmentCount(_editedEvent.value.matchRulesOverride),
-        )
-        val hasRentalBackedSlots = _editableLeagueTimeSlots.value.any { slot -> slot.isRentalBacked() }
-        val selectedRentalFieldIds = (
-            selectedRentalResourceFields().map { field -> field.id.trim() } +
-                _editableLeagueTimeSlots.value
-                    .filter { slot -> slot.isRentalBacked() }
-                    .flatMap { slot -> slot.normalizedScheduledFieldIds() }
-            )
-            .filter(String::isNotBlank)
-            .distinct()
-        val selectedRentalFieldIdSet = selectedRentalFieldIds.toSet()
-        val shouldPersistFields = eventDraft.eventType == EventType.LEAGUE ||
-            eventDraft.eventType == EventType.TOURNAMENT ||
-            eventDraft.eventType == EventType.WEEKLY_EVENT ||
-            hasRentalBackedSlots
-        val preparedFields = if (shouldPersistFields) {
-            buildFieldDrafts(eventDraft, excludedFieldIds = selectedRentalFieldIdSet)
-        } else {
-            null
-        }
-        val preparedEventWithFields = if (preparedFields != null) {
-            eventDraft.copy(fieldIds = selectedRentalFieldIds + preparedFields.map { field -> field.id })
-        } else {
-            eventDraft
-        }
-        val preparedLeagueScoringConfig = if (eventDraft.eventType == EventType.LEAGUE) {
-            _editableLeagueScoringConfig.value
-        } else {
-            null
-        }
-        val shouldPersistTimeSlots = eventDraft.eventType == EventType.LEAGUE ||
-            eventDraft.eventType == EventType.TOURNAMENT ||
-            eventDraft.eventType == EventType.WEEKLY_EVENT ||
-            hasRentalBackedSlots
-        if (!shouldPersistTimeSlots) {
-            return PreparedEventForUpdate(
-                event = preparedEventWithFields,
-                fields = preparedFields,
-                timeSlots = null,
-                leagueScoringConfig = preparedLeagueScoringConfig,
-            )
-        }
-
-        val preparedTimeSlots = buildLeagueSlotDrafts(preparedEventWithFields)
-        val preparedEvent = preparedEventWithFields.copy(timeSlotIds = preparedTimeSlots.map { slot -> slot.id })
-        return PreparedEventForUpdate(
-            event = preparedEvent,
-            fields = preparedFields,
-            timeSlots = preparedTimeSlots,
-            leagueScoringConfig = preparedLeagueScoringConfig,
-        )
-    }
-
-    private fun buildFieldDrafts(event: Event, excludedFieldIds: Set<String> = emptySet()): List<Field> {
-        val preservedFields = _editableFields.value.filter { field ->
-            excludedFieldIds.contains(field.id.trim())
-        }
-        val numberOffset = preservedFields.size
-        val drafts = _editableFields.value
-            .filterNot { field -> excludedFieldIds.contains(field.id.trim()) }
-            .mapIndexed { index, field ->
-                val fieldNumber = numberOffset + index + 1
-                field.copy(
-                    id = if (field.id.isBlank()) newId() else field.id,
-                    fieldNumber = fieldNumber,
-                    name = field.name?.takeIf(String::isNotBlank) ?: "Field $fieldNumber",
-                    divisions = field.divisions
-                        .normalizeDivisionIdentifiers()
-                        .ifEmpty { defaultFieldDivisions(event) },
-                    location = eventFieldLocationDefault(field, event),
-                    organizationId = resolveFieldOrganizationId(
-                        fieldOrganizationId = field.organizationId,
-                        eventOrganizationId = event.organizationId,
-                    ),
-                )
-            }
-        val allFields = (preservedFields + drafts)
-            .distinctBy { field -> field.id.trim() }
-            .mapIndexed { index, field -> field.copy(fieldNumber = index + 1) }
-        _editableFields.value = allFields
-        _fieldCount.value = allFields.size
-        _editedEvent.value = _editedEvent.value.copy(fieldIds = allFields.map { field -> field.id })
-        return drafts
-    }
-
-    private fun buildLeagueSlotDrafts(event: Event): List<TimeSlot> {
-        val originalEventStart = eventWithRelations.value.event.start
-        val selectedDivisionIds = event.divisions
-            .normalizeDivisionIdentifiers()
-            .ifEmpty { listOf(DEFAULT_DIVISION) }
-        val validFieldIds = event.fieldIds
-            .map(String::trim)
-            .filter(String::isNotBlank)
-            .toSet()
-
-        return _editableLeagueTimeSlots.value.mapNotNull { rawSlot ->
-            val slot = normalizeRentalSlotResourceSelection(rawSlot, validFieldIds)
-            val slotTimeZone = slot.timeZone.toTimeZoneOrUtc(event.resolvedTimeZone())
-            val normalizedFieldIds = slot.normalizedScheduledFieldIds()
-            val mappedFieldIds = if (validFieldIds.isEmpty()) {
-                normalizedFieldIds
-            } else {
-                normalizedFieldIds.filter(validFieldIds::contains)
-            }
-            if (mappedFieldIds.isEmpty()) {
-                return@mapNotNull null
-            }
-
-            val effectiveDivisionIds = resolveEffectiveLeagueSlotDivisionIds(
-                singleDivision = event.singleDivision,
-                selectedDivisionIds = selectedDivisionIds,
-                slotDivisionIds = slot.normalizedDivisionIds(),
-            )
-
-            if (!slot.repeating) {
-                val slotStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start
-                val slotEndDate = slot.endDate ?: return@mapNotNull null
-                if (slotEndDate <= slotStartDate) {
-                    return@mapNotNull null
-                }
-                val slotDayOfWeek = slotStartDate.toMondayFirstDay(slotTimeZone)
-                return@mapNotNull slot.copy(
-                    id = slot.id.ifBlank { newId() },
-                    dayOfWeek = slotDayOfWeek,
-                    daysOfWeek = listOf(slotDayOfWeek),
-                    divisions = effectiveDivisionIds,
-                    scheduledFieldId = mappedFieldIds.first(),
-                    scheduledFieldIds = mappedFieldIds,
-                    startDate = slotStartDate,
-                    endDate = slotEndDate,
-                    startTimeMinutes = slotStartDate.toMinutesOfDay(slotTimeZone),
-                    endTimeMinutes = slotEndDate.toMinutesOfDay(slotTimeZone),
-                    repeating = false,
-                )
-            }
-
-            val normalizedDays = slot.normalizedDaysOfWeek()
-            val startMinutes = slot.startTimeMinutes
-            val endMinutes = slot.endTimeMinutes
-            if (normalizedDays.isEmpty() || startMinutes == null || endMinutes == null) {
-                return@mapNotNull null
-            }
-            if (endMinutes <= startMinutes) {
-                return@mapNotNull null
-            }
-
-            val bounds = resolveRecurringSlotDateBoundsForEventDraft(
-                slot = slot,
-                event = event,
-                originalEventStart = originalEventStart,
-            )
-            slot.copy(
-                id = slot.id.ifBlank { newId() },
-                dayOfWeek = normalizedDays.first(),
-                daysOfWeek = normalizedDays,
-                divisions = effectiveDivisionIds,
-                scheduledFieldId = mappedFieldIds.first(),
-                scheduledFieldIds = mappedFieldIds,
-                startDate = bounds.startDate,
-                endDate = bounds.endDate,
-                repeating = true,
-            )
-        }
-    }
-
-    private fun editableLeagueTimeSlotsForEvent(
-        event: Event,
-        timeSlots: List<TimeSlot>,
-    ): List<TimeSlot> {
-        return timeSlots
-            .map { slot -> normalizeEditableLeagueTimeSlotForEvent(event, slot) }
-            .sortedBy { slot -> slot.startTimeMinutes ?: Int.MAX_VALUE }
-    }
-
-    private fun syncEditableLeagueSlotBoundaries(
-        previousEvent: Event,
-        updatedEvent: Event,
-    ) {
-        val scheduleBoundaryChanged = previousEvent.start != updatedEvent.start ||
-            previousEvent.end != updatedEvent.end ||
-            previousEvent.noFixedEndDateTime != updatedEvent.noFixedEndDateTime ||
-            previousEvent.eventType != updatedEvent.eventType
-        if (!scheduleBoundaryChanged || _editableLeagueTimeSlots.value.isEmpty()) {
-            return
-        }
-
-        _editableLeagueTimeSlots.value = _editableLeagueTimeSlots.value.map { slot ->
-            if (!slot.repeating) {
-                slot
-            } else {
-                val normalizedStart = when {
-                    slot.startDate == Instant.DISTANT_PAST -> Instant.DISTANT_PAST
-                    slot.startDate == previousEvent.start -> Instant.DISTANT_PAST
-                    else -> slot.startDate
-                }
-                slot.copy(
-                    startDate = normalizedStart,
-                    endDate = updatedEvent.defaultLeagueSlotEndDate(),
-                )
-            }
-        }
-    }
-
-    private fun buildEditableFieldDrafts(
-        event: Event,
-        sourceFields: List<Field>,
-    ): List<Field> {
-        val sourceById = sourceFields.associateBy { field -> field.id.trim() }
-        val orderedEventFieldIds = event.fieldIds
-            .map { fieldId -> fieldId.trim() }
-            .filter(String::isNotBlank)
-            .distinct()
-        val baseFields = if (orderedEventFieldIds.isNotEmpty()) {
-            orderedEventFieldIds.mapIndexed { index, fieldId ->
-                sourceById[fieldId] ?: Field(
-                    fieldNumber = index + 1,
-                    organizationId = event.organizationId,
-                    id = fieldId,
-                ).copy(
-                    name = "Field ${index + 1}",
-                    location = defaultFieldLocation(event),
-                )
-            }
-        } else {
-            sourceFields
-                .sortedBy { field -> field.fieldNumber }
-                .ifEmpty {
-                    emptyList()
-                }
-        }
-
-        return baseFields.mapIndexed { index, field ->
-            field.copy(
-                id = field.id.trim().takeIf(String::isNotBlank) ?: newId(),
-                fieldNumber = index + 1,
-                name = field.name?.takeIf(String::isNotBlank) ?: "Field ${index + 1}",
-                divisions = field.divisions
-                    .normalizeDivisionIdentifiers()
-                    .ifEmpty { defaultFieldDivisions(event) },
-                location = eventFieldLocationDefault(field, event),
-                organizationId = field.organizationId?.trim()?.takeIf(String::isNotBlank) ?: event.organizationId,
-            )
-        }
-    }
-
-    private fun syncEditableFieldsForEvent(previousEvent: Event, updatedEvent: Event) {
-        if (_editableFields.value.isEmpty()) return
-
-        _editableFields.value = _editableFields.value.mapIndexed { index, field ->
-            field.copy(
-                fieldNumber = index + 1,
-                divisions = field.divisions
-                    .normalizeDivisionIdentifiers()
-                    .ifEmpty { defaultFieldDivisions(updatedEvent) },
-                location = eventFieldLocationDefault(field, updatedEvent, previousEvent),
-                organizationId = resolveFieldOrganizationId(
-                    fieldOrganizationId = field.organizationId,
-                    eventOrganizationId = updatedEvent.organizationId,
+        val result = EventEditPayloadBuilder.prepareForUpdate(
+            EventEditPayloadInput(
+                editedEvent = _editedEvent.value.copy(
+                    matchRulesOverride = matchRulesOverrideWithoutSegmentCount(_editedEvent.value.matchRulesOverride),
                 ),
+                editableFields = _editableFields.value,
+                editableLeagueTimeSlots = _editableLeagueTimeSlots.value,
+                selectedRentalFields = selectedRentalResourceFields(),
+                leagueScoringConfig = _editableLeagueScoringConfig.value,
+                originalEventStart = eventWithRelations.value.event.start,
+                normalizeSlotResourceSelection = { slot, validFieldIds ->
+                    normalizeRentalSlotResourceSelection(slot, validFieldIds)
+                },
             )
+        )
+        result.editableFields?.let { fields ->
+            _editableFields.value = fields
+            _fieldCount.value = fields.size
+            _editedEvent.value = _editedEvent.value.copy(fieldIds = fields.map { field -> field.id })
         }
-    }
-
-    private fun defaultFieldDivisions(event: Event): List<String> {
-        val eventDivisions = event.divisions.normalizeDivisionIdentifiers()
-        return eventDivisions.ifEmpty { listOf(DEFAULT_DIVISION) }
-    }
-
-    private fun defaultFieldLocation(event: Event): String? {
-        return event.location.trim().takeIf(String::isNotBlank)
-    }
-
-    private fun eventFieldLocationDefault(
-        field: Field,
-        event: Event,
-        previousEvent: Event? = null,
-    ): String? {
-        val currentLocation = field.location?.trim()?.takeIf(String::isNotBlank)
-        val previousDefault = previousEvent?.let(::defaultFieldLocation)
-        val eventDefault = defaultFieldLocation(event)
-        return when {
-            currentLocation == null -> eventDefault
-            previousDefault != null && currentLocation == previousDefault -> eventDefault
-            else -> currentLocation
-        }
-    }
-
-    private fun resolveFieldOrganizationId(
-        fieldOrganizationId: String?,
-        eventOrganizationId: String?,
-    ): String? {
-        return fieldOrganizationId
-            ?.trim()
-            ?.takeIf(String::isNotBlank)
-            ?: eventOrganizationId?.trim()?.takeIf(String::isNotBlank)
+        return result.prepared
     }
 
     private fun logPreparedFieldOwnership(action: String, prepared: PreparedEventForUpdate) {
@@ -6350,70 +6064,6 @@ class DefaultEventDetailComponent(
             "Event ownership payload [$action] eventId=${prepared.event.id} " +
                 "eventOrg=${eventOrgId ?: "null"} fieldOwnership=[$fieldOwnership]",
         )
-    }
-
-    private fun LeagueScoringConfig.toDto(): LeagueScoringConfigDTO = LeagueScoringConfigDTO(
-        pointsForWin = pointsForWin,
-        pointsForDraw = pointsForDraw,
-        pointsForLoss = pointsForLoss,
-        pointsPerSetWin = pointsPerSetWin,
-        pointsPerSetLoss = pointsPerSetLoss,
-        pointsPerGameWin = pointsPerGameWin,
-        pointsPerGameLoss = pointsPerGameLoss,
-        pointsPerGoalScored = pointsPerGoalScored,
-        pointsPerGoalConceded = pointsPerGoalConceded,
-    )
-
-    private fun createDefaultLeagueSlot(): TimeSlot {
-        val event = _editedEvent.value
-        val startDate = if (event.start == Instant.DISTANT_PAST) Clock.System.now() else event.start
-        val endDate = event.defaultLeagueSlotEndDate()
-        return TimeSlot(
-            id = newId(),
-            dayOfWeek = null,
-            daysOfWeek = emptyList(),
-            divisions = defaultFieldDivisions(event),
-            startTimeMinutes = null,
-            endTimeMinutes = null,
-            startDate = startDate,
-            timeZone = event.timeZone,
-            repeating = true,
-            endDate = endDate,
-            scheduledFieldId = null,
-            scheduledFieldIds = emptyList(),
-            price = null,
-        )
-    }
-
-    private fun Event.defaultLeagueSlotEndDate(): Instant? {
-        if (eventType == EventType.WEEKLY_EVENT || noFixedEndDateTime) {
-            return null
-        }
-        return end
-            .takeIf { value -> value > start }
-            ?.toDateOnlyInstant(resolvedTimeZone())
-    }
-
-    private fun Instant.toDateOnlyInstant(timezone: TimeZone): Instant {
-        val localDate = toLocalDateTime(timezone).date
-        return localDate.atStartOfDayIn(timezone)
-    }
-
-    private fun Instant.toMinutesOfDay(timezone: TimeZone): Int {
-        val localTime = toLocalDateTime(timezone).time
-        return localTime.hour * 60 + localTime.minute
-    }
-
-    private fun Instant.toMondayFirstDay(timezone: TimeZone): Int {
-        val isoDay = toLocalDateTime(timezone).date.dayOfWeek.isoDayNumber
-        return (isoDay - 1).mod(7)
-    }
-
-    private fun List<String>.normalizeDistinctIds(): List<String> {
-        return this
-            .map { value -> value.trim() }
-            .filter(String::isNotBlank)
-            .distinct()
     }
 
     private fun buildBracketRounds(
@@ -7827,68 +7477,6 @@ class DefaultEventDetailComponent(
     data class ValidationResult(
         val isValid: Boolean, val errorMessage: String
     )
-}
-
-internal data class RecurringSlotDateBounds(
-    val startDate: Instant,
-    val endDate: Instant?,
-)
-
-internal fun normalizeEditableLeagueTimeSlotForEvent(
-    event: Event,
-    slot: TimeSlot,
-): TimeSlot {
-    if (!slot.repeating) {
-        return slot
-    }
-
-    val normalizedStart = if (slot.startDate == event.start) {
-        Instant.DISTANT_PAST
-    } else {
-        slot.startDate
-    }
-    val normalizedEnd = if (event.eventType == EventType.WEEKLY_EVENT || event.noFixedEndDateTime) {
-        null
-    } else {
-        slot.endDate
-    }
-
-    return if (normalizedStart == slot.startDate && normalizedEnd == slot.endDate) {
-        slot
-    } else {
-        slot.copy(
-            startDate = normalizedStart,
-            endDate = normalizedEnd,
-        )
-    }
-}
-
-internal fun resolveRecurringSlotDateBoundsForEventDraft(
-    slot: TimeSlot,
-    event: Event,
-    originalEventStart: Instant,
-): RecurringSlotDateBounds {
-    val slotStartDate = when {
-        slot.startDate == Instant.DISTANT_PAST -> event.start
-        slot.startDate == originalEventStart -> event.start
-        else -> slot.startDate
-    }
-    val slotEndDate = if (event.eventType == EventType.WEEKLY_EVENT || event.noFixedEndDateTime) {
-        null
-    } else {
-        event.end
-            .takeIf { value -> value > event.start }
-            ?.toDateOnlyInstantForScheduling(event.resolvedTimeZone())
-    }
-    return RecurringSlotDateBounds(
-        startDate = slotStartDate,
-        endDate = slotEndDate,
-    )
-}
-
-private fun Instant.toDateOnlyInstantForScheduling(timezone: TimeZone): Instant {
-    val localDate = toLocalDateTime(timezone).date
-    return localDate.atStartOfDayIn(timezone)
 }
 
 private fun addTemplateSuffix(name: String): String {
