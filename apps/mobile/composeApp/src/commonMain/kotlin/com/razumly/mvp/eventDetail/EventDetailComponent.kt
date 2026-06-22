@@ -678,8 +678,7 @@ class DefaultEventDetailComponent(
     override val errorState = _errorState.asStateFlow()
     private val registrationFlowCoordinator = EventRegistrationFlowCoordinator()
     override val billingAddressPrompt = registrationFlowCoordinator.billingAddressPrompt
-    private val _startingTeamRegistrationId = MutableStateFlow<String?>(null)
-    override val startingTeamRegistrationId = _startingTeamRegistrationId.asStateFlow()
+    override val startingTeamRegistrationId = registrationFlowCoordinator.startingTeamRegistrationId
 
     private lateinit var loadingHandler: LoadingHandler
 
@@ -722,10 +721,9 @@ class DefaultEventDetailComponent(
     override fun registrationHoldExpired() {
         scope.launch {
             clearCurrentRegistrationProgress()
-            pendingTeamRegistration = null
             registrationFlowCoordinator.clearPendingJoinConfirmationTarget()
+            registrationFlowCoordinator.clearTeamRegistrationState()
             registrationFlowCoordinator.clearAfterRegistrationHoldExpired()
-            _startingTeamRegistrationId.value = null
             _errorState.value = ErrorMessage("Registration hold expired. Start registration again to reserve a new spot.")
         }
     }
@@ -1273,7 +1271,6 @@ class DefaultEventDetailComponent(
     private var pendingSignatureSteps: List<SignStep> = emptyList()
     private var pendingSignatureStepIndex = 0
     private var pendingPostSignatureAction: (suspend () -> Unit)? = null
-    private var pendingTeamRegistration: TeamWithPlayers? = null
     private var pendingSignatureContext: SignerContext = SignerContext.PARTICIPANT
     private var pendingSignatureContexts: List<SignerContext> = emptyList()
     private var pendingSignatureContextIndex = 0
@@ -1656,29 +1653,27 @@ class DefaultEventDetailComponent(
         scope.launch {
             paymentResult.collect {
                 if (it != null) {
-                    val pendingTeam = pendingTeamRegistration
+                    val pendingTeam = registrationFlowCoordinator.currentPendingTeamRegistration()
                     val confirmationTarget = registrationFlowCoordinator.currentJoinConfirmationTarget()
                     when (it) {
                         PaymentResult.Canceled -> {
                             _errorState.value = ErrorMessage("Payment canceled.")
-                            _startingTeamRegistrationId.value = null
-                            pendingTeamRegistration = null
+                            registrationFlowCoordinator.clearTeamRegistrationState()
                         }
 
                         is PaymentResult.Failed -> {
                             _errorState.value = ErrorMessage(it.error)
-                            _startingTeamRegistrationId.value = null
-                            pendingTeamRegistration = null
+                            registrationFlowCoordinator.clearTeamRegistrationState()
                         }
 
                         PaymentResult.Completed -> {
                             if (pendingTeam != null) {
                                 loadingHandler.showLoading("Refreshing Team")
-                                _startingTeamRegistrationId.value = null
+                                registrationFlowCoordinator.clearStartingTeamRegistrationId()
                                 val teamRegisteredSuccessfully = waitForTeamRegistrationWithTimeout(
                                     teamId = pendingTeam.team.id,
                                 )
-                                pendingTeamRegistration = null
+                                registrationFlowCoordinator.clearPendingTeamRegistration()
                                 if (teamRegisteredSuccessfully) {
                                     val refreshedTeam = teamRepository.getTeamWithPlayers(pendingTeam.team.id)
                                         .getOrNull()
@@ -2570,14 +2565,14 @@ class DefaultEventDetailComponent(
     override fun startTeamRegistration(team: TeamWithPlayers) {
         scope.launch {
             val teamId = team.team.registrationTargetTeamId()
-            if (teamId.isBlank() || _startingTeamRegistrationId.value != null) return@launch
+            if (teamId.isBlank() || registrationFlowCoordinator.startingTeamRegistrationId.value != null) return@launch
 
             if (currentUser.value.id.isBlank()) {
                 _errorState.value = ErrorMessage("Please sign in to join this team.")
                 return@launch
             }
 
-            _startingTeamRegistrationId.value = teamId
+            if (!registrationFlowCoordinator.startTeamRegistration(teamId)) return@launch
             try {
                 loadingHandler.showLoading("Preparing team registration...")
                 val registrationTeam = resolveTeamRegistrationTarget(team).getOrElse { throwable ->
@@ -2624,9 +2619,7 @@ class DefaultEventDetailComponent(
                 )
                 loadingHandler.hideLoading()
             } finally {
-                if (pendingTeamRegistration == null) {
-                    _startingTeamRegistrationId.value = null
-                }
+                registrationFlowCoordinator.clearStartingTeamRegistrationIfNoPendingTeam()
             }
         }
     }
@@ -2646,8 +2639,7 @@ class DefaultEventDetailComponent(
         val dialog = result.dialog ?: return
         scope.launch {
             val teamId = dialog.teamId.trim().takeIf(String::isNotBlank) ?: team.team.registrationTargetTeamId()
-            if (teamId.isBlank() || _startingTeamRegistrationId.value != null) return@launch
-            _startingTeamRegistrationId.value = teamId
+            if (!registrationFlowCoordinator.startTeamRegistration(teamId)) return@launch
             try {
                 loadingHandler.showLoading(
                     if (dialog.joinPolicy.isRequestToJoinPolicy()) {
@@ -2663,9 +2655,7 @@ class DefaultEventDetailComponent(
                 )
                 loadingHandler.hideLoading()
             } finally {
-                if (pendingTeamRegistration == null) {
-                    _startingTeamRegistrationId.value = null
-                }
+                registrationFlowCoordinator.clearStartingTeamRegistrationIfNoPendingTeam()
             }
         }
     }
@@ -2747,7 +2737,7 @@ class DefaultEventDetailComponent(
         if (result.requiresAdditionalSigning()) {
             runActionAfterRequiredSigning(teamId = team.team.id) {
                 scope.launch {
-                    _startingTeamRegistrationId.value = team.team.id
+                    registrationFlowCoordinator.setStartingTeamRegistrationId(team.team.id)
                     loadingHandler.showLoading("Refreshing team registration...")
                     teamRepository.requestTeamRegistration(team.team.id, answers)
                         .onSuccess { refreshedResult ->
@@ -2758,9 +2748,7 @@ class DefaultEventDetailComponent(
                             )
                         }
                     loadingHandler.hideLoading()
-                    if (pendingTeamRegistration == null) {
-                        _startingTeamRegistrationId.value = null
-                    }
+                    registrationFlowCoordinator.clearStartingTeamRegistrationIfNoPendingTeam()
                 }
             }
             return
@@ -2779,7 +2767,7 @@ class DefaultEventDetailComponent(
             return
         }
 
-        _startingTeamRegistrationId.value = teamId
+        registrationFlowCoordinator.setStartingTeamRegistrationId(teamId)
         try {
             if (team.team.registrationPriceCents > 0) {
                 if (!ensureBillingAddressOrPrompt { scope.launch { continueTeamRegistration(team, result) } }) {
@@ -2802,7 +2790,7 @@ class DefaultEventDetailComponent(
                                 holdExpiresAt = holdExpiresAt,
                             )
                         }
-                    pendingTeamRegistration = team
+                    registrationFlowCoordinator.setPendingTeamRegistration(team)
                     showPaymentSheet(intent)
                 }.onFailure { throwable ->
                     _errorState.value = ErrorMessage(
@@ -2826,9 +2814,7 @@ class DefaultEventDetailComponent(
             clearCurrentRegistrationProgress()
             _errorState.value = ErrorMessage("You joined ${team.team.name}.")
         } finally {
-            if (pendingTeamRegistration == null) {
-                _startingTeamRegistrationId.value = null
-            }
+            registrationFlowCoordinator.clearStartingTeamRegistrationIfNoPendingTeam()
         }
     }
 

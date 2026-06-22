@@ -402,6 +402,42 @@ class EventRegistrationFlowCoordinatorTest {
     }
 
     @Test
+    fun team_registration_state_tracks_starting_id_and_pending_team() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val team = teamWithPlayers("team-1")
+
+        assertTrue(coordinator.startTeamRegistration(" team-1 "))
+        assertEquals("team-1", coordinator.startingTeamRegistrationId.value)
+        assertFalse(coordinator.startTeamRegistration("team-2"))
+
+        coordinator.setPendingTeamRegistration(team)
+
+        assertEquals(team, coordinator.currentPendingTeamRegistration())
+
+        coordinator.clearStartingTeamRegistrationIfNoPendingTeam()
+
+        assertEquals("team-1", coordinator.startingTeamRegistrationId.value)
+
+        coordinator.clearPendingTeamRegistration()
+        coordinator.clearStartingTeamRegistrationIfNoPendingTeam()
+
+        assertNull(coordinator.startingTeamRegistrationId.value)
+    }
+
+    @Test
+    fun team_registration_state_can_be_cleared_together() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val team = teamWithPlayers("team-1")
+
+        coordinator.setStartingTeamRegistrationId(" team-1 ")
+        coordinator.setPendingTeamRegistration(team)
+        coordinator.clearTeamRegistrationState()
+
+        assertNull(coordinator.startingTeamRegistrationId.value)
+        assertNull(coordinator.currentPendingTeamRegistration())
+    }
+
+    @Test
     fun signature_prompts_can_be_shown_and_cleared_independently() {
         val coordinator = EventRegistrationFlowCoordinator()
         val textPrompt = TextSignaturePromptState(

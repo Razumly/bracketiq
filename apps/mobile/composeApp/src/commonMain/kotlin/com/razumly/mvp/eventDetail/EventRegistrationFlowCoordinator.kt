@@ -51,6 +51,9 @@ internal class EventRegistrationFlowCoordinator {
     private val _currentFeeBreakdown = MutableStateFlow<FeeBreakdown?>(null)
     val currentFeeBreakdown = _currentFeeBreakdown.asStateFlow()
 
+    private val _startingTeamRegistrationId = MutableStateFlow<String?>(null)
+    val startingTeamRegistrationId = _startingTeamRegistrationId.asStateFlow()
+
     private val _paymentPlanPreviewDialog = MutableStateFlow<PaymentPlanPreviewDialogState?>(null)
     val paymentPlanPreviewDialog = _paymentPlanPreviewDialog.asStateFlow()
 
@@ -82,6 +85,7 @@ internal class EventRegistrationFlowCoordinator {
     private var pendingTeamJoinQuestionTeam: TeamWithPlayers? = null
     private var pendingJoinConfirmationTarget: JoinConfirmationTarget? = null
     private var pendingFeeBreakdownAction: (() -> Unit)? = null
+    private var pendingTeamRegistration: TeamWithPlayers? = null
 
     fun updateQuestionAnswer(questionId: String, answer: String): Boolean {
         val answerUpdate = registrationQuestionAnswerUpdate(questionId, answer) ?: return false
@@ -325,6 +329,43 @@ internal class EventRegistrationFlowCoordinator {
 
     fun clearPendingJoinConfirmationTarget() {
         pendingJoinConfirmationTarget = null
+    }
+
+    fun startTeamRegistration(teamId: String): Boolean {
+        val normalizedTeamId = teamId.trim().takeIf(String::isNotBlank) ?: return false
+        if (_startingTeamRegistrationId.value != null) return false
+        _startingTeamRegistrationId.value = normalizedTeamId
+        return true
+    }
+
+    fun setStartingTeamRegistrationId(teamId: String?) {
+        _startingTeamRegistrationId.value = teamId?.trim()?.takeIf(String::isNotBlank)
+    }
+
+    fun clearStartingTeamRegistrationId() {
+        _startingTeamRegistrationId.value = null
+    }
+
+    fun setPendingTeamRegistration(team: TeamWithPlayers?) {
+        pendingTeamRegistration = team
+    }
+
+    fun currentPendingTeamRegistration(): TeamWithPlayers? =
+        pendingTeamRegistration
+
+    fun clearPendingTeamRegistration() {
+        pendingTeamRegistration = null
+    }
+
+    fun clearStartingTeamRegistrationIfNoPendingTeam() {
+        if (pendingTeamRegistration == null) {
+            _startingTeamRegistrationId.value = null
+        }
+    }
+
+    fun clearTeamRegistrationState() {
+        _startingTeamRegistrationId.value = null
+        pendingTeamRegistration = null
     }
 
     fun showTextSignaturePrompt(prompt: TextSignaturePromptState) {
