@@ -56,6 +56,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Move participant management snapshot/compliance loading state and request-token coordination into `EventParticipantManagementCoordinator` with focused tests.
   - [x] (2026-06-22) Move participant invite/add/remove preflight decisions into helpers or coordinator methods with focused tests.
 - [ ] Thin `DefaultEventDetailComponent` so it owns Decompose lifecycle, public state exposure, and delegation, while helpers own domain-specific transformations.
+  - [x] (2026-06-22) Move league standings state and division target decisions into `EventLeagueStandingsCoordinator` with focused tests.
 - [ ] Run focused event-detail regression tests and final compile/build validation.
 
 ## Surprises & Discoveries
@@ -236,6 +237,8 @@ The thirty-fourth implementation milestone starts participant/invite coordinatio
 The thirty-fifth implementation milestone moves participant management state and request-token coordination into a coordinator. `EventParticipantManagementCoordinator.kt` now owns event team/participant loading state, participant management snapshots, division warnings, team/user compliance summaries, participant management and compliance loading flags, managed-detail bootstrap suppression, and stale request-token handling. `DefaultEventDetailComponent` still owns repository calls, Room observations, permission checks, selected occurrence resolution, and error/logging behavior. `EventDetailComponent.kt` dropped to 6,411 lines after this milestone.
 
 The thirty-sixth implementation milestone completes the participant/invite coordination extraction. `EventInviteHelpers.kt` now owns team/player invite preflight decisions and user-removal id preflight, preserving existing user-facing error copy while `DefaultEventDetailComponent` keeps weekly occurrence prompts, repository mutations, refreshes, and loading/error side effects. `EventDetailComponent.kt` dropped to 6,404 lines after this milestone.
+
+The thirty-seventh implementation milestone starts the final component-thinning task. `EventLeagueStandingsCoordinator.kt` now owns league standings data/loading/confirming state, standings load-target resolution, current standings division resolution, and confirmation success copy. `DefaultEventDetailComponent` still owns repository calls, schedule refresh triggers, selected event/division flows, loading/error side effects, and match/event refreshes after confirmation. `EventDetailComponent.kt` dropped to 6,382 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. Registration coordination and participant/invite coordination are now complete; the remaining work is to keep thinning `DefaultEventDetailComponent` around lower-risk orchestration seams, then run final focused regression and build validation.
 
@@ -1137,6 +1140,32 @@ Thirty-sixth milestone line-count evidence:
      280 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventInviteHelpersTest.kt
     1205 plans/event-detail-component-decomposition-execplan.md
 
+League standings coordinator slice first focused test run caught a compile issue:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventLeagueStandingsCoordinatorTest*" --tests "*LeagueStandingsPresentationTest*"
+    Exit code: 1
+    Result: `EventDetailComponent.kt` failed to compile because a private extension method reference to `isPlayoffPlacementDivision` is prohibited by Kotlin.
+    Fix: pass the playoff-placement check as an explicit lambda.
+
+League standings coordinator slice focused tests passed after compile fix:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventLeagueStandingsCoordinatorTest*" --tests "*LeagueStandingsPresentationTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 1m 23s; 43 actionable tasks: 9 executed, 34 up-to-date.
+
+League standings coordinator slice common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 12s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Thirty-seventh milestone line-count evidence:
+
+    6382 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     100 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventLeagueStandingsCoordinator.kt
+     148 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventLeagueStandingsCoordinatorTest.kt
+    1235 plans/event-detail-component-decomposition-execplan.md
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -1203,3 +1232,4 @@ Revision Note (2026-06-22): Recorded the final registration coordinator regressi
 Revision Note (2026-06-22): Recorded the first invite coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the participant management coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the participant invite/add/remove preflight helper slice, focused tests, compile checks, and marked participant/invite coordination complete.
+Revision Note (2026-06-22): Recorded the league standings coordinator slice, focused tests, compile fix, compile checks, and line-count impact.

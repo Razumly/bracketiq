@@ -741,14 +741,10 @@ class DefaultEventDetailComponent(
     private val _organizationTemplatesError = MutableStateFlow<String?>(null)
     override val organizationTemplatesError = _organizationTemplatesError.asStateFlow()
 
-    private val _leagueDivisionStandings = MutableStateFlow<LeagueDivisionStandings?>(null)
-    override val leagueDivisionStandings = _leagueDivisionStandings.asStateFlow()
-
-    private val _leagueDivisionStandingsLoading = MutableStateFlow(false)
-    override val leagueDivisionStandingsLoading = _leagueDivisionStandingsLoading.asStateFlow()
-
-    private val _leagueStandingsConfirming = MutableStateFlow(false)
-    override val leagueStandingsConfirming = _leagueStandingsConfirming.asStateFlow()
+    private val leagueStandingsCoordinator = EventLeagueStandingsCoordinator()
+    override val leagueDivisionStandings = leagueStandingsCoordinator.divisionStandings
+    override val leagueDivisionStandingsLoading = leagueStandingsCoordinator.divisionStandingsLoading
+    override val leagueStandingsConfirming = leagueStandingsCoordinator.standingsConfirming
     private var sportsLoadJob: Job? = null
     private var sportsCatalogLoaded = false
     private var reportSportsLoadErrors = false
@@ -1772,29 +1768,23 @@ class DefaultEventDetailComponent(
         }
         scope.launch {
             combine(selectedEvent, selectedDivision) { eventValue, divisionValue ->
-                val normalizedDivision = divisionValue
-                    ?.normalizeDivisionIdentifier()
-                    ?.takeIf(String::isNotBlank)
-                val supportsStandings = eventValue.eventType == EventType.LEAGUE ||
-                    eventValue.isTournamentPoolPlayEnabled()
-                if (!supportsStandings || normalizedDivision == null) {
-                    null
-                } else if (eventValue.isPlayoffPlacementDivision(normalizedDivision)) {
-                    null
-                } else {
-                    eventValue.id to normalizedDivision
-                }
+                leagueStandingsCoordinator.resolveLoadTarget(
+                    event = eventValue,
+                    selectedDivisionId = divisionValue,
+                    isPlayoffPlacementDivision = { divisionId ->
+                        eventValue.isPlayoffPlacementDivision(divisionId)
+                    },
+                )
             }
                 .distinctUntilChanged()
                 .collect { selection ->
                     if (selection == null) {
-                        _leagueDivisionStandings.value = null
-                        _leagueDivisionStandingsLoading.value = false
+                        leagueStandingsCoordinator.clearUnavailableSelection()
                     } else {
-                        _leagueDivisionStandings.value = null
+                        leagueStandingsCoordinator.clearStandingsForSelectionLoad()
                         loadLeagueDivisionStandings(
-                            eventId = selection.first,
-                            divisionId = selection.second,
+                            eventId = selection.eventId,
+                            divisionId = selection.divisionId,
                             showLoading = true,
                             reportErrors = false,
                         )
@@ -1998,12 +1988,10 @@ class DefaultEventDetailComponent(
         showLoading: Boolean,
         reportErrors: Boolean,
     ) {
-        if (showLoading) {
-            _leagueDivisionStandingsLoading.value = true
-        }
+        leagueStandingsCoordinator.beginLoad(showLoading)
         eventRepository.getLeagueDivisionStandings(eventId, divisionId)
             .onSuccess { standings ->
-                _leagueDivisionStandings.value = standings
+                leagueStandingsCoordinator.applyLoadSuccess(standings)
             }
             .onFailure { throwable ->
                 if (reportErrors) {
@@ -2012,9 +2000,7 @@ class DefaultEventDetailComponent(
                     )
                 }
             }
-        if (showLoading) {
-            _leagueDivisionStandingsLoading.value = false
-        }
+        leagueStandingsCoordinator.finishLoad(showLoading)
     }
 
     private suspend fun refreshLeagueStandingsAfterSchedule(event: Event) {
@@ -2029,14 +2015,12 @@ class DefaultEventDetailComponent(
     }
 
     private fun resolveLeagueStandingsDivisionId(): String? =
-        _leagueDivisionStandings.value?.divisionId
-            ?.normalizeDivisionIdentifier()
-            ?.takeIf(String::isNotBlank)
-            ?: selectedDivision.value
-                ?.normalizeDivisionIdentifier()
-                ?.takeIf { divisionId ->
-                    divisionId.isNotBlank() && !selectedEvent.value.isPlayoffPlacementDivision(divisionId)
-                }
+        leagueStandingsCoordinator.resolveCurrentDivisionId(
+            selectedDivisionId = selectedDivision.value,
+            isSelectedDivisionEligible = { divisionId ->
+                !selectedEvent.value.isPlayoffPlacementDivision(divisionId)
+            },
+        )
 
     override fun refreshLeagueStandings() {
         val divisionId = resolveLeagueStandingsDivisionId() ?: return
@@ -2061,7 +2045,7 @@ class DefaultEventDetailComponent(
         }
 
         scope.launch {
-            _leagueStandingsConfirming.value = true
+            leagueStandingsCoordinator.beginConfirming()
             loadingHandler.showLoading("Confirming standings...")
 
             eventRepository.confirmLeagueDivisionStandings(
@@ -2069,23 +2053,17 @@ class DefaultEventDetailComponent(
                 divisionId = divisionId,
                 applyReassignment = applyReassignment,
             ).onSuccess { result ->
-                _leagueDivisionStandings.value = result.division
+                val message = leagueStandingsCoordinator.applyConfirmSuccess(result)
                 matchRepository.getMatchesOfTournament(event.id)
                 eventRepository.getEvent(event.id)
-                _errorState.value = ErrorMessage(
-                    if (result.applyReassignment && result.seededTeamIds.isNotEmpty()) {
-                        "Standings confirmed. Playoff assignments updated."
-                    } else {
-                        "Standings confirmed."
-                    },
-                )
+                _errorState.value = ErrorMessage(message)
             }.onFailure { throwable ->
                 _errorState.value = ErrorMessage(
                     throwable.userMessage("Failed to confirm standings."),
                 )
             }
 
-            _leagueStandingsConfirming.value = false
+            leagueStandingsCoordinator.finishConfirming()
             loadingHandler.hideLoading()
         }
     }
