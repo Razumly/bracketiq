@@ -3070,27 +3070,8 @@ class DefaultEventDetailComponent(
                     eventId = selectedEvent.value.id,
                     warningMessage = "Failed to refresh event after child registration.",
                 )
-                val status = registration.registrationStatus?.lowercase()
-                val message = when {
-                    registration.joinedWaitlist -> "${child.fullName} added to waitlist."
-                    status == "active" -> "${child.fullName} registration completed."
-                    registration.requiresParentApproval -> {
-                        "${child.fullName} request sent. A parent/guardian must approve before registration can continue."
-                    }
-                    registration.requiresChildEmail -> {
-                        "${child.fullName} registration started. Add child email to continue child-signature document steps."
-                    }
-                    !registration.consentStatus.isNullOrBlank() -> {
-                        "${child.fullName} registration is pending. Consent status: ${registration.consentStatus}."
-                    }
-                    !status.isNullOrBlank() -> {
-                        "${child.fullName} registration is pending. Status: $status."
-                    }
-                    else -> "${child.fullName} registration request submitted and is pending processing."
-                }
-                val warning = registration.warnings.firstOrNull()?.takeIf(String::isNotBlank)
                 _errorState.value = ErrorMessage(
-                    listOfNotNull(message, warning).joinToString(" ")
+                    registrationFlowCoordinator.childRegistrationResultMessage(child, registration),
                 )
             }.onFailure { throwable ->
                 _errorState.value = ErrorMessage(throwable.userMessage("Failed to register child."))

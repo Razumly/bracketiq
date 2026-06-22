@@ -6,6 +6,7 @@ import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
@@ -433,6 +434,64 @@ class EventRegistrationFlowCoordinatorTest {
 
         assertEquals(listOf(child), coordinator.currentJoinableChildren())
         assertNull(coordinator.findJoinableChild("missing-child"))
+    }
+
+    @Test
+    fun child_registration_result_message_classifies_completion_pending_and_warning_states() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val child = joinChild("child-1")
+
+        assertEquals(
+            "Child child-1 registration completed.",
+            coordinator.childRegistrationResultMessage(
+                child = child,
+                registration = ChildRegistrationResult(registrationStatus = "ACTIVE"),
+            ),
+        )
+        assertEquals(
+            "Child child-1 added to waitlist.",
+            coordinator.childRegistrationResultMessage(
+                child = child,
+                registration = ChildRegistrationResult(joinedWaitlist = true),
+            ),
+        )
+        assertEquals(
+            "Child child-1 request sent. A parent/guardian must approve before registration can continue.",
+            coordinator.childRegistrationResultMessage(
+                child = child,
+                registration = ChildRegistrationResult(requiresParentApproval = true),
+            ),
+        )
+        assertEquals(
+            "Child child-1 registration started. Add child email to continue child-signature document steps.",
+            coordinator.childRegistrationResultMessage(
+                child = child,
+                registration = ChildRegistrationResult(requiresChildEmail = true),
+            ),
+        )
+        assertEquals(
+            "Child child-1 registration is pending. Consent status: sent.",
+            coordinator.childRegistrationResultMessage(
+                child = child,
+                registration = ChildRegistrationResult(consentStatus = "sent"),
+            ),
+        )
+        assertEquals(
+            "Child child-1 registration is pending. Status: pending.",
+            coordinator.childRegistrationResultMessage(
+                child = child,
+                registration = ChildRegistrationResult(registrationStatus = "PENDING"),
+            ),
+        )
+        assertEquals(
+            "Child child-1 registration request submitted and is pending processing. Bring a signed waiver.",
+            coordinator.childRegistrationResultMessage(
+                child = child,
+                registration = ChildRegistrationResult(
+                    warnings = listOf("Bring a signed waiver."),
+                ),
+            ),
+        )
     }
 
     @Test

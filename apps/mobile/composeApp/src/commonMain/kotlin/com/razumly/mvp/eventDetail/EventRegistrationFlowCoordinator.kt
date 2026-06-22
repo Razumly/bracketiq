@@ -6,6 +6,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
@@ -482,6 +483,28 @@ internal class EventRegistrationFlowCoordinator {
     fun findJoinableChild(userId: String): JoinChildOption? {
         val normalizedUserId = userId.trim().takeIf(String::isNotBlank) ?: return null
         return currentJoinableChildren().firstOrNull { child -> child.userId == normalizedUserId }
+    }
+
+    fun childRegistrationResultMessage(
+        child: JoinChildOption,
+        registration: ChildRegistrationResult,
+    ): String {
+        val status = registration.registrationStatus?.lowercase()
+        val message = when {
+            registration.joinedWaitlist -> "${child.fullName} added to waitlist."
+            status == "active" -> "${child.fullName} registration completed."
+            registration.requiresParentApproval ->
+                "${child.fullName} request sent. A parent/guardian must approve before registration can continue."
+            registration.requiresChildEmail ->
+                "${child.fullName} registration started. Add child email to continue child-signature document steps."
+            !registration.consentStatus.isNullOrBlank() ->
+                "${child.fullName} registration is pending. Consent status: ${registration.consentStatus}."
+            !status.isNullOrBlank() ->
+                "${child.fullName} registration is pending. Status: $status."
+            else -> "${child.fullName} registration request submitted and is pending processing."
+        }
+        val warning = registration.warnings.firstOrNull()?.takeIf(String::isNotBlank)
+        return listOfNotNull(message, warning).joinToString(" ")
     }
 
     fun determineJoinExecutionAction(
