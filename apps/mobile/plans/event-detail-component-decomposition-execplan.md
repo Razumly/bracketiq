@@ -32,7 +32,8 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Move payment-plan preview dialog and continuation state into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move billing-address prompt and continuation state into `EventRegistrationFlowCoordinator` with focused tests.
   - [ ] Move purchase-intent UI state.
-  - [ ] Move signature prompt, polling, and post-signature continuation state.
+  - [x] (2026-06-22) Move text/web signature prompt state into `EventRegistrationFlowCoordinator` with focused tests.
+  - [ ] Move signature polling and post-signature continuation state.
   - [x] (2026-06-22) Move withdraw-target list state into `EventRegistrationFlowCoordinator` with focused tests.
   - [ ] Move refund and leave action UI/continuation state.
   - [ ] Wire remaining public registration actions through the coordinator and run the final coordinator regression suite.
@@ -173,7 +174,9 @@ The twelfth implementation milestone moves withdraw-target list state into the r
 
 The thirteenth implementation milestone moves billing-address prompt state into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now owns the billing-address prompt and pending continuation, while `DefaultEventDetailComponent` still loads and saves billing addresses through `BillingRepository` before invoking the returned continuation. `EventDetailComponent.kt` dropped further to 6,645 lines after this milestone.
 
-Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining coordinator work is to move join orchestration, purchase-intent state, signature prompt/polling state, and refund/leave action state, then extract participant/invite coordination.
+The fourteenth implementation milestone moves text/web signature prompt state into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now owns prompt visibility and prompt replacement/clearing for both mobile text signatures and web signing prompts, while `DefaultEventDetailComponent` still owns signature step loading, polling, signature recording, context selection, and post-signature continuation execution. `EventDetailComponent.kt` is now 6,646 lines after this milestone.
+
+Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining coordinator work is to move join orchestration, purchase-intent state, signature polling/post-signature continuation state, and refund/leave action state, then extract participant/invite coordination.
 
 ## Context and Orientation
 
@@ -620,6 +623,24 @@ Thirteenth milestone line-count evidence:
      266 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
      265 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
 
+Signature prompt coordinator slice focused tests passed:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventRegistrationFlowCoordinatorTest*" --tests "*EventSignatureFlowHelpersTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 1m 38s; 43 actionable tasks: 9 executed, 34 up-to-date.
+
+Signature prompt coordinator slice common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 16s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Fourteenth milestone line-count evidence:
+
+    6646 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     293 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
+     332 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
+
 Full debug unit suite currently blocked:
 
     ./gradlew :composeApp:testDebugUnitTest
@@ -679,3 +700,4 @@ Revision Note (2026-06-22): Recorded the payment-plan preview coordinator slice,
 Revision Note (2026-06-22): Recorded the withdraw-target coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the billing-address prompt coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded current unfiltered debug unit suite blockers after the coordinator slices.
+Revision Note (2026-06-22): Recorded the signature prompt coordinator slice, focused tests, compile checks, and line-count impact.

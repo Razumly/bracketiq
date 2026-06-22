@@ -1276,12 +1276,8 @@ class DefaultEventDetailComponent(
     override val registrationHoldExpiresAt = registrationFlowCoordinator.holdExpiresAt
     override val paymentPlanPreviewDialog = registrationFlowCoordinator.paymentPlanPreviewDialog
     override val withdrawTargets = registrationFlowCoordinator.withdrawTargets
-
-    private val _textSignaturePrompt = MutableStateFlow<TextSignaturePromptState?>(null)
-    override val textSignaturePrompt = _textSignaturePrompt.asStateFlow()
-
-    private val _webSignaturePrompt = MutableStateFlow<WebSignaturePromptState?>(null)
-    override val webSignaturePrompt = _webSignaturePrompt.asStateFlow()
+    override val textSignaturePrompt = registrationFlowCoordinator.textSignaturePrompt
+    override val webSignaturePrompt = registrationFlowCoordinator.webSignaturePrompt
 
     private var joinableChildren: List<JoinChildOption> = emptyList()
     private var pendingSignatureSteps: List<SignStep> = emptyList()
@@ -3702,10 +3698,12 @@ class DefaultEventDetailComponent(
         }
 
         if (currentStep.isTextStep()) {
-            _textSignaturePrompt.value = TextSignaturePromptState(
-                step = currentStep,
-                currentStep = pendingSignatureStepIndex + 1,
-                totalSteps = pendingSignatureSteps.size
+            registrationFlowCoordinator.showTextSignaturePrompt(
+                TextSignaturePromptState(
+                    step = currentStep,
+                    currentStep = pendingSignatureStepIndex + 1,
+                    totalSteps = pendingSignatureSteps.size,
+                )
             )
             return
         }
@@ -3719,17 +3717,19 @@ class DefaultEventDetailComponent(
             return
         }
 
-        _webSignaturePrompt.value = WebSignaturePromptState(
-            step = currentStep,
-            url = signingUrl,
-            currentStep = pendingSignatureStepIndex + 1,
-            totalSteps = pendingSignatureSteps.size,
+        registrationFlowCoordinator.showWebSignaturePrompt(
+            WebSignaturePromptState(
+                step = currentStep,
+                url = signingUrl,
+                currentStep = pendingSignatureStepIndex + 1,
+                totalSteps = pendingSignatureSteps.size,
+            )
         )
 
         _errorState.value = ErrorMessage("Waiting for signature sync...")
         pendingPdfSignaturePollJob = scope.launch {
             if (awaitSignatureStepClearance(currentStep)) {
-                _webSignaturePrompt.value = null
+                registrationFlowCoordinator.clearWebSignaturePrompt()
                 processNextSignatureStep()
             }
         }
@@ -3746,8 +3746,7 @@ class DefaultEventDetailComponent(
         pendingSignatureChild = null
         pendingSignatureTeamId = null
         pendingPostSignatureAction = null
-        _textSignaturePrompt.value = null
-        _webSignaturePrompt.value = null
+        registrationFlowCoordinator.clearSignaturePrompts()
     }
 
     private fun processPurchaseIntent(intent: PurchaseIntent) {
@@ -3795,11 +3794,13 @@ class DefaultEventDetailComponent(
             return true
         }
 
-        _webSignaturePrompt.value = WebSignaturePromptState(
-            step = null,
-            url = signingUrl,
-            currentStep = 1,
-            totalSteps = 1,
+        registrationFlowCoordinator.showWebSignaturePrompt(
+            WebSignaturePromptState(
+                step = null,
+                url = signingUrl,
+                currentStep = 1,
+                totalSteps = 1,
+            )
         )
         _errorState.value = ErrorMessage(
             "Please complete document signing in the modal, then tap Purchase Ticket again."
@@ -5990,7 +5991,7 @@ class DefaultEventDetailComponent(
     }
 
     override fun confirmTextSignature() {
-        val prompt = _textSignaturePrompt.value ?: return
+        val prompt = registrationFlowCoordinator.textSignaturePrompt.value ?: return
 
         scope.launch {
             loadingHandler.showLoading("Recording signature ...")
@@ -6020,7 +6021,7 @@ class DefaultEventDetailComponent(
                     throwable.userMessage("Failed to record signature.")
                 )
             }.onSuccess {
-                _textSignaturePrompt.value = null
+                registrationFlowCoordinator.clearTextSignaturePrompt()
                 if (awaitSignatureStepClearance(prompt.step)) {
                     processNextSignatureStep()
                 }

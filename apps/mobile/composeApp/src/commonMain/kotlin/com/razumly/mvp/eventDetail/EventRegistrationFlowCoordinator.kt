@@ -46,6 +46,12 @@ internal class EventRegistrationFlowCoordinator {
     private val _billingAddressPrompt = MutableStateFlow<BillingAddressDraft?>(null)
     val billingAddressPrompt = _billingAddressPrompt.asStateFlow()
 
+    private val _textSignaturePrompt = MutableStateFlow<TextSignaturePromptState?>(null)
+    val textSignaturePrompt = _textSignaturePrompt.asStateFlow()
+
+    private val _webSignaturePrompt = MutableStateFlow<WebSignaturePromptState?>(null)
+    val webSignaturePrompt = _webSignaturePrompt.asStateFlow()
+
     private var pendingQuestionContinuation: (() -> Unit)? = null
     private var questionsConfirmed = false
     private var pendingPaymentPlanPreviewAction: (() -> Unit)? = null
@@ -202,6 +208,27 @@ internal class EventRegistrationFlowCoordinator {
         _billingAddressPrompt.value = null
         pendingBillingAddressAction = null
         return action
+    }
+
+    fun showTextSignaturePrompt(prompt: TextSignaturePromptState) {
+        _textSignaturePrompt.value = prompt
+    }
+
+    fun clearTextSignaturePrompt() {
+        _textSignaturePrompt.value = null
+    }
+
+    fun showWebSignaturePrompt(prompt: WebSignaturePromptState) {
+        _webSignaturePrompt.value = prompt
+    }
+
+    fun clearWebSignaturePrompt() {
+        _webSignaturePrompt.value = null
+    }
+
+    fun clearSignaturePrompts() {
+        _textSignaturePrompt.value = null
+        _webSignaturePrompt.value = null
     }
 
     fun applyRegistrationProgressDraft(draft: RegistrationProgressDraft?): String? {

@@ -3,6 +3,7 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.RegistrationProgressDraft
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
+import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -240,6 +241,72 @@ class EventRegistrationFlowCoordinatorTest {
 
         assertNull(coordinator.billingAddressPrompt.value)
         assertNull(coordinator.completeBillingAddressPrompt())
+    }
+
+    @Test
+    fun signature_prompts_can_be_shown_and_cleared_independently() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val textPrompt = TextSignaturePromptState(
+            step = signStep("text-template"),
+            currentStep = 1,
+            totalSteps = 2,
+        )
+        val webPrompt = WebSignaturePromptState(
+            step = signStep("web-template", type = "PDF"),
+            url = "https://example.com/sign",
+            currentStep = 2,
+            totalSteps = 2,
+        )
+
+        coordinator.showTextSignaturePrompt(textPrompt)
+        coordinator.showWebSignaturePrompt(webPrompt)
+
+        assertEquals(textPrompt, coordinator.textSignaturePrompt.value)
+        assertEquals(webPrompt, coordinator.webSignaturePrompt.value)
+
+        coordinator.clearTextSignaturePrompt()
+
+        assertNull(coordinator.textSignaturePrompt.value)
+        assertEquals(webPrompt, coordinator.webSignaturePrompt.value)
+
+        coordinator.clearWebSignaturePrompt()
+
+        assertNull(coordinator.webSignaturePrompt.value)
+    }
+
+    @Test
+    fun clear_signature_prompts_dismisses_text_and_web_prompts() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        coordinator.showTextSignaturePrompt(
+            TextSignaturePromptState(
+                step = signStep("text-template"),
+                currentStep = 1,
+                totalSteps = 1,
+            ),
+        )
+        coordinator.showWebSignaturePrompt(
+            WebSignaturePromptState(
+                step = null,
+                url = "https://example.com/sign",
+                currentStep = 1,
+                totalSteps = 1,
+            ),
+        )
+
+        coordinator.clearSignaturePrompts()
+
+        assertNull(coordinator.textSignaturePrompt.value)
+        assertNull(coordinator.webSignaturePrompt.value)
+    }
+
+    private fun signStep(
+        templateId: String,
+        type: String = "TEXT",
+    ): SignStep {
+        return SignStep(
+            templateId = templateId,
+            type = type,
+        )
     }
 
     private fun paymentPreview(): PaymentPlanPreviewDialogState {
