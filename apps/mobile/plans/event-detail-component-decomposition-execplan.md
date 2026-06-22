@@ -57,6 +57,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Move participant invite/add/remove preflight decisions into helpers or coordinator methods with focused tests.
 - [ ] Thin `DefaultEventDetailComponent` so it owns Decompose lifecycle, public state exposure, and delegation, while helpers own domain-specific transformations.
   - [x] (2026-06-22) Move league standings state and division target decisions into `EventLeagueStandingsCoordinator` with focused tests.
+  - [x] (2026-06-22) Move organization-template loading state into `EventOrganizationTemplatesCoordinator` with focused tests.
 - [ ] Run focused event-detail regression tests and final compile/build validation.
 
 ## Surprises & Discoveries
@@ -239,6 +240,8 @@ The thirty-fifth implementation milestone moves participant management state and
 The thirty-sixth implementation milestone completes the participant/invite coordination extraction. `EventInviteHelpers.kt` now owns team/player invite preflight decisions and user-removal id preflight, preserving existing user-facing error copy while `DefaultEventDetailComponent` keeps weekly occurrence prompts, repository mutations, refreshes, and loading/error side effects. `EventDetailComponent.kt` dropped to 6,404 lines after this milestone.
 
 The thirty-seventh implementation milestone starts the final component-thinning task. `EventLeagueStandingsCoordinator.kt` now owns league standings data/loading/confirming state, standings load-target resolution, current standings division resolution, and confirmation success copy. `DefaultEventDetailComponent` still owns repository calls, schedule refresh triggers, selected event/division flows, loading/error side effects, and match/event refreshes after confirmation. `EventDetailComponent.kt` dropped to 6,382 lines after this milestone.
+
+The thirty-eighth implementation milestone moves organization-template loading state into a coordinator. `EventOrganizationTemplatesCoordinator.kt` now owns template list, loading, error, clear, success, and failure state transitions while `DefaultEventDetailComponent` keeps the billing repository call, organization selection, logging, and error-message normalization. `EventDetailComponent.kt` dropped to 6,375 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. Registration coordination and participant/invite coordination are now complete; the remaining work is to keep thinning `DefaultEventDetailComponent` around lower-risk orchestration seams, then run final focused regression and build validation.
 
@@ -1166,6 +1169,25 @@ Thirty-seventh milestone line-count evidence:
      148 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventLeagueStandingsCoordinatorTest.kt
     1235 plans/event-detail-component-decomposition-execplan.md
 
+Organization templates coordinator slice focused tests passed:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventOrganizationTemplatesCoordinatorTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 1m 30s; 43 actionable tasks: 9 executed, 34 up-to-date.
+
+Organization templates coordinator slice common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 12s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Thirty-eighth milestone line-count evidence:
+
+    6375 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+      40 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventOrganizationTemplatesCoordinator.kt
+      60 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventOrganizationTemplatesCoordinatorTest.kt
+    1258 plans/event-detail-component-decomposition-execplan.md
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -1233,3 +1255,4 @@ Revision Note (2026-06-22): Recorded the first invite coordinator slice, focused
 Revision Note (2026-06-22): Recorded the participant management coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the participant invite/add/remove preflight helper slice, focused tests, compile checks, and marked participant/invite coordination complete.
 Revision Note (2026-06-22): Recorded the league standings coordinator slice, focused tests, compile fix, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded the organization templates coordinator slice, focused tests, compile checks, and line-count impact.

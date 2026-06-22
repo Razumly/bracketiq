@@ -732,14 +732,10 @@ class DefaultEventDetailComponent(
     override val eventImageIds =
         imageRepository.getUserImageIdsFlow().stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    private val _organizationTemplates = MutableStateFlow<List<OrganizationTemplateDocument>>(emptyList())
-    override val organizationTemplates = _organizationTemplates.asStateFlow()
-
-    private val _organizationTemplatesLoading = MutableStateFlow(false)
-    override val organizationTemplatesLoading = _organizationTemplatesLoading.asStateFlow()
-
-    private val _organizationTemplatesError = MutableStateFlow<String?>(null)
-    override val organizationTemplatesError = _organizationTemplatesError.asStateFlow()
+    private val organizationTemplatesCoordinator = EventOrganizationTemplatesCoordinator()
+    override val organizationTemplates = organizationTemplatesCoordinator.templates
+    override val organizationTemplatesLoading = organizationTemplatesCoordinator.loading
+    override val organizationTemplatesError = organizationTemplatesCoordinator.error
 
     private val leagueStandingsCoordinator = EventLeagueStandingsCoordinator()
     override val leagueDivisionStandings = leagueStandingsCoordinator.divisionStandings
@@ -1915,25 +1911,22 @@ class DefaultEventDetailComponent(
 
     private suspend fun loadOrganizationTemplates(organizationId: String) {
         if (organizationId.isBlank()) {
-            _organizationTemplates.value = emptyList()
-            _organizationTemplatesError.value = null
-            _organizationTemplatesLoading.value = false
+            organizationTemplatesCoordinator.clear()
             return
         }
 
-        _organizationTemplatesLoading.value = true
-        _organizationTemplatesError.value = null
+        organizationTemplatesCoordinator.beginLoad()
         billingRepository.listOrganizationTemplates(organizationId)
             .onSuccess { templates ->
-                _organizationTemplates.value = templates
+                organizationTemplatesCoordinator.applyLoadSuccess(templates)
             }
             .onFailure { throwable ->
                 Napier.w("Failed to load templates for organization $organizationId.", throwable)
-                _organizationTemplates.value = emptyList()
-                _organizationTemplatesError.value =
-                    throwable.userMessage("Failed to load templates.")
+                organizationTemplatesCoordinator.applyLoadFailure(
+                    throwable.userMessage("Failed to load templates."),
+                )
             }
-        _organizationTemplatesLoading.value = false
+        organizationTemplatesCoordinator.finishLoad()
     }
 
     override fun onNavigateToChat(user: UserData) {
