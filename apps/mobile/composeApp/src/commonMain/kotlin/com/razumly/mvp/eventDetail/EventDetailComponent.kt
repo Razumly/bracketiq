@@ -3744,7 +3744,11 @@ class DefaultEventDetailComponent(
         teamId: String? = null,
         onReady: suspend () -> Unit,
     ) {
-        pendingSignatureContexts = buildSignatureContextQueue(signerContext, child)
+        pendingSignatureContexts = buildSignatureContextQueue(
+            baseContext = signerContext,
+            child = child,
+            currentAccountEmail = userRepository.currentAccount.value.getOrNull()?.email,
+        )
         pendingSignatureContextIndex = 0
         pendingSignatureChild = child
         pendingSignatureTeamId = teamId?.trim()?.takeIf(String::isNotBlank)
@@ -3752,26 +3756,8 @@ class DefaultEventDetailComponent(
         loadSignatureStepsForCurrentContext()
     }
 
-    private fun buildSignatureContextQueue(
-        baseContext: SignerContext,
-        child: JoinChildOption?,
-    ): List<SignerContext> {
-        if (child == null) return listOf(baseContext)
-        val childEmail = child.email?.trim()?.takeIf(String::isNotBlank)?.lowercase()
-        val currentEmail = userRepository.currentAccount.value.getOrNull()?.email
-            ?.trim()?.takeIf(String::isNotBlank)?.lowercase()
-        val shouldChainChild =
-            childEmail != null && currentEmail != null && childEmail == currentEmail && baseContext != SignerContext.CHILD
-
-        return if (shouldChainChild) {
-            listOf(baseContext, SignerContext.CHILD)
-        } else {
-            listOf(baseContext)
-        }
-    }
-
     private fun currentSignatureContext(): SignerContext =
-        pendingSignatureContexts.getOrNull(pendingSignatureContextIndex) ?: SignerContext.PARTICIPANT
+        signatureContextAt(pendingSignatureContexts, pendingSignatureContextIndex)
 
     private suspend fun fetchRequiredSignatureStepsForCurrentContext(): Result<List<SignStep>> {
         if (pendingSignatureContexts.isEmpty()) {
@@ -3794,15 +3780,6 @@ class DefaultEventDetailComponent(
             childUserId = pendingSignatureChild?.userId,
             childUserEmail = pendingSignatureChild?.email,
         )
-    }
-
-    private fun SignStep.matchesPendingSignatureStep(other: SignStep): Boolean {
-        if (templateId != other.templateId) {
-            return false
-        }
-        val currentDocumentId = resolvedDocumentId()
-        val otherDocumentId = other.resolvedDocumentId()
-        return currentDocumentId == null || otherDocumentId == null || currentDocumentId == otherDocumentId
     }
 
     private suspend fun awaitSignatureStepClearance(
@@ -3837,7 +3814,7 @@ class DefaultEventDetailComponent(
                 return false
             }
 
-            if (refreshedSteps.none { refreshedStep -> refreshedStep.matchesPendingSignatureStep(step) }) {
+            if (refreshedSteps.none { refreshedStep -> pendingSignatureStepsMatch(refreshedStep, step) }) {
                 pendingSignatureSteps = refreshedSteps
                 pendingSignatureStepIndex = 0
                 return true
