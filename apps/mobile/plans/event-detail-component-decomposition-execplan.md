@@ -84,6 +84,9 @@ After this refactor, the app should behave the same for users, but the code will
 - Observation: The first coordinator slice can own registration question and progress state without owning repository persistence.
   Evidence: `EventRegistrationFlowCoordinator.kt` now owns question dialog state, answer state, expanded state, hold expiration state, registration progress key construction, draft construction, and draft restoration. `DefaultEventDetailComponent` still calls `CurrentUserDataSource` to save, load, and clear progress.
 
+- Observation: The unfiltered debug unit suite currently has three reproducible failures outside the coordinator refactor.
+  Evidence: `./gradlew :composeApp:testDebugUnitTest` completed 662 tests with 3 failures. Rerunning the three failing classes reproduced the same failures: two backend schedule HTTP 400 failures in mobile API integration tests, and one `TeamInviteDialogUiTest` failure with `No padding values provided`.
+
 ## Decision Log
 
 - Decision: Keep the public `EventDetailComponent` interface and `DefaultEventDetailComponent` constructor stable during the first extraction milestones.
@@ -617,6 +620,22 @@ Thirteenth milestone line-count evidence:
      266 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
      265 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
 
+Full debug unit suite currently blocked:
+
+    ./gradlew :composeApp:testDebugUnitTest
+    Exit code: 1
+    Result: 662 tests completed, 3 failed.
+    Failures:
+    - `EventLifecycleMobileApiIntegrationTest.event_lifecycle_matrix_creates_joins_schedules_and_updates_matches`: backend schedule request returned HTTP 400 with "Not enough time is allotted in the configured time slots to schedule this event. Not enough teams are available to cover match and team-official slots."
+    - `LeaguePlayoffMobileApiIntegrationTest.league_playoff_mobile_api_flow_loads_staff_invites_periphery_join_and_schedule_data`: backend schedule request returned HTTP 400 for `/api/events/mobile_api_league_playoff_regression/schedule`.
+    - `TeamInviteDialogUiTest.existing_team_read_only_view_uses_team_name_title_inline_jersey_and_expandable_details`: `IllegalStateException: No padding values provided`.
+
+Targeted rerun of the full-suite failures reproduced the same failures:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventLifecycleMobileApiIntegrationTest*" --tests "*LeaguePlayoffMobileApiIntegrationTest*" --tests "*TeamInviteDialogUiTest*"
+    Exit code: 1
+    Result: 6 tests completed, 3 failed.
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -659,3 +678,4 @@ Revision Note (2026-06-22): Recorded the first registration coordinator slice, a
 Revision Note (2026-06-22): Recorded the payment-plan preview coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the withdraw-target coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the billing-address prompt coordinator slice, focused tests, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded current unfiltered debug unit suite blockers after the coordinator slices.
