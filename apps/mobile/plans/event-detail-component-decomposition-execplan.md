@@ -26,7 +26,7 @@ After this refactor, the app should behave the same for users, but the code will
 - [x] (2026-06-22) Extracted current-user registration cache membership, withdraw-target classification, refund eligibility, team-withdrawal decision, and registration/payment error predicates into `EventRegistrationFlowHelpers.kt` with focused tests.
 - [x] (2026-06-22) Extracted event invite search normalization, invite context resolution, participant exclusion sets, and player invite DTO construction into `EventInviteHelpers.kt` with focused tests.
 - [x] (2026-06-22) Extracted event sport-rule normalization for league and tournament set/timed scoring into `EventSportRulesHelpers.kt` with focused tests.
-- [ ] Extract registration, join, withdraw, refund, payment preview, and signature flow state into a cohesive coordinator without changing public behavior.
+- [x] (2026-06-22) Extract registration, join, withdraw, refund, payment preview, and signature flow state into a cohesive coordinator without changing public behavior.
   - [x] (2026-06-22) Move registration question dialog, answer, expanded, hold, and registration-progress state into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move join-choice and child-selection dialog state into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move team join-question dialog and pending-team state into `EventRegistrationFlowCoordinator` with focused tests.
@@ -50,7 +50,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Move remaining signature polling job lifecycle into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move withdraw-target list state into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move refund and leave action preflight decisions into `EventRegistrationFlowCoordinator` with focused tests.
-  - [ ] Wire remaining public registration actions through the coordinator and run the final coordinator regression suite.
+  - [x] (2026-06-22) Wire remaining public registration actions through the coordinator and run the final coordinator regression suite.
 - [ ] Extract participant management and invite/search coordination where it can be tested independently.
 - [ ] Thin `DefaultEventDetailComponent` so it owns Decompose lifecycle, public state exposure, and delegation, while helpers own domain-specific transformations.
 - [ ] Run focused event-detail regression tests and final compile/build validation.
@@ -225,6 +225,8 @@ The thirtieth implementation milestone moves child-registration result message c
 The thirty-first implementation milestone moves self/minor join result and payment-plan pre-join decisions into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now classifies parent-approval and waitlist messages for self/minor join results, determines whether self payment-plan pre-join should continue, reload the event, report a non-duplicate failure, or remember that rollback is required. `DefaultEventDetailComponent` still owns repository calls, billing creation, rollback execution, event refresh, loading/error mutation, and payment purchase-intent flow. `EventDetailComponent.kt` dropped to 6,524 lines after this milestone.
 
 The thirty-second implementation milestone completes the current self/team/child/minor join orchestration decision slice. `EventRegistrationFlowCoordinator.kt` now classifies team join-before-payment-plan results, treats duplicate already-registered errors as resumable payment-plan paths, preserves rollback intent, owns user/team payment-plan success copy, and exposes the shared `PaymentPlanBillStatus` used by billing creation. `DefaultEventDetailComponent` still owns repository calls, billing creation, rollback execution, event refresh, loading/error mutation, and purchase-intent processing. `EventDetailComponent.kt` dropped to 6,518 lines after this milestone.
+
+The thirty-third implementation milestone closes the registration coordinator parent task. Public registration, join, withdraw/refund, payment preview, billing-address, payment-sheet, fee-breakdown, and signature prompt state now route through `EventRegistrationFlowCoordinator`, while `DefaultEventDetailComponent` remains responsible for Decompose lifecycle, repository and billing side effects, refreshes, coroutine execution, and UI-facing public state exposure. The final coordinator regression suite passed across coordinator, mobile join-flow, payment-plan helper, signature helper, registration-question helper, and withdraw/refund helper tests. `EventDetailComponent.kt` remains 6,518 lines after this close-out.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining coordinator work is to finish join orchestration around repository callbacks, then run the final coordinator regression suite and extract participant/invite coordination.
 
@@ -1049,6 +1051,19 @@ Thirty-second milestone line-count evidence:
     1366 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
     1113 plans/event-detail-component-decomposition-execplan.md
 
+Final registration coordinator regression suite passed:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventRegistrationFlowCoordinatorTest*" --tests "*EventDetailMobileJoinFlowTest*" --tests "*EventPaymentPlanHelpersTest*" --tests "*EventSignatureFlowHelpersTest*" --tests "*EventRegistrationQuestionHelpersTest*" --tests "*EventWithdrawTargetHelpersTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 22s; 43 actionable tasks: 5 executed, 38 up-to-date.
+
+Final registration coordinator close-out line-count evidence:
+
+    6518 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+    1008 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
+    1366 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
+    1129 plans/event-detail-component-decomposition-execplan.md
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -1111,3 +1126,4 @@ Revision Note (2026-06-22): Recorded the team registration continuation coordina
 Revision Note (2026-06-22): Recorded the child-registration result message coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the self/minor join result coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the team join payment-plan coordinator slice, focused tests, compile checks, and line-count impact, and marked the self/team/child/minor orchestration decision subtask complete.
+Revision Note (2026-06-22): Recorded the final registration coordinator regression suite and marked the registration coordinator parent task complete.
