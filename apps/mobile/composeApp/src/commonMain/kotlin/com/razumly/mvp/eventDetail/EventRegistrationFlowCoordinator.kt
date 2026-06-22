@@ -1,6 +1,7 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.RegistrationProgressDraft
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -42,9 +43,13 @@ internal class EventRegistrationFlowCoordinator {
     private val _withdrawTargets = MutableStateFlow<List<WithdrawTargetOption>>(emptyList())
     val withdrawTargets = _withdrawTargets.asStateFlow()
 
+    private val _billingAddressPrompt = MutableStateFlow<BillingAddressDraft?>(null)
+    val billingAddressPrompt = _billingAddressPrompt.asStateFlow()
+
     private var pendingQuestionContinuation: (() -> Unit)? = null
     private var questionsConfirmed = false
     private var pendingPaymentPlanPreviewAction: (() -> Unit)? = null
+    private var pendingBillingAddressAction: (() -> Unit)? = null
 
     fun updateQuestionAnswer(questionId: String, answer: String): Boolean {
         val answerUpdate = registrationQuestionAnswerUpdate(questionId, answer) ?: return false
@@ -177,6 +182,26 @@ internal class EventRegistrationFlowCoordinator {
 
     fun clearWithdrawTargets() {
         _withdrawTargets.value = emptyList()
+    }
+
+    fun showBillingAddressPrompt(
+        billingAddress: BillingAddressDraft?,
+        onReady: () -> Unit,
+    ) {
+        pendingBillingAddressAction = onReady
+        _billingAddressPrompt.value = billingAddress ?: BillingAddressDraft()
+    }
+
+    fun dismissBillingAddressPrompt() {
+        _billingAddressPrompt.value = null
+        pendingBillingAddressAction = null
+    }
+
+    fun completeBillingAddressPrompt(): (() -> Unit)? {
+        val action = pendingBillingAddressAction
+        _billingAddressPrompt.value = null
+        pendingBillingAddressAction = null
+        return action
     }
 
     fun applyRegistrationProgressDraft(draft: RegistrationProgressDraft?): String? {

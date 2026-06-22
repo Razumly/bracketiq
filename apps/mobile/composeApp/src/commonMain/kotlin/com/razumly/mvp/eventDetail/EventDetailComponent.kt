@@ -676,8 +676,8 @@ class DefaultEventDetailComponent(
 
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
-    private val _billingAddressPrompt = MutableStateFlow<BillingAddressDraft?>(null)
-    override val billingAddressPrompt = _billingAddressPrompt.asStateFlow()
+    private val registrationFlowCoordinator = EventRegistrationFlowCoordinator()
+    override val billingAddressPrompt = registrationFlowCoordinator.billingAddressPrompt
     private val _startingTeamRegistrationId = MutableStateFlow<String?>(null)
     override val startingTeamRegistrationId = _startingTeamRegistrationId.asStateFlow()
 
@@ -1269,7 +1269,6 @@ class DefaultEventDetailComponent(
     override val teamJoinQuestionDialog = _teamJoinQuestionDialog.asStateFlow()
     private var pendingTeamJoinQuestionTeam: TeamWithPlayers? = null
 
-    private val registrationFlowCoordinator = EventRegistrationFlowCoordinator()
     override val eventRegistrationQuestionDialog = registrationFlowCoordinator.questionDialog
     override val eventRegistrationQuestions = registrationFlowCoordinator.questions
     override val eventRegistrationQuestionAnswers = registrationFlowCoordinator.answers
@@ -1288,7 +1287,6 @@ class DefaultEventDetailComponent(
     private var pendingSignatureSteps: List<SignStep> = emptyList()
     private var pendingSignatureStepIndex = 0
     private var pendingPostSignatureAction: (suspend () -> Unit)? = null
-    private var pendingBillingAddressAction: (() -> Unit)? = null
     private var pendingJoinConfirmationTarget: JoinConfirmationTarget? = null
     private var pendingTeamRegistration: TeamWithPlayers? = null
     private var pendingSignatureContext: SignerContext = SignerContext.PARTICIPANT
@@ -3835,8 +3833,10 @@ class DefaultEventDetailComponent(
             return true
         }
 
-        pendingBillingAddressAction = onReady
-        _billingAddressPrompt.value = billingAddress ?: BillingAddressDraft()
+        registrationFlowCoordinator.showBillingAddressPrompt(
+            billingAddress = billingAddress,
+            onReady = onReady,
+        )
         return false
     }
 
@@ -6045,10 +6045,7 @@ class DefaultEventDetailComponent(
             loadingHandler.showLoading("Saving billing address...")
             billingRepository.updateBillingAddress(address)
                 .onSuccess {
-                    _billingAddressPrompt.value = null
-                    val action = pendingBillingAddressAction
-                    pendingBillingAddressAction = null
-                    action?.invoke()
+                    registrationFlowCoordinator.completeBillingAddressPrompt()?.invoke()
                 }
                 .onFailure { error ->
                     _errorState.value = ErrorMessage(error.userMessage("Unable to save billing address."))
@@ -6058,8 +6055,7 @@ class DefaultEventDetailComponent(
     }
 
     override fun dismissBillingAddressPrompt() {
-        _billingAddressPrompt.value = null
-        pendingBillingAddressAction = null
+        registrationFlowCoordinator.dismissBillingAddressPrompt()
     }
 
     private fun refreshEditableRounds() {

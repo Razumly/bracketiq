@@ -1,6 +1,7 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.RegistrationProgressDraft
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import kotlin.test.Test
@@ -204,6 +205,41 @@ class EventRegistrationFlowCoordinatorTest {
         coordinator.clearWithdrawTargets()
 
         assertEquals(emptyList(), coordinator.withdrawTargets.value)
+    }
+
+    @Test
+    fun billing_address_prompt_completion_returns_continuation_and_clears_prompt() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        var continued = false
+
+        coordinator.showBillingAddressPrompt(BillingAddressDraft(countryCode = "US")) {
+            continued = true
+        }
+
+        assertEquals("US", coordinator.billingAddressPrompt.value?.countryCode)
+
+        val continuation = coordinator.completeBillingAddressPrompt()
+
+        assertNull(coordinator.billingAddressPrompt.value)
+        assertFalse(continued)
+
+        continuation?.invoke()
+
+        assertTrue(continued)
+        assertNull(coordinator.completeBillingAddressPrompt())
+    }
+
+    @Test
+    fun billing_address_prompt_dismiss_clears_prompt_and_pending_continuation() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        coordinator.showBillingAddressPrompt(null) {}
+
+        assertEquals(BillingAddressDraft(), coordinator.billingAddressPrompt.value)
+
+        coordinator.dismissBillingAddressPrompt()
+
+        assertNull(coordinator.billingAddressPrompt.value)
+        assertNull(coordinator.completeBillingAddressPrompt())
     }
 
     private fun paymentPreview(): PaymentPlanPreviewDialogState {
