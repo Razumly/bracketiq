@@ -244,6 +244,45 @@ class EventRegistrationFlowCoordinatorTest {
     }
 
     @Test
+    fun join_choice_and_child_selection_dialogs_are_mutually_exclusive() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val child = joinChild("child-1")
+
+        coordinator.showJoinChoiceDialog(listOf(child))
+
+        assertEquals(listOf(child), coordinator.joinChoiceDialog.value?.children)
+        assertNull(coordinator.childJoinSelectionDialog.value)
+
+        coordinator.showChildJoinSelectionDialog(listOf(child))
+
+        assertNull(coordinator.joinChoiceDialog.value)
+        assertEquals(listOf(child), coordinator.childJoinSelectionDialog.value?.children)
+    }
+
+    @Test
+    fun join_dialogs_can_be_dismissed_individually_or_together() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val child = joinChild("child-1")
+
+        coordinator.showJoinChoiceDialog(listOf(child))
+        coordinator.dismissJoinChoiceDialog()
+
+        assertNull(coordinator.joinChoiceDialog.value)
+
+        coordinator.showChildJoinSelectionDialog(listOf(child))
+        coordinator.dismissChildJoinSelectionDialog()
+
+        assertNull(coordinator.childJoinSelectionDialog.value)
+
+        coordinator.showJoinChoiceDialog(listOf(child))
+        coordinator.showChildJoinSelectionDialog(listOf(child))
+        coordinator.clearJoinDialogs()
+
+        assertNull(coordinator.joinChoiceDialog.value)
+        assertNull(coordinator.childJoinSelectionDialog.value)
+    }
+
+    @Test
     fun signature_prompts_can_be_shown_and_cleared_independently() {
         val coordinator = EventRegistrationFlowCoordinator()
         val textPrompt = TextSignaturePromptState(
@@ -306,6 +345,15 @@ class EventRegistrationFlowCoordinatorTest {
         return SignStep(
             templateId = templateId,
             type = type,
+        )
+    }
+
+    private fun joinChild(userId: String): JoinChildOption {
+        return JoinChildOption(
+            userId = userId,
+            fullName = "Child $userId",
+            email = "child@example.com",
+            hasEmail = true,
         )
     }
 

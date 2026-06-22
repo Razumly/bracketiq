@@ -1259,11 +1259,8 @@ class DefaultEventDetailComponent(
     private val _showMatchEditDialog = MutableStateFlow<MatchEditDialogState?>(null)
     override val showMatchEditDialog = _showMatchEditDialog.asStateFlow()
 
-    private val _joinChoiceDialog = MutableStateFlow<JoinChoiceDialogState?>(null)
-    override val joinChoiceDialog = _joinChoiceDialog.asStateFlow()
-
-    private val _childJoinSelectionDialog = MutableStateFlow<ChildJoinSelectionDialogState?>(null)
-    override val childJoinSelectionDialog = _childJoinSelectionDialog.asStateFlow()
+    override val joinChoiceDialog = registrationFlowCoordinator.joinChoiceDialog
+    override val childJoinSelectionDialog = registrationFlowCoordinator.childJoinSelectionDialog
 
     private val _teamJoinQuestionDialog = MutableStateFlow<TeamJoinQuestionDialogState?>(null)
     override val teamJoinQuestionDialog = _teamJoinQuestionDialog.asStateFlow()
@@ -2570,8 +2567,7 @@ class DefaultEventDetailComponent(
                 val children = loadJoinableChildren()
                 if (children.isNotEmpty()) {
                     joinableChildren = children
-                    _joinChoiceDialog.value = JoinChoiceDialogState(children = children)
-                    _childJoinSelectionDialog.value = null
+                    registrationFlowCoordinator.showJoinChoiceDialog(children)
                     return@launch
                 }
             }
@@ -2948,8 +2944,7 @@ class DefaultEventDetailComponent(
             if (!ensureRegistrationOpen()) return@launch
             if (!ensureEventRegistrationQuestionsAnswered { joinEventAsTeam(team) }) return@launch
             _usersTeam.value = team
-            _joinChoiceDialog.value = null
-            _childJoinSelectionDialog.value = null
+            registrationFlowCoordinator.clearJoinDialogs()
 
             buildPaymentPlanPreviewDialogState(
                 event = selectedEvent.value,
@@ -2976,8 +2971,7 @@ class DefaultEventDetailComponent(
     }
 
     override fun confirmJoinAsSelf() {
-        _joinChoiceDialog.value = null
-        _childJoinSelectionDialog.value = null
+        registrationFlowCoordinator.clearJoinDialogs()
         scope.launch {
             runSelfJoinFlow()
         }
@@ -2985,21 +2979,20 @@ class DefaultEventDetailComponent(
 
     override fun showChildJoinSelection() {
         val children = joinableChildren.ifEmpty {
-            _joinChoiceDialog.value?.children.orEmpty()
+            registrationFlowCoordinator.joinChoiceDialog.value?.children.orEmpty()
         }
-        _joinChoiceDialog.value = null
+        registrationFlowCoordinator.dismissJoinChoiceDialog()
         if (children.isEmpty()) {
             _errorState.value = ErrorMessage("No linked children are available for registration.")
-            _childJoinSelectionDialog.value = null
+            registrationFlowCoordinator.dismissChildJoinSelectionDialog()
             return
         }
-        _childJoinSelectionDialog.value = ChildJoinSelectionDialogState(children = children)
+        registrationFlowCoordinator.showChildJoinSelectionDialog(children)
     }
 
     override fun selectChildForJoin(childUserId: String) {
         if (!ensureRegistrationOpen()) {
-            _joinChoiceDialog.value = null
-            _childJoinSelectionDialog.value = null
+            registrationFlowCoordinator.clearJoinDialogs()
             return
         }
         val selectedChild = joinableChildren.firstOrNull { it.userId == childUserId }
@@ -3008,8 +3001,7 @@ class DefaultEventDetailComponent(
             return
         }
 
-        _joinChoiceDialog.value = null
-        _childJoinSelectionDialog.value = null
+        registrationFlowCoordinator.clearJoinDialogs()
         if (!ensureEventRegistrationQuestionsAnswered { selectChildForJoin(childUserId) }) {
             return
         }
@@ -3024,11 +3016,11 @@ class DefaultEventDetailComponent(
     }
 
     override fun dismissJoinChoiceDialog() {
-        _joinChoiceDialog.value = null
+        registrationFlowCoordinator.dismissJoinChoiceDialog()
     }
 
     override fun dismissChildJoinSelectionDialog() {
-        _childJoinSelectionDialog.value = null
+        registrationFlowCoordinator.dismissChildJoinSelectionDialog()
     }
 
     private suspend fun runSelfJoinFlow(skipPaymentPlanPreview: Boolean = false) {

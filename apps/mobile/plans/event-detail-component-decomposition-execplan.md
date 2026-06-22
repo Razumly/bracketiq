@@ -28,6 +28,7 @@ After this refactor, the app should behave the same for users, but the code will
 - [x] (2026-06-22) Extracted event sport-rule normalization for league and tournament set/timed scoring into `EventSportRulesHelpers.kt` with focused tests.
 - [ ] Extract registration, join, withdraw, refund, payment preview, and signature flow state into a cohesive coordinator without changing public behavior.
   - [x] (2026-06-22) Move registration question dialog, answer, expanded, hold, and registration-progress state into `EventRegistrationFlowCoordinator` with focused tests.
+  - [x] (2026-06-22) Move join-choice and child-selection dialog state into `EventRegistrationFlowCoordinator` with focused tests.
   - [ ] Move self, team, child, and minor join orchestration around the existing repository callbacks.
   - [x] (2026-06-22) Move payment-plan preview dialog and continuation state into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move billing-address prompt and continuation state into `EventRegistrationFlowCoordinator` with focused tests.
@@ -175,6 +176,8 @@ The twelfth implementation milestone moves withdraw-target list state into the r
 The thirteenth implementation milestone moves billing-address prompt state into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now owns the billing-address prompt and pending continuation, while `DefaultEventDetailComponent` still loads and saves billing addresses through `BillingRepository` before invoking the returned continuation. `EventDetailComponent.kt` dropped further to 6,645 lines after this milestone.
 
 The fourteenth implementation milestone moves text/web signature prompt state into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now owns prompt visibility and prompt replacement/clearing for both mobile text signatures and web signing prompts, while `DefaultEventDetailComponent` still owns signature step loading, polling, signature recording, context selection, and post-signature continuation execution. `EventDetailComponent.kt` is now 6,646 lines after this milestone.
+
+The fifteenth implementation milestone moves join-choice and child-selection dialog state into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now owns the self-or-child join-choice dialog and child-selection dialog, while `DefaultEventDetailComponent` still loads linked children, validates registration eligibility, and executes the self/child join flows. `EventDetailComponent.kt` dropped further to 6,638 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining coordinator work is to move join orchestration, purchase-intent state, signature polling/post-signature continuation state, and refund/leave action state, then extract participant/invite coordination.
 
@@ -641,6 +644,24 @@ Fourteenth milestone line-count evidence:
      293 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
      332 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
 
+Join dialog coordinator slice focused tests passed:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventRegistrationFlowCoordinatorTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 1m 31s; 43 actionable tasks: 9 executed, 34 up-to-date.
+
+Join dialog coordinator slice common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 14s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Fifteenth milestone line-count evidence:
+
+    6638 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     322 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
+     380 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
+
 Full debug unit suite currently blocked:
 
     ./gradlew :composeApp:testDebugUnitTest
@@ -701,3 +722,4 @@ Revision Note (2026-06-22): Recorded the withdraw-target coordinator slice, focu
 Revision Note (2026-06-22): Recorded the billing-address prompt coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded current unfiltered debug unit suite blockers after the coordinator slices.
 Revision Note (2026-06-22): Recorded the signature prompt coordinator slice, focused tests, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded the join dialog coordinator slice, focused tests, compile checks, and line-count impact.

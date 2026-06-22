@@ -46,6 +46,12 @@ internal class EventRegistrationFlowCoordinator {
     private val _billingAddressPrompt = MutableStateFlow<BillingAddressDraft?>(null)
     val billingAddressPrompt = _billingAddressPrompt.asStateFlow()
 
+    private val _joinChoiceDialog = MutableStateFlow<JoinChoiceDialogState?>(null)
+    val joinChoiceDialog = _joinChoiceDialog.asStateFlow()
+
+    private val _childJoinSelectionDialog = MutableStateFlow<ChildJoinSelectionDialogState?>(null)
+    val childJoinSelectionDialog = _childJoinSelectionDialog.asStateFlow()
+
     private val _textSignaturePrompt = MutableStateFlow<TextSignaturePromptState?>(null)
     val textSignaturePrompt = _textSignaturePrompt.asStateFlow()
 
@@ -208,6 +214,29 @@ internal class EventRegistrationFlowCoordinator {
         _billingAddressPrompt.value = null
         pendingBillingAddressAction = null
         return action
+    }
+
+    fun showJoinChoiceDialog(children: List<JoinChildOption>) {
+        _joinChoiceDialog.value = JoinChoiceDialogState(children = children)
+        _childJoinSelectionDialog.value = null
+    }
+
+    fun dismissJoinChoiceDialog() {
+        _joinChoiceDialog.value = null
+    }
+
+    fun showChildJoinSelectionDialog(children: List<JoinChildOption>) {
+        _joinChoiceDialog.value = null
+        _childJoinSelectionDialog.value = ChildJoinSelectionDialogState(children = children)
+    }
+
+    fun dismissChildJoinSelectionDialog() {
+        _childJoinSelectionDialog.value = null
+    }
+
+    fun clearJoinDialogs() {
+        _joinChoiceDialog.value = null
+        _childJoinSelectionDialog.value = null
     }
 
     fun showTextSignaturePrompt(prompt: TextSignaturePromptState) {
