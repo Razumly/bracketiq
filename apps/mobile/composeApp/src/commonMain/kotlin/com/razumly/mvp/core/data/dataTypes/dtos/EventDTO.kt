@@ -9,6 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
+import com.razumly.mvp.core.data.dataTypes.buildEventOfficialRecordId
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.requiresTeamOfficials
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
@@ -89,7 +90,7 @@ data class EventDTO(
     val officialSchedulingMode: OfficialSchedulingMode = OfficialSchedulingMode.SCHEDULE,
     val officialPositions: List<EventOfficialPosition> = emptyList(),
     val eventOfficials: List<EventOfficial> = emptyList(),
-    val officialIds: List<String> = emptyList(),
+    @Transient val officialIds: List<String> = emptyList(),
     val allowPaymentPlans: Boolean? = null,
     val installmentCount: Int? = null,
     val installmentDueDates: List<String> = emptyList(),
@@ -100,6 +101,24 @@ data class EventDTO(
 ) {
     fun toEvent(id: String): Event {
         val effectiveDoTeamsOfficiate = if (officialSchedulingMode.requiresTeamOfficials()) true else doTeamsOfficiate
+        val normalizedEventOfficials = if (eventOfficials.isNotEmpty()) {
+            eventOfficials
+        } else {
+            officialIds.mapNotNull { officialId ->
+                val normalizedUserId = officialId.trim()
+                if (normalizedUserId.isBlank()) {
+                    null
+                } else {
+                    EventOfficial(
+                        id = buildEventOfficialRecordId(id, normalizedUserId),
+                        userId = normalizedUserId,
+                        positionIds = officialPositions.map(EventOfficialPosition::id),
+                        fieldIds = emptyList(),
+                        isActive = true,
+                    )
+                }
+            }
+        }
         return Event(
             doubleElimination = doubleElimination,
             winnerSetCount = winnerSetCount,
@@ -170,9 +189,9 @@ data class EventDTO(
             pointsToVictory = pointsToVictory,
             officialSchedulingMode = officialSchedulingMode,
             officialPositions = officialPositions,
-            eventOfficials = eventOfficials,
+            eventOfficials = normalizedEventOfficials,
             lastUpdated = Clock.System.now(),
-            officialIds = officialIds,
+            officialIds = normalizedEventOfficials.map(EventOfficial::userId),
             allowPaymentPlans = allowPaymentPlans,
             installmentCount = installmentCount,
             installmentDueDates = installmentDueDates,

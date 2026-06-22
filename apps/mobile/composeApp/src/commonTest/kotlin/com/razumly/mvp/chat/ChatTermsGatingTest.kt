@@ -17,7 +17,6 @@ import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.PushDeviceTargetDebugStatus
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
-import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.eventCreate.CreateEvent_FakeUserRepository
 import com.razumly.mvp.eventCreate.MainDispatcherTest
 import kotlinx.coroutines.flow.Flow
@@ -200,7 +199,7 @@ private class ChatTerms_FakeNavigationHandler : INavigationHandler {
         selectedFreeAgentId: String?,
     ) = Unit
     override fun navigateToChat(user: UserData?, chat: ChatGroupWithRelations?) = Unit
-    override fun navigateToCreate(rentalContext: RentalCreateContext?) = Unit
+    override fun navigateToCreate() = Unit
     override fun navigateToSearch() = Unit
     override fun navigateToEvent(event: Event) = Unit
     override fun navigateToOrganization(organizationId: String, initialTab: OrganizationDetailTab) = Unit

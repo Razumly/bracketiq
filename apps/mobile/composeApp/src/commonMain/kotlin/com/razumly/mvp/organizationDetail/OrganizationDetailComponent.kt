@@ -114,7 +114,6 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     fun confirmTextSignature()
     fun dismissTextSignature()
     fun dismissWebSignaturePrompt()
-    fun startRentalCreate(context: RentalCreateContext)
     fun startRentalReservation(context: RentalCreateContext, selections: List<RentalOrderSelectionRequest>)
     fun createEventFromCompletedRentalReservation()
     fun dismissCompletedRentalReservation()
@@ -485,10 +484,6 @@ class DefaultOrganizationDetailComponent(
                 _startingProductCheckoutId.value = null
             }
         }
-    }
-
-    override fun startRentalCreate(context: RentalCreateContext) {
-        navigationHandler.navigateToCreate(context)
     }
 
     override fun startRentalReservation(

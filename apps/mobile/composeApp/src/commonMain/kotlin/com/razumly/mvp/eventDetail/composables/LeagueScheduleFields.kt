@@ -128,7 +128,17 @@ private fun String?.cleanLabel(): String? = this
     ?.takeIf(String::isNotBlank)
 
 private fun Field.resourceLabel(): String {
-    return name.cleanLabel() ?: "Resource $fieldNumber"
+    val rawLabel = name.cleanLabel() ?: "Resource $fieldNumber"
+    val facility = facilityLabel() ?: return rawLabel
+    val separators = listOf(" - ", " – ", ": ", " / ")
+    val redundantPrefix = separators.firstOrNull { separator ->
+        rawLabel.startsWith("$facility$separator", ignoreCase = true)
+    } ?: return rawLabel
+    return rawLabel
+        .drop(facility.length + redundantPrefix.length)
+        .trim()
+        .takeIf(String::isNotBlank)
+        ?: rawLabel
 }
 
 private fun Field.facilityLabel(): String? {

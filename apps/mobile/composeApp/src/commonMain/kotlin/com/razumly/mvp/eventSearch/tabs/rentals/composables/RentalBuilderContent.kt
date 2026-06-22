@@ -183,7 +183,7 @@ internal fun RentalDetailsContent(
                 when {
                     isLoadingFields -> {
                         Text(
-                            text = "Loading fields and rental slots...",
+                            text = "Loading resources and rental slots...",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -191,7 +191,7 @@ internal fun RentalDetailsContent(
 
                     fieldOptions.isEmpty() -> {
                         Text(
-                            text = "No fields/courts are configured for this organization.",
+                            text = "No resources are configured for this organization.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

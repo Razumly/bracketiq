@@ -280,8 +280,8 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val rentalValidationMessage = when {
         organization == null -> "Organization is not available."
         !organizationCanReserveRentals -> "This organization needs a public rental checkout before resources can be reserved."
-        isLoadingRentals && rentalFieldOptions.isEmpty() -> "Loading fields and rental slots..."
-        rentalFieldOptions.isEmpty() -> "No fields are configured for this organization."
+        isLoadingRentals && rentalFieldOptions.isEmpty() -> "Loading resources and rental slots..."
+        rentalFieldOptions.isEmpty() -> "No resources are configured for this organization."
         rentalSelections.isEmpty() -> "Tap any available 30-minute cell to add a rental selection."
         invalidSelectionCount > 0 -> "One or more selections are outside available rental slot ranges."
         else -> null

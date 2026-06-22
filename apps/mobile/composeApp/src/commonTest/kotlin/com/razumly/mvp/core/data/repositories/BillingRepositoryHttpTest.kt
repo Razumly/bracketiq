@@ -1460,6 +1460,74 @@ class BillingRepositoryHttpTest {
     }
 
     @Test
+    fun listRentalResourceOptions_uses_item_facility_when_field_facility_is_missing() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/rentals/bookings", request.url.encodedPath)
+            assertEquals("", request.url.encodedQuery)
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            respond(
+                content = """
+                    {
+                      "bookings": [
+                        {
+                          "id": "booking_1",
+                          "organizationId": "owner_org",
+                          "organization": {
+                            "id": "owner_org",
+                            "name": "Example Clubhouse"
+                          },
+                          "items": [
+                            {
+                              "id": "item_1",
+                              "facilityId": "facility_1",
+                              "facility": {
+                                "id": "facility_1",
+                                "name": "Example Clubhouse",
+                                "address": "800 Waterfront Way"
+                              },
+                              "fieldId": "field_1",
+                              "start": "2026-06-24T22:00:00Z",
+                              "end": "2026-06-25T00:00:00Z",
+                              "timeZone": "America/Los_Angeles",
+                              "field": {
+                                "id": "field_1",
+                                "organizationId": "owner_org",
+                                "name": "Example Clubhouse - Court 1"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val option = repo.listRentalResourceOptions().getOrThrow().single()
+
+        assertEquals("booking_1:item_1", option.id)
+        assertEquals("field_1", option.field.id)
+        assertEquals("facility_1", option.field.facilityId)
+        assertEquals("Example Clubhouse", option.field.facility?.name)
+        assertEquals("800 Waterfront Way", option.field.facility?.address)
+    }
+
+    @Test
     fun getRequiredSignLinks_posts_and_parses_response() = runTest {
         val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
         val userRepo = BillingRepositoryHttp_FakeUserRepository(

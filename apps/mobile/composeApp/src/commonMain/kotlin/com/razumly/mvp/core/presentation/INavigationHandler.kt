@@ -17,7 +17,7 @@ interface INavigationHandler {
         selectedFreeAgentId: String? = null,
     )
     fun navigateToChat(user: UserData? = null, chat: ChatGroupWithRelations? = null)
-    fun navigateToCreate(rentalContext: RentalCreateContext? = null)
+    fun navigateToCreate()
     fun navigateToSearch()
     fun navigateToEvent(event: Event)
     fun navigateToOrganization(organizationId: String, initialTab: OrganizationDetailTab = OrganizationDetailTab.OVERVIEW)

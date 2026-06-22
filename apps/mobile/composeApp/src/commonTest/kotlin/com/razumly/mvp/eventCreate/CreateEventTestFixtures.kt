@@ -71,7 +71,6 @@ import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
 import com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto
 import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.core.network.MvpUploadFile
-import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.LoadingState
 import com.razumly.mvp.eventDetail.data.IMatchRepository
@@ -113,7 +112,6 @@ abstract class MainDispatcherTest {
 
 internal class CreateEventHarness(
     sports: List<Sport> = emptyList(),
-    rentalContext: RentalCreateContext? = null,
     existingOrganizationEvents: List<Event> = emptyList(),
     rentalResourceOptions: List<RentalResourceOption> = emptyList(),
 ) {
@@ -125,7 +123,6 @@ internal class CreateEventHarness(
         this.rentalResourceOptions = rentalResourceOptions
     }
     val imageRepository = CreateEvent_FakeImagesRepository()
-    val matchRepository = CreateEvent_FakeMatchRepository()
     val loadingHandler = CreateEvent_FakeLoadingHandler()
 
     var onEventCreatedCount = 0
@@ -134,12 +131,10 @@ internal class CreateEventHarness(
         componentContext = createTestComponentContext(),
         userRepository = userRepository,
         eventRepository = eventRepository,
-        matchRepository = matchRepository,
         fieldRepository = fieldRepository,
         sportsRepository = sportsRepository,
         billingRepository = billingRepository,
         imageRepository = imageRepository,
-        rentalContext = rentalContext,
         onEventCreated = { onEventCreatedCount += 1 }
     ).also { component ->
         component.setLoadingHandler(loadingHandler)

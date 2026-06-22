@@ -14,6 +14,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.buildEventOfficialRecordId
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.requiresTeamOfficials
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
@@ -23,6 +24,7 @@ import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.presentation.Primary
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlin.native.ObjCName
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
@@ -277,6 +279,24 @@ data class EventApiDto(
         } else {
             doTeamsOfficiate
         }
+        val normalizedEventOfficials = when {
+            !eventOfficials.isNullOrEmpty() -> eventOfficials
+            !officialIds.isNullOrEmpty() -> officialIds.mapNotNull { officialId ->
+                val normalizedUserId = officialId.trim()
+                if (normalizedUserId.isBlank()) {
+                    null
+                } else {
+                    EventOfficial(
+                        id = buildEventOfficialRecordId(resolvedId, normalizedUserId),
+                        userId = normalizedUserId,
+                        positionIds = officialPositions?.map(EventOfficialPosition::id).orEmpty(),
+                        fieldIds = emptyList(),
+                        isActive = true,
+                    )
+                }
+            }
+            else -> emptyList()
+        }
 
         return Event(
             id = resolvedId,
@@ -342,8 +362,8 @@ data class EventApiDto(
             pointsToVictory = pointsToVictory ?: emptyList(),
             officialSchedulingMode = resolvedOfficialSchedulingMode,
             officialPositions = officialPositions ?: emptyList(),
-            eventOfficials = eventOfficials ?: emptyList(),
-            officialIds = officialIds ?: emptyList(),
+            eventOfficials = normalizedEventOfficials,
+            officialIds = normalizedEventOfficials.map(EventOfficial::userId),
             allowPaymentPlans = resolvedEventAllowPaymentPlans,
             installmentCount = resolvedEventInstallmentCount,
             installmentDueDates = resolvedEventInstallmentDueDates,
@@ -726,7 +746,7 @@ data class EventUpdateDto(
     val teamOfficialsMaySwap: Boolean? = null,
     val matchRulesOverride: MatchRulesConfigMVP? = null,
     val autoCreatePointMatchIncidents: Boolean? = null,
-    val officialIds: List<String>? = null,
+    @Transient val officialIds: List<String>? = null,
     val allowPaymentPlans: Boolean? = null,
     val installmentCount: Int? = null,
     val installmentDueDates: List<String>? = null,
@@ -1005,7 +1025,6 @@ fun Event.toUpdateDto(
         teamOfficialsMaySwap = if (effectiveDoTeamsOfficiate == true) teamOfficialsMaySwap else false,
         matchRulesOverride = matchRulesOverride,
         autoCreatePointMatchIncidents = autoCreatePointMatchIncidents,
-        officialIds = officialIds,
         allowPaymentPlans = allowPaymentPlans,
         installmentCount = installmentCount,
         installmentDueDates = installmentDueDates,

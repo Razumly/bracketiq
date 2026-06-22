@@ -1812,6 +1812,7 @@ private data class RentalBookingItemDto(
     val requiredTemplateIds: List<String> = emptyList(),
     val hostRequiredTemplateIds: List<String> = emptyList(),
     val field: RentalFieldDto? = null,
+    val facility: RentalFacilityDto? = null,
 )
 
 @Serializable
@@ -2167,7 +2168,13 @@ private fun RentalBookingItemDto.toRentalResourceOptionOrNull(
     renterOrganizationId: String?,
 ): RentalResourceOption? {
     val resolvedItemId = (id ?: legacyId)?.trim()?.takeIf(String::isNotBlank) ?: return null
-    val resolvedField = field?.toFieldOrNull(fallbackFieldId = fieldId, fallbackOrganizationId = organizationId ?: bookingOrganizationId)
+    val fallbackFacility = facility?.toFacilityOrNull()
+    val resolvedField = field?.toFieldOrNull(
+        fallbackFieldId = fieldId,
+        fallbackOrganizationId = organizationId ?: bookingOrganizationId,
+        fallbackFacilityId = facilityId,
+        fallbackFacility = fallbackFacility,
+    )
         ?: return null
     val resolvedStart = start?.trim()?.takeIf(String::isNotBlank)?.let { value ->
         runCatching { Instant.parse(value) }.getOrNull()
@@ -2200,9 +2207,11 @@ private fun RentalBookingItemDto.toRentalResourceOptionOrNull(
 private fun RentalFieldDto.toFieldOrNull(
     fallbackFieldId: String?,
     fallbackOrganizationId: String?,
+    fallbackFacilityId: String? = null,
+    fallbackFacility: Facility? = null,
 ): Field? {
     val resolvedId = (id ?: legacyId ?: fallbackFieldId)?.trim()?.takeIf(String::isNotBlank) ?: return null
-    val resolvedFacility = facility?.toFacilityOrNull()
+    val resolvedFacility = facility?.toFacilityOrNull() ?: fallbackFacility
     return Field(
         fieldNumber = fieldNumber ?: 0,
         divisions = divisions.normalizeStringList(),
@@ -2218,6 +2227,7 @@ private fun RentalFieldDto.toFieldOrNull(
         id = resolvedId,
     ).also { field ->
         field.facilityId = facilityId?.trim()?.takeIf(String::isNotBlank)
+            ?: fallbackFacilityId?.trim()?.takeIf(String::isNotBlank)
             ?: resolvedFacility?.resolvedId?.takeIf(String::isNotBlank)
         field.facility = resolvedFacility
     }

@@ -54,7 +54,6 @@ import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.network.dto.InviteCreateDto
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
-import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.eventCreate.CreateEvent_FakeBillingRepository
 import com.razumly.mvp.eventCreate.CreateEvent_FakeImagesRepository
 import com.razumly.mvp.eventCreate.CreateEvent_FakeSportsRepository
@@ -2636,7 +2635,7 @@ private object NoopNavigationHandler : INavigationHandler {
     override fun navigateToMatch(match: MatchWithRelations, event: Event) = Unit
     override fun navigateToTeams(freeAgents: List<String>, event: Event?, selectedFreeAgentId: String?) = Unit
     override fun navigateToChat(user: UserData?, chat: com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations?) = Unit
-    override fun navigateToCreate(rentalContext: RentalCreateContext?) = Unit
+    override fun navigateToCreate() = Unit
     override fun navigateToSearch() = Unit
     override fun navigateToEvent(event: Event) = Unit
     override fun navigateToOrganization(organizationId: String, initialTab: OrganizationDetailTab) = Unit

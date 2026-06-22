@@ -907,7 +907,7 @@ class EventDtosTest {
         assertEquals("SCHEDULE", dto.officialSchedulingMode)
         assertEquals(listOf("R1"), dto.officialPositions?.map(EventOfficialPosition::name))
         assertEquals(listOf("official-1"), dto.eventOfficials?.map(EventOfficial::userId))
-        assertEquals(listOf("official-1"), dto.officialIds)
+        assertEquals(null, dto.officialIds)
     }
 
     @Test

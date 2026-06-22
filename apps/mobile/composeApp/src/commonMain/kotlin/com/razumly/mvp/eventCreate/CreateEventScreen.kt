@@ -44,8 +44,6 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.withOfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
-import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
-import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.composables.TermsConsentDialog
 import com.razumly.mvp.core.presentation.util.backAnimation
@@ -54,7 +52,6 @@ import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventCreate.steps.Preview
 import com.razumly.mvp.eventDetail.EventDetails
-import com.razumly.mvp.eventDetail.TextSignatureDialog
 import com.razumly.mvp.eventDetail.toEventWithFullRelations
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
@@ -90,7 +87,6 @@ fun CreateEventScreen(
     }
     val childStack by component.childStack.subscribeAsState()
     val eventImageUrls by component.eventImageUrls.collectAsState()
-    val isRentalFlow by component.isRentalFlow.collectAsState()
     val sports by component.sports.collectAsState()
     val divisionTypeParameters by component.divisionTypeParameters.collectAsState()
     val organizationTemplates by component.organizationTemplates.collectAsState()
@@ -104,9 +100,6 @@ fun CreateEventScreen(
     val leagueScoringConfig by component.leagueScoringConfig.collectAsState()
     val suggestedUsers by component.suggestedUsers.collectAsState()
     val pendingStaffInvites by component.pendingStaffInvites.collectAsState()
-    val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
-    val webSignaturePrompt by component.webSignaturePrompt.collectAsState()
-    val billingAddressPrompt by component.billingAddressPrompt.collectAsState()
     val termsConsentState by component.termsConsentState.collectAsState()
     val termsConsentLoading by component.termsConsentLoading.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
@@ -179,23 +172,23 @@ fun CreateEventScreen(
         sports.firstOrNull { it.id == newEventState.sportId }
     }
 
-    val onEditEvent: (Event.() -> Event) -> Unit = remember(component, isRentalFlow) {
+    val onEditEvent: (Event.() -> Event) -> Unit = remember(component) {
         { update ->
             component.updateEventField {
-                update().applyCreateSelectionRules(isRentalFlow)
+                update().applyCreateSelectionRules()
             }
         }
     }
 
-    val onEditTournament: (Event.() -> Event) -> Unit = remember(component, isRentalFlow) {
+    val onEditTournament: (Event.() -> Event) -> Unit = remember(component) {
         { update ->
             component.updateTournamentField {
-                update().applyCreateSelectionRules(isRentalFlow)
+                update().applyCreateSelectionRules()
             }
         }
     }
 
-    val onEventTypeSelected: (EventType) -> Unit = remember(component, isRentalFlow) {
+    val onEventTypeSelected: (EventType) -> Unit = remember(component) {
         { selectedType ->
             val normalizedType = selectedType
             component.onTypeSelected(normalizedType)
@@ -417,7 +410,7 @@ fun CreateEventScreen(
                             navPadding = LocalNavBarPadding.current,
                             editView = isEditing,
                             isNewEvent = true,
-                            rentalTimeLocked = isRentalFlow,
+                            rentalTimeLocked = false,
                             onAddCurrentUser = component::addUserToEvent,
                             imageScheme = imageScheme,
                             imageIds = eventImageUrls,
@@ -512,31 +505,6 @@ fun CreateEventScreen(
                             component = component
                         )
                     }
-                }
-
-                textSignaturePrompt?.let { prompt ->
-                    TextSignatureDialog(
-                        prompt = prompt,
-                        onConfirm = component::confirmTextSignature,
-                        onDismiss = component::dismissTextSignature,
-                    )
-                }
-
-                webSignaturePrompt?.let { prompt ->
-                    EmbeddedWebModal(
-                        title = prompt.step?.title ?: "Sign required document",
-                        url = prompt.url,
-                        description = null,
-                        onDismiss = component::dismissWebSignaturePrompt,
-                    )
-                }
-
-                billingAddressPrompt?.let { address ->
-                    BillingAddressDialog(
-                        initialAddress = address,
-                        onConfirm = component::submitBillingAddress,
-                        onDismiss = component::dismissBillingAddressPrompt,
-                    )
                 }
 
             }

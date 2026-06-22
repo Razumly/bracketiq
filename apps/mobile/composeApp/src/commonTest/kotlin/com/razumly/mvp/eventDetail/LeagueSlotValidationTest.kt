@@ -48,8 +48,8 @@ class LeagueSlotValidationTest {
             selectedDivisionIds = emptyList(),
         )
 
-        assertEquals("Overlaps with another timeslot for one or more selected fields.", errors[0])
-        assertEquals("Overlaps with another timeslot for one or more selected fields.", errors[1])
+        assertEquals("Overlaps with another timeslot for one or more selected resources.", errors[0])
+        assertEquals("Overlaps with another timeslot for one or more selected resources.", errors[1])
     }
 
     @Test

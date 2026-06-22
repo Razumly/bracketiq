@@ -95,7 +95,7 @@ data class Event(
     val officialSchedulingMode: OfficialSchedulingMode = OfficialSchedulingMode.SCHEDULE,
     val officialPositions: List<EventOfficialPosition> = emptyList(),
     val eventOfficials: List<EventOfficial> = emptyList(),
-    val officialIds: List<String> = emptyList(),
+    @Transient val officialIds: List<String> = emptyList(),
     val allowPaymentPlans: Boolean? = null,
     val installmentCount: Int? = null,
     val installmentDueDates: List<String> = emptyList(),

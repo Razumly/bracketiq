@@ -17,7 +17,6 @@ import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
-import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.calcDistance
@@ -71,7 +70,6 @@ interface EventSearchComponent {
     fun viewEvent(event: Event)
     fun viewOrganization(organization: Organization, initialTab: OrganizationDetailTab = OrganizationDetailTab.OVERVIEW)
     fun startEventCreate()
-    fun startRentalCreate(context: RentalCreateContext)
     fun suggestEvents(searchQuery: String)
     fun suggestOrganizations(searchQuery: String, rentalsOnly: Boolean = false)
     fun updateFilter(update: EventFilter.() -> EventFilter)
@@ -282,10 +280,6 @@ class DefaultEventSearchComponent(
 
     override fun startEventCreate() {
         navigationHandler.navigateToCreate()
-    }
-
-    override fun startRentalCreate(context: RentalCreateContext) {
-        navigationHandler.navigateToCreate(context)
     }
 
     override fun suggestEvents(searchQuery: String) {

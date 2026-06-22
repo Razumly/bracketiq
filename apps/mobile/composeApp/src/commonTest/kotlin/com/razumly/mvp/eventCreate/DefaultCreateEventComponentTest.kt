@@ -11,7 +11,6 @@ import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
-import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.eventDetail.EventStaffRole
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
@@ -519,36 +518,6 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertFalse(harness.component.newEventState.value.teamSignup)
         assertTrue(harness.component.newEventState.value.noFixedEndDateTime)
         assertFalse(harness.component.newEventState.value.singleDivision)
-    }
-
-    @Test
-    fun given_rental_context_when_initialized_then_event_is_not_seeded_from_purchase_context() = runTest(testDispatcher) {
-        val rentalContext = RentalCreateContext(
-            organizationId = "org-1",
-            organizationName = "Org One",
-            organizationLocation = "Main Gym",
-            organizationCoordinates = listOf(-122.25, 37.78),
-            organizationFieldIds = listOf("org-field-1"),
-            selectedFieldIds = listOf(" field-a ", "field-a", "field-b"),
-            selectedTimeSlotIds = listOf(" slot-a ", "slot-a"),
-            participantRequiredTemplateIds = listOf("template-a", "template-b"),
-            hostRequiredTemplateIds = listOf("host-template-a"),
-            rentalPriceCents = 2500,
-            startEpochMillis = 1_700_000_000_000,
-            endEpochMillis = 1_700_003_600_000,
-        )
-        val harness = CreateEventHarness(rentalContext = rentalContext)
-        advance()
-
-        val initial = harness.component.newEventState.value
-        assertEquals(EventType.EVENT, initial.eventType)
-        assertNull(initial.organizationId)
-        assertTrue(initial.fieldIds.isEmpty())
-        assertTrue(initial.timeSlotIds.isEmpty())
-        assertTrue(initial.requiredTemplateIds.isEmpty())
-        assertEquals(0, initial.priceCents)
-        assertTrue(harness.component.leagueSlots.value.none { slot -> slot.rentalLocked == true })
-        assertEquals(1, harness.billingRepository.rentalResourceOptionCalls.size)
     }
 
     @Test

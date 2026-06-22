@@ -129,7 +129,7 @@ internal fun computeLeagueSlotErrors(
             val slotStart = slot.startDate
             val slotEnd = slot.endDate
             val requiredMissing = when {
-                fieldIds.isEmpty() -> "Select at least one field."
+                fieldIds.isEmpty() -> "Select at least one resource."
                 slotEnd == null -> "Select start and end date/time."
                 slotEnd <= slotStart -> "Timeslot must end after it starts."
                 else -> null
@@ -170,13 +170,13 @@ internal fun computeLeagueSlotErrors(
             }
 
             if (hasOverlap) {
-                errors[index] = "Overlaps with another timeslot for one or more selected fields."
+                errors[index] = "Overlaps with another timeslot for one or more selected resources."
             }
             return@forEachIndexed
         }
 
         val requiredMissing = when {
-            fieldIds.isEmpty() -> "Select at least one field."
+            fieldIds.isEmpty() -> "Select at least one resource."
             days.isEmpty() -> "Select at least one day."
             start == null -> "Select a start time."
             end == null -> "Select an end time."
@@ -222,7 +222,7 @@ internal fun computeLeagueSlotErrors(
         }
 
         if (hasOverlap) {
-            errors[index] = "Overlaps with another timeslot for one or more selected fields."
+            errors[index] = "Overlaps with another timeslot for one or more selected resources."
         }
     }
     if (splitByDivision && selectedDivisionSet.isNotEmpty()) {

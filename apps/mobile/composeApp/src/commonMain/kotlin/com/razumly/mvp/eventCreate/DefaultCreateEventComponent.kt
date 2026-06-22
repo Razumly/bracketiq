@@ -11,12 +11,10 @@ import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.value.Value
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
-import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
-import com.razumly.mvp.core.data.dataTypes.Facility
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
@@ -44,12 +42,8 @@ import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
-import com.razumly.mvp.core.data.repositories.PurchaseIntentTimeSlotContext
 import com.razumly.mvp.core.presentation.IPaymentProcessor
-import com.razumly.mvp.core.presentation.LockedRentalSelection
-import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.core.presentation.PaymentProcessor
-import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.presentation.util.convertPhotoResultToUploadFile
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
@@ -62,20 +56,16 @@ import com.razumly.mvp.eventDetail.assignedUserIdsForRole
 import com.razumly.mvp.eventDetail.conflictListLabel
 import com.razumly.mvp.eventDetail.EventStaffRole
 import com.razumly.mvp.eventDetail.PendingStaffInviteDraft
-import com.razumly.mvp.eventDetail.TextSignaturePromptState
-import com.razumly.mvp.eventDetail.WebSignaturePromptState
 import com.razumly.mvp.eventDetail.mergePendingStaffInviteDraft
 import com.razumly.mvp.eventDetail.normalizeStaffInviteEmail
 import com.razumly.mvp.eventDetail.reconcileEventStaffInvites
 import com.razumly.mvp.eventDetail.resolveEffectiveLeagueSlotDivisionIds
-import com.razumly.mvp.eventDetail.data.IMatchRepository
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -87,7 +77,6 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlin.time.Clock
-import kotlin.time.Duration.Companion.seconds
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
@@ -101,15 +90,11 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val currentUser: StateFlow<UserData?>
     val errorState: StateFlow<ErrorMessage?>
     val eventImageUrls: StateFlow<List<String>>
-    val isRentalFlow: StateFlow<Boolean>
     val sports: StateFlow<List<Sport>>
     val divisionTypeParameters: StateFlow<DivisionTypeParameters>
     val organizationTemplates: StateFlow<List<OrganizationTemplateDocument>>
     val organizationTemplatesLoading: StateFlow<Boolean>
     val organizationTemplatesError: StateFlow<String?>
-    val textSignaturePrompt: StateFlow<TextSignaturePromptState?>
-    val webSignaturePrompt: StateFlow<WebSignaturePromptState?>
-    val billingAddressPrompt: StateFlow<BillingAddressDraft?>
     val localFields: StateFlow<List<Field>>
     val leagueSlots: StateFlow<List<TimeSlot>>
     val useManualTimeSlots: StateFlow<Boolean>
@@ -165,11 +150,6 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     fun removeLeagueTimeSlot(index: Int)
     fun updateLeagueScoringConfig(update: LeagueScoringConfigDTO.() -> LeagueScoringConfigDTO)
     fun createAccount()
-    fun confirmTextSignature()
-    fun dismissTextSignature()
-    fun dismissWebSignaturePrompt()
-    fun submitBillingAddress(address: BillingAddressDraft)
-    fun dismissBillingAddressPrompt()
     fun acceptTermsConsent()
     fun onUploadSelected(photo: GalleryPhotoResult)
     fun deleteImage(url: String)
@@ -193,12 +173,10 @@ class DefaultCreateEventComponent(
     componentContext: ComponentContext,
     private val userRepository: IUserRepository,
     private val eventRepository: IEventRepository,
-    private val matchRepository: IMatchRepository,
     private val fieldRepository: IFieldRepository,
     private val sportsRepository: ISportsRepository,
     private val billingRepository: IBillingRepository,
     private val imageRepository: IImagesRepository,
-    private val rentalContext: RentalCreateContext?,
     val onEventCreated: (Event) -> Unit
 ) : CreateEventComponent, PaymentProcessor(), ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
@@ -227,9 +205,6 @@ class DefaultCreateEventComponent(
 
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
-    private val _billingAddressPrompt = MutableStateFlow<BillingAddressDraft?>(null)
-    override val billingAddressPrompt = _billingAddressPrompt.asStateFlow()
-
     private val _addUserToEvent = MutableStateFlow(false)
 
     override val currentUser = userRepository.currentUser.map { it.getOrNull() }
@@ -244,8 +219,6 @@ class DefaultCreateEventComponent(
     override val eventImageUrls = imageRepository
         .getUserImageIdsFlow()
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
-    private val _isRentalFlow = MutableStateFlow(false)
-    override val isRentalFlow = _isRentalFlow.asStateFlow()
     private val _sports = MutableStateFlow<List<Sport>>(emptyList())
     override val sports = _sports.asStateFlow()
     private val _divisionTypeParameters = MutableStateFlow(DivisionTypeParameters())
@@ -256,10 +229,6 @@ class DefaultCreateEventComponent(
     override val organizationTemplatesLoading = _organizationTemplatesLoading.asStateFlow()
     private val _organizationTemplatesError = MutableStateFlow<String?>(null)
     override val organizationTemplatesError = _organizationTemplatesError.asStateFlow()
-    private val _textSignaturePrompt = MutableStateFlow<TextSignaturePromptState?>(null)
-    override val textSignaturePrompt = _textSignaturePrompt.asStateFlow()
-    private val _webSignaturePrompt = MutableStateFlow<WebSignaturePromptState?>(null)
-    override val webSignaturePrompt = _webSignaturePrompt.asStateFlow()
     private val _localFields = MutableStateFlow<List<Field>>(emptyList())
     override val localFields = _localFields.asStateFlow()
     private val _leagueSlots = MutableStateFlow<List<TimeSlot>>(emptyList())
@@ -273,15 +242,6 @@ class DefaultCreateEventComponent(
     private val _leagueScoringConfig = MutableStateFlow(LeagueScoringConfigDTO())
     override val leagueScoringConfig = _leagueScoringConfig.asStateFlow()
     private val _fieldCount = MutableStateFlow(0)
-    private val pendingEventAfterPayment = MutableStateFlow<Event?>(null)
-    private val awaitingRentalPayment = MutableStateFlow(false)
-    private var activeRentalLockKeys: List<String> = emptyList()
-    private var pendingRentalSignatureSteps: List<com.razumly.mvp.core.data.repositories.SignStep> = emptyList()
-    private var pendingRentalSignatureStepIndex = 0
-    private var pendingRentalSignatureEvent: Event? = null
-    private var pendingRentalPdfSignaturePollJob: Job? = null
-    private var pendingBillingAddressAction: (() -> Unit)? = null
-
     private lateinit var loadingHandler: LoadingHandler
 
     override fun setLoadingHandler(loadingHandler: LoadingHandler) {
@@ -304,9 +264,6 @@ class DefaultCreateEventComponent(
 
     init {
         childStack.subscribe {}
-        if (rentalContext != null) {
-            _errorState.value = ErrorMessage("Your rental is already reserved. Select it from Resources to attach it to this event.")
-        }
         loadSports()
         loadAvailableRentalResources()
         scope.launch {
@@ -332,45 +289,6 @@ class DefaultCreateEventComponent(
                         host = user,
                         event = defaultEvent.value.event.withRequiredHost(user.id),
                     )
-                }
-            }
-        }
-        scope.launch {
-            paymentResult.collect { result ->
-                if (result == null || !awaitingRentalPayment.value) {
-                    return@collect
-                }
-
-                clearPaymentResult()
-
-                when (result) {
-                    PaymentResult.Completed -> {
-                        awaitingRentalPayment.value = false
-                        val pendingEvent = pendingEventAfterPayment.value
-                        pendingEventAfterPayment.value = null
-
-                        if (pendingEvent != null) {
-                            createEventAfterPayment(pendingEvent)
-                        } else {
-                            loadingHandler.hideLoading()
-                        }
-                    }
-
-                    PaymentResult.Canceled -> {
-                        awaitingRentalPayment.value = false
-                        pendingEventAfterPayment.value = null
-                        releaseRentalCheckoutLocks()
-                        _errorState.value = ErrorMessage("Payment canceled.")
-                        loadingHandler.hideLoading()
-                    }
-
-                    is PaymentResult.Failed -> {
-                        awaitingRentalPayment.value = false
-                        pendingEventAfterPayment.value = null
-                        releaseRentalCheckoutLocks()
-                        _errorState.value = ErrorMessage(result.error)
-                        loadingHandler.hideLoading()
-                    }
                 }
             }
         }
@@ -407,26 +325,13 @@ class DefaultCreateEventComponent(
             if (hostSyncedDraft != newEventState.value) {
                 _newEventState.value = hostSyncedDraft
             }
-            val eventDraft = applyRentalConstraints(
-                hostSyncedDraft.applyCreateSelectionRules(_isRentalFlow.value)
-            )
+            val eventDraft = hostSyncedDraft.applyCreateSelectionRules()
             val validationError = validateCreateEventDraft(eventDraft)
             if (validationError != null) {
                 _errorState.value = ErrorMessage(validationError)
                 return@launch
             }
-            if (_isRentalFlow.value) {
-                if (!ensureRentalSignaturesBeforeCreate(eventDraft)) {
-                    return@launch
-                }
-                if (eventDraft.priceCents > 0) {
-                    processRentalPaymentBeforeCreate(eventDraft)
-                } else {
-                    createEventAfterPayment(eventDraft)
-                }
-            } else {
-                createEventAfterPayment(eventDraft)
-            }
+            createEventAfterPayment(eventDraft)
         }
     }
 
@@ -438,77 +343,16 @@ class DefaultCreateEventComponent(
         }
     }
 
-    override fun confirmTextSignature() {
-        val prompt = _textSignaturePrompt.value ?: return
-        if (pendingRentalSignatureEvent == null) return
-
-        scope.launch {
-            loadingHandler.showLoading("Recording signature ...")
-
-            val documentId = prompt.step.resolvedDocumentId()
-                ?: "mobile-text-${prompt.step.templateId}-${Clock.System.now().toEpochMilliseconds()}"
-
-            billingRepository.recordSignature(
-                eventId = "",
-                templateId = prompt.step.templateId,
-                documentId = documentId,
-                type = prompt.step.type,
-            ).onFailure { throwable ->
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Failed to record signature.")
-                )
-            }.onSuccess {
-                _textSignaturePrompt.value = null
-                pendingRentalSignatureStepIndex += 1
-                processNextRentalSignatureStep()
-            }
-
-            loadingHandler.hideLoading()
-        }
-    }
-
-    override fun dismissTextSignature() {
-        clearPendingRentalSignatureFlow()
-        _errorState.value = ErrorMessage("Document signing canceled.")
-    }
-
-    override fun dismissWebSignaturePrompt() {
-        clearPendingRentalSignatureFlow()
-        _errorState.value = ErrorMessage("Document signing canceled.")
-    }
-
-    override fun submitBillingAddress(address: BillingAddressDraft) {
-        scope.launch {
-            loadingHandler.showLoading("Saving billing address...")
-            billingRepository.updateBillingAddress(address)
-                .onSuccess {
-                    _billingAddressPrompt.value = null
-                    val action = pendingBillingAddressAction
-                    pendingBillingAddressAction = null
-                    action?.invoke()
-                }
-                .onFailure { error ->
-                    _errorState.value = ErrorMessage(error.userMessage("Unable to save billing address."))
-                }
-            loadingHandler.hideLoading()
-        }
-    }
-
-    override fun dismissBillingAddressPrompt() {
-        _billingAddressPrompt.value = null
-        pendingBillingAddressAction = null
-    }
-
     override fun updateEventField(update: Event.() -> Event) {
         scope.launch {
             val previous = _newEventState.value
             val updated = previous
                 .update()
-                .applyCreateSelectionRules(_isRentalFlow.value)
+                .applyCreateSelectionRules()
                 .withSportRules()
             val normalized = syncOfficialStaffingForSportTransition(
                 previous = previous,
-                updated = applyRentalConstraints(updated),
+                updated = updated,
             )
             val sportChanged = previous.sportId != normalized.sportId
 
@@ -530,7 +374,7 @@ class DefaultCreateEventComponent(
                 .withSportRules()
             val normalized = syncOfficialStaffingForSportTransition(
                 previous = previous,
-                updated = applyRentalConstraints(updated),
+                updated = updated,
             )
             val sportChanged = previous.sportId != normalized.sportId
 
@@ -578,11 +422,11 @@ class DefaultCreateEventComponent(
             val previous = _newEventState.value
             val updated = previous
                 .update()
-                .applyCreateSelectionRules(_isRentalFlow.value)
+                .applyCreateSelectionRules()
                 .withSportRules()
             val normalized = syncOfficialStaffingForSportTransition(
                 previous = previous,
-                updated = applyRentalConstraints(updated),
+                updated = updated,
             )
 
             _newEventState.value = normalized
@@ -1307,403 +1151,18 @@ class DefaultCreateEventComponent(
         _leagueScoringConfig.value = _leagueScoringConfig.value.update()
     }
 
-    private fun applyRentalDefaults() {
-        val context = rentalContext ?: return
-        val now = Clock.System.now()
-        val requestedStart = Instant.fromEpochMilliseconds(context.startEpochMillis)
-        val selectedFieldIds = context.selectedFieldIds
-            .ifEmpty { context.organizationFieldIds }
-            .normalizeDistinctIds()
-        val start = if (requestedStart == Instant.DISTANT_PAST) now else requestedStart
-        val requestedEnd = Instant.fromEpochMilliseconds(context.endEpochMillis)
-        val end = if (requestedEnd > start) {
-            requestedEnd
-        } else {
-            Instant.fromEpochMilliseconds(start.toEpochMilliseconds() + ONE_HOUR_MILLIS)
-        }
-        val selectedTimeSlotIds = context.selectedTimeSlotIds
-        val lockedSlots = buildLockedRentalSlots(
-            context = context,
-            fallbackFieldIds = selectedFieldIds,
-            fallbackStart = start,
-            fallbackEnd = end,
-        )
-
-        _newEventState.value = applyRentalConstraints(_newEventState.value.copy(
-            id = context.rentalBookingId?.trim()?.takeIf(String::isNotBlank) ?: _newEventState.value.id,
-            name = _newEventState.value.name.ifBlank { "${context.organizationName} Rental Event" },
-            location = context.organizationLocation ?: _newEventState.value.location,
-            address = context.organizationAddress ?: _newEventState.value.address,
-            coordinates = context.organizationCoordinates ?: _newEventState.value.coordinates,
-            // Rentals created from mobile are always user-owned events.
-            organizationId = null,
-            fieldIds = selectedFieldIds,
-            timeSlotIds = selectedTimeSlotIds,
-            requiredTemplateIds = rentalRequiredTemplateIds(),
-            priceCents = context.rentalPriceCents.coerceAtLeast(0),
-            start = start,
-            end = end,
-        ).applyCreateSelectionRules(_isRentalFlow.value))
-
-        seedRentalFields(
-            selectedFieldIds = selectedFieldIds,
-            lockedSelections = context.lockedSelections,
-        )
-        _leagueSlots.value = lockedSlots
-    }
-
-    private fun seedRentalFields(
-        selectedFieldIds: List<String>,
-        lockedSelections: List<LockedRentalSelection>,
-    ) {
-        val normalizedFieldIds = selectedFieldIds.normalizeDistinctIds()
-        _fieldCount.value = normalizedFieldIds.size
-        if (normalizedFieldIds.isEmpty()) {
-            _localFields.value = emptyList()
-            return
-        }
-
-        val fieldNameById = lockedSelections
-            .asSequence()
-            .mapNotNull { selection ->
-                val fieldId = selection.fieldId.trim().takeIf(String::isNotEmpty) ?: return@mapNotNull null
-                val fieldName = selection.fieldName?.trim()?.takeIf(String::isNotEmpty) ?: return@mapNotNull null
-                fieldId to fieldName
-            }
-            .toMap()
-        val fieldFacilityById = lockedSelections
-            .asSequence()
-            .mapNotNull { selection ->
-                val fieldId = selection.fieldId.trim().takeIf(String::isNotEmpty) ?: return@mapNotNull null
-                val facilityId = selection.facilityId?.trim()?.takeIf(String::isNotEmpty)
-                val facilityName = selection.facilityName?.trim()?.takeIf(String::isNotEmpty)
-                val facilityLocation = selection.facilityLocation?.trim()?.takeIf(String::isNotEmpty)
-                if (facilityId == null && facilityName == null && facilityLocation == null) {
-                    return@mapNotNull null
-                }
-                fieldId to Facility(
-                    id = facilityId.orEmpty(),
-                    name = facilityName,
-                    location = facilityLocation,
-                )
-            }
-            .toMap()
-        val defaultDivisions = defaultFieldDivisions(_newEventState.value)
-        _localFields.value = normalizedFieldIds.mapIndexed { index, fieldId ->
-            Field(
-                fieldNumber = index + 1,
-                id = fieldId,
-                name = fieldNameById[fieldId] ?: "Field ${index + 1}",
-                divisions = defaultDivisions,
-                organizationId = null,
-            ).also { field ->
-                fieldFacilityById[fieldId]?.let { facility ->
-                    field.facilityId = facility.resolvedId.takeIf(String::isNotBlank)
-                    field.facility = facility
-                }
-            }
-        }
-    }
-
-    private fun buildLockedRentalSlots(
-        context: RentalCreateContext,
-        fallbackFieldIds: List<String>,
-        fallbackStart: Instant,
-        fallbackEnd: Instant,
-    ): List<TimeSlot> {
-        val currentEvent = _newEventState.value
-        val eventTimeZone = currentEvent.resolvedTimeZone()
-        val defaultDivisions = defaultFieldDivisions(currentEvent)
-        val rentalBookingId = context.rentalBookingId?.trim()?.takeIf(String::isNotBlank)
-        val explicitSlots = context.lockedSelections.mapNotNull { selection ->
-            val fieldId = selection.fieldId.trim().takeIf(String::isNotEmpty) ?: return@mapNotNull null
-            val requestedStart = Instant.fromEpochMilliseconds(selection.startEpochMillis)
-            val slotStart = if (requestedStart == Instant.DISTANT_PAST) fallbackStart else requestedStart
-            val requestedEnd = Instant.fromEpochMilliseconds(selection.endEpochMillis)
-            val slotEnd = if (requestedEnd > slotStart) {
-                requestedEnd
-            } else {
-                Instant.fromEpochMilliseconds(slotStart.toEpochMilliseconds() + ONE_HOUR_MILLIS)
-            }
-            val slotDay = slotStart.toMondayFirstDay(eventTimeZone)
-            TimeSlot(
-                id = newId(),
-                dayOfWeek = slotDay,
-                daysOfWeek = listOf(slotDay),
-                divisions = defaultDivisions,
-                startTimeMinutes = slotStart.toMinutesOfDay(eventTimeZone),
-                endTimeMinutes = slotEnd.toMinutesOfDay(eventTimeZone),
-                startDate = slotStart,
-                timeZone = currentEvent.timeZone,
-                repeating = false,
-                endDate = slotEnd,
-                scheduledFieldId = fieldId,
-                scheduledFieldIds = listOf(fieldId),
-                price = null,
-                requiredTemplateIds = selection.requiredTemplateIds.normalizeDistinctIds(),
-                hostRequiredTemplateIds = selection.hostRequiredTemplateIds.normalizeDistinctIds(),
-                sourceType = rentalBookingId?.let { "RENTAL_BOOKING" },
-                rentalBookingId = rentalBookingId,
-                rentalBookingItemId = selection.rentalBookingItemId?.trim()?.takeIf(String::isNotBlank),
-                rentalLocked = rentalBookingId != null,
-            )
-        }
-        if (explicitSlots.isNotEmpty()) {
-            return explicitSlots
-        }
-
-        val normalizedFallbackFieldIds = fallbackFieldIds.normalizeDistinctIds()
-        if (normalizedFallbackFieldIds.isEmpty()) {
-            return emptyList()
-        }
-        val slotDay = fallbackStart.toMondayFirstDay(eventTimeZone)
-        return normalizedFallbackFieldIds.map { fieldId ->
-            TimeSlot(
-                id = newId(),
-                dayOfWeek = slotDay,
-                daysOfWeek = listOf(slotDay),
-                divisions = defaultDivisions,
-                startTimeMinutes = fallbackStart.toMinutesOfDay(eventTimeZone),
-                endTimeMinutes = fallbackEnd.toMinutesOfDay(eventTimeZone),
-                startDate = fallbackStart,
-                timeZone = currentEvent.timeZone,
-                repeating = false,
-                endDate = fallbackEnd,
-                scheduledFieldId = fieldId,
-                scheduledFieldIds = listOf(fieldId),
-                price = null,
-                requiredTemplateIds = context.participantRequiredTemplateIds.normalizeDistinctIds(),
-                hostRequiredTemplateIds = context.hostRequiredTemplateIds.normalizeDistinctIds(),
-                sourceType = rentalBookingId?.let { "RENTAL_BOOKING" },
-                rentalBookingId = rentalBookingId,
-                rentalBookingItemId = null,
-                rentalLocked = rentalBookingId != null,
-            )
-        }
-    }
-
-    private fun rentalRequiredTemplateIds(): List<String> {
-        return rentalContext?.participantRequiredTemplateIds
-            ?.map { templateId -> templateId.trim() }
-            ?.filter { templateId -> templateId.isNotEmpty() }
-            ?.distinct()
-            ?: emptyList()
-    }
-
-    private fun rentalHostRequiredTemplateIds(): List<String> {
-        return rentalContext?.hostRequiredTemplateIds
-            ?.map { templateId -> templateId.trim() }
-            ?.filter { templateId -> templateId.isNotEmpty() }
-            ?.distinct()
-            ?: emptyList()
-    }
-
-    private fun buildRentalTimeSlotContext(eventDraft: Event): PurchaseIntentTimeSlotContext? {
-        if (!_isRentalFlow.value) {
-            return null
-        }
-
-        val context = rentalContext ?: return null
-        val startDate = Instant.fromEpochMilliseconds(context.startEpochMillis).toString()
-        val endDate = Instant.fromEpochMilliseconds(context.endEpochMillis).toString()
-        val scheduledFieldIds = eventDraft.fieldIds
-            .map(String::trim)
-            .filter(String::isNotBlank)
-            .distinct()
-        val checkoutSourceSlotId = context.lockedSelections
-            .asSequence()
-            .flatMap { selection -> selection.sourceTimeSlotIds.asSequence() }
-            .map(String::trim)
-            .firstOrNull(String::isNotBlank)
-        return PurchaseIntentTimeSlotContext(
-            id = checkoutSourceSlotId ?: context.selectedTimeSlotIds
-                .asSequence()
-                .map(String::trim)
-                .firstOrNull(String::isNotBlank),
-            priceCents = eventDraft.priceCents,
-            startDate = startDate,
-            endDate = endDate,
-            scheduledFieldId = scheduledFieldIds.firstOrNull(),
-            scheduledFieldIds = scheduledFieldIds,
-            hostRequiredTemplateIds = rentalHostRequiredTemplateIds(),
-        )
-    }
-
-    private fun applyRentalConstraints(event: Event): Event {
-        if (!_isRentalFlow.value) {
-            return event
-        }
-        val context = rentalContext ?: return event
-
-        val contextStart = Instant.fromEpochMilliseconds(context.startEpochMillis)
-        val contextEnd = Instant.fromEpochMilliseconds(context.endEpochMillis)
-        val normalizedStart = if (contextStart == Instant.DISTANT_PAST) {
-            event.start
-        } else {
-            contextStart
-        }
-        val minimumEnd = Instant.fromEpochMilliseconds(normalizedStart.toEpochMilliseconds() + ONE_HOUR_MILLIS)
-        val normalizedEnd = when {
-            contextEnd > normalizedStart -> contextEnd
-            event.end > normalizedStart -> event.end
-            else -> minimumEnd
-        }
-
-        val lockedFieldIds = context.selectedFieldIds
-            .ifEmpty { context.organizationFieldIds }
-            .map { fieldId -> fieldId.trim() }
-            .filter(String::isNotEmpty)
-            .distinct()
-        val lockedTimeSlotIds = context.lockedSelections
-            .flatMap { selection -> selection.sourceTimeSlotIds }
-            .normalizeDistinctIds()
-            .ifEmpty { context.selectedTimeSlotIds.normalizeDistinctIds() }
-        val lockedPrice = context.rentalPriceCents.coerceAtLeast(0)
-
-        var next = event.copy(
-            noFixedEndDateTime = false,
-            // Rentals created from mobile are always user-owned events.
-            organizationId = null,
-            start = normalizedStart,
-            end = normalizedEnd,
-            priceCents = lockedPrice,
-            requiredTemplateIds = rentalRequiredTemplateIds(),
-        )
-        if (lockedFieldIds.isNotEmpty()) {
-            next = next.copy(fieldIds = lockedFieldIds)
-        }
-        if (lockedTimeSlotIds.isNotEmpty()) {
-            next = next.copy(timeSlotIds = lockedTimeSlotIds)
-        }
-        return next
-    }
-
-    private suspend fun processRentalPaymentBeforeCreate(eventDraft: Event) {
-        if (eventDraft.priceCents <= 0) {
-            createEventAfterPayment(eventDraft)
-            return
-        }
-        if (!ensureBillingAddressOrPrompt { createEvent() }) {
-            return
-        }
-
-        if (!reserveRentalCheckoutLocks(eventDraft)) {
-            _errorState.value = ErrorMessage(
-                "Selected resources are temporarily locked. Please wait a few seconds and try again."
-            )
-            return
-        }
-
-        loadingHandler.showLoading("Checking resource availability...")
-        val overlappingEvents = findOverlappingRentalEvents(eventDraft)
-            .getOrElse { throwable ->
-                releaseRentalCheckoutLocks()
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Unable to verify resource availability.")
-                )
-                loadingHandler.hideLoading()
-                return
-            }
-        if (overlappingEvents.isNotEmpty()) {
-            releaseRentalCheckoutLocks()
-            _errorState.value = ErrorMessage(buildOverlapConflictMessage(overlappingEvents.first()))
-            loadingHandler.hideLoading()
-            return
-        }
-
-        loadingHandler.showLoading("Creating rental payment...")
-        billingRepository.createPurchaseIntent(
-            event = eventDraft,
-            timeSlotContext = buildRentalTimeSlotContext(eventDraft),
-        )
-            .onSuccess { intent ->
-                clearPaymentResult()
-                pendingEventAfterPayment.value = eventDraft
-                awaitingRentalPayment.value = true
-                runCatching {
-                    setPaymentIntent(intent)
-                    val account = userRepository.currentAccount.value.getOrThrow()
-                    val user = currentUser.value ?: userRepository.currentUser.value.getOrNull()
-                        ?: error("Current user is not available yet.")
-                    val billingAddress = loadSavedBillingAddress()
-                    loadingHandler.showLoading("Waiting for payment completion...")
-                    presentPaymentSheet(account.email, user.fullName, billingAddress)
-                }.onFailure { throwable ->
-                    awaitingRentalPayment.value = false
-                    pendingEventAfterPayment.value = null
-                    releaseRentalCheckoutLocks()
-                    _errorState.value = ErrorMessage(throwable.userMessage("Unable to start payment."))
-                    loadingHandler.hideLoading()
-                }
-            }
-            .onFailure { throwable ->
-                releaseRentalCheckoutLocks()
-                _errorState.value = ErrorMessage(throwable.userMessage("Unable to create rental payment."))
-                loadingHandler.hideLoading()
-            }
-    }
-
-    private suspend fun ensureBillingAddressOrPrompt(onReady: () -> Unit): Boolean {
-        val billingAddress = billingRepository.getBillingAddress()
-            .getOrElse { error ->
-                _errorState.value = ErrorMessage(error.userMessage("Unable to load billing address."))
-                return false
-            }
-            .billingAddress
-            ?.normalized()
-
-        if (billingAddress != null && billingAddress.isCompleteForUsTax()) {
-            return true
-        }
-
-        pendingBillingAddressAction = onReady
-        _billingAddressPrompt.value = billingAddress ?: BillingAddressDraft()
-        return false
-    }
-
-    private suspend fun loadSavedBillingAddress(): BillingAddressDraft? {
-        return billingRepository.getBillingAddress()
-            .getOrNull()
-            ?.billingAddress
-            ?.normalized()
-    }
-
     private suspend fun createEventAfterPayment(eventDraft: Event) {
         loadingHandler.showLoading("Creating event...")
         val preparedEvent = prepareEventForCreation(eventDraft).getOrElse { error ->
-            releaseRentalCheckoutLocks()
             _errorState.value = ErrorMessage(error.userMessage("Failed to prepare event setup."))
             loadingHandler.hideLoading()
             return
         }
 
-        if (_isRentalFlow.value) {
-            val overlappingEvents = findOverlappingRentalEvents(preparedEvent.event)
-                .getOrElse { throwable ->
-                    releaseRentalCheckoutLocks()
-                    _errorState.value = ErrorMessage(
-                        throwable.userMessage("Unable to recheck resource availability.")
-                    )
-                    loadingHandler.hideLoading()
-                    return
-                }
-
-            if (overlappingEvents.isNotEmpty()) {
-                releaseRentalCheckoutLocks()
-                _errorState.value = ErrorMessage(buildOverlapConflictMessage(overlappingEvents.first()))
-                loadingHandler.hideLoading()
-                return
-            }
-        }
-
-        val requiredTemplateIds = if (_isRentalFlow.value) {
-            rentalRequiredTemplateIds()
-        } else {
-            preparedEvent.event.requiredTemplateIds
-                .map(String::trim)
-                .filter(String::isNotBlank)
-                .distinct()
-        }
+        val requiredTemplateIds = preparedEvent.event.requiredTemplateIds
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
 
         eventRepository.createEvent(
             preparedEvent.event,
@@ -1721,125 +1180,13 @@ class DefaultCreateEventComponent(
                         )
                     }
                     .getOrDefault(createdEvent)
-                releaseRentalCheckoutLocks()
                 loadingHandler.hideLoading()
                 onEventCreated(syncedEvent)
             }
             .onFailure {
-                releaseRentalCheckoutLocks()
                 _errorState.value = ErrorMessage(it.userMessage())
                 loadingHandler.hideLoading()
             }
-    }
-
-    private suspend fun ensureRentalSignaturesBeforeCreate(eventDraft: Event): Boolean {
-        if (!_isRentalFlow.value) {
-            return true
-        }
-
-        val requiredTemplateIds = rentalHostRequiredTemplateIds()
-        if (requiredTemplateIds.isEmpty()) {
-            clearPendingRentalSignatureFlow()
-            return true
-        }
-
-        val signSteps = billingRepository.getRequiredRentalSignLinks(
-            templateIds = requiredTemplateIds,
-            eventId = null,
-            organizationId = rentalContext?.organizationId,
-        ).getOrElse { throwable ->
-            _errorState.value = ErrorMessage(
-                throwable.userMessage("Unable to load rental signing requirements.")
-            )
-            return false
-        }
-
-        if (signSteps.isEmpty()) {
-            clearPendingRentalSignatureFlow()
-            return true
-        }
-
-        pendingRentalSignatureEvent = eventDraft
-        pendingRentalSignatureSteps = signSteps
-        pendingRentalSignatureStepIndex = 0
-        processNextRentalSignatureStep()
-        return false
-    }
-
-    private suspend fun processNextRentalSignatureStep() {
-        pendingRentalPdfSignaturePollJob?.cancel()
-        pendingRentalPdfSignaturePollJob = null
-
-        val currentStep = pendingRentalSignatureSteps.getOrNull(pendingRentalSignatureStepIndex)
-        if (currentStep == null) {
-            continueCreateAfterRentalSignatures()
-            return
-        }
-
-        if (currentStep.isTextStep()) {
-            _textSignaturePrompt.value = TextSignaturePromptState(
-                step = currentStep,
-                currentStep = pendingRentalSignatureStepIndex + 1,
-                totalSteps = pendingRentalSignatureSteps.size,
-            )
-            return
-        }
-
-        val signingUrl = currentStep.resolvedSigningUrl()
-        if (signingUrl.isNullOrBlank()) {
-            clearPendingRentalSignatureFlow()
-            _errorState.value = ErrorMessage("A required document is missing a signing URL.")
-            return
-        }
-
-        _webSignaturePrompt.value = WebSignaturePromptState(
-            step = currentStep,
-            url = signingUrl,
-            currentStep = pendingRentalSignatureStepIndex + 1,
-            totalSteps = pendingRentalSignatureSteps.size,
-        )
-
-        val operationId = currentStep.operationId?.trim()?.takeIf(String::isNotBlank)
-        if (operationId == null) {
-            _errorState.value = ErrorMessage(
-                "Complete signing in the modal, then tap Create Event again."
-            )
-            return
-        }
-
-        _errorState.value = ErrorMessage("Waiting for signature sync...")
-        pendingRentalPdfSignaturePollJob = scope.launch {
-            billingRepository.pollBoldSignOperation(operationId).onFailure { throwable ->
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Failed to confirm signature status.")
-                )
-                clearPendingRentalSignatureFlow()
-            }.onSuccess {
-                _webSignaturePrompt.value = null
-                pendingRentalSignatureStepIndex += 1
-                processNextRentalSignatureStep()
-            }
-        }
-    }
-
-    private suspend fun continueCreateAfterRentalSignatures() {
-        val eventDraft = pendingRentalSignatureEvent ?: return
-        clearPendingRentalSignatureFlow()
-        if (eventDraft.priceCents > 0) {
-            processRentalPaymentBeforeCreate(eventDraft)
-        } else {
-            createEventAfterPayment(eventDraft)
-        }
-    }
-
-    private fun clearPendingRentalSignatureFlow() {
-        pendingRentalPdfSignaturePollJob?.cancel()
-        pendingRentalPdfSignaturePollJob = null
-        pendingRentalSignatureSteps = emptyList()
-        pendingRentalSignatureStepIndex = 0
-        pendingRentalSignatureEvent = null
-        _textSignaturePrompt.value = null
-        _webSignaturePrompt.value = null
     }
 
     private suspend fun syncEventStaffAssignments(createdEvent: Event): Result<Event> = runCatching {
@@ -1878,7 +1225,7 @@ class DefaultCreateEventComponent(
         var preparedFields = emptyList<Field>()
         var preparedTimeSlots = emptyList<TimeSlot>()
 
-        val shouldManageLocalFields = !_isRentalFlow.value &&
+        val shouldManageLocalFields =
             (preparedEvent.eventType == EventType.LEAGUE || preparedEvent.eventType == EventType.TOURNAMENT) &&
             _fieldCount.value > 0
 
@@ -1908,7 +1255,7 @@ class DefaultCreateEventComponent(
         }
 
         val hasRentalBackedSlots = _leagueSlots.value.any { slot -> slot.isRentalBacked() }
-        val shouldPersistManagedSlots = if (_isRentalFlow.value || hasRentalBackedSlots) {
+        val shouldPersistManagedSlots = if (hasRentalBackedSlots) {
             preparedEvent.eventType == EventType.EVENT ||
                 preparedEvent.eventType == EventType.LEAGUE ||
                 preparedEvent.eventType == EventType.TOURNAMENT
@@ -1939,9 +1286,6 @@ class DefaultCreateEventComponent(
     }
 
     private fun validateCreateEventDraft(event: Event): String? {
-        if (_isRentalFlow.value) {
-            return null
-        }
         val hasRentalBackedEventSlots = event.eventType == EventType.EVENT &&
             _leagueSlots.value.any { slot -> slot.isRentalBacked() }
         if (hasRentalBackedEventSlots) {
@@ -2070,7 +1414,7 @@ class DefaultCreateEventComponent(
     }
 
     private fun shouldUseConfiguredLeagueSlots(event: Event): Boolean {
-        if (_isRentalFlow.value || _leagueSlots.value.any { slot -> slot.isRentalBacked() }) {
+        if (_leagueSlots.value.any { slot -> slot.isRentalBacked() }) {
             return true
         }
         if (event.eventType == EventType.WEEKLY_EVENT) {
@@ -2466,184 +1810,6 @@ class DefaultCreateEventComponent(
             .distinct()
     }
 
-    private fun reserveRentalCheckoutLocks(eventDraft: Event): Boolean {
-        if (!_isRentalFlow.value) {
-            return true
-        }
-
-        val organizationId = resolveRentalOrganizationId(eventDraft)
-        val fieldIds = eventDraft.fieldIds
-            .map { fieldId -> fieldId.trim() }
-            .filter(String::isNotBlank)
-            .distinct()
-        if (organizationId.isEmpty() || fieldIds.isEmpty()) {
-            return true
-        }
-        if (eventDraft.end <= eventDraft.start) {
-            return false
-        }
-
-        val now = Clock.System.now()
-        val expiresAt = now + 10.seconds
-        rentalCheckoutLocks.entries.removeAll { (_, lockExpiry) -> lockExpiry <= now }
-
-        val lockKeys = fieldIds.map { fieldId ->
-            buildRentalLockKey(
-                organizationId = organizationId,
-                fieldId = fieldId,
-                start = eventDraft.start,
-                end = eventDraft.end,
-            )
-        }
-        val hasActiveLock = lockKeys.any { lockKey ->
-            val lockExpiry = rentalCheckoutLocks[lockKey]
-            lockExpiry != null && lockExpiry > now
-        }
-        if (hasActiveLock) {
-            return false
-        }
-
-        lockKeys.forEach { lockKey ->
-            rentalCheckoutLocks[lockKey] = expiresAt
-        }
-        activeRentalLockKeys = lockKeys
-        return true
-    }
-
-    private fun releaseRentalCheckoutLocks() {
-        if (activeRentalLockKeys.isEmpty()) {
-            return
-        }
-        activeRentalLockKeys.forEach { lockKey ->
-            rentalCheckoutLocks.remove(lockKey)
-        }
-        activeRentalLockKeys = emptyList()
-    }
-
-    private suspend fun findOverlappingRentalEvents(eventDraft: Event): Result<List<Event>> {
-        val organizationId = resolveRentalOrganizationId(eventDraft)
-        if (organizationId.isEmpty()) {
-            return Result.success(emptyList())
-        }
-
-        val selectedFieldIds = eventDraft.fieldIds
-            .map { fieldId -> fieldId.trim() }
-            .filter(String::isNotBlank)
-            .distinct()
-        if (selectedFieldIds.isEmpty()) {
-            return Result.success(emptyList())
-        }
-        if (eventDraft.end <= eventDraft.start) {
-            return Result.failure(IllegalArgumentException("Selected rental time range is invalid."))
-        }
-
-        val selectedFieldSet = selectedFieldIds.toSet()
-        return eventRepository.getEventsByOrganization(
-            organizationId = organizationId,
-            limit = 400,
-        ).mapCatching { organizationEvents ->
-            organizationEvents.filter { existingEvent ->
-                existingEvent.id != eventDraft.id
-            }.filter { existingEvent ->
-                doesScheduledEventOverlapRentalWindow(
-                    scheduledEvent = existingEvent,
-                    selectedFieldSet = selectedFieldSet,
-                    selectedStart = eventDraft.start,
-                    selectedEnd = eventDraft.end,
-                )
-            }
-        }
-    }
-
-    private fun resolveRentalOrganizationId(eventDraft: Event): String {
-        return if (_isRentalFlow.value) {
-            rentalContext?.organizationId?.trim().orEmpty()
-        } else {
-            eventDraft.organizationId?.trim().orEmpty()
-        }
-    }
-
-    private suspend fun doesScheduledEventOverlapRentalWindow(
-        scheduledEvent: Event,
-        selectedFieldSet: Set<String>,
-        selectedStart: Instant,
-        selectedEnd: Instant,
-    ): Boolean {
-        if (selectedEnd <= selectedStart) {
-            return false
-        }
-
-        return when (scheduledEvent.eventType) {
-            EventType.EVENT, EventType.WEEKLY_EVENT -> {
-                val eventFieldIds = scheduledEvent.fieldIds
-                    .map { fieldId -> fieldId.trim() }
-                    .filter(String::isNotBlank)
-                    .distinct()
-                if (eventFieldIds.intersect(selectedFieldSet).isEmpty()) {
-                    false
-                } else {
-                    rangesOverlap(
-                        firstStart = selectedStart,
-                        firstEnd = selectedEnd,
-                        secondStart = scheduledEvent.start,
-                        secondEnd = scheduledEvent.end,
-                    )
-                }
-            }
-
-            EventType.LEAGUE, EventType.TOURNAMENT -> {
-                val matches = matchRepository.getMatchesOfTournament(scheduledEvent.id).getOrElse { error ->
-                    throw IllegalStateException(
-                        "Failed to load matches for ${scheduledEvent.name.ifBlank { "event" }}: ${error.userMessage()}",
-                        error
-                    )
-                }
-
-                matches.any { match ->
-                    val fieldId = match.fieldId?.trim()
-                    val matchStart = match.start ?: return@any false
-                    val matchEnd = match.end
-                    !fieldId.isNullOrBlank() &&
-                        selectedFieldSet.contains(fieldId) &&
-                        matchEnd != null &&
-                        matchEnd > matchStart &&
-                        rangesOverlap(
-                            firstStart = selectedStart,
-                            firstEnd = selectedEnd,
-                            secondStart = matchStart,
-                            secondEnd = matchEnd,
-                        )
-                }
-            }
-        }
-    }
-
-    private fun buildOverlapConflictMessage(existingEvent: Event): String {
-        val eventName = existingEvent.name.ifBlank { "Another event" }
-        return "$eventName was registered for one of these resources and times. Checkout was stopped; choose different slots."
-    }
-
-    private fun buildRentalLockKey(
-        organizationId: String,
-        fieldId: String,
-        start: Instant,
-        end: Instant,
-    ): String {
-        return "$organizationId:$fieldId:${start.toEpochMilliseconds()}:${end.toEpochMilliseconds()}"
-    }
-
-    private fun rangesOverlap(
-        firstStart: Instant,
-        firstEnd: Instant,
-        secondStart: Instant,
-        secondEnd: Instant,
-    ): Boolean {
-        if (firstEnd <= firstStart || secondEnd <= secondStart) {
-            return false
-        }
-        return firstStart < secondEnd && secondStart < firstEnd
-    }
-
     private fun resolveCurrentUserId(): String =
         userRepository.currentUser.value.getOrNull()?.id?.trim().orEmpty()
 
@@ -2704,6 +1870,5 @@ class DefaultCreateEventComponent(
 
     companion object {
         private const val ONE_HOUR_MILLIS = 60L * 60L * 1000L
-        private val rentalCheckoutLocks = mutableMapOf<String, Instant>()
     }
 }
