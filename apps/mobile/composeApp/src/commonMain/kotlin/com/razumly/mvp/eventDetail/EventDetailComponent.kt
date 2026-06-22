@@ -723,7 +723,7 @@ class DefaultEventDetailComponent(
         scope.launch {
             clearCurrentRegistrationProgress()
             pendingTeamRegistration = null
-            pendingJoinConfirmationTarget = null
+            registrationFlowCoordinator.clearPendingJoinConfirmationTarget()
             registrationFlowCoordinator.clearAfterRegistrationHoldExpired()
             _startingTeamRegistrationId.value = null
             _errorState.value = ErrorMessage("Registration hold expired. Start registration again to reserve a new spot.")
@@ -1278,7 +1278,6 @@ class DefaultEventDetailComponent(
     private var pendingSignatureSteps: List<SignStep> = emptyList()
     private var pendingSignatureStepIndex = 0
     private var pendingPostSignatureAction: (suspend () -> Unit)? = null
-    private var pendingJoinConfirmationTarget: JoinConfirmationTarget? = null
     private var pendingTeamRegistration: TeamWithPlayers? = null
     private var pendingSignatureContext: SignerContext = SignerContext.PARTICIPANT
     private var pendingSignatureContexts: List<SignerContext> = emptyList()
@@ -1663,7 +1662,7 @@ class DefaultEventDetailComponent(
             paymentResult.collect {
                 if (it != null) {
                     val pendingTeam = pendingTeamRegistration
-                    val confirmationTarget = pendingJoinConfirmationTarget
+                    val confirmationTarget = registrationFlowCoordinator.currentJoinConfirmationTarget()
                     when (it) {
                         PaymentResult.Canceled -> {
                             _errorState.value = ErrorMessage("Payment canceled.")
@@ -1727,7 +1726,7 @@ class DefaultEventDetailComponent(
                         }
                     }
                     loadingHandler.hideLoading()
-                    pendingJoinConfirmationTarget = null
+                    registrationFlowCoordinator.clearPendingJoinConfirmationTarget()
                     clearPaymentResult()
                 }
             }
@@ -3402,11 +3401,13 @@ class DefaultEventDetailComponent(
                     divisionId = selectedDivision.value,
                 )
                     .onSuccess { purchaseIntent ->
-                        pendingJoinConfirmationTarget = buildJoinConfirmationTarget(
-                            eventId = selectedEvent.value.id,
-                            registrantType = JoinConfirmationRegistrantType.SELF,
-                            registrantId = currentUser.value.id,
-                            occurrence = weeklyOccurrence,
+                        registrationFlowCoordinator.setPendingJoinConfirmationTarget(
+                            buildJoinConfirmationTarget(
+                                eventId = selectedEvent.value.id,
+                                registrantType = JoinConfirmationRegistrantType.SELF,
+                                registrantId = currentUser.value.id,
+                                occurrence = weeklyOccurrence,
+                            )
                         )
                         processPurchaseIntent(purchaseIntent)
                     }.onFailure {
@@ -3521,11 +3522,13 @@ class DefaultEventDetailComponent(
                     divisionId = selectedDivision.value,
                 )
                     .onSuccess { purchaseIntent ->
-                        pendingJoinConfirmationTarget = buildJoinConfirmationTarget(
-                            eventId = selectedEvent.value.id,
-                            registrantType = JoinConfirmationRegistrantType.TEAM,
-                            registrantId = team.team.id,
-                            occurrence = weeklyOccurrence,
+                        registrationFlowCoordinator.setPendingJoinConfirmationTarget(
+                            buildJoinConfirmationTarget(
+                                eventId = selectedEvent.value.id,
+                                registrantType = JoinConfirmationRegistrantType.TEAM,
+                                registrantId = team.team.id,
+                                occurrence = weeklyOccurrence,
+                            )
                         )
                         processPurchaseIntent(purchaseIntent)
                     }.onFailure {
@@ -6549,7 +6552,7 @@ class DefaultEventDetailComponent(
     }
 
     private suspend fun waitForUserInEventWithTimeout(
-        confirmationTarget: JoinConfirmationTarget? = pendingJoinConfirmationTarget,
+        confirmationTarget: JoinConfirmationTarget? = registrationFlowCoordinator.currentJoinConfirmationTarget(),
         timeoutS: Duration = 30.seconds,
         checkIntervalS: Duration = 1.seconds,
     ): Boolean {

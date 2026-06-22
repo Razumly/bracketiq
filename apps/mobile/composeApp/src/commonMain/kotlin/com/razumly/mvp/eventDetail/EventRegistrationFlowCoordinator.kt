@@ -73,6 +73,7 @@ internal class EventRegistrationFlowCoordinator {
     private var pendingPaymentPlanPreviewAction: (() -> Unit)? = null
     private var pendingBillingAddressAction: (() -> Unit)? = null
     private var pendingTeamJoinQuestionTeam: TeamWithPlayers? = null
+    private var pendingJoinConfirmationTarget: JoinConfirmationTarget? = null
 
     fun updateQuestionAnswer(questionId: String, answer: String): Boolean {
         val answerUpdate = registrationQuestionAnswerUpdate(questionId, answer) ?: return false
@@ -284,6 +285,17 @@ internal class EventRegistrationFlowCoordinator {
     fun dismissTeamJoinQuestionDialog() {
         _teamJoinQuestionDialog.value = null
         pendingTeamJoinQuestionTeam = null
+    }
+
+    fun setPendingJoinConfirmationTarget(target: JoinConfirmationTarget?) {
+        pendingJoinConfirmationTarget = target
+    }
+
+    fun currentJoinConfirmationTarget(): JoinConfirmationTarget? =
+        pendingJoinConfirmationTarget
+
+    fun clearPendingJoinConfirmationTarget() {
+        pendingJoinConfirmationTarget = null
     }
 
     fun showTextSignaturePrompt(prompt: TextSignaturePromptState) {

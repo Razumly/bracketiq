@@ -334,6 +334,36 @@ class EventRegistrationFlowCoordinatorTest {
     }
 
     @Test
+    fun pending_join_confirmation_target_can_be_set_replaced_and_cleared() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val target = JoinConfirmationTarget(
+            eventId = "event-1",
+            registrantType = JoinConfirmationRegistrantType.SELF,
+            registrantId = "user-1",
+            occurrence = EventOccurrenceSelection(
+                slotId = "slot-1",
+                occurrenceDate = "2026-07-01",
+            ),
+        )
+        val replacement = target.copy(
+            registrantType = JoinConfirmationRegistrantType.TEAM,
+            registrantId = "team-1",
+        )
+
+        coordinator.setPendingJoinConfirmationTarget(target)
+
+        assertEquals(target, coordinator.currentJoinConfirmationTarget())
+
+        coordinator.setPendingJoinConfirmationTarget(replacement)
+
+        assertEquals(replacement, coordinator.currentJoinConfirmationTarget())
+
+        coordinator.clearPendingJoinConfirmationTarget()
+
+        assertNull(coordinator.currentJoinConfirmationTarget())
+    }
+
+    @Test
     fun signature_prompts_can_be_shown_and_cleared_independently() {
         val coordinator = EventRegistrationFlowCoordinator()
         val textPrompt = TextSignaturePromptState(
