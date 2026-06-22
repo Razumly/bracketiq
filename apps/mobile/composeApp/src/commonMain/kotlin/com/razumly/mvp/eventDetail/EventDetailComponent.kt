@@ -73,7 +73,6 @@ import com.razumly.mvp.core.data.repositories.EventParticipantsSummary
 import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
-import com.razumly.mvp.core.data.repositories.isActive
 import com.razumly.mvp.core.data.repositories.userMessage
 import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
@@ -2742,15 +2741,16 @@ class DefaultEventDetailComponent(
         team: TeamWithPlayers,
         result: TeamRegistrationResult,
     ) {
-        val teamId = team.team.id.trim()
-        if (teamId.isBlank()) {
-            _errorState.value = ErrorMessage("This team is missing an id.")
+        val decision = registrationFlowCoordinator.teamRegistrationContinuationDecision(team.team, result)
+        if (decision.action == TeamRegistrationContinuationAction.MISSING_TEAM_ID) {
+            _errorState.value = ErrorMessage(decision.message ?: "This team is missing an id.")
             return
         }
 
+        val teamId = decision.teamId
         registrationFlowCoordinator.setStartingTeamRegistrationId(teamId)
         try {
-            if (team.team.registrationPriceCents > 0) {
+            if (decision.action == TeamRegistrationContinuationAction.START_CHECKOUT) {
                 if (!ensureBillingAddressOrPrompt { scope.launch { continueTeamRegistration(team, result) } }) {
                     return
                 }
@@ -2782,9 +2782,9 @@ class DefaultEventDetailComponent(
                 return
             }
 
-            if (!result.isActive()) {
+            if (decision.action == TeamRegistrationContinuationAction.REJECT_INACTIVE) {
                 _errorState.value = ErrorMessage(
-                    result.userMessage("Unable to join this team."),
+                    decision.message ?: result.userMessage("Unable to join this team."),
                 )
                 return
             }

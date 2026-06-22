@@ -645,6 +645,57 @@ class EventRegistrationFlowCoordinatorTest {
     }
 
     @Test
+    fun team_registration_continuation_decision_classifies_checkout_inactive_and_complete_paths() {
+        val coordinator = EventRegistrationFlowCoordinator()
+
+        assertEquals(
+            TeamRegistrationContinuationDecision(
+                action = TeamRegistrationContinuationAction.MISSING_TEAM_ID,
+                teamId = "",
+                message = "This team is missing an id.",
+            ),
+            coordinator.teamRegistrationContinuationDecision(
+                team = Team(captainId = "captain-1").copy(id = " "),
+                result = teamRegistrationResult(),
+            ),
+        )
+        assertEquals(
+            TeamRegistrationContinuationDecision(
+                action = TeamRegistrationContinuationAction.START_CHECKOUT,
+                teamId = "team-1",
+            ),
+            coordinator.teamRegistrationContinuationDecision(
+                team = Team(captainId = "captain-1").copy(
+                    id = " team-1 ",
+                    registrationPriceCents = 500,
+                ),
+                result = teamRegistrationResult(),
+            ),
+        )
+        assertEquals(
+            TeamRegistrationContinuationDecision(
+                action = TeamRegistrationContinuationAction.REJECT_INACTIVE,
+                teamId = "team-1",
+                message = "Unable to join this team.",
+            ),
+            coordinator.teamRegistrationContinuationDecision(
+                team = Team(captainId = "captain-1").copy(id = " team-1 "),
+                result = teamRegistrationResult(registrationStatus = "STARTED"),
+            ),
+        )
+        assertEquals(
+            TeamRegistrationContinuationDecision(
+                action = TeamRegistrationContinuationAction.COMPLETE_ACTIVE,
+                teamId = "team-1",
+            ),
+            coordinator.teamRegistrationContinuationDecision(
+                team = Team(captainId = "captain-1").copy(id = " team-1 "),
+                result = teamRegistrationResult(registrationStatus = "ACTIVE"),
+            ),
+        )
+    }
+
+    @Test
     fun team_join_question_submit_requires_answers_then_returns_dialog_and_team() {
         val coordinator = EventRegistrationFlowCoordinator()
         val requiredQuestion = question("q1", required = true)

@@ -13,6 +13,7 @@ import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
+import com.razumly.mvp.core.data.repositories.isActive
 import com.razumly.mvp.core.data.repositories.requiresAdditionalSigning
 import com.razumly.mvp.core.data.repositories.requiresChildEmail
 import com.razumly.mvp.core.data.repositories.userMessage
@@ -49,6 +50,12 @@ internal data class TeamJoinPolicyDecision(
 
 internal data class TeamRegistrationResultDecision(
     val action: TeamRegistrationResultAction,
+    val message: String? = null,
+)
+
+internal data class TeamRegistrationContinuationDecision(
+    val action: TeamRegistrationContinuationAction,
+    val teamId: String,
     val message: String? = null,
 )
 
@@ -89,6 +96,13 @@ internal enum class TeamRegistrationResultAction {
     REQUIRE_CHILD_EMAIL,
     REQUIRE_ADDITIONAL_SIGNING,
     CONTINUE,
+}
+
+internal enum class TeamRegistrationContinuationAction {
+    MISSING_TEAM_ID,
+    START_CHECKOUT,
+    REJECT_INACTIVE,
+    COMPLETE_ACTIVE,
 }
 
 internal data class WithdrawalActionDecision(
@@ -551,6 +565,37 @@ internal class EventRegistrationFlowCoordinator {
             return TeamRegistrationResultDecision(TeamRegistrationResultAction.REQUIRE_ADDITIONAL_SIGNING)
         }
         return TeamRegistrationResultDecision(TeamRegistrationResultAction.CONTINUE)
+    }
+
+    fun teamRegistrationContinuationDecision(
+        team: Team,
+        result: TeamRegistrationResult,
+    ): TeamRegistrationContinuationDecision {
+        val teamId = team.id.trim()
+        if (teamId.isBlank()) {
+            return TeamRegistrationContinuationDecision(
+                action = TeamRegistrationContinuationAction.MISSING_TEAM_ID,
+                teamId = teamId,
+                message = "This team is missing an id.",
+            )
+        }
+        if (team.registrationPriceCents > 0) {
+            return TeamRegistrationContinuationDecision(
+                action = TeamRegistrationContinuationAction.START_CHECKOUT,
+                teamId = teamId,
+            )
+        }
+        if (!result.isActive()) {
+            return TeamRegistrationContinuationDecision(
+                action = TeamRegistrationContinuationAction.REJECT_INACTIVE,
+                teamId = teamId,
+                message = result.userMessage("Unable to join this team."),
+            )
+        }
+        return TeamRegistrationContinuationDecision(
+            action = TeamRegistrationContinuationAction.COMPLETE_ACTIVE,
+            teamId = teamId,
+        )
     }
 
     fun submitTeamJoinQuestionAnswers(answers: Map<String, String>): TeamJoinQuestionSubmitResult? {

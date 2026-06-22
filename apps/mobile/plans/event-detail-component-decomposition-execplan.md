@@ -35,6 +35,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Move team join-policy classification and submit loading selection into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move team registration target-id normalization into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move team registration result follow-up classification into `EventRegistrationFlowCoordinator` with focused tests.
+  - [x] (2026-06-22) Move team registration continuation branching into `EventRegistrationFlowCoordinator` with focused tests.
   - [ ] Move self, team, child, and minor join orchestration around the existing repository callbacks.
   - [x] (2026-06-22) Move payment-plan preview dialog and continuation state into `EventRegistrationFlowCoordinator` with focused tests.
   - [x] (2026-06-22) Move billing-address prompt and continuation state into `EventRegistrationFlowCoordinator` with focused tests.
@@ -214,6 +215,8 @@ The twenty-sixth implementation milestone moves team join-policy classification 
 The twenty-seventh implementation milestone moves team registration target-id normalization into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now owns the parent-team fallback rule used by team registration start, join-question submission, team join/request submission, and registration target resolution. `DefaultEventDetailComponent` still fetches parent team data when needed and owns all team repository calls. `EventDetailComponent.kt` dropped to 6,555 lines after this milestone.
 
 The twenty-eighth implementation milestone moves team registration result follow-up classification into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now decides whether a team registration result should wait for parent approval, require child email, start additional signing, or continue, including the user-facing fallback messages for the first two cases. `DefaultEventDetailComponent` still refreshes event data, starts signing, requests refreshed team registration, and continues checkout/active-join handling. `EventDetailComponent.kt` is now 6,557 lines after this milestone.
+
+The twenty-ninth implementation milestone moves team registration continuation branching into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now decides whether continuing team registration should reject a missing team id, start paid checkout, reject an inactive registration result, or complete an active join. `DefaultEventDetailComponent` still owns billing-address prompts, purchase-intent creation, team refresh, membership refresh, and success/error state mutation. `EventDetailComponent.kt` is now 6,557 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining coordinator work is to finish join orchestration around repository callbacks, then run the final coordinator regression suite and extract participant/invite coordination.
 
@@ -962,6 +965,25 @@ Twenty-eighth milestone line-count evidence:
      829 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
     1126 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
 
+Team registration continuation coordinator slice focused tests passed:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventRegistrationFlowCoordinatorTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 1m 44s; 43 actionable tasks: 9 executed, 34 up-to-date.
+
+Team registration continuation coordinator slice common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 14s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Twenty-ninth milestone line-count evidence:
+
+    6557 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     874 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
+    1177 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
+    1045 plans/event-detail-component-decomposition-execplan.md
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -1020,3 +1042,4 @@ Revision Note (2026-06-22): Recorded the signature poll-job lifecycle coordinato
 Revision Note (2026-06-22): Recorded the team join-policy coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the team registration target-id coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the team registration result decision coordinator slice, focused tests, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded the team registration continuation coordinator slice, focused tests, compile checks, and line-count impact.
