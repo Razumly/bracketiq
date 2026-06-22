@@ -32,7 +32,8 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Move payment-plan preview dialog and continuation state into `EventRegistrationFlowCoordinator` with focused tests.
   - [ ] Move billing prompt and purchase-intent UI state.
   - [ ] Move signature prompt, polling, and post-signature continuation state.
-  - [ ] Move withdraw, refund, and leave-target UI state.
+  - [x] (2026-06-22) Move withdraw-target list state into `EventRegistrationFlowCoordinator` with focused tests.
+  - [ ] Move refund and leave action UI/continuation state.
   - [ ] Wire remaining public registration actions through the coordinator and run the final coordinator regression suite.
 - [ ] Extract participant management and invite/search coordination where it can be tested independently.
 - [ ] Thin `DefaultEventDetailComponent` so it owns Decompose lifecycle, public state exposure, and delegation, while helpers own domain-specific transformations.
@@ -164,7 +165,9 @@ The tenth implementation milestone starts the cohesive registration coordinator.
 
 The eleventh implementation milestone moves payment-plan preview state into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now owns the payment-plan preview dialog and pending preview continuation, while `DefaultEventDetailComponent` still builds preview content, decides when to show it, and launches the existing join/signature continuations. `EventDetailComponent.kt` dropped further to 6,651 lines after this milestone.
 
-Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining coordinator work is to move join orchestration, billing/purchase-intent state, signature prompt/polling state, and withdraw/refund/leave-target state, then extract participant/invite coordination.
+The twelfth implementation milestone moves withdraw-target list state into the registration coordinator. `EventRegistrationFlowCoordinator.kt` now owns the withdraw target list exposed to the UI, while `DefaultEventDetailComponent` still computes targets from the current user, linked children, cached membership, and event snapshot, and still owns leave/refund repository operations. `EventDetailComponent.kt` dropped further to 6,649 lines after this milestone.
+
+Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. The remaining coordinator work is to move join orchestration, billing/purchase-intent state, signature prompt/polling state, and refund/leave action state, then extract participant/invite coordination.
 
 ## Context and Orientation
 
@@ -575,6 +578,24 @@ Eleventh milestone line-count evidence:
      230 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
      210 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
 
+Withdraw-target coordinator slice focused tests passed:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventRegistrationFlowCoordinatorTest*" --tests "*EventWithdrawTargetHelpersTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 1m 55s; 43 actionable tasks: 9 executed, 34 up-to-date.
+
+Withdraw-target coordinator slice common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 22s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Twelfth milestone line-count evidence:
+
+    6649 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     241 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinator.kt
+     229 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRegistrationFlowCoordinatorTest.kt
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -615,3 +636,4 @@ Revision Note (2026-06-22): Recorded completion of the registration-question hel
 Revision Note (2026-06-22): Recorded completion of the sport-rule helper extraction, focused and related edit validation tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the first registration coordinator slice, added remaining coordinator substeps, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the payment-plan preview coordinator slice, focused tests, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded the withdraw-target coordinator slice, focused tests, compile checks, and line-count impact.

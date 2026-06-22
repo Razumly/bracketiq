@@ -39,6 +39,9 @@ internal class EventRegistrationFlowCoordinator {
     private val _paymentPlanPreviewDialog = MutableStateFlow<PaymentPlanPreviewDialogState?>(null)
     val paymentPlanPreviewDialog = _paymentPlanPreviewDialog.asStateFlow()
 
+    private val _withdrawTargets = MutableStateFlow<List<WithdrawTargetOption>>(emptyList())
+    val withdrawTargets = _withdrawTargets.asStateFlow()
+
     private var pendingQuestionContinuation: (() -> Unit)? = null
     private var questionsConfirmed = false
     private var pendingPaymentPlanPreviewAction: (() -> Unit)? = null
@@ -166,6 +169,14 @@ internal class EventRegistrationFlowCoordinator {
         val continuation = pendingPaymentPlanPreviewAction
         dismissPaymentPlanPreviewDialog()
         return continuation
+    }
+
+    fun replaceWithdrawTargets(targets: List<WithdrawTargetOption>) {
+        _withdrawTargets.value = targets
+    }
+
+    fun clearWithdrawTargets() {
+        _withdrawTargets.value = emptyList()
     }
 
     fun applyRegistrationProgressDraft(draft: RegistrationProgressDraft?): String? {

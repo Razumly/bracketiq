@@ -1276,9 +1276,7 @@ class DefaultEventDetailComponent(
     override val eventRegistrationQuestionsExpanded = registrationFlowCoordinator.questionsExpanded
     override val registrationHoldExpiresAt = registrationFlowCoordinator.holdExpiresAt
     override val paymentPlanPreviewDialog = registrationFlowCoordinator.paymentPlanPreviewDialog
-
-    private val _withdrawTargets = MutableStateFlow<List<WithdrawTargetOption>>(emptyList())
-    override val withdrawTargets = _withdrawTargets.asStateFlow()
+    override val withdrawTargets = registrationFlowCoordinator.withdrawTargets
 
     private val _textSignaturePrompt = MutableStateFlow<TextSignaturePromptState?>(null)
     override val textSignaturePrompt = _textSignaturePrompt.asStateFlow()
@@ -5810,7 +5808,7 @@ class DefaultEventDetailComponent(
             _isUserFreeAgent.value = false
             _isUserCaptain.value = false
             _usersTeam.value = null
-            _withdrawTargets.value = emptyList()
+            registrationFlowCoordinator.clearWithdrawTargets()
             return
         }
 
@@ -5904,7 +5902,7 @@ class DefaultEventDetailComponent(
             )
         }
 
-        _withdrawTargets.value = targets.values.toList()
+        registrationFlowCoordinator.replaceWithdrawTargets(targets.values.toList())
     }
 
     private fun resolveWithdrawTargetMembership(

@@ -187,6 +187,25 @@ class EventRegistrationFlowCoordinatorTest {
         assertNull(coordinator.confirmPaymentPlanPreviewDialog())
     }
 
+    @Test
+    fun withdraw_targets_can_be_replaced_and_cleared() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val target = WithdrawTargetOption(
+            userId = "user-1",
+            fullName = "User One",
+            membership = WithdrawTargetMembership.PARTICIPANT,
+            isSelf = true,
+        )
+
+        coordinator.replaceWithdrawTargets(listOf(target))
+
+        assertEquals(listOf(target), coordinator.withdrawTargets.value)
+
+        coordinator.clearWithdrawTargets()
+
+        assertEquals(emptyList(), coordinator.withdrawTargets.value)
+    }
+
     private fun paymentPreview(): PaymentPlanPreviewDialogState {
         return PaymentPlanPreviewDialogState(
             ownerLabel = "You",
