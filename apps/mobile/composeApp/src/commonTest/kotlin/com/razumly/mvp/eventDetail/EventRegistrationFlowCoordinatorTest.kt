@@ -153,6 +153,49 @@ class EventRegistrationFlowCoordinatorTest {
         assertFalse(coordinator.ensureQuestionsAnswered(eventName = "Event") {})
     }
 
+    @Test
+    fun payment_plan_preview_confirm_returns_continuation_and_dismisses_dialog() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val preview = paymentPreview()
+        var continued = false
+
+        coordinator.showPaymentPlanPreviewDialog(preview) {
+            continued = true
+        }
+
+        assertEquals(preview, coordinator.paymentPlanPreviewDialog.value)
+
+        val continuation = coordinator.confirmPaymentPlanPreviewDialog()
+
+        assertNull(coordinator.paymentPlanPreviewDialog.value)
+        assertFalse(continued)
+
+        continuation?.invoke()
+
+        assertTrue(continued)
+        assertNull(coordinator.confirmPaymentPlanPreviewDialog())
+    }
+
+    @Test
+    fun payment_plan_preview_dismiss_clears_dialog_and_pending_continuation() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        coordinator.showPaymentPlanPreviewDialog(paymentPreview()) {}
+
+        coordinator.dismissPaymentPlanPreviewDialog()
+
+        assertNull(coordinator.paymentPlanPreviewDialog.value)
+        assertNull(coordinator.confirmPaymentPlanPreviewDialog())
+    }
+
+    private fun paymentPreview(): PaymentPlanPreviewDialogState {
+        return PaymentPlanPreviewDialogState(
+            ownerLabel = "You",
+            totalAmountCents = 10000,
+            installmentAmounts = listOf(5000, 5000),
+            installmentDueDates = listOf("2026-07-01", "2026-08-01"),
+        )
+    }
+
     private fun question(
         id: String,
         prompt: String = "Prompt $id",

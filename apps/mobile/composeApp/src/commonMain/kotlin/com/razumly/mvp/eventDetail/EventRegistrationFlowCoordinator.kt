@@ -36,8 +36,12 @@ internal class EventRegistrationFlowCoordinator {
     private val _holdExpiresAt = MutableStateFlow<String?>(null)
     val holdExpiresAt = _holdExpiresAt.asStateFlow()
 
+    private val _paymentPlanPreviewDialog = MutableStateFlow<PaymentPlanPreviewDialogState?>(null)
+    val paymentPlanPreviewDialog = _paymentPlanPreviewDialog.asStateFlow()
+
     private var pendingQuestionContinuation: (() -> Unit)? = null
     private var questionsConfirmed = false
+    private var pendingPaymentPlanPreviewAction: (() -> Unit)? = null
 
     fun updateQuestionAnswer(questionId: String, answer: String): Boolean {
         val answerUpdate = registrationQuestionAnswerUpdate(questionId, answer) ?: return false
@@ -143,6 +147,25 @@ internal class EventRegistrationFlowCoordinator {
 
     fun setRegistrationHoldExpiresAt(holdExpiresAt: String?) {
         _holdExpiresAt.value = holdExpiresAt?.trim()?.takeIf(String::isNotBlank)
+    }
+
+    fun showPaymentPlanPreviewDialog(
+        dialogState: PaymentPlanPreviewDialogState,
+        onContinue: () -> Unit,
+    ) {
+        _paymentPlanPreviewDialog.value = dialogState
+        pendingPaymentPlanPreviewAction = onContinue
+    }
+
+    fun dismissPaymentPlanPreviewDialog() {
+        _paymentPlanPreviewDialog.value = null
+        pendingPaymentPlanPreviewAction = null
+    }
+
+    fun confirmPaymentPlanPreviewDialog(): (() -> Unit)? {
+        val continuation = pendingPaymentPlanPreviewAction
+        dismissPaymentPlanPreviewDialog()
+        return continuation
     }
 
     fun applyRegistrationProgressDraft(draft: RegistrationProgressDraft?): String? {

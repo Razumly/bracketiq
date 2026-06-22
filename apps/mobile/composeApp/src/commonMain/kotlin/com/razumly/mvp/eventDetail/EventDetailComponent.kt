@@ -1275,9 +1275,7 @@ class DefaultEventDetailComponent(
     override val eventRegistrationQuestionAnswers = registrationFlowCoordinator.answers
     override val eventRegistrationQuestionsExpanded = registrationFlowCoordinator.questionsExpanded
     override val registrationHoldExpiresAt = registrationFlowCoordinator.holdExpiresAt
-
-    private val _paymentPlanPreviewDialog = MutableStateFlow<PaymentPlanPreviewDialogState?>(null)
-    override val paymentPlanPreviewDialog = _paymentPlanPreviewDialog.asStateFlow()
+    override val paymentPlanPreviewDialog = registrationFlowCoordinator.paymentPlanPreviewDialog
 
     private val _withdrawTargets = MutableStateFlow<List<WithdrawTargetOption>>(emptyList())
     override val withdrawTargets = _withdrawTargets.asStateFlow()
@@ -1301,7 +1299,6 @@ class DefaultEventDetailComponent(
     private var pendingSignatureChild: JoinChildOption? = null
     private var pendingSignatureTeamId: String? = null
     private var pendingPdfSignaturePollJob: Job? = null
-    private var pendingPaymentPlanPreviewAction: (() -> Unit)? = null
 
     private val shareServiceProvider = ShareServiceProvider()
 
@@ -3079,8 +3076,10 @@ class DefaultEventDetailComponent(
         dialogState: PaymentPlanPreviewDialogState,
         onContinue: () -> Unit,
     ) {
-        _paymentPlanPreviewDialog.value = dialogState
-        pendingPaymentPlanPreviewAction = onContinue
+        registrationFlowCoordinator.showPaymentPlanPreviewDialog(
+            dialogState = dialogState,
+            onContinue = onContinue,
+        )
     }
 
     private suspend fun loadJoinableChildren(): List<JoinChildOption> {
@@ -5985,14 +5984,11 @@ class DefaultEventDetailComponent(
     }
 
     override fun dismissPaymentPlanPreviewDialog() {
-        _paymentPlanPreviewDialog.value = null
-        pendingPaymentPlanPreviewAction = null
+        registrationFlowCoordinator.dismissPaymentPlanPreviewDialog()
     }
 
     override fun confirmPaymentPlanPreviewDialog() {
-        val continuation = pendingPaymentPlanPreviewAction
-        dismissPaymentPlanPreviewDialog()
-        continuation?.invoke()
+        registrationFlowCoordinator.confirmPaymentPlanPreviewDialog()?.invoke()
     }
 
     override fun confirmTextSignature() {
