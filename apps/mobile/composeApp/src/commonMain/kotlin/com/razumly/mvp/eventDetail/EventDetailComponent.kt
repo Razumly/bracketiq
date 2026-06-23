@@ -1607,17 +1607,12 @@ class DefaultEventDetailComponent(
             }
                 .distinctUntilChanged()
                 .collect { selection ->
-                    if (selection == null) {
-                        leagueStandingsCoordinator.clearUnavailableSelection()
-                    } else {
-                        leagueStandingsCoordinator.clearStandingsForSelectionLoad()
-                        loadLeagueDivisionStandings(
-                            eventId = selection.eventId,
-                            divisionId = selection.divisionId,
-                            showLoading = true,
-                            reportErrors = false,
-                        )
-                    }
+                    leagueStandingsCoordinator.loadStandingsForSelection(
+                        target = selection,
+                        showLoading = true,
+                        reportErrors = false,
+                        getStandings = eventRepository::getLeagueDivisionStandings,
+                    )?.let { errorMessage -> _errorState.value = errorMessage }
                 }
         }
         scope.launch {
@@ -1784,35 +1779,16 @@ class DefaultEventDetailComponent(
         }
     }
 
-    private suspend fun loadLeagueDivisionStandings(
-        eventId: String,
-        divisionId: String,
-        showLoading: Boolean,
-        reportErrors: Boolean,
-    ) {
-        leagueStandingsCoordinator.beginLoad(showLoading)
-        eventRepository.getLeagueDivisionStandings(eventId, divisionId)
-            .onSuccess { standings ->
-                leagueStandingsCoordinator.applyLoadSuccess(standings)
-            }
-            .onFailure { throwable ->
-                if (reportErrors) {
-                    _errorState.value = ErrorMessage(
-                        throwable.userMessage("Failed to load league standings."),
-                    )
-                }
-            }
-        leagueStandingsCoordinator.finishLoad(showLoading)
-    }
-
     private suspend fun refreshLeagueStandingsAfterSchedule(event: Event) {
-        if (event.eventType != EventType.LEAGUE && !event.isTournamentPoolPlayEnabled()) return
-        val divisionId = resolveLeagueStandingsDivisionId() ?: return
-        loadLeagueDivisionStandings(
-            eventId = event.id,
-            divisionId = divisionId,
+        val target = leagueStandingsCoordinator.resolveScheduleRefreshTarget(
+            event = event,
+            divisionId = resolveLeagueStandingsDivisionId(),
+        ) ?: return
+        leagueStandingsCoordinator.loadDivisionStandings(
+            target = target,
             showLoading = false,
             reportErrors = false,
+            getStandings = eventRepository::getLeagueDivisionStandings,
         )
     }
 
@@ -1825,48 +1801,41 @@ class DefaultEventDetailComponent(
         )
 
     override fun refreshLeagueStandings() {
-        val divisionId = resolveLeagueStandingsDivisionId() ?: return
-        val eventId = selectedEvent.value.id
+        val target = leagueStandingsCoordinator.resolveCurrentLoadTarget(
+            eventId = selectedEvent.value.id,
+            divisionId = resolveLeagueStandingsDivisionId(),
+        ) ?: return
         scope.launch {
-            loadLeagueDivisionStandings(
-                eventId = eventId,
-                divisionId = divisionId,
+            leagueStandingsCoordinator.loadDivisionStandings(
+                target = target,
                 showLoading = true,
                 reportErrors = true,
-            )
+                getStandings = eventRepository::getLeagueDivisionStandings,
+            )?.let { errorMessage -> _errorState.value = errorMessage }
         }
     }
 
     override fun confirmLeagueStandings(applyReassignment: Boolean) {
         val event = selectedEvent.value
-        val divisionId = resolveLeagueStandingsDivisionId()
+        val target = leagueStandingsCoordinator.resolveScheduleRefreshTarget(
+            event = event,
+            divisionId = resolveLeagueStandingsDivisionId(),
+        )
 
-        if ((event.eventType != EventType.LEAGUE && !event.isTournamentPoolPlayEnabled()) || divisionId == null) {
+        if (target == null) {
             _errorState.value = ErrorMessage("Select a standings division before confirming standings.")
             return
         }
 
         scope.launch {
-            leagueStandingsCoordinator.beginConfirming()
-            loadingHandler.showLoading("Confirming standings...")
-
-            eventRepository.confirmLeagueDivisionStandings(
-                eventId = event.id,
-                divisionId = divisionId,
+            _errorState.value = leagueStandingsCoordinator.confirmStandings(
+                target = target,
                 applyReassignment = applyReassignment,
-            ).onSuccess { result ->
-                val message = leagueStandingsCoordinator.applyConfirmSuccess(result)
-                matchRepository.getMatchesOfTournament(event.id)
-                eventRepository.getEvent(event.id)
-                _errorState.value = ErrorMessage(message)
-            }.onFailure { throwable ->
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Failed to confirm standings."),
-                )
-            }
-
-            leagueStandingsCoordinator.finishConfirming()
-            loadingHandler.hideLoading()
+                loadingHandler = loadingHandler,
+                confirmStandings = eventRepository::confirmLeagueDivisionStandings,
+                refreshMatches = { eventId -> matchRepository.getMatchesOfTournament(eventId) },
+                refreshEvent = { eventId -> eventRepository.getEvent(eventId) },
+            )
         }
     }
 
