@@ -60,6 +60,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Move organization-template loading state into `EventOrganizationTemplatesCoordinator` with focused tests.
   - [x] (2026-06-22) Move rental resource selection, slot normalization, and rental-backed edit draft construction into `EventRentalResourcesCoordinator` with focused tests.
   - [x] (2026-06-22) Move template event creation and field/timeslot clone preparation into `EventTemplateCreateBuilder` with focused tests.
+  - [x] (2026-06-22) Move match editing state, staged create/delete tracking, and match edit dialogs into `EventMatchEditingCoordinator` with focused tests.
 - [ ] Run focused event-detail regression tests and final compile/build validation.
 
 ## Surprises & Discoveries
@@ -251,6 +252,8 @@ The thirty-eighth implementation milestone moves organization-template loading s
 The thirty-ninth implementation milestone extracts a larger rental-resource chunk. `EventRentalResourcesCoordinator.kt` now owns available rental resources, selected rental resource ids, attached-resource selection from existing rental-backed slots, selection changes, selected rental fields, non-rental slot cleanup, rental-backed slot normalization, and rental-backed edit draft construction. `DefaultEventDetailComponent` still owns billing repository loading, edit-flow assignment, and event draft state exposure. `EventDetailComponent.kt` dropped to 6,217 lines after this milestone.
 
 The fortieth implementation milestone extracts another larger template-creation chunk. `EventTemplateCreateBuilder.kt` now owns template event shell construction, participant/staff reset, official id remapping, field clone/persistence decisions, timeslot remapping/cloning, and league scoring config selection. `DefaultEventDetailComponent` still owns already-template validation, current event/edit-state selection, repository creation, loading/error side effects, and navigation-facing state. `EventDetailComponent.kt` dropped to 6,060 lines after this milestone.
+
+The forty-first implementation milestone extracts match editing coordination. `EventMatchEditingCoordinator.kt` now owns match edit mode state, editable matches/rounds, staged match create/delete metadata, pending create cleanup, team-selection dialog state, match-edit dialog state, staged schedule/bracket match construction, bracket-anchor insertion, match update/delete/lock transitions, and bulk update payload preparation. `DefaultEventDetailComponent` still owns permission checks, selected event/division context, the `buildBracketRounds` display helper, `matchRepository.updateMatchesBulk`, loading/error side effects, and notification sending. `EventDetailComponent.kt` dropped to 5,829 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. Registration coordination and participant/invite coordination are now complete; the remaining work is to keep thinning `DefaultEventDetailComponent` around lower-risk orchestration seams, then run final focused regression and build validation.
 
@@ -1249,6 +1252,31 @@ Fortieth milestone line-count evidence:
      181 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventTemplateCreateBuilderTest.kt
     1321 plans/event-detail-component-decomposition-execplan.md
 
+Match editing coordinator focused tests passed:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventMatchEditingCoordinatorTest*" --tests "*EventMatchEditHelpersTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 2m 18s; 43 actionable tasks: 10 executed, 33 up-to-date.
+
+Match editing coordinator common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 14s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Related bracket and match regression tests passed:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*BracketGraphValidatorTest*" --tests "*EventDetailsMatchRulesTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 13s; 43 actionable tasks: 5 executed, 38 up-to-date.
+
+Forty-first milestone line-count evidence:
+
+    5829 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     497 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventMatchEditingCoordinator.kt
+     161 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventMatchEditingCoordinatorTest.kt
+    1350 plans/event-detail-component-decomposition-execplan.md
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -1319,3 +1347,4 @@ Revision Note (2026-06-22): Recorded the league standings coordinator slice, foc
 Revision Note (2026-06-22): Recorded the organization templates coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the rental resources coordinator slice, focused tests, expectation fix, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the template creation builder slice, focused tests, expectation fix, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded the match editing coordinator slice, focused tests, related bracket/match regression tests, compile checks, and line-count impact.

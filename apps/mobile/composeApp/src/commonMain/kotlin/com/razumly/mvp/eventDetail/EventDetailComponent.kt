@@ -90,7 +90,6 @@ import com.razumly.mvp.core.util.emailAddressRegex
 import com.razumly.mvp.core.util.newId
 import com.razumly.mvp.eventDetail.data.BracketNode
 import com.razumly.mvp.eventDetail.data.IMatchRepository
-import com.razumly.mvp.eventDetail.data.StagedMatchCreate
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import io.github.aakira.napier.Napier
 import io.ktor.http.encodeURLQueryComponent
@@ -117,7 +116,6 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlin.time.Clock
 import kotlin.time.Duration
-import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
@@ -528,8 +526,6 @@ class DefaultEventDetailComponent(
 
 ) : EventDetailComponent, PaymentProcessor(), ComponentContext by componentContext {
     private companion object {
-        const val CLIENT_MATCH_PREFIX = "client:"
-        const val LOCAL_PLACEHOLDER_PREFIX = "placeholder-local:"
         const val MATCH_REALTIME_EDIT_PAUSE_REASON = "event-detail-editing"
     }
 
@@ -567,7 +563,7 @@ class DefaultEventDetailComponent(
             organization?.canManageEventsForViewer(currentUserId) == true
     }
 
-    private fun canEditMatchesNow(): Boolean = _isEditingMatches.value && canManageMatchEditing()
+    private fun canEditMatchesNow(): Boolean = matchEditingCoordinator.canEditNow(canManageMatchEditing())
 
     private fun normalizeToken(value: String?): String? =
         value?.trim()?.takeIf(String::isNotBlank)
@@ -614,12 +610,6 @@ class DefaultEventDetailComponent(
         return normalizedDivisions.firstOrNull { divisionId -> divisionId !in playoffIds }
             ?: normalizedDivisions.firstOrNull()
     }
-
-    private fun isClientMatchId(value: String?): Boolean =
-        normalizeToken(value)?.startsWith(CLIENT_MATCH_PREFIX) == true
-
-    private fun extractClientId(matchId: String): String =
-        matchId.removePrefix(CLIENT_MATCH_PREFIX)
 
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
     override val currentUser = userRepository.currentUser.map { it.getOrNull() ?: UserData() }
@@ -1177,24 +1167,12 @@ class DefaultEventDetailComponent(
     private val _isUserCaptain = MutableStateFlow(checkIsUserCaptain())
     override val isUserCaptain = _isUserCaptain.asStateFlow()
 
-    private val _isEditingMatches = MutableStateFlow(false)
-    override val isEditingMatches = _isEditingMatches.asStateFlow()
-
-    private val _editableMatches = MutableStateFlow<List<MatchWithRelations>>(emptyList())
-    override val editableMatches = _editableMatches.asStateFlow()
-
-    private val _editableRounds = MutableStateFlow<List<List<MatchWithRelations?>>>(emptyList())
-    override val editableRounds = _editableRounds.asStateFlow()
-
-    private val _stagedMatchCreates = MutableStateFlow<Map<String, StagedMatchCreateMeta>>(emptyMap())
-    private val _stagedMatchDeletes = MutableStateFlow<Set<String>>(emptySet())
-    private var pendingCreateMatchId: String? = null
-
-    private val _showTeamSelectionDialog = MutableStateFlow<TeamSelectionDialogState?>(null)
-    override val showTeamSelectionDialog = _showTeamSelectionDialog.asStateFlow()
-
-    private val _showMatchEditDialog = MutableStateFlow<MatchEditDialogState?>(null)
-    override val showMatchEditDialog = _showMatchEditDialog.asStateFlow()
+    private val matchEditingCoordinator = EventMatchEditingCoordinator()
+    override val isEditingMatches = matchEditingCoordinator.isEditingMatches
+    override val editableMatches = matchEditingCoordinator.editableMatches
+    override val editableRounds = matchEditingCoordinator.editableRounds
+    override val showTeamSelectionDialog = matchEditingCoordinator.showTeamSelectionDialog
+    override val showMatchEditDialog = matchEditingCoordinator.showMatchEditDialog
 
     override val joinChoiceDialog = registrationFlowCoordinator.joinChoiceDialog
     override val childJoinSelectionDialog = registrationFlowCoordinator.childJoinSelectionDialog
@@ -1641,7 +1619,7 @@ class DefaultEventDetailComponent(
         scope.launch {
             matchRepository.setIgnoreMatch(null)
             try {
-                combine(selectedEventId, _isEditing, _isEditingMatches) { eventId, isEditing, isEditingMatches ->
+                combine(selectedEventId, _isEditing, matchEditingCoordinator.isEditingMatches) { eventId, isEditing, isEditingMatches ->
                     Triple(eventId, isEditing, isEditingMatches)
                 }.collectLatest { (eventId, isEditing, isEditingMatches) ->
                     if (eventId.isBlank()) {
@@ -1965,7 +1943,7 @@ class DefaultEventDetailComponent(
                 )
             }.associateBy { it.match.id }
         }
-        if (_isEditingMatches.value) {
+        if (matchEditingCoordinator.isEditingMatches.value) {
             refreshEditableRounds()
         }
     }
@@ -2077,7 +2055,7 @@ class DefaultEventDetailComponent(
     override fun toggleLosersBracket() {
         _losersBracket.value = !_losersBracket.value
         generateRounds()
-        if (_isEditingMatches.value) {
+        if (matchEditingCoordinator.isEditingMatches.value) {
             refreshEditableRounds()
         }
     }
@@ -5486,52 +5464,11 @@ class DefaultEventDetailComponent(
     }
 
     private fun refreshEditableRounds() {
-        val editable = _editableMatches.value
-        if (editable.isEmpty()) {
-            _editableRounds.value = emptyList()
-            return
-        }
-
-        val activeDivision = selectedDivision.value
-        val divisionScopedMatches = if (!selectedEvent.value.singleDivision && !activeDivision.isNullOrEmpty()) {
-            val normalizedActiveDivision = activeDivision.normalizeDivisionIdentifier()
-            editable.filter { relation ->
-                relation.match.division?.normalizeDivisionIdentifier() == normalizedActiveDivision
-            }
-        } else {
-            editable
-        }
-
-        val bracketMatches = divisionScopedMatches.filter { relation ->
-            !(
-                relation.previousRightMatch == null &&
-                    relation.previousLeftMatch == null &&
-                    relation.winnerNextMatch == null &&
-                    relation.loserNextMatch == null
-                )
-        }
-
-        if (bracketMatches.isEmpty()) {
-            _editableRounds.value = emptyList()
-            return
-        }
-
-        val matchesById = bracketMatches.associateBy { match -> match.match.id }
-        _editableRounds.value = buildBracketRounds(matchesById)
-    }
-
-    private fun nextEditableMatchNumber(): Int {
-        val maxMatchId = _editableMatches.value.maxOfOrNull { relation -> relation.match.matchId } ?: 0
-        return maxMatchId + 1
-    }
-
-    private fun placeholderCount(): Int {
-        return _editableMatches.value.count { relation ->
-            val team1Id = normalizeToken(relation.match.team1Id)
-            val team2Id = normalizeToken(relation.match.team2Id)
-            (team1Id?.startsWith(LOCAL_PLACEHOLDER_PREFIX) == true) ||
-                (team2Id?.startsWith(LOCAL_PLACEHOLDER_PREFIX) == true)
-        }
+        matchEditingCoordinator.refreshEditableRounds(
+            event = selectedEvent.value,
+            selectedDivisionId = selectedDivision.value,
+            buildRounds = ::buildBracketRounds,
+        )
     }
 
     private fun createStagedMatch(
@@ -5543,78 +5480,24 @@ class DefaultEventDetailComponent(
             return null
         }
 
-        val event = selectedEvent.value
-        val clientId = newId()
-        val matchDocId = "$CLIENT_MATCH_PREFIX$clientId"
-        val isTournamentEvent = event.eventType == EventType.TOURNAMENT
-        val defaultDivision = normalizeToken(seed?.division)
-            ?: normalizeToken(selectedDivision.value)
-            ?: event.divisions.firstOrNull()?.normalizeDivisionIdentifier()
-        val now = Clock.System.now()
-        val placeholderSuffix = placeholderCount() + 1
-        val placeholderId = "$LOCAL_PLACEHOLDER_PREFIX$placeholderSuffix"
-
-        val match = MatchMVP(
-            id = matchDocId,
-            matchId = nextEditableMatchNumber(),
-            team1Id = if (isTournamentEvent) placeholderId else null,
-            team2Id = null,
-            team1Seed = seed?.team1Seed,
-            team2Seed = seed?.team2Seed,
-            eventId = event.id,
-            officialId = null,
-            fieldId = if (creationContext == MatchCreateContext.SCHEDULE) normalizeToken(seed?.fieldId) else null,
-            start = if (creationContext == MatchCreateContext.SCHEDULE) (seed?.start ?: now) else null,
-            end = if (creationContext == MatchCreateContext.SCHEDULE) {
-                seed?.end ?: seed?.start?.plus(1.hours) ?: now.plus(1.hours)
-            } else {
-                null
-            },
-            division = defaultDivision,
-            team1Points = emptyList(),
-            team2Points = emptyList(),
-            setResults = emptyList(),
-            side = seed?.side,
-            losersBracket = seed?.losersBracket ?: false,
-            winnerNextMatchId = normalizeToken(seed?.winnerNextMatchId),
-            loserNextMatchId = normalizeToken(seed?.loserNextMatchId),
-            previousLeftId = normalizeToken(seed?.previousLeftId),
-            previousRightId = normalizeToken(seed?.previousRightId),
-            officialCheckedIn = false,
-            teamOfficialId = null,
-            locked = false,
-        )
-        val relation = MatchWithRelations(
-            match = match,
-            field = null,
-            team1 = null,
-            team2 = null,
-            teamOfficial = null,
-            winnerNextMatch = null,
-            loserNextMatch = null,
-            previousLeftMatch = null,
-            previousRightMatch = null,
-        )
-
-        _editableMatches.value = _editableMatches.value + relation
-        _stagedMatchCreates.value = _stagedMatchCreates.value + (
-            matchDocId to StagedMatchCreateMeta(
-                clientId = clientId,
+        return matchEditingCoordinator.createStagedMatch(
+            input = StagedMatchInput(
+                event = selectedEvent.value,
+                selectedDivisionId = selectedDivision.value,
                 creationContext = creationContext,
-                autoPlaceholderTeam = isTournamentEvent,
-            )
-            )
-        refreshEditableRounds()
-
-        if (openEditor) {
-            pendingCreateMatchId = matchDocId
+                seed = seed,
+                clientId = newId(),
+                now = Clock.System.now(),
+            ),
+            openEditor = openEditor,
+            buildRounds = ::buildBracketRounds,
+        ) { relation, context, isCreateMode ->
             showMatchEditDialog(
                 match = relation,
-                creationContext = creationContext,
-                isCreateMode = true,
+                creationContext = context,
+                isCreateMode = isCreateMode,
             )
         }
-        return relation
     }
 
     override fun startEditingMatches() {
@@ -5622,26 +5505,17 @@ class DefaultEventDetailComponent(
             return
         }
         scope.launch {
-            val currentMatches = eventWithRelations.value.matches
-            _editableMatches.value = currentMatches.map { matchRelation ->
-                matchRelation.copy(match = matchRelation.match.copy())
-            }
-            _stagedMatchCreates.value = emptyMap()
-            _stagedMatchDeletes.value = emptySet()
-            pendingCreateMatchId = null
-            refreshEditableRounds()
-            _isEditingMatches.value = true
+            matchEditingCoordinator.beginEditing(
+                matches = eventWithRelations.value.matches,
+                event = selectedEvent.value,
+                selectedDivisionId = selectedDivision.value,
+                buildRounds = ::buildBracketRounds,
+            )
         }
     }
 
     override fun cancelEditingMatches() {
-        _isEditingMatches.value = false
-        _editableMatches.value = emptyList()
-        _editableRounds.value = emptyList()
-        _stagedMatchCreates.value = emptyMap()
-        _stagedMatchDeletes.value = emptySet()
-        pendingCreateMatchId = null
-        _showTeamSelectionDialog.value = null
+        matchEditingCoordinator.cancelEditing()
     }
 
     override fun commitMatchChanges() {
@@ -5649,53 +5523,20 @@ class DefaultEventDetailComponent(
             return
         }
         scope.launch {
-            val matches = _editableMatches.value
-
-            val validationResult = validateEditableMatches(
-                matches = matches,
+            val preparation = matchEditingCoordinator.prepareCommit(
                 isTournament = selectedEvent.value.eventType == EventType.TOURNAMENT,
-                stagedCreates = _stagedMatchCreates.value,
-                isClientMatchId = ::isClientMatchId,
             )
-            if (!validationResult.isValid) {
-                _errorState.value = ErrorMessage(validationResult.errorMessage)
+            if (preparation is MatchEditCommitPreparation.Invalid) {
+                _errorState.value = ErrorMessage(preparation.errorMessage)
                 return@launch
             }
+            val payload = (preparation as MatchEditCommitPreparation.Valid).payload
 
             loadingHandler.showLoading("Updating matches...")
 
             try {
-                val stagedCreates = _stagedMatchCreates.value
-                val updates = matches
-                    .map { relation -> relation.match }
-                    .filterNot { match -> isClientMatchId(match.id) }
-                val creates = matches
-                    .mapNotNull { relation ->
-                        val match = relation.match
-                        if (!isClientMatchId(match.id)) {
-                            return@mapNotNull null
-                        }
-                        val meta = stagedCreates[match.id] ?: StagedMatchCreateMeta(
-                            clientId = extractClientId(match.id),
-                            creationContext = MatchCreateContext.BRACKET,
-                            autoPlaceholderTeam = selectedEvent.value.eventType == EventType.TOURNAMENT,
-                        )
-                        StagedMatchCreate(
-                            clientId = meta.clientId,
-                            match = match,
-                            creationContext = meta.creationContext.name.lowercase(),
-                            autoPlaceholderTeam = meta.autoPlaceholderTeam,
-                        )
-                    }
-                val deletes = _stagedMatchDeletes.value.toList()
-                matchRepository.updateMatchesBulk(updates, creates, deletes).getOrThrow()
-
-                _isEditingMatches.value = false
-                _editableMatches.value = emptyList()
-                _editableRounds.value = emptyList()
-                _stagedMatchCreates.value = emptyMap()
-                _stagedMatchDeletes.value = emptySet()
-                pendingCreateMatchId = null
+                matchRepository.updateMatchesBulk(payload.updates, payload.creates, payload.deletes).getOrThrow()
+                matchEditingCoordinator.finishCommitSuccess()
                 loadingHandler.hideLoading()
             } catch (e: Exception) {
                 _errorState.value = ErrorMessage(e.userMessage("Failed to update matches"))
@@ -5705,16 +5546,13 @@ class DefaultEventDetailComponent(
     }
 
     override fun updateEditableMatch(matchId: String, updater: (MatchMVP) -> MatchMVP) {
-        val currentMatches = _editableMatches.value.toMutableList()
-        val matchIndex = currentMatches.indexOfFirst { it.match.id == matchId }
-
-        if (matchIndex != -1) {
-            val currentMatch = currentMatches[matchIndex]
-            val updatedMatch = currentMatch.copy(match = updater(currentMatch.match))
-            currentMatches[matchIndex] = updatedMatch
-            _editableMatches.value = normalizeEditableBracketGraph(currentMatches)
-            refreshEditableRounds()
-        }
+        matchEditingCoordinator.updateEditableMatch(
+            matchId = matchId,
+            event = selectedEvent.value,
+            selectedDivisionId = selectedDivision.value,
+            buildRounds = ::buildBracketRounds,
+            updater = updater,
+        )
     }
 
     override fun setLockForEditableMatches(matchIds: List<String>, locked: Boolean) {
@@ -5723,15 +5561,13 @@ class DefaultEventDetailComponent(
         val targetIds = matchIds.map(String::trim).filter(String::isNotBlank).toSet()
         if (targetIds.isEmpty()) return
 
-        val nextMatches = _editableMatches.value.map { match ->
-            if (targetIds.contains(match.match.id)) {
-                match.copy(match = match.match.copy(locked = locked))
-            } else {
-                match
-            }
-        }
-        _editableMatches.value = nextMatches
-        refreshEditableRounds()
+        matchEditingCoordinator.setLockForEditableMatches(
+            matchIds = targetIds.toList(),
+            locked = locked,
+            event = selectedEvent.value,
+            selectedDivisionId = selectedDivision.value,
+            buildRounds = ::buildBracketRounds,
+        )
     }
 
     override fun addScheduleMatch() {
@@ -5752,55 +5588,34 @@ class DefaultEventDetailComponent(
         if (!canEditMatchesNow()) {
             return
         }
-        val normalizedAnchorId = normalizeToken(anchorMatchId) ?: return
-        val anchor = _editableMatches.value.firstOrNull { relation ->
-            relation.match.id == normalizedAnchorId
-        } ?: return
-
-        val staged = createStagedMatch(
-            creationContext = MatchCreateContext.BRACKET,
-            seed = MatchMVP(
-                id = "seed",
-                matchId = 0,
-                eventId = anchor.match.eventId,
-                division = anchor.match.division,
-                losersBracket = anchor.match.losersBracket,
-                winnerNextMatchId = if (slot == BracketAddSlot.FINAL_WINNER_NEXT) null else normalizedAnchorId,
-                previousLeftId = if (slot == BracketAddSlot.FINAL_WINNER_NEXT) normalizedAnchorId else null,
-                previousRightId = null,
-            ),
-            openEditor = false,
-        ) ?: return
-
-        updateEditableMatch(normalizedAnchorId) { match ->
-            when (slot) {
-                BracketAddSlot.PREVIOUS_LEFT -> match.copy(previousLeftId = staged.match.id)
-                BracketAddSlot.PREVIOUS_RIGHT -> match.copy(previousRightId = staged.match.id)
-                BracketAddSlot.FINAL_WINNER_NEXT -> match.copy(winnerNextMatchId = staged.match.id)
-            }
-        }
-    }
-
-    override fun showTeamSelection(matchId: String, position: TeamPosition) {
-        val availableTeams = eventWithRelations.value.teams
-        _showTeamSelectionDialog.value = TeamSelectionDialogState(
-            matchId = matchId, position = position, availableTeams = availableTeams
+        matchEditingCoordinator.addBracketMatchFromAnchor(
+            anchorMatchId = anchorMatchId,
+            slot = slot,
+            event = selectedEvent.value,
+            selectedDivisionId = selectedDivision.value,
+            clientId = newId(),
+            now = Clock.System.now(),
+            buildRounds = ::buildBracketRounds,
         )
     }
 
+    override fun showTeamSelection(matchId: String, position: TeamPosition) {
+        matchEditingCoordinator.showTeamSelection(matchId, position, eventWithRelations.value.teams)
+    }
+
     override fun selectTeamForMatch(matchId: String, position: TeamPosition, teamId: String?) {
-        updateEditableMatch(matchId) { match ->
-            when (position) {
-                TeamPosition.TEAM1 -> match.copy(team1Id = teamId)
-                TeamPosition.TEAM2 -> match.copy(team2Id = teamId)
-                TeamPosition.OFFICIAL -> match.copy(teamOfficialId = teamId)
-            }
-        }
-        _showTeamSelectionDialog.value = null
+        matchEditingCoordinator.selectTeamForMatch(
+            matchId = matchId,
+            position = position,
+            teamId = teamId,
+            event = selectedEvent.value,
+            selectedDivisionId = selectedDivision.value,
+            buildRounds = ::buildBracketRounds,
+        )
     }
 
     override fun dismissTeamSelection() {
-        _showTeamSelectionDialog.value = null
+        matchEditingCoordinator.dismissTeamSelection()
     }
 
     override fun showMatchEditDialog(
@@ -5811,18 +5626,19 @@ class DefaultEventDetailComponent(
         if (!canEditMatchesNow()) {
             return
         }
-        val availableMatches = if (_isEditingMatches.value) _editableMatches.value else eventWithRelations.value.matches
-        _showMatchEditDialog.value = MatchEditDialogState(
-            match = match,
-            teams = eventWithRelations.value.teams,
-            fields = divisionFields.value,
-            allMatches = availableMatches,
-            eventOfficials = selectedEvent.value.eventOfficials,
-            officialPositions = selectedEvent.value.officialPositions,
-            players = eventWithRelations.value.players,
-            eventType = selectedEvent.value.eventType,
-            isCreateMode = isCreateMode,
-            creationContext = creationContext,
+        matchEditingCoordinator.showMatchEditDialog(
+            MatchEditDialogState(
+                match = match,
+                teams = eventWithRelations.value.teams,
+                fields = divisionFields.value,
+                allMatches = matchEditingCoordinator.availableMatchesForDialog(eventWithRelations.value.matches),
+                eventOfficials = selectedEvent.value.eventOfficials,
+                officialPositions = selectedEvent.value.officialPositions,
+                players = eventWithRelations.value.players,
+                eventType = selectedEvent.value.eventType,
+                isCreateMode = isCreateMode,
+                creationContext = creationContext,
+            )
         )
     }
 
@@ -5837,82 +5653,35 @@ class DefaultEventDetailComponent(
     }
 
     override fun dismissMatchEditDialog() {
-        val pendingId = pendingCreateMatchId
-        if (!pendingId.isNullOrBlank()) {
-            _editableMatches.value = _editableMatches.value.filterNot { relation ->
-                relation.match.id == pendingId
-            }
-            _stagedMatchCreates.value = _stagedMatchCreates.value - pendingId
-            refreshEditableRounds()
-            pendingCreateMatchId = null
-        }
-        _showMatchEditDialog.value = null
+        matchEditingCoordinator.dismissMatchEditDialog(
+            event = selectedEvent.value,
+            selectedDivisionId = selectedDivision.value,
+            buildRounds = ::buildBracketRounds,
+        )
     }
 
     override fun deleteMatchFromDialog(matchId: String) {
         if (!canEditMatchesNow()) {
             return
         }
-        val normalizedId = normalizeToken(matchId) ?: return
-        if (!_editableMatches.value.any { relation -> relation.match.id == normalizedId }) {
-            _showMatchEditDialog.value = null
-            return
-        }
-
-        val isClient = isClientMatchId(normalizedId)
-        _editableMatches.value = _editableMatches.value
-            .filterNot { relation -> relation.match.id == normalizedId }
-            .map { relation ->
-                val match = relation.match
-                relation.copy(
-                    match = match.copy(
-                        winnerNextMatchId = if (normalizeToken(match.winnerNextMatchId) == normalizedId) null else match.winnerNextMatchId,
-                        loserNextMatchId = if (normalizeToken(match.loserNextMatchId) == normalizedId) null else match.loserNextMatchId,
-                        previousLeftId = if (normalizeToken(match.previousLeftId) == normalizedId) null else match.previousLeftId,
-                        previousRightId = if (normalizeToken(match.previousRightId) == normalizedId) null else match.previousRightId,
-                    ),
-                )
-            }
-            .let(::normalizeEditableBracketGraph)
-        _stagedMatchCreates.value = _stagedMatchCreates.value - normalizedId
-        _stagedMatchDeletes.value = if (isClient) {
-            _stagedMatchDeletes.value - normalizedId
-        } else {
-            _stagedMatchDeletes.value + normalizedId
-        }
-        if (pendingCreateMatchId == normalizedId) {
-            pendingCreateMatchId = null
-        }
-        refreshEditableRounds()
-        _showMatchEditDialog.value = null
+        matchEditingCoordinator.deleteMatchFromDialog(
+            matchId = matchId,
+            event = selectedEvent.value,
+            selectedDivisionId = selectedDivision.value,
+            buildRounds = ::buildBracketRounds,
+        )
     }
 
     override fun updateMatchFromDialog(updatedMatch: MatchWithRelations) {
         if (!canEditMatchesNow()) {
             return
         }
-        val currentMatches = _editableMatches.value.toMutableList()
-        val matchIndex = currentMatches.indexOfFirst { it.match.id == updatedMatch.match.id }
-
-        if (matchIndex != -1) {
-            currentMatches[matchIndex] = updatedMatch
-        } else {
-            currentMatches += updatedMatch
-        }
-        _editableMatches.value = normalizeEditableBracketGraph(currentMatches)
-        if (isClientMatchId(updatedMatch.match.id) && !_stagedMatchCreates.value.containsKey(updatedMatch.match.id)) {
-            _stagedMatchCreates.value = _stagedMatchCreates.value + (
-                updatedMatch.match.id to StagedMatchCreateMeta(
-                    clientId = extractClientId(updatedMatch.match.id),
-                    creationContext = MatchCreateContext.BRACKET,
-                    autoPlaceholderTeam = selectedEvent.value.eventType == EventType.TOURNAMENT,
-                )
-                )
-        }
-        pendingCreateMatchId = null
-        refreshEditableRounds()
-
-        dismissMatchEditDialog()
+        matchEditingCoordinator.updateMatchFromDialog(
+            updatedMatch = updatedMatch,
+            event = selectedEvent.value,
+            selectedDivisionId = selectedDivision.value,
+            buildRounds = ::buildBracketRounds,
+        )
     }
 
     private suspend fun refreshUiForJoinConfirmation(
