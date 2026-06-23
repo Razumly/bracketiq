@@ -339,6 +339,8 @@ The sixty-eighth implementation milestone expands purchase-intent coordination f
 
 The sixty-ninth implementation milestone extracts required-signature execution. `EventSignatureExecutionCoordinator.kt` now owns starting required-signature flows, fetching self/team required signing steps, text/web prompt selection, web-signing polling and clearance, signature-context advancement/completion, pending-flow clearing, and text-signature recording. `DefaultEventDetailComponent` keeps selected event reads, repository callback adapters, coroutine launching, and UI error assignment. Focused and related regression validation passed with `./gradlew :composeApp:testDebugUnitTest --tests "*EventSignatureExecutionCoordinatorTest*" --tests "*EventRegistrationFlowCoordinatorTest*" --tests "*EventSignatureFlowHelpersTest*" --tests "*EventDetailMobileJoinFlowTest*" --console=plain`. `EventDetailComponent.kt` is 4,390 lines after this milestone.
 
+Post-batch focused validation for participant mutations, join execution, billing-address handoff, signature execution, registration-flow state, signature helpers, and mobile join flow passed with `./gradlew :composeApp:testDebugUnitTest --tests "*EventParticipantManagementCoordinatorTest*" --tests "*EventJoinExecutionCoordinatorTest*" --tests "*EventPurchaseIntentCoordinatorTest*" --tests "*EventSignatureExecutionCoordinatorTest*" --tests "*EventRegistrationFlowCoordinatorTest*" --tests "*EventSignatureFlowHelpersTest*" --tests "*EventDetailMobileJoinFlowTest*" --console=plain`. Final full debug/release suites and assemble validation remain open under the final validation item.
+
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. Registration coordination and participant/invite coordination are now complete; the remaining work is to keep thinning `DefaultEventDetailComponent` around lower-risk orchestration seams, then run final focused regression and build validation.
 
 ## Context and Orientation
@@ -1642,3 +1644,4 @@ Revision Note (2026-06-23): Recorded the participant mutation execution coordina
 Revision Note (2026-06-23): Recorded the child/minor join execution coordinator slice, focused tests, and line-count impact.
 Revision Note (2026-06-23): Recorded the billing-address purchase-intent coordinator slice, focused tests, and line-count impact.
 Revision Note (2026-06-23): Recorded the signature execution coordinator slice, focused and related regression tests, and line-count impact.
+Revision Note (2026-06-23): Recorded the consolidated focused regression pass for the multi-slice event-detail decomposition batch.
