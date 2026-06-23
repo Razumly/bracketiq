@@ -1,6 +1,9 @@
 package com.razumly.mvp.eventDetail
 
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
+import com.razumly.mvp.core.data.dataTypes.BillingAddressProfile
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
+import com.razumly.mvp.core.network.userMessage
 
 internal enum class PurchaseIntentProcessingAction {
     WAITING_FOR_SIGNATURE,
@@ -11,6 +14,60 @@ internal enum class PurchaseIntentProcessingAction {
 internal class EventPurchaseIntentCoordinator(
     private val registrationFlowCoordinator: EventRegistrationFlowCoordinator,
 ) {
+    suspend fun ensureBillingAddressOrPrompt(
+        getBillingAddress: suspend () -> Result<BillingAddressProfile>,
+        onReady: () -> Unit,
+        setError: (String) -> Unit,
+    ): Boolean {
+        val billingAddress = getBillingAddress()
+            .getOrElse { error ->
+                setError(error.userMessage("Unable to load billing address."))
+                return false
+            }
+            .billingAddress
+            ?.normalized()
+
+        if (billingAddress != null && billingAddress.isCompleteForUsTax()) {
+            return true
+        }
+
+        registrationFlowCoordinator.showBillingAddressPrompt(
+            billingAddress = billingAddress,
+            onReady = onReady,
+        )
+        return false
+    }
+
+    suspend fun loadSavedBillingAddress(
+        getBillingAddress: suspend () -> Result<BillingAddressProfile>,
+    ): BillingAddressDraft? {
+        return getBillingAddress()
+            .getOrNull()
+            ?.billingAddress
+            ?.normalized()
+    }
+
+    suspend fun submitBillingAddress(
+        address: BillingAddressDraft,
+        updateBillingAddress: suspend (BillingAddressDraft) -> Result<BillingAddressProfile>,
+        showLoading: (String) -> Unit,
+        hideLoading: () -> Unit,
+        setError: (String) -> Unit,
+    ) {
+        showLoading("Saving billing address...")
+        try {
+            updateBillingAddress(address)
+                .onSuccess {
+                    registrationFlowCoordinator.completeBillingAddressPrompt()?.invoke()
+                }
+                .onFailure { error ->
+                    setError(error.userMessage("Unable to save billing address."))
+                }
+        } finally {
+            hideLoading()
+        }
+    }
+
     fun processPurchaseIntent(
         intent: PurchaseIntent,
         saveRegistrationProgress: (registrationId: String?, holdExpiresAt: String) -> Unit,

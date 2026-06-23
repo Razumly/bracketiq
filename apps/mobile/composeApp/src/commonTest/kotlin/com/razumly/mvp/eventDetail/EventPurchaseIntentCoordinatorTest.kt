@@ -1,7 +1,10 @@
 package com.razumly.mvp.eventDetail
 
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
+import com.razumly.mvp.core.data.dataTypes.BillingAddressProfile
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -111,6 +114,87 @@ class EventPurchaseIntentCoordinatorTest {
 
         assertEquals(PurchaseIntentProcessingAction.LAUNCHING_PAYMENT_SHEET, result)
         assertEquals(listOf("launch:registration-1"), events)
+    }
+
+    @Test
+    fun billing_address_gate_prompts_for_incomplete_address_and_loads_saved_address() = runTest {
+        val registrationFlow = EventRegistrationFlowCoordinator()
+        val coordinator = EventPurchaseIntentCoordinator(registrationFlow)
+        val events = mutableListOf<String>()
+
+        val prompted = coordinator.ensureBillingAddressOrPrompt(
+            getBillingAddress = {
+                Result.success(
+                    BillingAddressProfile(
+                        billingAddress = BillingAddressDraft(
+                            line1 = " 123 Main ",
+                            city = "",
+                            state = " wa ",
+                            postalCode = " 98101 ",
+                        ),
+                    )
+                )
+            },
+            onReady = { events += "ready" },
+            setError = { message -> events += "error:$message" },
+        )
+        val loadedAddress = coordinator.loadSavedBillingAddress {
+            Result.success(
+                BillingAddressProfile(
+                    billingAddress = BillingAddressDraft(
+                        line1 = " 123 Main ",
+                        city = " Seattle ",
+                        state = " wa ",
+                        postalCode = " 98101 ",
+                    )
+                )
+            )
+        }
+        val ready = coordinator.ensureBillingAddressOrPrompt(
+            getBillingAddress = { Result.success(BillingAddressProfile(billingAddress = loadedAddress)) },
+            onReady = { events += "should-not-run" },
+            setError = { message -> events += "error:$message" },
+        )
+
+        assertEquals(false, prompted)
+        assertEquals("123 Main", registrationFlow.billingAddressPrompt.value?.line1)
+        assertEquals("WA", registrationFlow.billingAddressPrompt.value?.state)
+        assertEquals(BillingAddressDraft("123 Main", null, "Seattle", "WA", "98101", "US"), loadedAddress)
+        assertEquals(true, ready)
+        assertEquals(emptyList(), events)
+    }
+
+    @Test
+    fun submit_billing_address_saves_address_and_runs_pending_continuation() = runTest {
+        val registrationFlow = EventRegistrationFlowCoordinator()
+        val coordinator = EventPurchaseIntentCoordinator(registrationFlow)
+        val events = mutableListOf<String>()
+        registrationFlow.showBillingAddressPrompt(
+            billingAddress = null,
+            onReady = { events += "ready" },
+        )
+
+        coordinator.submitBillingAddress(
+            address = BillingAddressDraft(line1 = "123 Main", city = "Seattle", state = "WA", postalCode = "98101"),
+            updateBillingAddress = { address ->
+                events += "update:${address.line1}:${address.city}"
+                Result.success(BillingAddressProfile(billingAddress = address))
+            },
+            showLoading = { message -> events += "show:$message" },
+            hideLoading = { events += "hide" },
+            setError = { message -> events += "error:$message" },
+        )
+
+        assertEquals(
+            listOf(
+                "show:Saving billing address...",
+                "update:123 Main:Seattle",
+                "ready",
+                "hide",
+            ),
+            events,
+        )
+        assertEquals(null, registrationFlow.billingAddressPrompt.value)
     }
 
     private fun EventPurchaseIntentCoordinator.processForTest(

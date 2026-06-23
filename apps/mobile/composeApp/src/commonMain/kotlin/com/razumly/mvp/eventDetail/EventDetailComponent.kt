@@ -3011,30 +3011,19 @@ class DefaultEventDetailComponent(
     }
 
     private suspend fun ensureBillingAddressOrPrompt(onReady: () -> Unit): Boolean {
-        val billingAddress = billingRepository.getBillingAddress()
-            .getOrElse { error ->
-                _errorState.value = ErrorMessage(error.userMessage("Unable to load billing address."))
-                return false
-            }
-            .billingAddress
-            ?.normalized()
-
-        if (billingAddress != null && billingAddress.isCompleteForUsTax()) {
-            return true
-        }
-
-        registrationFlowCoordinator.showBillingAddressPrompt(
-            billingAddress = billingAddress,
+        return purchaseIntentCoordinator.ensureBillingAddressOrPrompt(
+            getBillingAddress = billingRepository::getBillingAddress,
             onReady = onReady,
+            setError = { message ->
+                _errorState.value = ErrorMessage(message)
+            },
         )
-        return false
     }
 
     private suspend fun loadSavedBillingAddress(): BillingAddressDraft? {
-        return billingRepository.getBillingAddress()
-            .getOrNull()
-            ?.billingAddress
-            ?.normalized()
+        return purchaseIntentCoordinator.loadSavedBillingAddress(
+            getBillingAddress = billingRepository::getBillingAddress,
+        )
     }
 
     override fun requestRefund(reason: String, targetUserId: String?) {
@@ -4279,15 +4268,15 @@ class DefaultEventDetailComponent(
 
     override fun submitBillingAddress(address: BillingAddressDraft) {
         scope.launch {
-            loadingHandler.showLoading("Saving billing address...")
-            billingRepository.updateBillingAddress(address)
-                .onSuccess {
-                    registrationFlowCoordinator.completeBillingAddressPrompt()?.invoke()
-                }
-                .onFailure { error ->
-                    _errorState.value = ErrorMessage(error.userMessage("Unable to save billing address."))
-                }
-            loadingHandler.hideLoading()
+            purchaseIntentCoordinator.submitBillingAddress(
+                address = address,
+                updateBillingAddress = billingRepository::updateBillingAddress,
+                showLoading = loadingHandler::showLoading,
+                hideLoading = loadingHandler::hideLoading,
+                setError = { message ->
+                    _errorState.value = ErrorMessage(message)
+                },
+            )
         }
     }
 
