@@ -1,7 +1,14 @@
 package com.razumly.mvp.eventDetail
 
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
+import com.razumly.mvp.core.network.userMessage
+import com.razumly.mvp.core.util.ErrorMessage
+import com.razumly.mvp.core.util.LoadingHandler
+import com.razumly.mvp.core.util.emailAddressRegex
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -24,6 +31,25 @@ internal class EventInviteCoordinator {
 
     fun clearSuggestedUsers() {
         _suggestedUsers.value = emptyList()
+    }
+
+    suspend fun searchUsers(
+        query: String,
+        searchPlayers: suspend (String) -> Result<List<UserData>>,
+    ): ErrorMessage? {
+        val normalizedQuery = normalizedInviteSearchQuery(query)
+        if (normalizedQuery == null) {
+            clearSuggestedUsers()
+            return null
+        }
+
+        replaceSuggestedUsers(
+            searchPlayers(normalizedQuery)
+                .getOrElse { error ->
+                    return ErrorMessage(error.userMessage("Unable to search users."))
+                },
+        )
+        return null
     }
 
     fun removeSuggestedUser(userId: String) {
@@ -52,10 +78,178 @@ internal class EventInviteCoordinator {
         _inviteTeamsLoading.value = false
     }
 
+    suspend fun searchInviteTeams(
+        query: String,
+        event: Event,
+        organizationId: String?,
+        sportName: String?,
+        excludeTeamIds: Set<String>,
+        searchTeams: suspend (
+            query: String,
+            eventId: String,
+            organizationId: String?,
+            sportName: String?,
+            excludeTeamIds: Set<String>,
+        ) -> Result<List<Team>>,
+    ): ErrorMessage? {
+        val normalizedQuery = normalizedInviteSearchQuery(query, minLength = 2)
+        if (normalizedQuery == null || !event.teamSignup) {
+            clearInviteTeamSearch()
+            return null
+        }
+
+        startInviteTeamSearch()
+        return searchTeams(
+            normalizedQuery,
+            event.id,
+            organizationId,
+            sportName,
+            excludeTeamIds,
+        ).fold(
+            onSuccess = { teams ->
+                finishInviteTeamSearch(teams)
+                null
+            },
+            onFailure = { error ->
+                failInviteTeamSearch()
+                ErrorMessage(error.userMessage("Unable to search teams."))
+            },
+        )
+    }
+
     fun removeInviteTeamSuggestion(teamId: String) {
         val normalizedTeamId = teamId.trim().takeIf(String::isNotBlank) ?: return
         _inviteTeamSuggestions.value = _inviteTeamSuggestions.value.filterNot { candidate ->
             candidate.id.trim() == normalizedTeamId
+        }
+    }
+
+    suspend fun inviteTeamToEvent(
+        team: Team,
+        event: Event,
+        existingTeamIds: Set<String>,
+        selectedDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
+        loadingHandler: LoadingHandler,
+        addTeam: suspend (
+            event: Event,
+            team: Team,
+            preferredDivisionId: String?,
+            occurrence: EventOccurrenceSelection?,
+        ) -> Result<*>,
+        refreshAfterMutation: suspend (eventId: String, warningMessage: String) -> Unit,
+    ): ErrorMessage {
+        val preflight = inviteTeamToEventPreflight(
+            team = team,
+            event = event,
+            existingTeamIds = existingTeamIds,
+        )
+        if (!preflight.isAccepted) {
+            return ErrorMessage(preflight.errorMessage ?: "Unable to add team.")
+        }
+
+        loadingHandler.showLoading("Adding team...")
+        return try {
+            addTeam(event, team, selectedDivisionId, occurrence)
+                .fold(
+                    onSuccess = {
+                        refreshAfterMutation(
+                            event.id,
+                            "Failed to refresh event after adding team participant.",
+                        )
+                        removeInviteTeamSuggestion(preflight.normalizedId)
+                        ErrorMessage("${team.name.ifBlank { "Team" }} added to the event.")
+                    },
+                    onFailure = { error ->
+                        ErrorMessage(error.userMessage("Unable to add team."))
+                    },
+                )
+        } finally {
+            loadingHandler.hideLoading()
+        }
+    }
+
+    suspend fun invitePlayerToEvent(
+        user: UserData,
+        event: Event,
+        existingUserIds: Set<String>,
+        selectedDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
+        loadingHandler: LoadingHandler,
+        addPlayer: suspend (
+            event: Event,
+            player: UserData,
+            preferredDivisionId: String?,
+            occurrence: EventOccurrenceSelection?,
+        ) -> Result<*>,
+        refreshAfterMutation: suspend (eventId: String, warningMessage: String) -> Unit,
+    ): ErrorMessage {
+        val preflight = invitePlayerToEventPreflight(
+            user = user,
+            event = event,
+            existingUserIds = existingUserIds,
+        )
+        if (!preflight.isAccepted) {
+            return ErrorMessage(preflight.errorMessage ?: "Unable to add player.")
+        }
+
+        loadingHandler.showLoading("Adding player...")
+        return try {
+            addPlayer(event, user, selectedDivisionId, occurrence)
+                .fold(
+                    onSuccess = {
+                        refreshAfterMutation(
+                            event.id,
+                            "Failed to refresh event after adding player participant.",
+                        )
+                        removeSuggestedUser(preflight.normalizedId)
+                        ErrorMessage("${user.fullName.ifBlank { "Player" }} added to the event.")
+                    },
+                    onFailure = { error ->
+                        ErrorMessage(error.userMessage("Unable to add player."))
+                    },
+                )
+        } finally {
+            loadingHandler.hideLoading()
+        }
+    }
+
+    suspend fun invitePlayerToEventByEmail(
+        firstName: String,
+        lastName: String,
+        email: String,
+        event: Event,
+        loadingHandler: LoadingHandler,
+        createInvite: suspend (
+            event: Event,
+            email: String,
+            firstName: String,
+            lastName: String,
+        ) -> Result<List<Invite>>,
+    ): ErrorMessage {
+        val normalizedFirstName = firstName.trim()
+        val normalizedLastName = lastName.trim()
+        val normalizedEmail = email.trim().lowercase()
+        if (normalizedFirstName.isBlank() || normalizedLastName.isBlank() || !normalizedEmail.matches(emailAddressRegex)) {
+            return ErrorMessage("Enter first name, last name, and a valid email.")
+        }
+        if (event.teamSignup) {
+            return ErrorMessage("This event accepts teams, not individual players.")
+        }
+
+        loadingHandler.showLoading("Sending invite...")
+        return try {
+            createInvite(event, normalizedEmail, normalizedFirstName, normalizedLastName)
+                .fold(
+                    onSuccess = {
+                        ErrorMessage("Event invite sent to $normalizedEmail.")
+                    },
+                    onFailure = { error ->
+                        ErrorMessage(error.userMessage("Unable to invite player by email."))
+                    },
+                )
+        } finally {
+            loadingHandler.hideLoading()
         }
     }
 

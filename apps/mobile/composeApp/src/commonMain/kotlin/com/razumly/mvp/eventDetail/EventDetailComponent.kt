@@ -77,7 +77,6 @@ import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.core.presentation.util.ShareServiceProvider
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
-import com.razumly.mvp.core.util.emailAddressRegex
 import com.razumly.mvp.core.util.newId
 import com.razumly.mvp.eventDetail.data.BracketNode
 import com.razumly.mvp.eventDetail.data.IMatchRepository
@@ -3687,65 +3686,39 @@ class DefaultEventDetailComponent(
     }
 
     override fun searchUsers(query: String) {
-        val normalizedQuery = normalizedInviteSearchQuery(query)
-        if (normalizedQuery == null) {
-            eventInviteCoordinator.clearSuggestedUsers()
-            return
-        }
-
         scope.launch {
-            eventInviteCoordinator.replaceSuggestedUsers(
-                userRepository.searchPlayers(normalizedQuery)
-                    .getOrElse { error ->
-                        _errorState.value = ErrorMessage(error.userMessage("Unable to search users."))
-                        emptyList()
-                    },
-            )
+            eventInviteCoordinator.searchUsers(
+                query = query,
+                searchPlayers = userRepository::searchPlayers,
+            )?.let { errorMessage -> _errorState.value = errorMessage }
         }
     }
 
     override fun searchInviteTeams(query: String) {
-        val normalizedQuery = normalizedInviteSearchQuery(query, minLength = 2)
-        if (normalizedQuery == null) {
-            eventInviteCoordinator.clearInviteTeamSearch()
-            return
-        }
         val event = selectedEvent.value
-        if (!event.teamSignup) {
-            eventInviteCoordinator.clearInviteTeamSearch()
-            return
-        }
-
         scope.launch {
-            eventInviteCoordinator.startInviteTeamSearch()
-            teamRepository.searchTeamsForEventInvite(
-                query = normalizedQuery,
-                eventId = event.id,
+            eventInviteCoordinator.searchInviteTeams(
+                query = query,
+                event = event,
                 organizationId = currentInviteOrganizationId(event),
                 sportName = currentInviteSportName(event),
                 excludeTeamIds = eventParticipantTeamIdsForInviteSearch(event),
-            ).onSuccess { teams ->
-                eventInviteCoordinator.finishInviteTeamSearch(teams)
-            }.onFailure { error ->
-                eventInviteCoordinator.failInviteTeamSearch()
-                _errorState.value = ErrorMessage(error.userMessage("Unable to search teams."))
-            }
+                searchTeams = { searchQuery, eventId, organizationId, sportName, excludeTeamIds ->
+                    teamRepository.searchTeamsForEventInvite(
+                        query = searchQuery,
+                        eventId = eventId,
+                        organizationId = organizationId,
+                        sportName = sportName,
+                        excludeTeamIds = excludeTeamIds,
+                    )
+                },
+            )?.let { errorMessage -> _errorState.value = errorMessage }
         }
     }
 
     override fun inviteTeamToEvent(team: Team) {
         scope.launch {
             val event = selectedEvent.value
-            val preflight = inviteTeamToEventPreflight(
-                team = team,
-                event = event,
-                existingTeamIds = eventParticipantTeamIdsForInviteSearch(event),
-            )
-            if (!preflight.isAccepted) {
-                _errorState.value = ErrorMessage(preflight.errorMessage ?: "Unable to add team.")
-                return@launch
-            }
-            val normalizedTeamId = preflight.normalizedId
             val occurrence = if (isWeeklyParentEvent(event)) {
                 requireSelectedWeeklyOccurrence(
                     event = event,
@@ -3755,39 +3728,22 @@ class DefaultEventDetailComponent(
                 null
             }
 
-            loadingHandler.showLoading("Adding team...")
-            eventRepository.addTeamToEvent(
-                event = event,
+            _errorState.value = eventInviteCoordinator.inviteTeamToEvent(
                 team = team,
-                preferredDivisionId = selectedDivision.value,
+                event = event,
+                existingTeamIds = eventParticipantTeamIdsForInviteSearch(event),
+                selectedDivisionId = selectedDivision.value,
                 occurrence = occurrence,
-            ).onSuccess {
-                refreshEventAfterParticipantMutation(
-                    eventId = event.id,
-                    warningMessage = "Failed to refresh event after adding team participant.",
-                )
-                eventInviteCoordinator.removeInviteTeamSuggestion(normalizedTeamId)
-                _errorState.value = ErrorMessage("${team.name.ifBlank { "Team" }} added to the event.")
-            }.onFailure { error ->
-                _errorState.value = ErrorMessage(error.userMessage("Unable to add team."))
-            }
-            loadingHandler.hideLoading()
+                loadingHandler = loadingHandler,
+                addTeam = eventRepository::addTeamToEvent,
+                refreshAfterMutation = ::refreshEventAfterParticipantMutation,
+            )
         }
     }
 
     override fun invitePlayerToEvent(user: UserData) {
         scope.launch {
             val event = selectedEvent.value
-            val preflight = invitePlayerToEventPreflight(
-                user = user,
-                event = event,
-                existingUserIds = eventParticipantUserIdsForInviteSearch(event),
-            )
-            if (!preflight.isAccepted) {
-                _errorState.value = ErrorMessage(preflight.errorMessage ?: "Unable to add player.")
-                return@launch
-            }
-            val normalizedUserId = preflight.normalizedId
             val occurrence = if (isWeeklyParentEvent(event)) {
                 requireSelectedWeeklyOccurrence(
                     event = event,
@@ -3797,55 +3753,38 @@ class DefaultEventDetailComponent(
                 null
             }
 
-            loadingHandler.showLoading("Adding player...")
-            eventRepository.addPlayerToEvent(
+            _errorState.value = eventInviteCoordinator.invitePlayerToEvent(
+                user = user,
                 event = event,
-                player = user,
-                preferredDivisionId = selectedDivision.value,
+                existingUserIds = eventParticipantUserIdsForInviteSearch(event),
+                selectedDivisionId = selectedDivision.value,
                 occurrence = occurrence,
-            ).onSuccess {
-                refreshEventAfterParticipantMutation(
-                    eventId = event.id,
-                    warningMessage = "Failed to refresh event after adding player participant.",
-                )
-                eventInviteCoordinator.removeSuggestedUser(normalizedUserId)
-                _errorState.value = ErrorMessage("${user.fullName.ifBlank { "Player" }} added to the event.")
-            }.onFailure { error ->
-                _errorState.value = ErrorMessage(error.userMessage("Unable to add player."))
-            }
-            loadingHandler.hideLoading()
+                loadingHandler = loadingHandler,
+                addPlayer = eventRepository::addPlayerToEvent,
+                refreshAfterMutation = ::refreshEventAfterParticipantMutation,
+            )
         }
     }
 
     override fun invitePlayerToEventByEmail(firstName: String, lastName: String, email: String) {
-        val normalizedFirstName = firstName.trim()
-        val normalizedLastName = lastName.trim()
-        val normalizedEmail = email.trim().lowercase()
-        if (normalizedFirstName.isBlank() || normalizedLastName.isBlank() || !normalizedEmail.matches(emailAddressRegex)) {
-            _errorState.value = ErrorMessage("Enter first name, last name, and a valid email.")
-            return
-        }
-
         scope.launch {
             val event = selectedEvent.value
-            if (event.teamSignup) {
-                _errorState.value = ErrorMessage("This event accepts teams, not individual players.")
-                return@launch
-            }
-
-            loadingHandler.showLoading("Sending invite...")
-            createEventPlayerInvite(
+            _errorState.value = eventInviteCoordinator.invitePlayerToEventByEmail(
+                firstName = firstName,
+                lastName = lastName,
+                email = email,
                 event = event,
-                userId = null,
-                email = normalizedEmail,
-                firstName = normalizedFirstName,
-                lastName = normalizedLastName,
-            ).onSuccess {
-                _errorState.value = ErrorMessage("Event invite sent to $normalizedEmail.")
-            }.onFailure { error ->
-                _errorState.value = ErrorMessage(error.userMessage("Unable to invite player by email."))
-            }
-            loadingHandler.hideLoading()
+                loadingHandler = loadingHandler,
+                createInvite = { targetEvent, normalizedEmail, normalizedFirstName, normalizedLastName ->
+                    createEventPlayerInvite(
+                        event = targetEvent,
+                        userId = null,
+                        email = normalizedEmail,
+                        firstName = normalizedFirstName,
+                        lastName = normalizedLastName,
+                    )
+                },
+            )
         }
     }
 
