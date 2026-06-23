@@ -2537,29 +2537,24 @@ class DefaultEventDetailComponent(
         } else {
             null
         }
-        try {
-            val joiningWaitlist = !selectedEvent.value.teamSignup && isEventFull.value
-            loadingHandler.showLoading("Registering Child ...")
-            eventRepository.registerChildForEvent(
-                eventId = selectedEvent.value.id,
-                childUserId = child.userId,
-                joinWaitlist = joiningWaitlist,
-                occurrence = weeklyOccurrence,
-            ).onSuccess { registration ->
-                loadingHandler.showLoading("Refreshing Event ...")
+        joinExecutionCoordinator.executeChildRegistration(
+            event = selectedEvent.value,
+            child = child,
+            isEventFull = isEventFull.value,
+            weeklyOccurrence = weeklyOccurrence,
+            registerChildForEvent = eventRepository::registerChildForEvent,
+            refreshAfterParticipantMutation = { eventId, warningMessage ->
                 refreshEventAfterParticipantMutation(
-                    eventId = selectedEvent.value.id,
-                    warningMessage = "Failed to refresh event after child registration.",
+                    eventId = eventId,
+                    warningMessage = warningMessage,
                 )
-                _errorState.value = ErrorMessage(
-                    registrationFlowCoordinator.childRegistrationResultMessage(child, registration),
-                )
-            }.onFailure { throwable ->
-                _errorState.value = ErrorMessage(throwable.userMessage("Failed to register child."))
-            }
-        } finally {
-            loadingHandler.hideLoading()
-        }
+            },
+            showLoading = loadingHandler::showLoading,
+            hideLoading = loadingHandler::hideLoading,
+            setError = { message ->
+                _errorState.value = ErrorMessage(message)
+            },
+        )
     }
 
     private suspend fun createPaymentPlanBillForOwner(
@@ -2619,26 +2614,22 @@ class DefaultEventDetailComponent(
         } else {
             null
         }
-        loadingHandler.showLoading("Submitting Join Request ...")
-        eventRepository.requestCurrentUserRegistration(
+        joinExecutionCoordinator.submitMinorJoinRequestForParentApproval(
             event = selectedEvent.value,
-            preferredDivisionId = selectedDivision.value,
-            occurrence = weeklyOccurrence,
-        ).onSuccess { registration ->
-            loadingHandler.showLoading("Reloading Event")
-            refreshEventAfterParticipantMutation(
-                eventId = selectedEvent.value.id,
-                warningMessage = "Failed to refresh event after submitting child join request.",
-            )
-            _errorState.value = ErrorMessage(
-                registrationFlowCoordinator.selfRegistrationResultMessage(
-                    registration = registration,
-                    defaultMessage = "Join request submitted.",
-                ) ?: "Join request submitted.",
-            )
-        }.onFailure { throwable ->
-            _errorState.value = ErrorMessage(throwable.userMessage())
-        }
+            selectedDivisionId = selectedDivision.value,
+            weeklyOccurrence = weeklyOccurrence,
+            requestCurrentUserRegistration = eventRepository::requestCurrentUserRegistration,
+            refreshAfterParticipantMutation = { eventId, warningMessage ->
+                refreshEventAfterParticipantMutation(
+                    eventId = eventId,
+                    warningMessage = warningMessage,
+                )
+            },
+            showLoading = loadingHandler::showLoading,
+            setError = { message ->
+                _errorState.value = ErrorMessage(message)
+            },
+        )
     }
 
     private suspend fun executeJoinEvent() {

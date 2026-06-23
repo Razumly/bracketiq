@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
@@ -122,6 +123,77 @@ class EventJoinExecutionCoordinatorTest {
 
         assertEquals(
             listOf("error:Set a price for this division before joining."),
+            events,
+        )
+    }
+
+    @Test
+    fun execute_child_registration_registers_waitlist_child_and_refreshes_event() = runTest {
+        val registrationFlow = EventRegistrationFlowCoordinator()
+        val coordinator = EventJoinExecutionCoordinator(registrationFlow)
+        val events = mutableListOf<String>()
+        val occurrence = EventOccurrenceSelection(slotId = "slot-1", occurrenceDate = "2026-07-01")
+
+        coordinator.executeChildRegistration(
+            event = Event(id = "event-1", teamSignup = false),
+            child = child(),
+            isEventFull = true,
+            weeklyOccurrence = occurrence,
+            registerChildForEvent = { eventId, childUserId, joinWaitlist, targetOccurrence ->
+                events += "register-child:$eventId:$childUserId:$joinWaitlist:${targetOccurrence?.slotId}"
+                Result.success(ChildRegistrationResult(joinedWaitlist = true))
+            },
+            refreshAfterParticipantMutation = { eventId, warningMessage ->
+                events += "refresh:$eventId:$warningMessage"
+            },
+            showLoading = { message -> events += "show:$message" },
+            hideLoading = { events += "hide" },
+            setError = { message -> events += "error:$message" },
+        )
+
+        assertEquals(
+            listOf(
+                "show:Registering Child ...",
+                "register-child:event-1:child-1:true:slot-1",
+                "show:Refreshing Event ...",
+                "refresh:event-1:Failed to refresh event after child registration.",
+                "error:Alex Child added to waitlist.",
+                "hide",
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun submit_minor_join_request_refreshes_event_and_reports_default_message() = runTest {
+        val registrationFlow = EventRegistrationFlowCoordinator()
+        val coordinator = EventJoinExecutionCoordinator(registrationFlow)
+        val events = mutableListOf<String>()
+        val occurrence = EventOccurrenceSelection(slotId = "slot-1", occurrenceDate = "2026-07-01")
+
+        coordinator.submitMinorJoinRequestForParentApproval(
+            event = Event(id = "event-1"),
+            selectedDivisionId = "open",
+            weeklyOccurrence = occurrence,
+            requestCurrentUserRegistration = { event, preferredDivisionId, targetOccurrence ->
+                events += "request:${event.id}:$preferredDivisionId:${targetOccurrence?.slotId}"
+                Result.success(SelfRegistrationResult())
+            },
+            refreshAfterParticipantMutation = { eventId, warningMessage ->
+                events += "refresh:$eventId:$warningMessage"
+            },
+            showLoading = { message -> events += "show:$message" },
+            setError = { message -> events += "error:$message" },
+        )
+
+        assertEquals(
+            listOf(
+                "show:Submitting Join Request ...",
+                "request:event-1:open:slot-1",
+                "show:Reloading Event",
+                "refresh:event-1:Failed to refresh event after submitting child join request.",
+                "error:Join request submitted.",
+            ),
             events,
         )
     }
@@ -270,6 +342,15 @@ class EventJoinExecutionCoordinatorTest {
             captain = null,
             players = emptyList(),
             pendingPlayers = emptyList(),
+        )
+    }
+
+    private fun child(): JoinChildOption {
+        return JoinChildOption(
+            userId = "child-1",
+            fullName = "Alex Child",
+            email = "alex@example.com",
+            hasEmail = true,
         )
     }
 }

@@ -86,6 +86,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-23) Move purchase-intent signature gating, hold persistence, fee breakdown, and payment-sheet handoff into a coordinator with focused tests.
   - [x] (2026-06-23) Move self/team join execution branching into a join execution coordinator with focused tests.
   - [x] (2026-06-23) Move participant move/remove mutation execution into `EventParticipantManagementCoordinator` with focused tests.
+  - [x] (2026-06-23) Move child registration and minor parent-approval join request execution into `EventJoinExecutionCoordinator` with focused tests.
 - [ ] Run focused event-detail regression tests and final compile/build validation.
 
 ## Surprises & Discoveries
@@ -329,6 +330,8 @@ The sixty-fourth implementation milestone extracts purchase-intent handoff coord
 The sixty-fifth implementation milestone extracts self/team join execution. `EventJoinExecutionCoordinator.kt` now owns self and team join execution branching for parent-approval delegation, missing-price rejection, direct join refresh and progress cleanup, payment-plan join and rollback handling, purchase-intent creation, and join-confirmation target setup. `DefaultEventDetailComponent` keeps weekly occurrence preflight, billing-address retry continuation wiring, repository callbacks, coroutine launching, payment processor handoff, and UI error assignment. Focused validation passed with `./gradlew :composeApp:testDebugUnitTest --tests "*EventJoinExecutionCoordinatorTest*" --console=plain`, `./gradlew :composeApp:compileDebugKotlinAndroid --console=plain`, and `git diff --check`. `EventDetailComponent.kt` is 4,500 lines after this batch milestone.
 
 The sixty-sixth implementation milestone extracts participant mutation execution. `EventParticipantManagementCoordinator.kt` now owns move-team-division validation/execution, remove-team execution, remove-user preflight/execution, loading labels, refresh callbacks, and UI result messages. `DefaultEventDetailComponent` keeps weekly occurrence preflight, repository wiring, participant sync state application, and UI error assignment. Focused validation passed with `./gradlew :composeApp:testDebugUnitTest --tests "*EventParticipantManagementCoordinatorTest*" --console=plain`. `EventDetailComponent.kt` is 4,502 lines after this milestone.
+
+The sixty-seventh implementation milestone expands join execution coordination for child/minor registration. `EventJoinExecutionCoordinator.kt` now owns child registration result handling, child waitlist selection, refresh sequencing, parent-approval join request execution, loading labels, and user-facing messages. `DefaultEventDetailComponent` keeps registration-open checks, weekly occurrence preflight, repository callback wiring, and UI error assignment. Focused validation passed with `./gradlew :composeApp:testDebugUnitTest --tests "*EventJoinExecutionCoordinatorTest*" --console=plain`. `EventDetailComponent.kt` is 4,493 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. Registration coordination and participant/invite coordination are now complete; the remaining work is to keep thinning `DefaultEventDetailComponent` around lower-risk orchestration seams, then run final focused regression and build validation.
 
@@ -1630,3 +1633,4 @@ Revision Note (2026-06-23): Recorded the payment-plan billing coordinator slice,
 Revision Note (2026-06-23): Recorded the purchase-intent coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-23): Recorded the join execution coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-23): Recorded the participant mutation execution coordinator slice, focused tests, and line-count impact.
+Revision Note (2026-06-23): Recorded the child/minor join execution coordinator slice, focused tests, and line-count impact.

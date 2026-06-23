@@ -3,6 +3,7 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
@@ -11,6 +12,80 @@ import com.razumly.mvp.core.network.userMessage
 internal class EventJoinExecutionCoordinator(
     private val registrationFlowCoordinator: EventRegistrationFlowCoordinator,
 ) {
+    suspend fun executeChildRegistration(
+        event: Event,
+        child: JoinChildOption,
+        isEventFull: Boolean,
+        weeklyOccurrence: EventOccurrenceSelection?,
+        registerChildForEvent: suspend (
+            eventId: String,
+            childUserId: String,
+            joinWaitlist: Boolean,
+            occurrence: EventOccurrenceSelection?,
+        ) -> Result<ChildRegistrationResult>,
+        refreshAfterParticipantMutation: suspend (eventId: String, warningMessage: String) -> Unit,
+        showLoading: (String) -> Unit,
+        hideLoading: () -> Unit,
+        setError: (String) -> Unit,
+    ) {
+        try {
+            val joiningWaitlist = !event.teamSignup && isEventFull
+            showLoading("Registering Child ...")
+            registerChildForEvent(
+                event.id,
+                child.userId,
+                joiningWaitlist,
+                weeklyOccurrence,
+            ).onSuccess { registration ->
+                showLoading("Refreshing Event ...")
+                refreshAfterParticipantMutation(
+                    event.id,
+                    "Failed to refresh event after child registration.",
+                )
+                setError(registrationFlowCoordinator.childRegistrationResultMessage(child, registration))
+            }.onFailure { throwable ->
+                setError(throwable.userMessage("Failed to register child."))
+            }
+        } finally {
+            hideLoading()
+        }
+    }
+
+    suspend fun submitMinorJoinRequestForParentApproval(
+        event: Event,
+        selectedDivisionId: String?,
+        weeklyOccurrence: EventOccurrenceSelection?,
+        requestCurrentUserRegistration: suspend (
+            event: Event,
+            preferredDivisionId: String?,
+            occurrence: EventOccurrenceSelection?,
+        ) -> Result<SelfRegistrationResult>,
+        refreshAfterParticipantMutation: suspend (eventId: String, warningMessage: String) -> Unit,
+        showLoading: (String) -> Unit,
+        setError: (String) -> Unit,
+    ) {
+        showLoading("Submitting Join Request ...")
+        requestCurrentUserRegistration(
+            event,
+            selectedDivisionId,
+            weeklyOccurrence,
+        ).onSuccess { registration ->
+            showLoading("Reloading Event")
+            refreshAfterParticipantMutation(
+                event.id,
+                "Failed to refresh event after submitting child join request.",
+            )
+            setError(
+                registrationFlowCoordinator.selfRegistrationResultMessage(
+                    registration = registration,
+                    defaultMessage = "Join request submitted.",
+                ) ?: "Join request submitted.",
+            )
+        }.onFailure { throwable ->
+            setError(throwable.userMessage())
+        }
+    }
+
     suspend fun executeSelfJoin(
         event: Event,
         currentUserId: String,
