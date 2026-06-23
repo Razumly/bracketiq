@@ -956,18 +956,14 @@ class DefaultEventDetailComponent(
         selectedWeeklyOccurrenceSummary,
         overviewParticipantSummary,
     ) { relations, division, weeklySummary, overviewSummary ->
-        if (isWeeklyParentEvent(relations.event)) {
-            val capacity = weeklySummary?.participantCapacity ?: return@combine false
-            return@combine weeklySummary.participantCount >= capacity && capacity > 0
-        }
-        if ((relations.event.singleDivision || division == null) && overviewSummary != null) {
-            val capacity = overviewSummary.participantCapacity
-            if (capacity != null && capacity > 0) {
-                return@combine overviewSummary.participantCount >= capacity
-            }
-        }
-        checkEventIsFull(relations.event, relations.teams, division)
-    }.stateIn(scope, SharingStarted.Eagerly, checkEventIsFull(event, emptyList(), null))
+        eventIsFullForRegistration(
+            event = relations.event,
+            teams = relations.teams,
+            preferredDivisionId = division,
+            selectedWeeklyOccurrenceSummary = weeklySummary,
+            overviewParticipantSummary = overviewSummary,
+        )
+    }.stateIn(scope, SharingStarted.Eagerly, eventIsFullForRegistration(event, emptyList(), null))
 
     override val isUserInEvent = membershipCoordinator.isUserInEvent
     override val isRegistrationPaymentPending = membershipCoordinator.isRegistrationPaymentPending
@@ -2499,10 +2495,12 @@ class DefaultEventDetailComponent(
         )
     }
 
-    private suspend fun loadJoinableChildren(): List<JoinChildOption> {
+    private suspend fun loadJoinableChildren(
+        warningMessage: String = "Failed to load linked children before join flow.",
+    ): List<JoinChildOption> {
         return userRepository.listChildren()
             .onFailure { throwable ->
-                Napier.w("Failed to load linked children before join flow.", throwable)
+                Napier.w(warningMessage, throwable)
             }
             .getOrElse { emptyList() }
             .asSequence()
@@ -4520,37 +4518,23 @@ class DefaultEventDetailComponent(
     }
 
     private suspend fun refreshCurrentUserMembershipState(event: Event) {
-        val weeklyParentWithoutSelection =
-            isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() == null
-        if (weeklyParentWithoutSelection) {
-            membershipCoordinator.clearForMissingWeeklySelection()
-            registrationFlowCoordinator.clearWithdrawTargets()
-            return
-        }
-
-        val cachedState = resolveCachedCurrentUserRegistrationMembership(event)
-        if (cachedState != null) {
-            membershipCoordinator.applyCachedMembership(
-                membership = cachedState,
-                team = cachedState.teamId
-                    ?.let { teamId -> teamRepository.getTeamWithPlayers(teamId).getOrNull() },
-                currentUserId = currentUser.value.id,
-            )
-            return
-        }
-
-        val teamIds = membershipCoordinator.refreshFromSnapshot(
+        val current = currentUser.value
+        val selectedOccurrence = currentWeeklyOccurrenceSelection()
+        val eventIsWeeklyParent = isWeeklyParentEvent(event)
+        val missingWeeklySelection = membershipCoordinator.refreshCurrentUserMembershipState(
             event = event,
-            currentUserId = currentUser.value.id,
-            currentUserTeamIds = currentUserTeamIds(),
+            currentUserId = current.id,
+            profileTeamIds = current.teamIds,
+            registrations = cachedCurrentUserRegistrations.value,
+            selectedOccurrence = selectedOccurrence,
+            isWeeklyParentEvent = eventIsWeeklyParent,
+            weeklyParentWithoutSelection = eventIsWeeklyParent && selectedOccurrence == null,
+            getTeamWithPlayers = { teamId ->
+                teamRepository.getTeamWithPlayers(teamId).getOrNull()
+            },
         )
-        if (teamIds.isNotEmpty()) {
-            membershipCoordinator.setUsersTeam(
-                teamIds.firstNotNullOfOrNull { teamId ->
-                    teamRepository.getTeamWithPlayers(teamId).getOrNull()
-                },
-                currentUser.value.id,
-            )
+        if (missingWeeklySelection) {
+            registrationFlowCoordinator.clearWithdrawTargets()
         }
     }
 
@@ -4568,55 +4552,29 @@ class DefaultEventDetailComponent(
 
     private suspend fun refreshWithdrawTargets(event: Event) {
         val current = currentUser.value
-        val targets = LinkedHashMap<String, WithdrawTargetOption>()
-
-        resolveWithdrawTargetMembership(event, current.id)?.let { membership ->
-            targets[current.id] = WithdrawTargetOption(
-                userId = current.id,
-                fullName = current.fullName.ifBlank { "My Registration" },
-                membership = membership,
-                isSelf = true,
-            )
-        }
-
-        val children = userRepository.listChildren()
-            .onFailure { throwable ->
-                Napier.w("Failed to load linked children for withdraw targets.", throwable)
-            }
-            .getOrElse { emptyList() }
-            .filter { child ->
-                child.userId.isNotBlank() &&
-                    (child.linkStatus?.equals("active", ignoreCase = true) != false)
-            }
-
-        children.forEach { child ->
-            val childId = child.userId
-            val membership = resolveWithdrawTargetMembership(event, childId) ?: return@forEach
-            val fullName = listOf(child.firstName.trim(), child.lastName.trim())
-                .filter { it.isNotBlank() }
-                .joinToString(" ")
-                .ifBlank { "Child" }
-            targets[childId] = WithdrawTargetOption(
-                userId = childId,
-                fullName = fullName,
-                membership = membership,
-                isSelf = false,
-            )
-        }
-
-        registrationFlowCoordinator.replaceWithdrawTargets(targets.values.toList())
+        registrationFlowCoordinator.replaceWithdrawTargets(
+            registrationFlowCoordinator.buildWithdrawTargets(
+                currentUserId = current.id,
+                currentUserFullName = current.fullName,
+                children = loadJoinableChildren(
+                    warningMessage = "Failed to load linked children for withdraw targets.",
+                ),
+            ) { userId ->
+                resolveWithdrawTargetMembership(event, userId)
+            },
+        )
     }
 
     private fun resolveWithdrawTargetMembership(
         event: Event,
         userId: String,
     ): WithdrawTargetMembership? {
-        return resolveWithdrawTargetMembershipFromEvent(
+        return membershipCoordinator.resolveWithdrawTargetMembership(
             event = event,
-            targetUserId = userId,
+            userId = userId,
             currentUserId = currentUser.value.id,
-            currentUserTeamIds = currentUserTeamIds(),
-            currentUserMembership = if (userId == currentUser.value.id) {
+            profileTeamIds = currentUser.value.teamIds,
+            cachedCurrentUserMembership = if (userId == currentUser.value.id) {
                 resolveCachedCurrentUserRegistrationMembership(event)
             } else {
                 null
@@ -4627,35 +4585,6 @@ class DefaultEventDetailComponent(
 
     private fun currentUserTeamIds(): Set<String> {
         return membershipCoordinator.currentUserTeamIds(currentUser.value.teamIds)
-    }
-
-    private fun checkEventIsFull(
-        event: Event,
-        teams: List<TeamWithPlayers>,
-        preferredDivisionId: String?,
-    ): Boolean {
-        val selectedDivision = resolveSelectedDivisionDetail(event, preferredDivisionId)
-        val maxParticipants = if (event.divisions.isEmpty()) {
-            event.maxParticipants.takeIf { value -> value > 0 }
-        } else {
-            selectedDivision?.maxParticipants
-        }
-
-        if (maxParticipants == null || maxParticipants <= 0) {
-            return false
-        }
-
-        val participantCount = if (event.teamSignup) {
-            countTeamSignupParticipantsForCapacity(
-                event = event,
-                teams = teams,
-                selectedDivision = selectedDivision,
-            )
-        } else {
-            event.playerIds.size
-        }
-
-        return participantCount >= maxParticipants
     }
 
     override fun showFeeBreakdown(

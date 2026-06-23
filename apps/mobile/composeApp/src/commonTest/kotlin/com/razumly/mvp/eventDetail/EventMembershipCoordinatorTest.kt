@@ -6,6 +6,7 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -133,6 +134,127 @@ class EventMembershipCoordinatorTest {
                 teamId = "team-1",
             ),
             membership,
+        )
+    }
+
+    @Test
+    fun refresh_current_user_membership_state_handles_missing_weekly_cached_and_snapshot_paths() = runTest {
+        val coordinator = EventMembershipCoordinator(
+            initialEvent = event(),
+            initialCurrentUserId = "user-1",
+            initialCurrentUserTeamIds = emptySet(),
+            initialWeeklyParentWithoutSelection = false,
+        )
+
+        assertTrue(
+            coordinator.refreshCurrentUserMembershipState(
+                event = event(eventType = EventType.WEEKLY_EVENT),
+                currentUserId = "user-1",
+                profileTeamIds = emptyList(),
+                registrations = emptyList(),
+                selectedOccurrence = null,
+                isWeeklyParentEvent = true,
+                weeklyParentWithoutSelection = true,
+                getTeamWithPlayers = { error("Team lookup should not run for missing weekly selection.") },
+            ),
+        )
+        assertFalse(coordinator.isUserInEvent.value)
+
+        val cachedTeam = teamWithPlayers(id = "team-1", managerId = "user-1")
+        assertFalse(
+            coordinator.refreshCurrentUserMembershipState(
+                event = event(teamSignup = true),
+                currentUserId = "user-1",
+                profileTeamIds = listOf("team-1"),
+                registrations = listOf(
+                    EventRegistrationCacheEntry(
+                        id = "reg-1",
+                        eventId = "event-1",
+                        registrantId = "team-1",
+                        registrantType = "TEAM",
+                        rosterRole = "PARTICIPANT",
+                        status = "ACTIVE",
+                        eventTeamId = "team-1",
+                    ),
+                ),
+                selectedOccurrence = null,
+                isWeeklyParentEvent = false,
+                weeklyParentWithoutSelection = false,
+                getTeamWithPlayers = { teamId ->
+                    assertEquals("team-1", teamId)
+                    cachedTeam
+                },
+            ),
+        )
+        assertTrue(coordinator.isUserInEvent.value)
+        assertTrue(coordinator.isUserCaptain.value)
+        assertEquals(cachedTeam, coordinator.usersTeam())
+
+        val snapshotTeam = teamWithPlayers(id = "team-2", managerId = "user-1")
+        assertFalse(
+            coordinator.refreshCurrentUserMembershipState(
+                event = event(
+                    teamSignup = true,
+                    teamIds = listOf("team-2"),
+                ),
+                currentUserId = "user-1",
+                profileTeamIds = listOf("team-2"),
+                registrations = emptyList(),
+                selectedOccurrence = null,
+                isWeeklyParentEvent = false,
+                weeklyParentWithoutSelection = false,
+                getTeamWithPlayers = { teamId ->
+                    assertEquals("team-2", teamId)
+                    snapshotTeam
+                },
+            ),
+        )
+        assertEquals(snapshotTeam, coordinator.usersTeam())
+    }
+
+    @Test
+    fun resolve_withdraw_target_membership_uses_cached_self_and_team_snapshot_membership() {
+        val coordinator = EventMembershipCoordinator(
+            initialEvent = event(),
+            initialCurrentUserId = "user-1",
+            initialCurrentUserTeamIds = emptySet(),
+            initialWeeklyParentWithoutSelection = false,
+        )
+
+        assertEquals(
+            WithdrawTargetMembership.WAITLIST,
+            coordinator.resolveWithdrawTargetMembership(
+                event = event(playerIds = listOf("user-1")),
+                userId = "user-1",
+                currentUserId = "user-1",
+                profileTeamIds = emptyList(),
+                cachedCurrentUserMembership = CurrentUserRegistrationMembershipState(waitlist = true),
+                weeklyParentWithoutSelection = false,
+            ),
+        )
+        assertEquals(
+            WithdrawTargetMembership.PARTICIPANT,
+            coordinator.resolveWithdrawTargetMembership(
+                event = event(
+                    teamSignup = true,
+                    teamIds = listOf("team-1"),
+                ),
+                userId = "user-1",
+                currentUserId = "user-1",
+                profileTeamIds = listOf("team-1"),
+                cachedCurrentUserMembership = null,
+                weeklyParentWithoutSelection = false,
+            ),
+        )
+        assertNull(
+            coordinator.resolveWithdrawTargetMembership(
+                event = event(playerIds = listOf("user-1")),
+                userId = "user-1",
+                currentUserId = "user-1",
+                profileTeamIds = emptyList(),
+                cachedCurrentUserMembership = CurrentUserRegistrationMembershipState(participant = true),
+                weeklyParentWithoutSelection = true,
+            ),
         )
     }
 

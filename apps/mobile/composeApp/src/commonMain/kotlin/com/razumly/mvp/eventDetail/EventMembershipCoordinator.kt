@@ -108,6 +108,51 @@ internal class EventMembershipCoordinator(
         setUsersTeam(team, currentUserId)
     }
 
+    suspend fun refreshCurrentUserMembershipState(
+        event: Event,
+        currentUserId: String,
+        profileTeamIds: List<String>,
+        registrations: List<EventRegistrationCacheEntry>,
+        selectedOccurrence: EventOccurrenceSelection?,
+        isWeeklyParentEvent: Boolean,
+        weeklyParentWithoutSelection: Boolean,
+        getTeamWithPlayers: suspend (String) -> TeamWithPlayers?,
+    ): Boolean {
+        if (weeklyParentWithoutSelection) {
+            clearForMissingWeeklySelection()
+            return true
+        }
+
+        val cachedState = resolveCachedMembership(
+            registrations = registrations,
+            selectedOccurrence = selectedOccurrence,
+            currentUserId = currentUserId,
+            profileTeamIds = profileTeamIds,
+            isWeeklyParentEvent = isWeeklyParentEvent,
+        )
+        if (cachedState != null) {
+            applyCachedMembership(
+                membership = cachedState,
+                team = cachedState.teamId?.let { teamId -> getTeamWithPlayers(teamId) },
+                currentUserId = currentUserId,
+            )
+            return false
+        }
+
+        val teamIds = refreshFromSnapshot(
+            event = event,
+            currentUserId = currentUserId,
+            currentUserTeamIds = currentUserTeamIds(profileTeamIds),
+        )
+        if (teamIds.isNotEmpty()) {
+            setUsersTeam(
+                teamIds.firstNotNullOfOrNull { teamId -> getTeamWithPlayers(teamId) },
+                currentUserId,
+            )
+        }
+        return false
+    }
+
     fun refreshFromSnapshot(
         event: Event,
         currentUserId: String,
@@ -213,6 +258,24 @@ internal class EventMembershipCoordinator(
             currentUserId = currentUserId,
             currentUserTeamIds = currentUserTeamIds,
             cachedMembership = cachedMembership,
+            weeklyParentWithoutSelection = weeklyParentWithoutSelection,
+        )
+    }
+
+    fun resolveWithdrawTargetMembership(
+        event: Event,
+        userId: String,
+        currentUserId: String,
+        profileTeamIds: List<String>,
+        cachedCurrentUserMembership: CurrentUserRegistrationMembershipState?,
+        weeklyParentWithoutSelection: Boolean,
+    ): WithdrawTargetMembership? {
+        return resolveWithdrawTargetMembershipFromEvent(
+            event = event,
+            targetUserId = userId,
+            currentUserId = currentUserId,
+            currentUserTeamIds = currentUserTeamIds(profileTeamIds),
+            currentUserMembership = cachedCurrentUserMembership,
             weeklyParentWithoutSelection = weeklyParentWithoutSelection,
         )
     }

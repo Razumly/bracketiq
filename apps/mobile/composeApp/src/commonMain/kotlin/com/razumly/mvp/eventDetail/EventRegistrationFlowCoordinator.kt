@@ -441,6 +441,40 @@ internal class EventRegistrationFlowCoordinator {
         _withdrawTargets.value = emptyList()
     }
 
+    fun buildWithdrawTargets(
+        currentUserId: String,
+        currentUserFullName: String,
+        children: List<JoinChildOption>,
+        resolveMembership: (String) -> WithdrawTargetMembership?,
+    ): List<WithdrawTargetOption> {
+        val normalizedCurrentUserId = currentUserId.trim()
+        val targets = LinkedHashMap<String, WithdrawTargetOption>()
+
+        if (normalizedCurrentUserId.isNotBlank()) {
+            resolveMembership(normalizedCurrentUserId)?.let { membership ->
+                targets[normalizedCurrentUserId] = WithdrawTargetOption(
+                    userId = normalizedCurrentUserId,
+                    fullName = currentUserFullName.trim().ifBlank { "My Registration" },
+                    membership = membership,
+                    isSelf = true,
+                )
+            }
+        }
+
+        children.forEach { child ->
+            val childId = child.userId.trim().takeIf(String::isNotBlank) ?: return@forEach
+            val membership = resolveMembership(childId) ?: return@forEach
+            targets[childId] = WithdrawTargetOption(
+                userId = childId,
+                fullName = child.fullName.trim().ifBlank { "Child" },
+                membership = membership,
+                isSelf = false,
+            )
+        }
+
+        return targets.values.toList()
+    }
+
     fun normalizedWithdrawalTargetUserId(
         targetUserId: String?,
         currentUserId: String,

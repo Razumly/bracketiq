@@ -1130,6 +1130,44 @@ class EventRegistrationFlowCoordinatorTest {
     }
 
     @Test
+    fun build_withdraw_targets_includes_self_and_registered_children_in_order() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val targets = coordinator.buildWithdrawTargets(
+            currentUserId = " user-1 ",
+            currentUserFullName = " ",
+            children = listOf(
+                joinChild("child-1"),
+                joinChild("child-2"),
+                joinChild(" "),
+            ),
+        ) { userId ->
+            when (userId) {
+                "user-1" -> WithdrawTargetMembership.PARTICIPANT
+                "child-2" -> WithdrawTargetMembership.WAITLIST
+                else -> null
+            }
+        }
+
+        assertEquals(
+            listOf(
+                WithdrawTargetOption(
+                    userId = "user-1",
+                    fullName = "My Registration",
+                    membership = WithdrawTargetMembership.PARTICIPANT,
+                    isSelf = true,
+                ),
+                WithdrawTargetOption(
+                    userId = "child-2",
+                    fullName = "Child child-2",
+                    membership = WithdrawTargetMembership.WAITLIST,
+                    isSelf = false,
+                ),
+            ),
+            targets,
+        )
+    }
+
+    @Test
     fun fee_breakdown_confirm_returns_continuation_and_clears_state() {
         val coordinator = EventRegistrationFlowCoordinator()
         val feeBreakdown = feeBreakdown()

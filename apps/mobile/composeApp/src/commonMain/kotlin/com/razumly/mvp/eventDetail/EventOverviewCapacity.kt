@@ -3,6 +3,7 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.repositories.EventParticipantsSummary
 import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 
@@ -55,4 +56,46 @@ internal fun countTeamSignupParticipantsForCapacity(
         .toSet()
 
     return assignedTeamIds.count(registeredTeamIdSet::contains)
+}
+
+internal fun eventIsFullForRegistration(
+    event: Event,
+    teams: List<TeamWithPlayers>,
+    preferredDivisionId: String?,
+    selectedWeeklyOccurrenceSummary: WeeklyOccurrenceSummary? = null,
+    overviewParticipantSummary: EventParticipantsSummary? = null,
+): Boolean {
+    if (isWeeklyParentEvent(event)) {
+        val capacity = selectedWeeklyOccurrenceSummary?.participantCapacity ?: return false
+        return selectedWeeklyOccurrenceSummary.participantCount >= capacity && capacity > 0
+    }
+    if ((event.singleDivision || preferredDivisionId == null) && overviewParticipantSummary != null) {
+        val capacity = overviewParticipantSummary.participantCapacity
+        if (capacity != null && capacity > 0) {
+            return overviewParticipantSummary.participantCount >= capacity
+        }
+    }
+
+    val selectedDivision = resolveSelectedDivisionDetail(event, preferredDivisionId)
+    val maxParticipants = if (event.divisions.isEmpty()) {
+        event.maxParticipants.takeIf { value -> value > 0 }
+    } else {
+        selectedDivision?.maxParticipants
+    }
+
+    if (maxParticipants == null || maxParticipants <= 0) {
+        return false
+    }
+
+    val participantCount = if (event.teamSignup) {
+        countTeamSignupParticipantsForCapacity(
+            event = event,
+            teams = teams,
+            selectedDivision = selectedDivision,
+        )
+    } else {
+        event.playerIds.size
+    }
+
+    return participantCount >= maxParticipants
 }

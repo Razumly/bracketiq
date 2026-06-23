@@ -6,6 +6,7 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.repositories.EventParticipantsSummary
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
 import com.razumly.mvp.core.data.util.buildEventDivisionId
 import kotlin.test.Test
@@ -151,6 +152,61 @@ class EventOverviewCapacityTest {
         )
 
         assertEquals(0, countTeamSignupParticipantsForCapacity(event, teams, selectedDivision))
+    }
+
+    @Test
+    fun eventIsFullForRegistration_uses_weekly_overview_and_division_capacity_sources() {
+        val weeklyEvent = Event(
+            eventType = EventType.WEEKLY_EVENT,
+            timeSlotIds = listOf("slot-1"),
+            maxParticipants = 10,
+        )
+        assertEquals(
+            true,
+            eventIsFullForRegistration(
+                event = weeklyEvent,
+                teams = emptyList(),
+                preferredDivisionId = null,
+                selectedWeeklyOccurrenceSummary = WeeklyOccurrenceSummary(
+                    participantCount = 4,
+                    participantCapacity = 4,
+                ),
+            ),
+        )
+        assertEquals(false, eventIsFullForRegistration(weeklyEvent, emptyList(), null))
+
+        val overviewEvent = Event(
+            teamSignup = false,
+            singleDivision = true,
+            maxParticipants = 20,
+        )
+        assertEquals(
+            true,
+            eventIsFullForRegistration(
+                event = overviewEvent,
+                teams = emptyList(),
+                preferredDivisionId = null,
+                overviewParticipantSummary = EventParticipantsSummary(
+                    participantCount = 6,
+                    participantCapacity = 6,
+                ),
+            ),
+        )
+
+        val teamCapacityEvent = Event(
+            teamSignup = true,
+            singleDivision = true,
+            teamIds = listOf("team-1", "team-2"),
+            maxParticipants = 2,
+        )
+        assertEquals(
+            true,
+            eventIsFullForRegistration(
+                event = teamCapacityEvent,
+                teams = listOf(buildTeamWithPlayers("team-1"), buildTeamWithPlayers("team-2")),
+                preferredDivisionId = null,
+            ),
+        )
     }
 
     private fun buildTeamWithPlayers(
