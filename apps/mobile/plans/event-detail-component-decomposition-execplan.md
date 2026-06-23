@@ -66,6 +66,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Move current-user membership, payment-pending flags, captain state, and resolved team state into `EventMembershipCoordinator` with focused tests.
   - [x] (2026-06-22) Move selected division, division team map, and filtered division match map into `EventDivisionContentCoordinator` with focused tests.
   - [x] (2026-06-22) Move bracket round state, losers-bracket toggle state, and round-building traversal into `EventBracketRoundsCoordinator` with focused tests.
+  - [x] (2026-06-22) Move sports catalog state, load-error reporting decisions, sport lookup, and edit-draft sport transitions into `EventSportsCatalogCoordinator` with focused tests.
 - [ ] Run focused event-detail regression tests and final compile/build validation.
 
 ## Surprises & Discoveries
@@ -269,6 +270,8 @@ The forty-fourth implementation milestone extracts current-user membership state
 The forty-fifth implementation milestone extracts division content state coordination. `EventDivisionContentCoordinator.kt` now owns selected division state, selected-division restoration, division team maps, and filtered division match maps, including linked-match filtering and multi-division normalization. `DefaultEventDetailComponent` still owns event/relation observation, bracket round generation, match-edit round refreshes, league standings loads, and participant mutation side effects. `EventDetailComponent.kt` dropped to 5,564 lines after this milestone.
 
 The forty-sixth implementation milestone extracts bracket round presentation coordination. `EventBracketRoundsCoordinator.kt` now owns bracket round state, losers-bracket toggle state, round refreshing, and the existing bracket traversal logic used by both live division rounds and editable match rounds. `DefaultEventDetailComponent` still owns match-edit permissions, selected event/division context, repository calls, and notification side effects, but no longer owns `_rounds`, `_losersBracket`, or private bracket traversal helpers. `EventDetailComponent.kt` dropped to 5,475 lines after this milestone.
+
+The forty-seventh implementation milestone extracts sports catalog state coordination. `EventSportsCatalogCoordinator.kt` now owns sports list state, division type parameters, catalog-loaded tracking, report-error carryover while a load is active, sport lookup for template creation, and sport-rule/official-staffing transitions used when edit drafts change sport. `DefaultEventDetailComponent` still owns the sports repository calls and coroutine job lifecycle, but no longer owns `_sports`, `_divisionTypeParameters`, catalog-loaded flags, report-error flags, or local sport lookup/transition helpers. `EventDetailComponent.kt` dropped to 5,446 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. Registration coordination and participant/invite coordination are now complete; the remaining work is to keep thinning `DefaultEventDetailComponent` around lower-risk orchestration seams, then run final focused regression and build validation.
 
@@ -1420,6 +1423,32 @@ Forty-sixth milestone line-count evidence:
      107 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventBracketRoundsCoordinatorTest.kt
     1498 plans/event-detail-component-decomposition-execplan.md
 
+Sports catalog coordinator first focused test run caught a fixture mismatch:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventSportsCatalogCoordinatorTest*" --tests "*EventSportRulesHelpersTest*" --tests "*EventTemplateCreateBuilderTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 1
+    Result: `EventSportsCatalogCoordinatorTest` expected set-scoring sport rules on a default event type, but sport rules only apply to league and tournament events.
+    Fix: update the test fixture to use a league event before asserting set-rule application.
+
+Sports catalog coordinator focused tests passed after fixture fix:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventSportsCatalogCoordinatorTest*" --tests "*EventSportRulesHelpersTest*" --tests "*EventTemplateCreateBuilderTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 20s; 43 actionable tasks: 6 executed, 37 up-to-date.
+
+Sports catalog coordinator common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 10s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Forty-seventh milestone line-count evidence:
+
+    5446 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+      65 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventSportsCatalogCoordinator.kt
+      77 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventSportsCatalogCoordinatorTest.kt
+    1528 plans/event-detail-component-decomposition-execplan.md
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -1496,3 +1525,4 @@ Revision Note (2026-06-22): Recorded the edit draft coordinator slice, focused t
 Revision Note (2026-06-22): Recorded the membership coordinator slice, focused tests, test-helper fix, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the division content coordinator slice, focused tests, compile fix, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the bracket rounds coordinator slice, focused tests, expectation fix, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded the sports catalog coordinator slice, focused tests, fixture fix, compile checks, and line-count impact.

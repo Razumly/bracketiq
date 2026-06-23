@@ -33,8 +33,6 @@ import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.canManageEventsForViewer
 import com.razumly.mvp.core.data.dataTypes.isPaymentPending
 import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
-import com.razumly.mvp.core.data.dataTypes.shouldReplaceOfficialPositionsWithSportDefaults
-import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
@@ -717,8 +715,7 @@ class DefaultEventDetailComponent(
     override val leagueDivisionStandingsLoading = leagueStandingsCoordinator.divisionStandingsLoading
     override val leagueStandingsConfirming = leagueStandingsCoordinator.standingsConfirming
     private var sportsLoadJob: Job? = null
-    private var sportsCatalogLoaded = false
-    private var reportSportsLoadErrors = false
+    private val sportsCatalogCoordinator = EventSportsCatalogCoordinator()
 
     private val eventRelations: StateFlow<EventWithRelations> =
         eventRepository.getCachedEventWithRelationsFlow(event.id).map { result ->
@@ -732,10 +729,8 @@ class DefaultEventDetailComponent(
             EventWithRelations(event, null)
         )
 
-    private val _sports = MutableStateFlow<List<Sport>>(emptyList())
-    override val sports = _sports.asStateFlow()
-    private val _divisionTypeParameters = MutableStateFlow(DivisionTypeParameters())
-    override val divisionTypeParameters = _divisionTypeParameters.asStateFlow()
+    override val sports = sportsCatalogCoordinator.sports
+    override val divisionTypeParameters = sportsCatalogCoordinator.divisionTypeParameters
 
     override val selectedEvent: StateFlow<Event> =
         eventRelations.map { it.event }.stateIn(scope, SharingStarted.Eagerly, event)
@@ -931,7 +926,7 @@ class DefaultEventDetailComponent(
         eventRelationPlayers,
         eventMatches,
         eventTeams,
-        _sports,
+        sportsCatalogCoordinator.sports,
     ) { selected, players, matches, teams, sports ->
         val sport = selected.sportId
             ?.takeIf(String::isNotBlank)
@@ -1799,45 +1794,44 @@ class DefaultEventDetailComponent(
     }
 
     private fun loadSports(reportErrors: Boolean) {
-        reportSportsLoadErrors = reportSportsLoadErrors || reportErrors
-        if (sportsLoadJob?.isActive == true) {
+        val loadInProgress = sportsLoadJob?.isActive == true
+        if (!sportsCatalogCoordinator.prepareLoad(reportErrors, loadInProgress)) {
             return
         }
         sportsLoadJob = scope.launch {
             var loadedSports = false
             var loadedDivisionTypes = false
             sportsRepository.getSports()
-                .onSuccess {
+                .onSuccess { sports ->
                     loadedSports = true
-                    _sports.value = it
+                    sportsCatalogCoordinator.applySportsSuccess(sports)
                     if (editDraftCoordinator.isEditing.value) {
                         editDraftCoordinator.updateEditedEvent { previous ->
-                            syncOfficialStaffingForSportTransition(
+                            sportsCatalogCoordinator.syncOfficialStaffingForSportTransition(
                                 previous = previous,
-                                updated = previous.withSportRules(_sports.value),
+                                updated = previous,
                             )
                         }
                     }
                 }
                 .onFailure {
                     Napier.w("Failed to load sports.", it)
-                    if (reportSportsLoadErrors || editDraftCoordinator.isEditing.value) {
+                    if (sportsCatalogCoordinator.shouldReportLoadErrors(editDraftCoordinator.isEditing.value)) {
                         _errorState.value = ErrorMessage("Failed to load sports: ${it.userMessage()}")
                     }
                 }
             sportsRepository.getDivisionTypeParameters()
-                .onSuccess {
+                .onSuccess { parameters ->
                     loadedDivisionTypes = true
-                    _divisionTypeParameters.value = it
+                    sportsCatalogCoordinator.applyDivisionTypeParametersSuccess(parameters)
                 }
                 .onFailure {
                     Napier.w("Failed to load division options.", it)
-                    if (reportSportsLoadErrors || editDraftCoordinator.isEditing.value) {
+                    if (sportsCatalogCoordinator.shouldReportLoadErrors(editDraftCoordinator.isEditing.value)) {
                         _errorState.value = ErrorMessage("Failed to load division options: ${it.userMessage()}")
                     }
                 }
-            sportsCatalogLoaded = loadedSports && loadedDivisionTypes
-            reportSportsLoadErrors = false
+            sportsCatalogCoordinator.finishLoad(loadedSports, loadedDivisionTypes)
         }
     }
 
@@ -3835,15 +3829,15 @@ class DefaultEventDetailComponent(
         if (editDraftCoordinator.isEditing.value == enabled) {
             return
         }
-        if (enabled && !sportsCatalogLoaded) {
+        if (enabled && !sportsCatalogCoordinator.isCatalogLoaded()) {
             loadSports(reportErrors = true)
         }
         // Initialize or reset the draft from the latest selected event when mode changes.
         val selected = selectedEvent.value
-        val seededEvent = if (enabled && _sports.value.isNotEmpty()) {
-            syncOfficialStaffingForSportTransition(
+        val seededEvent = if (enabled && sportsCatalogCoordinator.currentSports().isNotEmpty()) {
+            sportsCatalogCoordinator.syncOfficialStaffingForSportTransition(
                 previous = selected,
-                updated = selected.withSportRules(_sports.value),
+                updated = selected,
             )
         } else {
             selected
@@ -3873,22 +3867,18 @@ class DefaultEventDetailComponent(
 
     override fun editEventField(update: Event.() -> Event) {
         editDraftCoordinator.updateEditedEvent { previous ->
-            syncOfficialStaffingForSportTransition(
+            sportsCatalogCoordinator.syncOfficialStaffingForSportTransition(
                 previous = previous,
-                updated = previous
-                    .update()
-                    .withSportRules(_sports.value),
+                updated = previous.update(),
             )
         }
     }
 
     override fun editTournamentField(update: Event.() -> Event) {
         editDraftCoordinator.updateEditedEvent { previous ->
-            syncOfficialStaffingForSportTransition(
+            sportsCatalogCoordinator.syncOfficialStaffingForSportTransition(
                 previous = previous,
-                updated = previous
-                    .update()
-                    .withSportRules(_sports.value),
+                updated = previous.update(),
             )
         }
     }
@@ -4331,7 +4321,7 @@ class DefaultEventDetailComponent(
                 EventTemplateCreateInput(
                     sourceEvent = sourceEvent,
                     currentUserId = currentUser.value.id,
-                    sourceSport = resolveSport(sourceEvent.sportId),
+                    sourceSport = sportsCatalogCoordinator.sportForId(sourceEvent.sportId),
                     isEditing = editDraftCoordinator.isEditing.value,
                     editableFields = editDraftCoordinator.editableFields.value,
                     relationFields = eventFields.value.map { relation -> relation.field },
@@ -4613,25 +4603,6 @@ class DefaultEventDetailComponent(
 
     override fun onTypeSelected(type: EventType) {
         editEventField { copy(eventType = type) }
-    }
-
-    private fun resolveSport(sportId: String?): Sport? = sportId
-        ?.trim()
-        ?.takeIf(String::isNotBlank)
-        ?.let { selectedSportId -> _sports.value.firstOrNull { it.id == selectedSportId } }
-
-    private fun syncOfficialStaffingForSportTransition(previous: Event, updated: Event): Event {
-        val previousSport = resolveSport(previous.sportId)
-        val nextSport = resolveSport(updated.sportId)
-        val shouldReplaceDefaults = previous.sportId != updated.sportId &&
-            previous.shouldReplaceOfficialPositionsWithSportDefaults(
-                previousSport = previousSport,
-                nextSport = nextSport,
-            )
-        return updated.syncOfficialStaffing(
-            sport = nextSport,
-            replacePositionsWithSportDefaults = shouldReplaceDefaults,
-        )
     }
 
     private fun generateRounds() {
