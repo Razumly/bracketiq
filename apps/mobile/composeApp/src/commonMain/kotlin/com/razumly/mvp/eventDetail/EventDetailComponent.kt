@@ -84,7 +84,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -102,7 +101,6 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlin.time.Clock
-import kotlin.time.Duration.Companion.seconds
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
@@ -534,6 +532,7 @@ class DefaultEventDetailComponent(
     private val withdrawalActionCoordinator = EventWithdrawalActionCoordinator(registrationFlowCoordinator)
     private val paymentPlanBillingCoordinator = EventPaymentPlanBillingCoordinator()
     private val purchaseIntentCoordinator = EventPurchaseIntentCoordinator(registrationFlowCoordinator)
+    private val signatureExecutionCoordinator = EventSignatureExecutionCoordinator(registrationFlowCoordinator)
     private val joinConfirmationCoordinator = EventJoinConfirmationCoordinator()
     private val eventInviteCoordinator = EventInviteCoordinator()
     override val suggestedUsers = eventInviteCoordinator.suggestedUsers
@@ -2369,7 +2368,35 @@ class DefaultEventDetailComponent(
             return false
         }
 
-        loadSignatureStepsForCurrentContext()
+        signatureExecutionCoordinator.loadSignatureStepsForCurrentContext(
+            eventId = selectedEvent.value.id,
+            getRequiredTeamSignLinks = { targetTeamId, context, childUserId, childUserEmail ->
+                billingRepository.getRequiredTeamSignLinks(
+                    teamId = targetTeamId,
+                    signerContext = context,
+                    childUserId = childUserId,
+                    childUserEmail = childUserEmail,
+                )
+            },
+            getRequiredSignLinks = { targetEventId, context, childUserId, childUserEmail ->
+                billingRepository.getRequiredSignLinks(
+                    eventId = targetEventId,
+                    signerContext = context,
+                    childUserId = childUserId,
+                    childUserEmail = childUserEmail,
+                )
+            },
+            pollBoldSignOperation = { operationId ->
+                billingRepository.pollBoldSignOperation(operationId).map { Unit }
+            },
+            startPolling = { block -> scope.launch { block() } },
+            setError = { message ->
+                _errorState.value = ErrorMessage(message)
+            },
+            logError = { message, throwable ->
+                Napier.e(message, throwable)
+            },
+        )
         return true
     }
 
@@ -2794,175 +2821,44 @@ class DefaultEventDetailComponent(
         teamId: String? = null,
         onReady: suspend () -> Unit,
     ) {
-        registrationFlowCoordinator.startRequiredSignatureFlow(
+        signatureExecutionCoordinator.runActionAfterRequiredSigning(
+            eventId = selectedEvent.value.id,
             signerContext = signerContext,
             child = child,
             currentAccountEmail = userRepository.currentAccount.value.getOrNull()?.email,
             teamId = teamId,
             onReady = onReady,
-        )
-        loadSignatureStepsForCurrentContext()
-    }
-
-    private suspend fun fetchRequiredSignatureStepsForCurrentContext(): Result<List<SignStep>> {
-        if (!registrationFlowCoordinator.hasSignatureContexts()) {
-            return Result.success(emptyList())
-        }
-
-        val target = registrationFlowCoordinator.currentSignatureFetchTarget()
-        val context = target.signerContext
-
-        return target.teamId?.let { teamId ->
-            billingRepository.getRequiredTeamSignLinks(
-                teamId = teamId,
-                signerContext = context,
-                childUserId = target.child?.userId,
-                childUserEmail = target.child?.email,
-            )
-        } ?: billingRepository.getRequiredSignLinks(
-            eventId = selectedEvent.value.id,
-            signerContext = context,
-            childUserId = target.child?.userId,
-            childUserEmail = target.child?.email,
-        )
-    }
-
-    private suspend fun awaitSignatureStepClearance(
-        step: SignStep,
-        operationId: String? = step.operationId,
-    ): Boolean {
-        val normalizedOperationId = operationId?.trim()?.takeIf(String::isNotBlank)
-        if (normalizedOperationId != null) {
-            _errorState.value = ErrorMessage("Waiting for signature sync...")
-            billingRepository.pollBoldSignOperation(normalizedOperationId).getOrElse { throwable ->
-                Napier.e("Failed to poll BoldSign operation.", throwable)
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Failed to confirm signature status.")
+            getRequiredTeamSignLinks = { targetTeamId, context, childUserId, childUserEmail ->
+                billingRepository.getRequiredTeamSignLinks(
+                    teamId = targetTeamId,
+                    signerContext = context,
+                    childUserId = childUserId,
+                    childUserEmail = childUserEmail,
                 )
-                clearPendingSignatureFlow()
-                return false
-            }
-        }
-
-        val intervalMillis = 2.seconds.inWholeMilliseconds
-        val timeoutMillis = 60.seconds.inWholeMilliseconds
-        var elapsedMillis = 0L
-
-        while (elapsedMillis <= timeoutMillis) {
-            _errorState.value = ErrorMessage("Waiting for signature sync...")
-            val refreshedSteps = fetchRequiredSignatureStepsForCurrentContext().getOrElse { throwable ->
-                Napier.e("Failed to refresh required signing documents.", throwable)
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Failed to confirm signature status.")
+            },
+            getRequiredSignLinks = { targetEventId, context, childUserId, childUserEmail ->
+                billingRepository.getRequiredSignLinks(
+                    eventId = targetEventId,
+                    signerContext = context,
+                    childUserId = childUserId,
+                    childUserEmail = childUserEmail,
                 )
-                clearPendingSignatureFlow()
-                return false
-            }
-
-            if (refreshedSteps.none { refreshedStep -> pendingSignatureStepsMatch(refreshedStep, step) }) {
-                registrationFlowCoordinator.replacePendingSignatureSteps(refreshedSteps)
-                return true
-            }
-
-            if (elapsedMillis >= timeoutMillis) {
-                break
-            }
-
-            delay(intervalMillis)
-            elapsedMillis += intervalMillis
-        }
-
-        clearPendingSignatureFlow()
-        _errorState.value = ErrorMessage("Document synchronization is delayed. Please try again shortly.")
-        return false
-    }
-
-    private suspend fun loadSignatureStepsForCurrentContext() {
-        if (!registrationFlowCoordinator.hasSignatureContexts()) {
-            clearPendingSignatureFlow()
-            return
-        }
-
-        fetchRequiredSignatureStepsForCurrentContext().onFailure { throwable ->
-            Napier.e("Failed to load required signing documents.", throwable)
-            _errorState.value = ErrorMessage(
-                "Unable to load required documents: ${throwable.userMessage("Unknown error")}"
-            )
-        }.onSuccess { allSteps ->
-            if (allSteps.isEmpty()) {
-                advanceSigningContextOrComplete()
-                return@onSuccess
-            }
-
-            registrationFlowCoordinator.replacePendingSignatureSteps(allSteps)
-            processNextSignatureStep()
-        }
-    }
-
-    private suspend fun advanceSigningContextOrComplete() {
-        registrationFlowCoordinator.clearPendingSignatureSteps()
-
-        if (registrationFlowCoordinator.advanceSignatureContext()) {
-            loadSignatureStepsForCurrentContext()
-            return
-        }
-
-        val action = registrationFlowCoordinator.completePendingSignatureFlow()
-        action?.invoke()
-    }
-
-    private suspend fun processNextSignatureStep() {
-        registrationFlowCoordinator.clearPendingSignaturePollJob()
-
-        val currentStepState = registrationFlowCoordinator.currentPendingSignatureStep()
-        if (currentStepState == null) {
-            advanceSigningContextOrComplete()
-            return
-        }
-        val currentStep = currentStepState.step
-
-        if (currentStep.isTextStep()) {
-            registrationFlowCoordinator.showTextSignaturePrompt(
-                TextSignaturePromptState(
-                    step = currentStep,
-                    currentStep = currentStepState.currentStep,
-                    totalSteps = currentStepState.totalSteps,
-                )
-            )
-            return
-        }
-
-        val signingUrl = currentStep.resolvedSigningUrl()
-        if (signingUrl.isNullOrBlank()) {
-            clearPendingSignatureFlow()
-            _errorState.value = ErrorMessage(
-                "A required document is missing a signing URL."
-            )
-            return
-        }
-
-        registrationFlowCoordinator.showWebSignaturePrompt(
-            WebSignaturePromptState(
-                step = currentStep,
-                url = signingUrl,
-                currentStep = currentStepState.currentStep,
-                totalSteps = currentStepState.totalSteps,
-            )
-        )
-
-        _errorState.value = ErrorMessage("Waiting for signature sync...")
-        registrationFlowCoordinator.replacePendingSignaturePollJob(
-            scope.launch {
-                if (awaitSignatureStepClearance(currentStep)) {
-                    registrationFlowCoordinator.clearWebSignaturePrompt()
-                    processNextSignatureStep()
-                }
-            }
+            },
+            pollBoldSignOperation = { operationId ->
+                billingRepository.pollBoldSignOperation(operationId).map { Unit }
+            },
+            startPolling = { block -> scope.launch { block() } },
+            setError = { message ->
+                _errorState.value = ErrorMessage(message)
+            },
+            logError = { message, throwable ->
+                Napier.e(message, throwable)
+            },
         )
     }
 
     private fun clearPendingSignatureFlow() {
-        registrationFlowCoordinator.clearPendingSignatureFlow()
+        signatureExecutionCoordinator.clearPendingSignatureFlow()
     }
 
     private fun processPurchaseIntent(intent: PurchaseIntent) {
@@ -4215,44 +4111,56 @@ class DefaultEventDetailComponent(
     }
 
     override fun confirmTextSignature() {
-        val prompt = registrationFlowCoordinator.textSignaturePrompt.value ?: return
-
         scope.launch {
-            loadingHandler.showLoading("Recording signature ...")
-
-            val documentId = prompt.step.resolvedDocumentId()
-                ?: "mobile-text-${prompt.step.templateId}-${Clock.System.now().toEpochMilliseconds()}"
-
-            val signatureTarget = registrationFlowCoordinator.currentSignatureRecordingTarget()
-            val recordSignatureResult = signatureTarget.teamId?.let { teamId ->
-                billingRepository.recordTeamSignature(
-                    teamId = teamId,
-                    templateId = prompt.step.templateId,
-                    documentId = documentId,
-                    type = prompt.step.type,
-                    signerContext = signatureTarget.signerContext,
-                    childUserId = signatureTarget.child?.userId,
-                )
-            } ?: billingRepository.recordSignature(
+            signatureExecutionCoordinator.confirmTextSignature(
                 eventId = selectedEvent.value.id,
-                templateId = prompt.step.templateId,
-                documentId = documentId,
-                type = prompt.step.type,
+                recordTeamSignature = { teamId, templateId, documentId, type, signerContext, childUserId ->
+                    billingRepository.recordTeamSignature(
+                        teamId = teamId,
+                        templateId = templateId,
+                        documentId = documentId,
+                        type = type,
+                        signerContext = signerContext,
+                        childUserId = childUserId,
+                    ).map { Unit }
+                },
+                recordSignature = { eventId, templateId, documentId, type ->
+                    billingRepository.recordSignature(
+                        eventId = eventId,
+                        templateId = templateId,
+                        documentId = documentId,
+                        type = type,
+                    ).map { Unit }
+                },
+                getRequiredTeamSignLinks = { targetTeamId, context, childUserId, childUserEmail ->
+                    billingRepository.getRequiredTeamSignLinks(
+                        teamId = targetTeamId,
+                        signerContext = context,
+                        childUserId = childUserId,
+                        childUserEmail = childUserEmail,
+                    )
+                },
+                getRequiredSignLinks = { targetEventId, context, childUserId, childUserEmail ->
+                    billingRepository.getRequiredSignLinks(
+                        eventId = targetEventId,
+                        signerContext = context,
+                        childUserId = childUserId,
+                        childUserEmail = childUserEmail,
+                    )
+                },
+                pollBoldSignOperation = { operationId ->
+                    billingRepository.pollBoldSignOperation(operationId).map { Unit }
+                },
+                startPolling = { block -> scope.launch { block() } },
+                showLoading = loadingHandler::showLoading,
+                hideLoading = loadingHandler::hideLoading,
+                setError = { message ->
+                    _errorState.value = ErrorMessage(message)
+                },
+                logError = { message, throwable ->
+                    Napier.e(message, throwable)
+                },
             )
-
-            recordSignatureResult.onFailure { throwable ->
-                Napier.e("Failed to record signature.", throwable)
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Failed to record signature.")
-                )
-            }.onSuccess {
-                registrationFlowCoordinator.clearTextSignaturePrompt()
-                if (awaitSignatureStepClearance(prompt.step)) {
-                    processNextSignatureStep()
-                }
-            }
-
-            loadingHandler.hideLoading()
         }
     }
 
