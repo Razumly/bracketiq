@@ -1380,72 +1380,92 @@ fun MatchDetailScreen(
                 }
             }
 
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                tonalElevation = 3.dp,
-                shadowElevation = 6.dp,
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Button(
-                            onClick = mapComponent::toggleMap,
-                            modifier = Modifier.onGloballyPositioned {
-                                mapRevealCenter = it.boundsInWindow().center
-                            }
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Text(fieldLocationLabel)
-                                Icon(
-                                    imageVector = Icons.Default.Place,
-                                    contentDescription = "Show field on map",
-                                )
-                            }
-                        }
-                        Button(
-                            onClick = { showMatchDetails = !showMatchDetails },
-                        ) {
-                            Text(if (showMatchDetails) "Hide Details" else "Match Details")
-                        }
-                    }
-                    locationTarget.warningDistanceMiles?.let { distance ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Warning,
-                                contentDescription = "Field differs from event location",
-                                tint = MaterialTheme.colorScheme.error
-                            )
-                            Text(
-                                text = "${roundMiles(distance)} mi from event",
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.padding(start = 4.dp),
-                            )
-                        }
-                    }
-                }
-            }
+            MatchDetailBottomActions(
+                fieldLocationLabel = fieldLocationLabel,
+                showMatchDetails = showMatchDetails,
+                warningDistanceMiles = locationTarget.warningDistanceMiles,
+                onMapToggle = mapComponent::toggleMap,
+                onMatchDetailsToggle = { showMatchDetails = !showMatchDetails },
+                onMapButtonCenterChanged = { mapRevealCenter = it },
+            )
         }
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun MatchDetailBottomActions(
+    fieldLocationLabel: String,
+    showMatchDetails: Boolean,
+    warningDistanceMiles: Double?,
+    onMapToggle: () -> Unit,
+    onMatchDetailsToggle: () -> Unit,
+    onMapButtonCenterChanged: (Offset) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        tonalElevation = 3.dp,
+        shadowElevation = 6.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Button(
+                    onClick = onMapToggle,
+                    modifier = Modifier.onGloballyPositioned {
+                        onMapButtonCenterChanged(it.boundsInWindow().center)
+                    },
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(fieldLocationLabel)
+                        Icon(
+                            imageVector = Icons.Default.Place,
+                            contentDescription = "Show field on map",
+                        )
+                    }
+                }
+                Button(
+                    onClick = onMatchDetailsToggle,
+                ) {
+                    Text(if (showMatchDetails) "Hide Details" else "Match Details")
+                }
+            }
+            warningDistanceMiles?.let { distance ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = "Field differs from event location",
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                    Text(
+                        text = "${roundMiles(distance)} mi from event",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
+                }
+            }
+        }
     }
 }
 
