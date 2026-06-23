@@ -63,6 +63,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Move match editing state, staged create/delete tracking, and match edit dialogs into `EventMatchEditingCoordinator` with focused tests.
   - [x] (2026-06-22) Move weekly occurrence selection, summary cache, and overview participant summary state into `EventWeeklyOccurrenceCoordinator` with focused tests.
   - [x] (2026-06-22) Move event edit draft state, field resizing, league slot edits, and scoring config mutation into `EventEditDraftCoordinator` with focused tests.
+  - [x] (2026-06-22) Move current-user membership, payment-pending flags, captain state, and resolved team state into `EventMembershipCoordinator` with focused tests.
 - [ ] Run focused event-detail regression tests and final compile/build validation.
 
 ## Surprises & Discoveries
@@ -260,6 +261,8 @@ The forty-first implementation milestone extracts match editing coordination. `E
 The forty-second implementation milestone extracts weekly occurrence state and summary coordination. `EventWeeklyOccurrenceCoordinator.kt` now owns selected occurrence state, selected occurrence summaries, weekly summary cache, overview participant summary state, selection validation, selected-start checks, summary remembering, and pending prefetch filtering. `DefaultEventDetailComponent` still owns repository sync, prefetch job lifecycle, participant sync side effects, loading/error state, and registration/participant action calls. `EventDetailComponent.kt` dropped to 5,731 lines after this milestone.
 
 The forty-third implementation milestone extracts edit draft state coordination. `EventEditDraftCoordinator.kt` now owns edit-mode state exposure, edited event draft state, editable field drafts, field-count resizing, league slot drafts, league scoring config mutation, readonly draft refresh, edit-mode seeding, edited-event resync, rental draft application, and prepared-field application. `DefaultEventDetailComponent` still owns permission checks, sports loading, official-staff sport transition decisions, rental-resource repository calls, template creation side effects, update repository calls, and loading/error state. `EventDetailComponent.kt` dropped to 5,649 lines after this milestone.
+
+The forty-fourth implementation milestone extracts current-user membership state coordination. `EventMembershipCoordinator.kt` now owns current user event membership state, registration payment pending/failed flags, waitlist and free-agent state, captain state, resolved user-team state, cached-registration membership resolution, weekly-selection clearing, and ordered team-id fallback selection for snapshot membership refresh. `DefaultEventDetailComponent` still owns repository team fetches, withdraw-target loading, payment-sheet handling, join confirmation polling, and mutation refresh side effects. `EventDetailComponent.kt` dropped to 5,579 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. Registration coordination and participant/invite coordination are now complete; the remaining work is to keep thinning `DefaultEventDetailComponent` around lower-risk orchestration seams, then run final focused regression and build validation.
 
@@ -1333,6 +1336,32 @@ Forty-third milestone line-count evidence:
      190 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventEditDraftCoordinatorTest.kt
     1408 plans/event-detail-component-decomposition-execplan.md
 
+Membership coordinator first focused test run caught a test helper constructor issue:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventMembershipCoordinatorTest*" --tests "*EventWithdrawTargetHelpersTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 1
+    Result: `EventMembershipCoordinatorTest` used obsolete `Event` constructor names `playerIds`, `waitList`, and `freeAgents`.
+    Fix: update the test helper to use `userIds`, `waitListIds`, and `freeAgentIds`.
+
+Membership coordinator focused tests passed after test helper fix:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventMembershipCoordinatorTest*" --tests "*EventWithdrawTargetHelpersTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 27s; 43 actionable tasks: 6 executed, 37 up-to-date.
+
+Membership coordinator common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 15s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Forty-fourth milestone line-count evidence:
+
+    5579 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     248 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventMembershipCoordinator.kt
+     178 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventMembershipCoordinatorTest.kt
+    1438 plans/event-detail-component-decomposition-execplan.md
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -1406,3 +1435,4 @@ Revision Note (2026-06-22): Recorded the template creation builder slice, focuse
 Revision Note (2026-06-22): Recorded the match editing coordinator slice, focused tests, related bracket/match regression tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the weekly occurrence coordinator slice, focused tests, compile checks, overview capacity regression, and line-count impact.
 Revision Note (2026-06-22): Recorded the edit draft coordinator slice, focused tests, related validation/rental regressions, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded the membership coordinator slice, focused tests, test-helper fix, compile checks, and line-count impact.

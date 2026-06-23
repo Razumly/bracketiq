@@ -72,7 +72,6 @@ import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.data.repositories.userMessage
-import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.presentation.INavigationHandler
@@ -1088,7 +1087,15 @@ class DefaultEventDetailComponent(
     private val _scheduleTrackedUserIds = MutableStateFlow<Set<String>>(emptySet())
     override val scheduleTrackedUserIds = _scheduleTrackedUserIds.asStateFlow()
 
-    private val _usersTeam = MutableStateFlow<TeamWithPlayers?>(null)
+    private val membershipCoordinator = EventMembershipCoordinator(
+        initialEvent = event,
+        initialCurrentUserId = currentUser.value.id,
+        initialCurrentUserTeamIds = currentUser.value.teamIds
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .toSet(),
+        initialWeeklyParentWithoutSelection = isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() == null,
+    )
 
     override val validTeams = combine(
         _userTeams,
@@ -1136,24 +1143,12 @@ class DefaultEventDetailComponent(
         checkEventIsFull(relations.event, relations.teams, division)
     }.stateIn(scope, SharingStarted.Eagerly, checkEventIsFull(event, emptyList(), null))
 
-    private val _isUserInEvent: MutableStateFlow<Boolean> =
-        MutableStateFlow(checkIsUserInEvent(event))
-    override val isUserInEvent = _isUserInEvent.asStateFlow()
-
-    private val _isRegistrationPaymentPending = MutableStateFlow(false)
-    override val isRegistrationPaymentPending = _isRegistrationPaymentPending.asStateFlow()
-
-    private val _isRegistrationPaymentFailed = MutableStateFlow(false)
-    override val isRegistrationPaymentFailed = _isRegistrationPaymentFailed.asStateFlow()
-
-    private val _isUserInWaitlist = MutableStateFlow(checkIsUserWaitListed(event))
-    override val isUserInWaitlist = _isUserInWaitlist.asStateFlow()
-
-    private val _isUserFreeAgent = MutableStateFlow(checkIsUserFreeAgent(event))
-    override val isUserFreeAgent = _isUserFreeAgent.asStateFlow()
-
-    private val _isUserCaptain = MutableStateFlow(checkIsUserCaptain())
-    override val isUserCaptain = _isUserCaptain.asStateFlow()
+    override val isUserInEvent = membershipCoordinator.isUserInEvent
+    override val isRegistrationPaymentPending = membershipCoordinator.isRegistrationPaymentPending
+    override val isRegistrationPaymentFailed = membershipCoordinator.isRegistrationPaymentFailed
+    override val isUserInWaitlist = membershipCoordinator.isUserInWaitlist
+    override val isUserFreeAgent = membershipCoordinator.isUserFreeAgent
+    override val isUserCaptain = membershipCoordinator.isUserCaptain
 
     private val matchEditingCoordinator = EventMatchEditingCoordinator()
     override val isEditingMatches = matchEditingCoordinator.isEditingMatches
@@ -1555,7 +1550,10 @@ class DefaultEventDetailComponent(
                                         ?.any { registration ->
                                             registration.userId == currentUser.value.id && registration.isPaymentPending()
                                         } == true
-                                    _usersTeam.value = refreshedTeam ?: pendingTeam
+                                    membershipCoordinator.setUsersTeam(
+                                        refreshedTeam ?: pendingTeam,
+                                        currentUser.value.id,
+                                    )
                                     refreshCurrentUserMembershipState(selectedEvent.value)
                                     _errorState.value = ErrorMessage(
                                         if (paymentPending) {
@@ -1578,7 +1576,7 @@ class DefaultEventDetailComponent(
                                 if (!userJoinedSuccessfully) {
                                     _errorState.value =
                                         ErrorMessage("Payment submitted, but event registration confirmation is still pending. Please reload event.")
-                                } else if (_isRegistrationPaymentPending.value) {
+                                } else if (membershipCoordinator.isRegistrationPaymentPending.value) {
                                     _errorState.value = ErrorMessage(
                                         "Payment submitted. Registration is pending until the bank payment clears."
                                     )
@@ -2599,7 +2597,10 @@ class DefaultEventDetailComponent(
                 return
             }
 
-            _usersTeam.value = teamRepository.getTeamWithPlayers(teamId).getOrNull() ?: team
+            membershipCoordinator.setUsersTeam(
+                teamRepository.getTeamWithPlayers(teamId).getOrNull() ?: team,
+                currentUser.value.id,
+            )
             refreshCurrentUserMembershipState(selectedEvent.value)
             refreshEventDetails()
             clearCurrentRegistrationProgress()
@@ -2667,7 +2668,7 @@ class DefaultEventDetailComponent(
         scope.launch {
             if (!ensureRegistrationOpen()) return@launch
             if (!ensureEventRegistrationQuestionsAnswered { joinEventAsTeam(team) }) return@launch
-            _usersTeam.value = team
+            membershipCoordinator.setUsersTeam(team, currentUser.value.id)
             registrationFlowCoordinator.clearJoinDialogs()
 
             buildPaymentPlanPreviewDialogState(
@@ -3563,7 +3564,7 @@ class DefaultEventDetailComponent(
             val useTeamWithdrawal = decision.useTeamWithdrawal
             loadingHandler.showLoading("Requesting Refund ...")
             val refundResult = if (useTeamWithdrawal) {
-                val team = _usersTeam.value
+                val team = membershipCoordinator.usersTeam()
                 if (team == null) {
                     Result.failure(IllegalStateException("Unable to resolve your team registration."))
                 } else {
@@ -3632,7 +3633,7 @@ class DefaultEventDetailComponent(
 
             loadingHandler.showLoading("Withdrawing and Refunding ...")
             val refundResult = if (useTeamWithdrawal) {
-                val team = _usersTeam.value
+                val team = membershipCoordinator.usersTeam()
                 if (team == null) {
                     Result.failure(IllegalStateException("Unable to resolve your team registration."))
                 } else {
@@ -3703,7 +3704,7 @@ class DefaultEventDetailComponent(
                 WithdrawTargetMembership.PARTICIPANT -> {
                     if (decision.useTeamWithdrawal) {
                         loadingHandler.showLoading("Team Leaving Event ...")
-                        val team = _usersTeam.value
+                        val team = membershipCoordinator.usersTeam()
                         if (team == null) {
                             Result.failure(IllegalStateException("Unable to resolve your team registration."))
                         } else {
@@ -4854,17 +4855,13 @@ class DefaultEventDetailComponent(
     }
 
     override fun checkIsUserWaitListed(event: Event): Boolean {
-        if (isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() == null) {
-            return false
-        }
-        val cachedState = resolveCachedCurrentUserRegistrationMembership(event)
-        if (cachedState != null) {
-            return cachedState.waitlist
-        }
-        val userTeamIds = currentUserTeamIds()
-        return event.waitList.any { participant ->
-            participant == currentUser.value.id || userTeamIds.contains(participant)
-        }
+        return membershipCoordinator.checkIsUserWaitListed(
+            event = event,
+            currentUserId = currentUser.value.id,
+            currentUserTeamIds = currentUserTeamIds(),
+            cachedMembership = resolveCachedCurrentUserRegistrationMembership(event),
+            weeklyParentWithoutSelection = isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() == null,
+        )
     }
 
     override fun deleteEvent() {
@@ -4973,53 +4970,12 @@ class DefaultEventDetailComponent(
     }
 
     override fun checkIsUserFreeAgent(event: Event): Boolean {
-        if (isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() == null) {
-            return false
-        }
-        val cachedState = resolveCachedCurrentUserRegistrationMembership(event)
-        if (cachedState != null) {
-            return cachedState.freeAgent
-        }
-        val userTeamIds = currentUserTeamIds()
-        return event.freeAgents.any { participant ->
-            participant == currentUser.value.id || userTeamIds.contains(participant)
-        }
-    }
-
-    private fun TeamWithPlayers.isActiveMembershipForUser(userTeamIds: Set<String>): Boolean {
-        val team = team
-        if (team.isPlaceholderSlot()) {
-            return false
-        }
-        val normalizedTeamId = team.id.trim()
-        val parentTeamId = team.parentTeamId?.trim()?.takeIf(String::isNotBlank)
-        return (parentTeamId != null && userTeamIds.contains(parentTeamId)) ||
-            userTeamIds.contains(normalizedTeamId)
-    }
-
-    private fun checkIsUserParticipant(event: Event): Boolean {
-        if (isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() == null) {
-            return false
-        }
-        val cachedState = resolveCachedCurrentUserRegistrationMembership(event)
-        if (cachedState != null) {
-            return cachedState.participant
-        }
-        return isUserParticipantInEventSnapshot(
+        return membershipCoordinator.checkIsUserFreeAgent(
             event = event,
             currentUserId = currentUser.value.id,
             currentUserTeamIds = currentUserTeamIds(),
-        )
-    }
-
-    private fun checkIsUserCaptain(): Boolean {
-        return _usersTeam.value?.team?.captainId == currentUser.value.id ||
-            _usersTeam.value?.team?.managerId == currentUser.value.id
-    }
-
-    private fun checkIsUserInEvent(event: Event): Boolean {
-        return checkIsUserParticipant(event) || checkIsUserFreeAgent(event) || checkIsUserWaitListed(
-            event
+            cachedMembership = resolveCachedCurrentUserRegistrationMembership(event),
+            weeklyParentWithoutSelection = isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() == null,
         )
     }
 
@@ -5027,65 +4983,45 @@ class DefaultEventDetailComponent(
         val weeklyParentWithoutSelection =
             isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() == null
         if (weeklyParentWithoutSelection) {
-            _isUserInEvent.value = false
-            _isRegistrationPaymentPending.value = false
-            _isRegistrationPaymentFailed.value = false
-            _isUserInWaitlist.value = false
-            _isUserFreeAgent.value = false
-            _isUserCaptain.value = false
-            _usersTeam.value = null
+            membershipCoordinator.clearForMissingWeeklySelection()
             registrationFlowCoordinator.clearWithdrawTargets()
             return
         }
 
         val cachedState = resolveCachedCurrentUserRegistrationMembership(event)
         if (cachedState != null) {
-            _isUserInEvent.value = cachedState.participant || cachedState.waitlist || cachedState.freeAgent
-            _isRegistrationPaymentPending.value = cachedState.paymentPending
-            _isRegistrationPaymentFailed.value = cachedState.paymentFailed
-            _isUserInWaitlist.value = cachedState.waitlist
-            _isUserFreeAgent.value = cachedState.freeAgent
-            _usersTeam.value = cachedState.teamId
-                ?.let { teamId -> teamRepository.getTeamWithPlayers(teamId).getOrNull() }
-            _isUserCaptain.value = checkIsUserCaptain()
+            membershipCoordinator.applyCachedMembership(
+                membership = cachedState,
+                team = cachedState.teamId
+                    ?.let { teamId -> teamRepository.getTeamWithPlayers(teamId).getOrNull() },
+                currentUserId = currentUser.value.id,
+            )
             return
         }
 
-        _isUserInEvent.value = checkIsUserInEvent(event)
-        _isRegistrationPaymentPending.value = false
-        _isRegistrationPaymentFailed.value = false
-        _isUserInWaitlist.value = checkIsUserWaitListed(event)
-        _isUserFreeAgent.value = checkIsUserFreeAgent(event)
-        if (_isUserInEvent.value) {
-            val currentTeamIds = currentUserTeamIds()
-            val participantTeamId = matchingParticipantTeamId(event, currentTeamIds)
-            val waitlistedTeamId = event.waitList
-                .map(String::trim)
-                .firstOrNull { teamId -> teamId.isNotBlank() && currentTeamIds.contains(teamId) }
-            val freeAgentTeamId = event.freeAgents
-                .map(String::trim)
-                .firstOrNull { teamId -> teamId.isNotBlank() && currentTeamIds.contains(teamId) }
-            _usersTeam.value =
-                participantTeamId
-                    ?.let { teamId -> teamRepository.getTeamWithPlayers(teamId).getOrNull() }
-                    ?: waitlistedTeamId
-                        ?.let { teamId -> teamRepository.getTeamWithPlayers(teamId).getOrNull() }
-                    ?: freeAgentTeamId
-                        ?.let { teamId -> teamRepository.getTeamWithPlayers(teamId).getOrNull() }
-        } else {
-            _usersTeam.value = null
+        val teamIds = membershipCoordinator.refreshFromSnapshot(
+            event = event,
+            currentUserId = currentUser.value.id,
+            currentUserTeamIds = currentUserTeamIds(),
+        )
+        if (teamIds.isNotEmpty()) {
+            membershipCoordinator.setUsersTeam(
+                teamIds.firstNotNullOfOrNull { teamId ->
+                    teamRepository.getTeamWithPlayers(teamId).getOrNull()
+                },
+                currentUser.value.id,
+            )
         }
-        _isUserCaptain.value = checkIsUserCaptain()
     }
 
     private fun resolveCachedCurrentUserRegistrationMembership(
         event: Event,
     ): CurrentUserRegistrationMembershipState? {
-        return resolveCurrentUserRegistrationMembership(
+        return membershipCoordinator.resolveCachedMembership(
             registrations = cachedCurrentUserRegistrations.value,
             selectedOccurrence = currentWeeklyOccurrenceSelection(),
             currentUserId = currentUser.value.id,
-            currentUserTeamIds = currentUserTeamIds(),
+            profileTeamIds = currentUser.value.teamIds,
             isWeeklyParentEvent = isWeeklyParentEvent(event),
         )
     }
@@ -5150,13 +5086,7 @@ class DefaultEventDetailComponent(
     }
 
     private fun currentUserTeamIds(): Set<String> {
-        val teamIdsFromProfile = currentUser.value.teamIds
-            .map(String::trim)
-            .filter(String::isNotBlank)
-        val activeTeamId = _usersTeam.value?.team?.id
-            ?.trim()
-            ?.takeIf(String::isNotBlank)
-        return (teamIdsFromProfile + listOfNotNull(activeTeamId)).toSet()
+        return membershipCoordinator.currentUserTeamIds(currentUser.value.teamIds)
     }
 
     private fun checkEventIsFull(
@@ -5584,7 +5514,7 @@ class DefaultEventDetailComponent(
     ): Boolean {
         if (confirmationTarget == null) {
             val startTime = Clock.System.now()
-            while (!_isUserInEvent.value) {
+            while (!membershipCoordinator.isUserInEvent.value) {
                 if (Clock.System.now() - startTime > timeoutS) {
                     return false
                 }
