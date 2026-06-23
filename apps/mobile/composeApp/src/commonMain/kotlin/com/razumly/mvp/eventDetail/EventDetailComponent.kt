@@ -59,7 +59,6 @@ import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckoutRequest
 import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
 import com.razumly.mvp.core.data.repositories.EventDetailSyncResult
-import com.razumly.mvp.core.data.repositories.EventParticipantRefundMode
 import com.razumly.mvp.core.data.repositories.EventParticipantManagementSnapshot
 import com.razumly.mvp.core.data.repositories.EventParticipantDivisionWarning
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
@@ -532,6 +531,7 @@ class DefaultEventDetailComponent(
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
     private val registrationFlowCoordinator = EventRegistrationFlowCoordinator()
+    private val withdrawalActionCoordinator = EventWithdrawalActionCoordinator(registrationFlowCoordinator)
     private val joinConfirmationCoordinator = EventJoinConfirmationCoordinator()
     private val eventInviteCoordinator = EventInviteCoordinator()
     override val suggestedUsers = eventInviteCoordinator.suggestedUsers
@@ -3238,227 +3238,103 @@ class DefaultEventDetailComponent(
     }
 
     override fun requestRefund(reason: String, targetUserId: String?) {
-        scope.launch {
-            val event = selectedEvent.value
-            val weeklyOccurrence = if (isWeeklyParentEvent(event)) {
-                requireSelectedWeeklyOccurrence(
-                    event = event,
-                    errorMessage = "Select an occurrence before requesting a refund.",
-                ) ?: return@launch
-            } else {
-                null
-            }
-            val normalizedTargetUserId = registrationFlowCoordinator.normalizedWithdrawalTargetUserId(
-                targetUserId = targetUserId,
-                currentUserId = currentUser.value.id,
-            )
-            val membership = resolveWithdrawTargetMembership(
-                event = event,
-                userId = normalizedTargetUserId,
-            )
-            val decision = registrationFlowCoordinator.prepareWithdrawalAction(
-                event = event,
-                action = WithdrawalActionKind.REQUEST_REFUND,
-                targetUserId = normalizedTargetUserId,
-                currentUserId = currentUser.value.id,
-                membership = membership,
-                weeklyOccurrence = weeklyOccurrence,
-                currentUserIsFreeAgent = checkIsUserFreeAgent(event),
-                eventOrOccurrenceStarted = false,
-            )
-            decision.errorMessage?.let { message ->
-                _errorState.value = ErrorMessage(message)
-                return@launch
-            }
-            val useTeamWithdrawal = decision.useTeamWithdrawal
-            loadingHandler.showLoading("Requesting Refund ...")
-            val refundResult = if (useTeamWithdrawal) {
-                val team = membershipCoordinator.usersTeam()
-                if (team == null) {
-                    Result.failure(IllegalStateException("Unable to resolve your team registration."))
-                } else {
-                    eventRepository.removeTeamFromEvent(
-                        event = event,
-                        teamWithPlayers = team,
-                        refundMode = EventParticipantRefundMode.REQUEST,
-                        refundReason = reason,
-                        occurrence = weeklyOccurrence,
-                    )
-                }
-            } else {
-                billingRepository.leaveAndRefundEvent(
-                    event = event,
-                    reason = reason,
-                    targetUserId = normalizedTargetUserId,
-                )
-            }
-            refundResult.onFailure {
-                _errorState.value = ErrorMessage(it.userMessage())
-            }.onSuccess {
-                loadingHandler.showLoading("Reloading Event")
-                refreshEventAfterParticipantMutation(
-                    eventId = event.id,
-                    warningMessage = "Failed to refresh event after refund request.",
-                )
-            }
-            loadingHandler.hideLoading()
-        }
+        runWithdrawalAction(
+            action = EventWithdrawalExecutionAction.REQUEST_REFUND,
+            targetUserId = targetUserId,
+            refundReason = reason,
+        )
     }
 
     override fun withdrawAndRefund(targetUserId: String?) {
-        scope.launch {
-            val event = selectedEvent.value
-            val weeklyOccurrence = if (isWeeklyParentEvent(event)) {
-                requireSelectedWeeklyOccurrence(
-                    event = event,
-                    errorMessage = "Select an occurrence before refunding this registration.",
-                ) ?: return@launch
-            } else {
-                null
-            }
-            val normalizedTargetUserId = registrationFlowCoordinator.normalizedWithdrawalTargetUserId(
-                targetUserId = targetUserId,
-                currentUserId = currentUser.value.id,
-            )
-            val membership = resolveWithdrawTargetMembership(
-                event = event,
-                userId = normalizedTargetUserId,
-            )
-            val decision = registrationFlowCoordinator.prepareWithdrawalAction(
-                event = event,
-                action = WithdrawalActionKind.WITHDRAW_AND_REFUND,
-                targetUserId = normalizedTargetUserId,
-                currentUserId = currentUser.value.id,
-                membership = membership,
-                weeklyOccurrence = weeklyOccurrence,
-                currentUserIsFreeAgent = checkIsUserFreeAgent(event),
-                eventOrOccurrenceStarted = hasSelectedEventOrOccurrenceStarted(
-                    event = event,
-                    selectedWeeklyOccurrenceStarted = weeklyOccurrenceCoordinator.hasSelectedOccurrenceStarted(Clock.System.now()),
-                ),
-            )
-            decision.errorMessage?.let { message ->
-                _errorState.value = ErrorMessage(message)
-                return@launch
-            }
-            val useTeamWithdrawal = decision.useTeamWithdrawal
-
-            loadingHandler.showLoading("Withdrawing and Refunding ...")
-            val refundResult = if (useTeamWithdrawal) {
-                val team = membershipCoordinator.usersTeam()
-                if (team == null) {
-                    Result.failure(IllegalStateException("Unable to resolve your team registration."))
-                } else {
-                    eventRepository.removeTeamFromEvent(
-                        event = event,
-                        teamWithPlayers = team,
-                        refundMode = EventParticipantRefundMode.AUTO,
-                        occurrence = weeklyOccurrence,
-                    )
-                }
-            } else {
-                billingRepository.leaveAndRefundEvent(
-                    event = event,
-                    reason = "",
-                    targetUserId = normalizedTargetUserId,
-                )
-            }
-
-            refundResult.onFailure {
-                _errorState.value = ErrorMessage(it.userMessage())
-            }.onSuccess {
-                loadingHandler.showLoading("Reloading Event")
-                refreshEventAfterParticipantMutation(
-                    eventId = event.id,
-                    warningMessage = "Failed to refresh event after refund.",
-                )
-            }
-            loadingHandler.hideLoading()
-        }
+        runWithdrawalAction(
+            action = EventWithdrawalExecutionAction.WITHDRAW_AND_REFUND,
+            targetUserId = targetUserId,
+        )
     }
 
     override fun leaveEvent(targetUserId: String?) {
+        runWithdrawalAction(
+            action = EventWithdrawalExecutionAction.LEAVE,
+            targetUserId = targetUserId,
+        )
+    }
+
+    private fun runWithdrawalAction(
+        action: EventWithdrawalExecutionAction,
+        targetUserId: String?,
+        refundReason: String = "",
+    ) {
         scope.launch {
             val event = selectedEvent.value
-            val weeklyOccurrence = if (isWeeklyParentEvent(event)) {
-                requireSelectedWeeklyOccurrence(
+            val eventOrOccurrenceStarted = action != EventWithdrawalExecutionAction.REQUEST_REFUND &&
+                hasSelectedEventOrOccurrenceStarted(
                     event = event,
-                    errorMessage = "Select an occurrence before leaving.",
-                ) ?: return@launch
-            } else {
-                null
-            }
-            val normalizedTargetUserId = registrationFlowCoordinator.normalizedWithdrawalTargetUserId(
-                targetUserId = targetUserId,
-                currentUserId = currentUser.value.id,
-            )
-            val membership = resolveWithdrawTargetMembership(
-                event = event,
-                userId = normalizedTargetUserId,
-            )
-            val decision = registrationFlowCoordinator.prepareWithdrawalAction(
-                event = event,
-                action = WithdrawalActionKind.LEAVE,
-                targetUserId = normalizedTargetUserId,
-                currentUserId = currentUser.value.id,
-                membership = membership,
-                weeklyOccurrence = weeklyOccurrence,
-                currentUserIsFreeAgent = checkIsUserFreeAgent(event),
-                eventOrOccurrenceStarted = hasSelectedEventOrOccurrenceStarted(
-                    event = event,
-                    selectedWeeklyOccurrenceStarted = weeklyOccurrenceCoordinator.hasSelectedOccurrenceStarted(Clock.System.now()),
-                ),
-            )
-            decision.errorMessage?.let { message ->
-                _errorState.value = ErrorMessage(message)
-                return@launch
-            }
-            val resolvedMembership = decision.membership ?: return@launch
-
-            val result = when (resolvedMembership) {
-                WithdrawTargetMembership.PARTICIPANT -> {
-                    if (decision.useTeamWithdrawal) {
-                        loadingHandler.showLoading("Team Leaving Event ...")
-                        val team = membershipCoordinator.usersTeam()
-                        if (team == null) {
-                            Result.failure(IllegalStateException("Unable to resolve your team registration."))
-                        } else {
-                            eventRepository.removeTeamFromEvent(
-                                event = event,
-                                teamWithPlayers = team,
-                                occurrence = weeklyOccurrence,
-                            )
-                        }
-                    } else {
-                        loadingHandler.showLoading("Leaving Event ...")
-                        eventRepository.removeCurrentUserFromEvent(
-                            event = event,
-                            targetUserId = normalizedTargetUserId,
-                            occurrence = weeklyOccurrence,
-                        )
-                    }
-                }
-
-                WithdrawTargetMembership.WAITLIST,
-                WithdrawTargetMembership.FREE_AGENT -> {
-                    loadingHandler.showLoading("Leaving Event ...")
-                    eventRepository.removeCurrentUserFromEvent(
-                        event = event,
-                        targetUserId = normalizedTargetUserId,
-                        occurrence = weeklyOccurrence,
-                    )
-                }
-            }
-
-            result.onFailure { _errorState.value = ErrorMessage(it.userMessage()) }
-            result.onSuccess {
-                loadingHandler.showLoading("Reloading Event")
-                refreshEventAfterParticipantMutation(
-                    eventId = event.id,
-                    warningMessage = "Failed to refresh event after leaving.",
+                    selectedWeeklyOccurrenceStarted = weeklyOccurrenceCoordinator.hasSelectedOccurrenceStarted(
+                        Clock.System.now(),
+                    ),
                 )
+
+            when (
+                val result = withdrawalActionCoordinator.runWithdrawalAction(
+                    action = action,
+                    event = event,
+                    targetUserId = targetUserId,
+                    currentUserId = currentUser.value.id,
+                    selectedWeeklyOccurrence = currentWeeklyOccurrenceSelection(),
+                    isWeeklyParentEvent = isWeeklyParentEvent(event),
+                    currentUserIsFreeAgent = checkIsUserFreeAgent(event),
+                    eventOrOccurrenceStarted = eventOrOccurrenceStarted,
+                    refundReason = refundReason,
+                    resolveMembership = { userId ->
+                        resolveWithdrawTargetMembership(
+                            event = event,
+                            userId = userId,
+                        )
+                    },
+                    usersTeam = {
+                        membershipCoordinator.usersTeam()
+                    },
+                    removeTeamFromEvent = { targetEvent, team, refundMode, reason, occurrence ->
+                        eventRepository.removeTeamFromEvent(
+                            event = targetEvent,
+                            teamWithPlayers = team,
+                            refundMode = refundMode,
+                            refundReason = reason,
+                            occurrence = occurrence,
+                        )
+                    },
+                    removeCurrentUserFromEvent = { targetEvent, userId, occurrence ->
+                        eventRepository.removeCurrentUserFromEvent(
+                            event = targetEvent,
+                            targetUserId = userId,
+                            occurrence = occurrence,
+                        )
+                    },
+                    leaveAndRefundEvent = { targetEvent, reason, userId ->
+                        billingRepository.leaveAndRefundEvent(
+                            event = targetEvent,
+                            reason = reason,
+                            targetUserId = userId,
+                        )
+                    },
+                    refreshAfterSuccess = { eventId, warningMessage ->
+                        refreshEventAfterParticipantMutation(
+                            eventId = eventId,
+                            warningMessage = warningMessage,
+                        )
+                    },
+                    showLoading = loadingHandler::showLoading,
+                    hideLoading = loadingHandler::hideLoading,
+                )
+            ) {
+                EventWithdrawalExecutionResult.Success -> Unit
+                is EventWithdrawalExecutionResult.Rejected -> {
+                    _errorState.value = ErrorMessage(result.message)
+                }
+                is EventWithdrawalExecutionResult.Failed -> {
+                    _errorState.value = ErrorMessage(result.message)
+                }
             }
-            loadingHandler.hideLoading()
         }
     }
 
