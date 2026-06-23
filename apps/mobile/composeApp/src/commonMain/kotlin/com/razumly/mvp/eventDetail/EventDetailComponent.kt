@@ -104,7 +104,6 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlin.time.Clock
-import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
@@ -533,6 +532,7 @@ class DefaultEventDetailComponent(
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
     private val registrationFlowCoordinator = EventRegistrationFlowCoordinator()
+    private val joinConfirmationCoordinator = EventJoinConfirmationCoordinator()
     private val eventInviteCoordinator = EventInviteCoordinator()
     override val suggestedUsers = eventInviteCoordinator.suggestedUsers
     override val inviteTeamSuggestions = eventInviteCoordinator.inviteTeamSuggestions
@@ -1363,8 +1363,10 @@ class DefaultEventDetailComponent(
                             if (pendingTeam != null) {
                                 loadingHandler.showLoading("Refreshing Team")
                                 registrationFlowCoordinator.clearStartingTeamRegistrationId()
-                                val teamRegisteredSuccessfully = waitForTeamRegistrationWithTimeout(
+                                val teamRegisteredSuccessfully = joinConfirmationCoordinator.waitForTeamRegistrationWithTimeout(
                                     teamId = pendingTeam.team.id,
+                                    currentUserId = currentUser.value.id,
+                                    getTeamWithPlayers = teamRepository::getTeamWithPlayers,
                                 )
                                 registrationFlowCoordinator.clearPendingTeamRegistration()
                                 if (teamRegisteredSuccessfully) {
@@ -1396,8 +1398,35 @@ class DefaultEventDetailComponent(
                                 }
                             } else {
                                 loadingHandler.showLoading("Reloading Event")
-                                val userJoinedSuccessfully = waitForUserInEventWithTimeout(
+                                val userJoinedSuccessfully = joinConfirmationCoordinator.waitForUserInEventWithTimeout(
                                     confirmationTarget = confirmationTarget,
+                                    isUserInEvent = { membershipCoordinator.isUserInEvent.value },
+                                    refreshAfterParticipantMutation = {
+                                        refreshEventAfterParticipantMutation(
+                                            eventId = selectedEvent.value.id,
+                                            warningMessage = "Failed to refresh event while waiting for join confirmation.",
+                                        )
+                                    },
+                                    isJoinConfirmationSatisfied = { target ->
+                                        joinConfirmationCoordinator.isJoinConfirmationSatisfied(
+                                            confirmationTarget = target,
+                                            cachedCurrentUserRegistrations = { cachedCurrentUserRegistrations.value },
+                                            selectedEvent = { selectedEvent.value },
+                                            currentWeeklyOccurrenceSelection = ::currentWeeklyOccurrenceSelection,
+                                            syncCurrentUserRegistrationCache = eventRepository::syncCurrentUserRegistrationCache,
+                                            getEvent = eventRepository::getEvent,
+                                            syncEventParticipants = { event, occurrence ->
+                                                eventRepository.syncEventParticipants(
+                                                    event = event,
+                                                    occurrence = occurrence,
+                                                )
+                                            },
+                                            getTeams = teamRepository::getTeams,
+                                            applyParticipantSyncResult = ::applyParticipantSyncResult,
+                                            refreshCurrentUserMembershipState = ::refreshCurrentUserMembershipState,
+                                            rememberWeeklyOccurrenceSummary = ::rememberWeeklyOccurrenceSummary,
+                                        )
+                                    },
                                 )
                                 if (!userJoinedSuccessfully) {
                                     _errorState.value =
@@ -4959,148 +4988,6 @@ class DefaultEventDetailComponent(
             selectedDivisionId = selectedDivision.value,
             buildRounds = bracketRoundsCoordinator::buildBracketRounds,
         )
-    }
-
-    private suspend fun refreshUiForJoinConfirmation(
-        syncResult: EventParticipantsSyncResult,
-        confirmationTarget: JoinConfirmationTarget,
-    ) {
-        applyParticipantSyncResult(syncResult)
-        val currentSelection = currentWeeklyOccurrenceSelection()
-        if (!occurrencesMatch(confirmationTarget.occurrence, currentSelection)) {
-            return
-        }
-        refreshCurrentUserMembershipState(syncResult.event)
-        confirmationTarget.occurrence?.let { occurrence ->
-            if (!syncResult.weeklySelectionRequired) {
-                rememberWeeklyOccurrenceSummary(
-                    occurrence = occurrence,
-                    summary = WeeklyOccurrenceSummary(
-                        participantCount = syncResult.participantCount,
-                        participantCapacity = syncResult.participantCapacity,
-                    ),
-                )
-            }
-        }
-    }
-
-    private suspend fun isJoinConfirmationSatisfied(
-        confirmationTarget: JoinConfirmationTarget,
-    ): Boolean {
-        eventRepository.syncCurrentUserRegistrationCache()
-            .onFailure { throwable ->
-                Napier.w(
-                    "Failed to sync current-user registrations while confirming join.",
-                    throwable,
-                )
-            }
-        if (cachedCurrentUserRegistrations.value.any { registration ->
-                registrationMatchesJoinConfirmationTarget(registration, confirmationTarget)
-            }
-        ) {
-            if (occurrencesMatch(confirmationTarget.occurrence, currentWeeklyOccurrenceSelection())) {
-                refreshCurrentUserMembershipState(selectedEvent.value)
-            }
-            return true
-        }
-
-        val refreshedEvent = eventRepository.getEvent(confirmationTarget.eventId)
-            .onFailure { throwable ->
-                Napier.w(
-                    "Failed to refresh event ${confirmationTarget.eventId} while confirming join.",
-                    throwable,
-                )
-            }
-            .getOrNull()
-            ?: selectedEvent.value
-
-        val syncResult = eventRepository.syncEventParticipants(
-            event = refreshedEvent,
-            occurrence = confirmationTarget.occurrence,
-        ).onFailure { throwable ->
-            Napier.w("Failed to sync participants while confirming join.", throwable)
-        }.getOrNull() ?: return false
-
-        refreshUiForJoinConfirmation(syncResult, confirmationTarget)
-        if (confirmationTarget.registrantType == JoinConfirmationRegistrantType.TEAM) {
-            val eventTeams = teamRepository.getTeams(syncResult.event.teamIds)
-                .getOrElse { emptyList() }
-            if (eventTeams.any { team ->
-                    team.id == confirmationTarget.registrantId || team.parentTeamId == confirmationTarget.registrantId
-                }) {
-                return true
-            }
-        }
-        return eventSnapshotMatchesJoinConfirmationTarget(syncResult.event, confirmationTarget)
-    }
-
-    private suspend fun waitForUserInEventWithTimeout(
-        confirmationTarget: JoinConfirmationTarget? = registrationFlowCoordinator.currentJoinConfirmationTarget(),
-        timeoutS: Duration = 30.seconds,
-        checkIntervalS: Duration = 1.seconds,
-    ): Boolean {
-        if (confirmationTarget == null) {
-            val startTime = Clock.System.now()
-            while (!membershipCoordinator.isUserInEvent.value) {
-                if (Clock.System.now() - startTime > timeoutS) {
-                    return false
-                }
-
-                try {
-                    refreshEventAfterParticipantMutation(
-                        eventId = selectedEvent.value.id,
-                        warningMessage = "Failed to refresh event while waiting for join confirmation.",
-                    )
-                    delay(checkIntervalS)
-                } catch (_: Exception) {
-                    delay(checkIntervalS * 2)
-                }
-            }
-            return true
-        }
-
-        val startTime = Clock.System.now()
-        while (Clock.System.now() - startTime <= timeoutS) {
-            try {
-                if (isJoinConfirmationSatisfied(confirmationTarget)) {
-                    return true
-                }
-                delay(checkIntervalS)
-            } catch (_: Exception) {
-                delay(checkIntervalS * 2)
-            }
-        }
-
-        return false
-    }
-
-    private fun TeamWithPlayers.includesUser(userId: String): Boolean {
-        val normalizedUserId = userId.trim()
-        if (normalizedUserId.isBlank()) return false
-        return team.playerIds.any { playerId -> playerId.trim() == normalizedUserId } ||
-            players.any { player -> player.id.trim() == normalizedUserId } ||
-            pendingPlayers.any { player -> player.id.trim() == normalizedUserId }
-    }
-
-    private suspend fun waitForTeamRegistrationWithTimeout(
-        teamId: String,
-        timeoutS: Duration = 30.seconds,
-        checkIntervalS: Duration = 1.seconds,
-    ): Boolean {
-        val normalizedTeamId = teamId.trim()
-        if (normalizedTeamId.isBlank()) return false
-
-        val startTime = Clock.System.now()
-        while (Clock.System.now() - startTime <= timeoutS) {
-            val refreshedTeam = teamRepository.getTeamWithPlayers(normalizedTeamId)
-                .getOrNull()
-            if (refreshedTeam?.includesUser(currentUser.value.id) == true) {
-                return true
-            }
-            delay(checkIntervalS)
-        }
-
-        return false
     }
 
 }
