@@ -67,6 +67,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Move selected division, division team map, and filtered division match map into `EventDivisionContentCoordinator` with focused tests.
   - [x] (2026-06-22) Move bracket round state, losers-bracket toggle state, and round-building traversal into `EventBracketRoundsCoordinator` with focused tests.
   - [x] (2026-06-22) Move sports catalog state, load-error reporting decisions, sport lookup, and edit-draft sport transitions into `EventSportsCatalogCoordinator` with focused tests.
+  - [x] (2026-06-22) Move external action decisions for event deletion, sharing, QR sharing, and directions into `EventExternalActionHelpers` with focused tests.
 - [ ] Run focused event-detail regression tests and final compile/build validation.
 
 ## Surprises & Discoveries
@@ -272,6 +273,8 @@ The forty-fifth implementation milestone extracts division content state coordin
 The forty-sixth implementation milestone extracts bracket round presentation coordination. `EventBracketRoundsCoordinator.kt` now owns bracket round state, losers-bracket toggle state, round refreshing, and the existing bracket traversal logic used by both live division rounds and editable match rounds. `DefaultEventDetailComponent` still owns match-edit permissions, selected event/division context, repository calls, and notification side effects, but no longer owns `_rounds`, `_losersBracket`, or private bracket traversal helpers. `EventDetailComponent.kt` dropped to 5,475 lines after this milestone.
 
 The forty-seventh implementation milestone extracts sports catalog state coordination. `EventSportsCatalogCoordinator.kt` now owns sports list state, division type parameters, catalog-loaded tracking, report-error carryover while a load is active, sport lookup for template creation, and sport-rule/official-staffing transitions used when edit drafts change sport. `DefaultEventDetailComponent` still owns the sports repository calls and coroutine job lifecycle, but no longer owns `_sports`, `_divisionTypeParameters`, catalog-loaded flags, report-error flags, or local sport lookup/transition helpers. `EventDetailComponent.kt` dropped to 5,446 lines after this milestone.
+
+The forty-eighth implementation milestone extracts external event-action decisions. `EventExternalActionHelpers.kt` now owns delete/refund loading-plan selection, share payload construction, QR-code payload construction, and directions URL/unavailable-location decisions. `DefaultEventDetailComponent` still owns repository/API calls, loading/error mutation, share service invocation, URL-handler invocation, and navigation callbacks. `EventDetailComponent.kt` dropped to 5,432 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. Registration coordination and participant/invite coordination are now complete; the remaining work is to keep thinning `DefaultEventDetailComponent` around lower-risk orchestration seams, then run final focused regression and build validation.
 
@@ -1449,6 +1452,39 @@ Forty-seventh milestone line-count evidence:
       77 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventSportsCatalogCoordinatorTest.kt
     1528 plans/event-detail-component-decomposition-execplan.md
 
+External action helper first focused test run caught coordinate fixture constructor issues:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventExternalActionHelpersTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 1
+    Result: `EventExternalActionHelpersTest` tried to construct `Event` with `lat` and `long`; the model stores coordinates in `coordinates`.
+    Fix: update the test fixture to populate `coordinates = listOf(long, lat)`.
+
+External action helper second focused test run caught expectation and paid-division fixture mismatches:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventExternalActionHelpersTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 1
+    Result: expected URL encoding did not match `encodeURLQueryComponent`, and the paid delete fixture lacked the matching `divisions` entry for its priced `DivisionDetail`.
+    Fix: update expected URL strings and add `divisions = listOf("open")` for the paid-division fixture.
+
+External action helper focused tests passed after fixture and expectation fixes:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventExternalActionHelpersTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 18s; 43 actionable tasks: 6 executed, 37 up-to-date.
+
+External action helper common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 13s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Forty-eighth milestone line-count evidence:
+
+    5432 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+      75 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventExternalActionHelpers.kt
+      94 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventExternalActionHelpersTest.kt
+    1565 plans/event-detail-component-decomposition-execplan.md
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -1526,3 +1562,4 @@ Revision Note (2026-06-22): Recorded the membership coordinator slice, focused t
 Revision Note (2026-06-22): Recorded the division content coordinator slice, focused tests, compile fix, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the bracket rounds coordinator slice, focused tests, expectation fix, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the sports catalog coordinator slice, focused tests, fixture fix, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded the external action helper slice, focused tests, fixture and expectation fixes, compile checks, and line-count impact.

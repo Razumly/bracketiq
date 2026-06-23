@@ -32,7 +32,6 @@ import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.canManageEventsForViewer
 import com.razumly.mvp.core.data.dataTypes.isPaymentPending
-import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
@@ -78,8 +77,6 @@ import com.razumly.mvp.core.presentation.PaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.core.presentation.util.ShareServiceProvider
 import com.razumly.mvp.core.presentation.util.convertPhotoResultToUploadFile
-import com.razumly.mvp.core.presentation.util.createEventUrl
-import com.razumly.mvp.core.presentation.util.getEventQrCodePath
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.emailAddressRegex
@@ -88,7 +85,6 @@ import com.razumly.mvp.eventDetail.data.BracketNode
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import io.github.aakira.napier.Napier
-import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -4734,10 +4730,10 @@ class DefaultEventDetailComponent(
     override fun deleteEvent() {
         scope.launch {
             val currentEvent = selectedEvent.value
-            val isTemplateEvent = currentEvent.state.equals("TEMPLATE", ignoreCase = true)
+            val deletePlan = eventDeletePlan(currentEvent)
             var deleted = false
-            if (isTemplateEvent || !currentEvent.hasAnyPaidDivision()) {
-                loadingHandler.showLoading(if (isTemplateEvent) "Deleting Template ..." else "Deleting Event ...")
+            if (!deletePlan.shouldRefund) {
+                loadingHandler.showLoading(deletePlan.loadingMessage)
                 eventRepository.deleteEvent(selectedEvent.value.id)
                     .onSuccess {
                         deleted = true
@@ -4745,7 +4741,7 @@ class DefaultEventDetailComponent(
                         _errorState.value = ErrorMessage(it.userMessage())
                     }
             } else {
-                loadingHandler.showLoading("Deleting Event and Refunding ...")
+                loadingHandler.showLoading(deletePlan.loadingMessage)
                 billingRepository.deleteAndRefundEvent(selectedEvent.value)
                     .onSuccess {
                         deleted = true
@@ -4775,27 +4771,26 @@ class DefaultEventDetailComponent(
     }
 
     override fun shareEvent() {
-        val shareService = shareServiceProvider.getShareService()
-        shareService.share(
-            selectedEvent.value.name, createEventUrl(selectedEvent.value)
-        )
+        val payload = eventSharePayload(selectedEvent.value)
+        shareServiceProvider.getShareService().share(payload.title, payload.url)
     }
 
     override fun shareEventQrCode() {
         val targetEvent = selectedEvent.value
+        val payload = eventQrCodeSharePayload(targetEvent)
         val client = apiClient ?: run {
             _errorState.value = ErrorMessage("Failed to share QR code.")
             return
         }
         scope.launch {
             runCatching {
-                client.getBytes(getEventQrCodePath(targetEvent.id))
+                client.getBytes(payload.path)
             }.onSuccess { imageBytes ->
                 shareServiceProvider.getShareService().shareImage(
-                    title = "${targetEvent.name} QR Code",
+                    title = payload.title,
                     imageBytes = imageBytes,
-                    fileName = "event-qr-code.png",
-                    mimeType = "image/png",
+                    fileName = payload.fileName,
+                    mimeType = payload.mimeType,
                 )
             }.onFailure { throwable ->
                 _errorState.value = ErrorMessage(
@@ -4806,21 +4801,12 @@ class DefaultEventDetailComponent(
     }
 
     override fun openEventDirections() {
-        val targetEvent = selectedEvent.value
-        val destinationQuery = when {
-            !targetEvent.address.isNullOrBlank() -> {
-                targetEvent.address.trim()
-            }
-            targetEvent.lat != 0.0 || targetEvent.long != 0.0 -> {
-                "${targetEvent.lat},${targetEvent.long}"
-            }
-            else -> {
-                _errorState.value = ErrorMessage("No event location available for directions.")
-                return
-            }
+        val directionsPlan = eventDirectionsPlan(selectedEvent.value)
+        if (directionsPlan is EventDirectionsPlan.Unavailable) {
+            _errorState.value = ErrorMessage(directionsPlan.message)
+            return
         }
-
-        val directionsUrl = "geo:0,0?q=${destinationQuery.encodeURLQueryComponent()}"
+        val directionsUrl = (directionsPlan as EventDirectionsPlan.OpenUrl).url
 
         scope.launch {
             val result = urlHandler?.openUrlInWebView(directionsUrl)
