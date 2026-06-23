@@ -305,6 +305,87 @@ internal class EventRegistrationFlowCoordinator {
             answers = _answers.value,
         )
 
+    suspend fun addCurrentUserToEventWithRegistrationAnswers(
+        event: Event,
+        preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
+        addWithoutAnswers: suspend (
+            event: Event,
+            preferredDivisionId: String?,
+            occurrence: EventOccurrenceSelection?,
+        ) -> Result<SelfRegistrationResult>,
+        addWithAnswers: suspend (
+            event: Event,
+            preferredDivisionId: String?,
+            occurrence: EventOccurrenceSelection?,
+            answers: Map<String, String>,
+        ) -> Result<SelfRegistrationResult>,
+    ): Result<SelfRegistrationResult> {
+        val answers = answersForRequest()
+        return if (answers.isEmpty()) {
+            addWithoutAnswers(event, preferredDivisionId, occurrence)
+        } else {
+            addWithAnswers(event, preferredDivisionId, occurrence, answers)
+        }
+    }
+
+    suspend fun addTeamToEventWithRegistrationAnswers(
+        event: Event,
+        team: Team,
+        preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
+        addWithoutAnswers: suspend (
+            event: Event,
+            team: Team,
+            preferredDivisionId: String?,
+            occurrence: EventOccurrenceSelection?,
+        ) -> Result<Unit>,
+        addWithAnswers: suspend (
+            event: Event,
+            team: Team,
+            preferredDivisionId: String?,
+            occurrence: EventOccurrenceSelection?,
+            answers: Map<String, String>,
+        ) -> Result<Unit>,
+    ): Result<Unit> {
+        val answers = answersForRequest()
+        return if (answers.isEmpty()) {
+            addWithoutAnswers(event, team, preferredDivisionId, occurrence)
+        } else {
+            addWithAnswers(event, team, preferredDivisionId, occurrence, answers)
+        }
+    }
+
+    suspend fun createPurchaseIntentWithRegistrationAnswers(
+        event: Event,
+        teamId: String?,
+        priceCents: Int,
+        occurrence: EventOccurrenceSelection?,
+        divisionId: String?,
+        createWithoutAnswers: suspend (
+            event: Event,
+            teamId: String?,
+            priceCents: Int,
+            occurrence: EventOccurrenceSelection?,
+            divisionId: String?,
+        ) -> Result<PurchaseIntent>,
+        createWithAnswers: suspend (
+            event: Event,
+            teamId: String?,
+            priceCents: Int,
+            occurrence: EventOccurrenceSelection?,
+            divisionId: String?,
+            answers: Map<String, String>,
+        ) -> Result<PurchaseIntent>,
+    ): Result<PurchaseIntent> {
+        val answers = answersForRequest()
+        return if (answers.isEmpty()) {
+            createWithoutAnswers(event, teamId, priceCents, occurrence, divisionId)
+        } else {
+            createWithAnswers(event, teamId, priceCents, occurrence, divisionId, answers)
+        }
+    }
+
     fun setRegistrationHoldExpiresAt(holdExpiresAt: String?) {
         _holdExpiresAt.value = holdExpiresAt?.trim()?.takeIf(String::isNotBlank)
     }
@@ -1004,5 +1085,45 @@ internal class EventRegistrationFlowCoordinator {
             holdExpiresAt = holdExpiresAt,
             updatedAt = Clock.System.now().toString(),
         )
+    }
+
+    suspend fun saveRegistrationProgress(
+        scope: EventRegistrationProgressScope,
+        selectedDivisionId: String?,
+        step: String?,
+        registrationId: String?,
+        holdExpiresAt: String? = _holdExpiresAt.value,
+        saveProgress: suspend (key: String, draft: RegistrationProgressDraft) -> Unit,
+    ) {
+        val key = registrationProgressKey(scope) ?: return
+        val draft = buildRegistrationProgressDraft(
+            scope = scope,
+            selectedDivisionId = selectedDivisionId,
+            step = step,
+            registrationId = registrationId,
+            holdExpiresAt = holdExpiresAt,
+        ) ?: return
+        saveProgress(key, draft)
+    }
+
+    suspend fun loadRegistrationProgress(
+        scope: EventRegistrationProgressScope,
+        loadProgress: suspend (key: String) -> RegistrationProgressDraft?,
+    ): String? {
+        val key = registrationProgressKey(scope) ?: run {
+            clearRegistrationProgressState()
+            return null
+        }
+        return applyRegistrationProgressDraft(loadProgress(key))
+    }
+
+    suspend fun clearRegistrationProgress(
+        scope: EventRegistrationProgressScope,
+        clearProgress: suspend (key: String) -> Unit,
+    ) {
+        registrationProgressKey(scope)?.let { key ->
+            clearProgress(key)
+        }
+        clearRegistrationProgressState()
     }
 }

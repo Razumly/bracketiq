@@ -1012,42 +1012,38 @@ class DefaultEventDetailComponent(
         registrationId: String? = null,
         holdExpiresAt: String? = registrationFlowCoordinator.holdExpiresAt.value,
     ) {
-        val scope = currentRegistrationProgressScope()
-        val key = registrationFlowCoordinator.registrationProgressKey(scope) ?: return
-        val draft = registrationFlowCoordinator.buildRegistrationProgressDraft(
-            scope = scope,
+        registrationFlowCoordinator.saveRegistrationProgress(
+            scope = currentRegistrationProgressScope(),
             selectedDivisionId = selectedDivision.value,
             step = step,
             registrationId = registrationId,
             holdExpiresAt = holdExpiresAt,
-        ) ?: return
-        currentUserDataSource?.saveRegistrationProgress(
-            key = key,
-            draft = draft,
-        )
+        ) { key, draft ->
+            currentUserDataSource?.saveRegistrationProgress(
+                key = key,
+                draft = draft,
+            )
+        }
     }
 
     private suspend fun loadCurrentRegistrationProgress() {
-        val key = registrationFlowCoordinator.registrationProgressKey(currentRegistrationProgressScope()) ?: run {
-            registrationFlowCoordinator.clearRegistrationProgressState()
-            return
+        registrationFlowCoordinator.loadRegistrationProgress(
+            scope = currentRegistrationProgressScope(),
+        ) { key ->
+            currentUserDataSource?.loadRegistrationProgress(key)
         }
-        val draft = currentUserDataSource?.loadRegistrationProgress(key)
-        registrationFlowCoordinator.applyRegistrationProgressDraft(draft)
             ?.let { restoredDivisionId ->
                 divisionContentCoordinator.restoreSelectedDivision(restoredDivisionId)
             }
     }
 
     private suspend fun clearCurrentRegistrationProgress() {
-        registrationFlowCoordinator.registrationProgressKey(currentRegistrationProgressScope())?.let { key ->
+        registrationFlowCoordinator.clearRegistrationProgress(
+            scope = currentRegistrationProgressScope(),
+        ) { key ->
             currentUserDataSource?.clearRegistrationProgress(key)
         }
-        registrationFlowCoordinator.clearRegistrationProgressState()
     }
-
-    private fun missingEventRegistrationQuestion(): TeamJoinQuestion? =
-        registrationFlowCoordinator.missingRegistrationQuestion()
 
     private fun ensureEventRegistrationQuestionsAnswered(onReady: () -> Unit): Boolean {
         return registrationFlowCoordinator.ensureQuestionsAnswered(
@@ -1056,30 +1052,18 @@ class DefaultEventDetailComponent(
         )
     }
 
-    private fun eventRegistrationAnswersForRequest(): Map<String, String> {
-        return registrationFlowCoordinator.answersForRequest()
-    }
-
     private suspend fun addCurrentUserToEventWithRegistrationAnswers(
         event: Event,
         preferredDivisionId: String?,
         occurrence: EventOccurrenceSelection?,
     ): Result<SelfRegistrationResult> {
-        val answers = eventRegistrationAnswersForRequest()
-        return if (answers.isEmpty()) {
-            eventRepository.addCurrentUserToEvent(
-                event = event,
-                preferredDivisionId = preferredDivisionId,
-                occurrence = occurrence,
-            )
-        } else {
-            eventRepository.addCurrentUserToEvent(
-                event = event,
-                preferredDivisionId = preferredDivisionId,
-                occurrence = occurrence,
-                answers = answers,
-            )
-        }
+        return registrationFlowCoordinator.addCurrentUserToEventWithRegistrationAnswers(
+            event = event,
+            preferredDivisionId = preferredDivisionId,
+            occurrence = occurrence,
+            addWithoutAnswers = eventRepository::addCurrentUserToEvent,
+            addWithAnswers = eventRepository::addCurrentUserToEvent,
+        )
     }
 
     private suspend fun addTeamToEventWithRegistrationAnswers(
@@ -1088,23 +1072,14 @@ class DefaultEventDetailComponent(
         preferredDivisionId: String?,
         occurrence: EventOccurrenceSelection?,
     ): Result<Unit> {
-        val answers = eventRegistrationAnswersForRequest()
-        return if (answers.isEmpty()) {
-            eventRepository.addTeamToEvent(
-                event = event,
-                team = team,
-                preferredDivisionId = preferredDivisionId,
-                occurrence = occurrence,
-            )
-        } else {
-            eventRepository.addTeamToEvent(
-                event = event,
-                team = team,
-                preferredDivisionId = preferredDivisionId,
-                occurrence = occurrence,
-                answers = answers,
-            )
-        }
+        return registrationFlowCoordinator.addTeamToEventWithRegistrationAnswers(
+            event = event,
+            team = team,
+            preferredDivisionId = preferredDivisionId,
+            occurrence = occurrence,
+            addWithoutAnswers = eventRepository::addTeamToEvent,
+            addWithAnswers = eventRepository::addTeamToEvent,
+        )
     }
 
     private suspend fun createPurchaseIntentWithRegistrationAnswers(
@@ -1114,25 +1089,32 @@ class DefaultEventDetailComponent(
         occurrence: EventOccurrenceSelection?,
         divisionId: String?,
     ): Result<PurchaseIntent> {
-        val answers = eventRegistrationAnswersForRequest()
-        return if (answers.isEmpty()) {
-            billingRepository.createPurchaseIntent(
-                event = event,
-                teamId = teamId,
-                priceCents = priceCents,
-                occurrence = occurrence,
-                divisionId = divisionId,
-            )
-        } else {
-            billingRepository.createPurchaseIntent(
-                event = event,
-                teamId = teamId,
-                priceCents = priceCents,
-                occurrence = occurrence,
-                divisionId = divisionId,
-                answers = answers,
-            )
-        }
+        return registrationFlowCoordinator.createPurchaseIntentWithRegistrationAnswers(
+            event = event,
+            teamId = teamId,
+            priceCents = priceCents,
+            occurrence = occurrence,
+            divisionId = divisionId,
+            createWithoutAnswers = { targetEvent, targetTeamId, targetPriceCents, selectedOccurrence, targetDivisionId ->
+                billingRepository.createPurchaseIntent(
+                    event = targetEvent,
+                    teamId = targetTeamId,
+                    priceCents = targetPriceCents,
+                    occurrence = selectedOccurrence,
+                    divisionId = targetDivisionId,
+                )
+            },
+            createWithAnswers = { targetEvent, targetTeamId, targetPriceCents, selectedOccurrence, targetDivisionId, answers ->
+                billingRepository.createPurchaseIntent(
+                    event = targetEvent,
+                    teamId = targetTeamId,
+                    priceCents = targetPriceCents,
+                    occurrence = selectedOccurrence,
+                    divisionId = targetDivisionId,
+                    answers = answers,
+                )
+            },
+        )
     }
 
     init {

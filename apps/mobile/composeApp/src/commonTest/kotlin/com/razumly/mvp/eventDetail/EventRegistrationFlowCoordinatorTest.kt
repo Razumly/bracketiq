@@ -155,6 +155,172 @@ class EventRegistrationFlowCoordinatorTest {
     }
 
     @Test
+    fun progress_persistence_helpers_save_load_and_clear_through_callbacks() = runTest {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val scope = EventRegistrationProgressScope(
+            userId = " user-1 ",
+            eventId = " event-1 ",
+            occurrence = EventOccurrenceSelection(
+                slotId = " slot-1 ",
+                occurrenceDate = " 2026-07-01 ",
+            ),
+        )
+        coordinator.updateQuestionAnswer("q1", "Answer 1")
+        coordinator.setRegistrationHoldExpiresAt(" 2026-07-01T10:00:00Z ")
+        var savedKey: String? = null
+        var savedDraft: RegistrationProgressDraft? = null
+
+        coordinator.saveRegistrationProgress(
+            scope = scope,
+            selectedDivisionId = "division-1",
+            step = "checkout",
+            registrationId = "registration-1",
+        ) { key, draft ->
+            savedKey = key
+            savedDraft = draft
+        }
+
+        assertEquals("event:user-1:event-1:slot-1:2026-07-01", savedKey)
+        assertEquals("registration-1", savedDraft?.registrationId)
+        assertEquals("2026-07-01T10:00:00Z", savedDraft?.holdExpiresAt)
+
+        coordinator.clearRegistrationProgress(scope) { key ->
+            assertEquals(savedKey, key)
+        }
+        assertNull(coordinator.holdExpiresAt.value)
+
+        val restoredDivision = coordinator.loadRegistrationProgress(scope) { key ->
+            assertEquals(savedKey, key)
+            savedDraft
+        }
+
+        assertEquals("division-1", restoredDivision)
+        assertEquals(mapOf("q1" to "Answer 1"), coordinator.answers.value)
+        assertEquals("2026-07-01T10:00:00Z", coordinator.holdExpiresAt.value)
+    }
+
+    @Test
+    fun answer_aware_registration_requests_choose_empty_or_answered_callbacks() = runTest {
+        val coordinator = EventRegistrationFlowCoordinator()
+        val event = Event(id = "event-1")
+        val team = Team(captainId = "captain-1").copy(id = "team-1")
+        val occurrence = EventOccurrenceSelection(
+            slotId = "slot-1",
+            occurrenceDate = "2026-07-01",
+        )
+        var selfPath = ""
+        var teamPath = ""
+        var purchasePath = ""
+
+        coordinator.addCurrentUserToEventWithRegistrationAnswers(
+            event = event,
+            preferredDivisionId = "open",
+            occurrence = occurrence,
+            addWithoutAnswers = { targetEvent, divisionId, targetOccurrence ->
+                assertEquals(event, targetEvent)
+                assertEquals("open", divisionId)
+                assertEquals(occurrence, targetOccurrence)
+                selfPath = "empty"
+                Result.success(SelfRegistrationResult())
+            },
+            addWithAnswers = { _, _, _, _ ->
+                error("Answered self path should not run without answers.")
+            },
+        )
+        coordinator.addTeamToEventWithRegistrationAnswers(
+            event = event,
+            team = team,
+            preferredDivisionId = "open",
+            occurrence = occurrence,
+            addWithoutAnswers = { targetEvent, targetTeam, divisionId, targetOccurrence ->
+                assertEquals(event, targetEvent)
+                assertEquals(team, targetTeam)
+                assertEquals("open", divisionId)
+                assertEquals(occurrence, targetOccurrence)
+                teamPath = "empty"
+                Result.success(Unit)
+            },
+            addWithAnswers = { _, _, _, _, _ ->
+                error("Answered team path should not run without answers.")
+            },
+        )
+        coordinator.createPurchaseIntentWithRegistrationAnswers(
+            event = event,
+            teamId = "team-1",
+            priceCents = 1000,
+            occurrence = occurrence,
+            divisionId = "open",
+            createWithoutAnswers = { targetEvent, teamId, priceCents, targetOccurrence, divisionId ->
+                assertEquals(event, targetEvent)
+                assertEquals("team-1", teamId)
+                assertEquals(1000, priceCents)
+                assertEquals(occurrence, targetOccurrence)
+                assertEquals("open", divisionId)
+                purchasePath = "empty"
+                Result.success(purchaseIntent("registration-1"))
+            },
+            createWithAnswers = { _, _, _, _, _, _ ->
+                error("Answered purchase path should not run without answers.")
+            },
+        )
+
+        assertEquals("empty", selfPath)
+        assertEquals("empty", teamPath)
+        assertEquals("empty", purchasePath)
+
+        coordinator.replaceRegistrationQuestions(listOf(question("q1")))
+        coordinator.updateQuestionAnswer("q1", "Answer 1")
+        val expectedAnswers = mapOf("q1" to "Answer 1")
+
+        coordinator.addCurrentUserToEventWithRegistrationAnswers(
+            event = event,
+            preferredDivisionId = "open",
+            occurrence = occurrence,
+            addWithoutAnswers = { _, _, _ ->
+                error("Empty self path should not run with answers.")
+            },
+            addWithAnswers = { _, _, _, answers ->
+                assertEquals(expectedAnswers, answers)
+                selfPath = "answered"
+                Result.success(SelfRegistrationResult())
+            },
+        )
+        coordinator.addTeamToEventWithRegistrationAnswers(
+            event = event,
+            team = team,
+            preferredDivisionId = "open",
+            occurrence = occurrence,
+            addWithoutAnswers = { _, _, _, _ ->
+                error("Empty team path should not run with answers.")
+            },
+            addWithAnswers = { _, _, _, _, answers ->
+                assertEquals(expectedAnswers, answers)
+                teamPath = "answered"
+                Result.success(Unit)
+            },
+        )
+        coordinator.createPurchaseIntentWithRegistrationAnswers(
+            event = event,
+            teamId = "team-1",
+            priceCents = 1000,
+            occurrence = occurrence,
+            divisionId = "open",
+            createWithoutAnswers = { _, _, _, _, _ ->
+                error("Empty purchase path should not run with answers.")
+            },
+            createWithAnswers = { _, _, _, _, _, answers ->
+                assertEquals(expectedAnswers, answers)
+                purchasePath = "answered"
+                Result.success(purchaseIntent("registration-2"))
+            },
+        )
+
+        assertEquals("answered", selfPath)
+        assertEquals("answered", teamPath)
+        assertEquals("answered", purchasePath)
+    }
+
+    @Test
     fun clear_after_hold_expired_dismisses_dialog_and_resets_hold() {
         val coordinator = EventRegistrationFlowCoordinator()
         coordinator.replaceRegistrationQuestions(listOf(question("q1", required = true)))

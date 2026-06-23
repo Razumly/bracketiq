@@ -76,6 +76,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-23) Move weekly occurrence start rules and participant-management room target resolution into `EventOccurrenceRules` with focused tests.
   - [x] (2026-06-23) Move participant-management snapshot/compliance refresh execution into `EventParticipantManagementCoordinator` with focused tests.
   - [x] (2026-06-23) Move post-payment join-confirmation polling into `EventJoinConfirmationCoordinator` with focused tests.
+  - [x] (2026-06-23) Move registration-progress persistence orchestration and answer-aware registration request branching into `EventRegistrationFlowCoordinator` with focused tests.
 - [ ] Run focused event-detail regression tests and final compile/build validation.
 
 ## Surprises & Discoveries
@@ -299,6 +300,8 @@ The fifty-fourth implementation milestone extracts occurrence and participant-ro
 The fifty-fifth implementation milestone moves participant-management refresh execution into the existing coordinator. `EventParticipantManagementCoordinator.kt` now owns snapshot refresh execution, team/user compliance refresh execution, loading request-token cleanup, hidden refresh logging, and returned UI error messages. `DefaultEventDetailComponent` keeps permission checks, current event/occurrence target resolution, repository wiring, and error-state assignment. Focused validation passed with `./gradlew :composeApp:testDebugUnitTest --tests "*EventParticipantManagementCoordinatorTest*" --console=plain`, `./gradlew :composeApp:compileDebugKotlinAndroid --console=plain`, and `git diff --check`. `EventDetailComponent.kt` dropped to 5,106 lines after this milestone.
 
 The fifty-sixth implementation milestone extracts post-payment join-confirmation polling. `EventJoinConfirmationCoordinator.kt` now owns user-registration confirmation polling, cached registration checks, event snapshot fallback checks, selected occurrence summary refresh callbacks, and team registration polling/membership matching. `DefaultEventDetailComponent` keeps payment-result collection, repository wiring, loading/error messaging, and membership-state assignment. Focused validation passed with `./gradlew :composeApp:testDebugUnitTest --tests "*EventJoinConfirmationCoordinatorTest*" --console=plain`, `./gradlew :composeApp:compileDebugKotlinAndroid --console=plain`, and `git diff --check`. `EventDetailComponent.kt` dropped below 5,000 lines to 4,993 lines after this milestone.
+
+The fifty-seventh implementation milestone expands registration-flow coordination. `EventRegistrationFlowCoordinator.kt` now owns registration-progress save/load/clear orchestration through persistence callbacks and chooses the answer-aware or answerless repository callback for self registration, team registration, and purchase-intent creation. `DefaultEventDetailComponent` keeps current progress scope construction, repository wiring, and restored-division assignment. Focused validation passed with `./gradlew :composeApp:testDebugUnitTest --tests "*EventRegistrationFlowCoordinatorTest*" --console=plain`, `./gradlew :composeApp:compileDebugKotlinAndroid --console=plain`, and `git diff --check`. `EventDetailComponent.kt` is 4,975 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. Registration coordination and participant/invite coordination are now complete; the remaining work is to keep thinning `DefaultEventDetailComponent` around lower-risk orchestration seams, then run final focused regression and build validation.
 
@@ -1590,3 +1593,4 @@ Revision Note (2026-06-22): Recorded the external action helper slice, focused t
 Revision Note (2026-06-23): Recorded the occurrence rule helper slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-23): Recorded the participant-management refresh execution coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-23): Recorded the join-confirmation polling coordinator slice, focused tests, compile checks, and line-count impact.
+Revision Note (2026-06-23): Recorded the registration-progress and answer-aware request coordinator slice, focused tests, compile checks, and line-count impact.
