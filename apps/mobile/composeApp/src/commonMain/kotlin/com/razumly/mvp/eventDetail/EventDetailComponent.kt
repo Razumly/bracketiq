@@ -532,6 +532,7 @@ class DefaultEventDetailComponent(
     private val registrationFlowCoordinator = EventRegistrationFlowCoordinator()
     private val withdrawalActionCoordinator = EventWithdrawalActionCoordinator(registrationFlowCoordinator)
     private val paymentPlanBillingCoordinator = EventPaymentPlanBillingCoordinator()
+    private val purchaseIntentCoordinator = EventPurchaseIntentCoordinator(registrationFlowCoordinator)
     private val joinConfirmationCoordinator = EventJoinConfirmationCoordinator()
     private val eventInviteCoordinator = EventInviteCoordinator()
     override val suggestedUsers = eventInviteCoordinator.suggestedUsers
@@ -3085,65 +3086,30 @@ class DefaultEventDetailComponent(
     }
 
     private fun processPurchaseIntent(intent: PurchaseIntent) {
-        if (!ensureDocumentSignedBeforePurchase(intent)) {
-            return
-        }
-
-        intent.registrationHoldExpiresAt
-            ?.trim()
-            ?.takeIf(String::isNotBlank)
-            ?.let { holdExpiresAt ->
-                registrationFlowCoordinator.setRegistrationHoldExpiresAt(holdExpiresAt)
+        purchaseIntentCoordinator.processPurchaseIntent(
+            intent = intent,
+            saveRegistrationProgress = { registrationId, holdExpiresAt ->
                 scope.launch {
                     saveCurrentRegistrationProgress(
                         step = "checkout",
-                        registrationId = intent.registrationId,
+                        registrationId = registrationId,
                         holdExpiresAt = holdExpiresAt,
                     )
                 }
-            }
-
-        intent.feeBreakdown?.let { feeBreakdown ->
-            registrationFlowCoordinator.setPendingPaymentSheetIntent(intent)
-            showFeeBreakdown(feeBreakdown, onConfirm = {
-                scope.launch {
-                    showPendingPaymentSheet()
-                }
-            }, onCancel = {
-                registrationFlowCoordinator.clearPendingPaymentSheetIntent()
-                loadingHandler.hideLoading()
-            })
-        } ?: run {
-            scope.launch {
-                showPaymentSheet(intent)
-            }
-        }
-    }
-
-    private fun ensureDocumentSignedBeforePurchase(intent: PurchaseIntent): Boolean {
-        if (!intent.isSignatureRequired() || intent.isSignatureCompleted()) {
-            return true
-        }
-
-        val signingUrl = intent.resolvedSigningUrl()
-        if (signingUrl.isNullOrBlank()) {
-            Napier.w("Purchase intent requires signature but did not include a signing URL.")
-            return true
-        }
-
-        registrationFlowCoordinator.showWebSignaturePrompt(
-            WebSignaturePromptState(
-                step = null,
-                url = signingUrl,
-                currentStep = 1,
-                totalSteps = 1,
-            )
+            },
+            launchPaymentSheet = { purchaseIntent ->
+                scope.launch { showPaymentSheet(purchaseIntent) }
+            },
+            launchPendingPaymentSheet = {
+                scope.launch { showPendingPaymentSheet() }
+            },
+            setError = { message ->
+                _errorState.value = ErrorMessage(message)
+            },
+            logWarning = { message ->
+                Napier.w(message)
+            },
         )
-        _errorState.value = ErrorMessage(
-            "Please complete document signing in the modal, then tap Purchase Ticket again."
-        )
-
-        return false
     }
 
     private suspend fun showPaymentSheet(intent: PurchaseIntent) {
