@@ -978,17 +978,11 @@ class DefaultEventDetailComponent(
     private val _selectedDivision = MutableStateFlow<String?>(null)
     override val selectedDivision = _selectedDivision.asStateFlow()
 
-    private val _selectedWeeklyOccurrence = MutableStateFlow<SelectedWeeklyOccurrenceState?>(null)
-    override val selectedWeeklyOccurrence = _selectedWeeklyOccurrence.asStateFlow()
-
-    private val _selectedWeeklyOccurrenceSummary = MutableStateFlow<WeeklyOccurrenceSummary?>(null)
-    override val selectedWeeklyOccurrenceSummary = _selectedWeeklyOccurrenceSummary.asStateFlow()
-
-    private val _weeklyOccurrenceSummaries = MutableStateFlow<Map<String, WeeklyOccurrenceSummary>>(emptyMap())
-    override val weeklyOccurrenceSummaries = _weeklyOccurrenceSummaries.asStateFlow()
-
-    private val _overviewParticipantSummary = MutableStateFlow<EventParticipantsSummary?>(null)
-    override val overviewParticipantSummary = _overviewParticipantSummary.asStateFlow()
+    private val weeklyOccurrenceCoordinator = EventWeeklyOccurrenceCoordinator()
+    override val selectedWeeklyOccurrence = weeklyOccurrenceCoordinator.selectedWeeklyOccurrence
+    override val selectedWeeklyOccurrenceSummary = weeklyOccurrenceCoordinator.selectedWeeklyOccurrenceSummary
+    override val weeklyOccurrenceSummaries = weeklyOccurrenceCoordinator.weeklyOccurrenceSummaries
+    override val overviewParticipantSummary = weeklyOccurrenceCoordinator.overviewParticipantSummary
 
     private val eventFieldIds = combine(
         selectedEvent,
@@ -1359,7 +1353,7 @@ class DefaultEventDetailComponent(
             combine(
                 selectedEvent.map { selected -> selected.id.trim() },
                 currentUser.map { user -> user.id.trim() },
-                _selectedWeeklyOccurrence,
+                weeklyOccurrenceCoordinator.selectedWeeklyOccurrence,
             ) { eventId, userId, occurrence ->
                 Triple(eventId, userId, occurrence)
             }
@@ -1386,12 +1380,7 @@ class DefaultEventDetailComponent(
                 .distinctUntilChanged()
                 .collect { (_, weeklyParent) ->
                     weeklyOccurrenceSummaryPrefetchJob?.cancel()
-                    _weeklyOccurrenceSummaries.value = emptyMap()
-                    if (!weeklyParent) {
-                        _selectedWeeklyOccurrence.value = null
-                        _selectedWeeklyOccurrenceSummary.value = null
-                    }
-                    _overviewParticipantSummary.value = null
+                    weeklyOccurrenceCoordinator.handleSelectedEventChanged(weeklyParent)
                 }
         }
         scope.launch {
@@ -1403,7 +1392,7 @@ class DefaultEventDetailComponent(
                         participantManagementCoordinator.setEventTeamsAndParticipantsLoading(false)
                         return@collectLatest
                     }
-                    _overviewParticipantSummary.value = null
+                    weeklyOccurrenceCoordinator.clearOverviewParticipantSummary()
                     participantManagementCoordinator.setEventTeamsAndParticipantsLoading(true)
                     try {
                         prefetchNonWeeklyParticipants(selectedEvent.value)
@@ -1413,20 +1402,14 @@ class DefaultEventDetailComponent(
                 }
         }
         scope.launch {
-            _selectedWeeklyOccurrence
-                .collectLatest {
+            weeklyOccurrenceCoordinator.selectedWeeklyOccurrence
+                .collectLatest { selectedOccurrence ->
                     val targetEvent = selectedEvent.value
-                    if (!isWeeklyParentEvent(targetEvent)) {
-                        _selectedWeeklyOccurrenceSummary.value = null
-                        return@collectLatest
-                    }
-                    _selectedWeeklyOccurrenceSummary.value = it
-                        ?.let { occurrence ->
-                            weeklyOccurrenceSummaryKey(
-                                slotId = occurrence.slotId,
-                                occurrenceDate = occurrence.occurrenceDate,
-                            )?.let(_weeklyOccurrenceSummaries.value::get)
-                    }
+                    weeklyOccurrenceCoordinator.updateSelectedSummaryFromCache(
+                        isWeeklyParent = isWeeklyParentEvent(targetEvent),
+                        selection = selectedOccurrence,
+                    )
+                    if (!isWeeklyParentEvent(targetEvent)) return@collectLatest
                     refreshCurrentUserMembershipState(targetEvent)
                     participantManagementCoordinator.setEventTeamsAndParticipantsLoading(true)
                     try {
@@ -1437,7 +1420,7 @@ class DefaultEventDetailComponent(
                 }
         }
         scope.launch {
-            combine(selectedEvent, _selectedWeeklyOccurrence) { eventValue, occurrenceState ->
+            combine(selectedEvent, weeklyOccurrenceCoordinator.selectedWeeklyOccurrence) { eventValue, occurrenceState ->
                 participantManagementRoomTarget(
                     event = eventValue,
                     occurrence = occurrenceState?.let { selectedOccurrence ->
@@ -1492,7 +1475,7 @@ class DefaultEventDetailComponent(
                 selectedEvent,
                 currentUser,
                 eventWithRelations.map { relations -> relations.organization }.distinctUntilChanged(),
-                _selectedWeeklyOccurrence,
+                weeklyOccurrenceCoordinator.selectedWeeklyOccurrence,
             ) { eventValue, user, organization, occurrenceState ->
                 val occurrence = occurrenceState?.let { selectedOccurrence ->
                     EventOccurrenceSelection(
@@ -1790,18 +1773,12 @@ class DefaultEventDetailComponent(
 
     private fun applyParticipantSyncResult(result: EventParticipantsSyncResult) {
         participantManagementCoordinator.replaceParticipantDivisionWarnings(result.divisionWarnings)
-        _overviewParticipantSummary.value = if (
-            isWeeklyParentEvent(result.event) ||
-            result.weeklySelectionRequired
-        ) {
-            null
-        } else {
-            EventParticipantsSummary(
-                participantCount = result.participantCount,
-                participantCapacity = result.participantCapacity,
-                weeklySelectionRequired = false,
-            )
-        }
+        weeklyOccurrenceCoordinator.applyOverviewParticipantSummary(
+            isWeeklyParent = isWeeklyParentEvent(result.event),
+            weeklySelectionRequired = result.weeklySelectionRequired,
+            participantCount = result.participantCount,
+            participantCapacity = result.participantCapacity,
+        )
     }
 
     private fun markManagedBootstrapRequested(
@@ -2088,8 +2065,7 @@ class DefaultEventDetailComponent(
         if (!isWeeklyParentEvent(event)) {
             return false
         }
-        val selection = _selectedWeeklyOccurrence.value ?: return false
-        return Clock.System.now() >= selection.sessionStart
+        return weeklyOccurrenceCoordinator.hasSelectedOccurrenceStarted(Clock.System.now())
     }
 
     private fun isJoinBlockedByStart(event: Event = selectedEvent.value): Boolean {
@@ -2105,12 +2081,7 @@ class DefaultEventDetailComponent(
             event.timeSlotIds.any { slotId -> slotId.isNotBlank() }
 
     private fun currentWeeklyOccurrenceSelection(): EventOccurrenceSelection? {
-        val selection = _selectedWeeklyOccurrence.value ?: return null
-        return EventOccurrenceSelection(
-            slotId = selection.slotId,
-            occurrenceDate = selection.occurrenceDate,
-            label = selection.label,
-        )
+        return weeklyOccurrenceCoordinator.currentSelection()
     }
 
     private fun participantManagementRoomTarget(
@@ -2253,33 +2224,11 @@ class DefaultEventDetailComponent(
         }
     }
 
-    private fun occurrencesMatch(
-        left: EventOccurrenceSelection?,
-        right: EventOccurrenceSelection?,
-    ): Boolean {
-        return when {
-            left == null && right == null -> true
-            left == null || right == null -> false
-            else -> left.slotId == right.slotId && left.occurrenceDate == right.occurrenceDate
-        }
-    }
-
     private fun rememberWeeklyOccurrenceSummary(
         occurrence: EventOccurrenceSelection,
         summary: WeeklyOccurrenceSummary,
     ) {
-        val key = weeklyOccurrenceSummaryKey(
-            slotId = occurrence.slotId,
-            occurrenceDate = occurrence.occurrenceDate,
-        ) ?: return
-        _weeklyOccurrenceSummaries.value = _weeklyOccurrenceSummaries.value + (key to summary)
-        val selected = _selectedWeeklyOccurrence.value
-        if (selected != null &&
-            selected.slotId == occurrence.slotId &&
-            selected.occurrenceDate == occurrence.occurrenceDate
-        ) {
-            _selectedWeeklyOccurrenceSummary.value = summary
-        }
+        weeklyOccurrenceCoordinator.rememberWeeklyOccurrenceSummary(occurrence, summary)
     }
 
     private suspend fun fetchWeeklyOccurrenceSummary(
@@ -2309,7 +2258,7 @@ class DefaultEventDetailComponent(
         reportErrors: Boolean = true,
     ) {
         if (!isWeeklyParentEvent(event)) {
-            _selectedWeeklyOccurrenceSummary.value = null
+            weeklyOccurrenceCoordinator.clearSelectedWeeklyOccurrenceSummary()
             return
         }
 
@@ -2323,16 +2272,12 @@ class DefaultEventDetailComponent(
         ).onSuccess { result ->
             applyEventDetailSyncResult(result)
             val participantResult = result.participants
-            _selectedWeeklyOccurrenceSummary.value = if (occurrence == null || participantResult.weeklySelectionRequired) {
-                null
-            } else {
-                WeeklyOccurrenceSummary(
-                    participantCount = participantResult.participantCount,
-                    participantCapacity = participantResult.participantCapacity,
-                ).also { summary ->
-                    rememberWeeklyOccurrenceSummary(occurrence, summary)
-                }
-            }
+            weeklyOccurrenceCoordinator.applySelectedOccurrenceParticipantSummary(
+                occurrence = occurrence,
+                weeklySelectionRequired = participantResult.weeklySelectionRequired,
+                participantCount = participantResult.participantCount,
+                participantCapacity = participantResult.participantCapacity,
+            )
         }.onFailure { throwable ->
             clearManagedBootstrapRequestIfCurrent(event, occurrence)
             if (reportErrors) {
@@ -2681,69 +2626,32 @@ class DefaultEventDetailComponent(
         occurrenceDate: String?,
         label: String?,
     ) {
-        val parentEvent = selectedEvent.value
-        if (!isWeeklyParentEvent(parentEvent)) {
-            _errorState.value = ErrorMessage("Weekly occurrences are only available from parent weekly events.")
-            return
+        when (
+            val result = weeklyOccurrenceCoordinator.selectWeeklySession(
+                isWeeklyParent = isWeeklyParentEvent(selectedEvent.value),
+                sessionStart = sessionStart,
+                sessionEnd = sessionEnd,
+                slotId = slotId,
+                occurrenceDate = occurrenceDate,
+                label = label,
+            )
+        ) {
+            is WeeklySessionSelectionResult.Rejected -> {
+                _errorState.value = ErrorMessage(result.message)
+            }
+            is WeeklySessionSelectionResult.Selected -> Unit
         }
-        if (sessionEnd <= sessionStart) {
-            _errorState.value = ErrorMessage("Selected weekly occurrence time is invalid.")
-            return
-        }
-        val normalizedSlotId = slotId?.trim()?.takeIf(String::isNotBlank)
-        val normalizedOccurrenceDate = occurrenceDate?.trim()?.takeIf(String::isNotBlank)
-        if (normalizedSlotId == null || normalizedOccurrenceDate == null) {
-            _errorState.value = ErrorMessage("Select a valid weekly occurrence.")
-            return
-        }
-        val resolvedLabel = label?.trim()?.takeIf(String::isNotBlank)
-            ?: normalizedOccurrenceDate
-        _selectedWeeklyOccurrence.value = SelectedWeeklyOccurrenceState(
-            slotId = normalizedSlotId,
-            occurrenceDate = normalizedOccurrenceDate,
-            label = resolvedLabel,
-            sessionStart = sessionStart,
-            sessionEnd = sessionEnd,
-        )
     }
 
     override fun prefetchWeeklyOccurrenceSummaries(occurrences: List<EventOccurrenceSelection>) {
         val event = selectedEvent.value
         if (!isWeeklyParentEvent(event)) return
 
-        val normalizedOccurrences = occurrences
-            .mapNotNull { occurrence ->
-                val slotId = occurrence.slotId.trim().takeIf(String::isNotBlank) ?: return@mapNotNull null
-                val occurrenceDate = occurrence.occurrenceDate.trim().takeIf(String::isNotBlank)
-                    ?: return@mapNotNull null
-                EventOccurrenceSelection(
-                    slotId = slotId,
-                    occurrenceDate = occurrenceDate,
-                    label = occurrence.label,
-                )
-            }
-            .distinctBy { occurrence -> "${occurrence.slotId}|${occurrence.occurrenceDate}" }
-
-        if (normalizedOccurrences.isEmpty()) return
+        val pending = weeklyOccurrenceCoordinator.pendingOccurrenceSummaries(occurrences)
+        if (pending.isEmpty()) return
 
         weeklyOccurrenceSummaryPrefetchJob?.cancel()
         weeklyOccurrenceSummaryPrefetchJob = scope.launch {
-            val selectedKey = currentWeeklyOccurrenceSelection()?.let { occurrence ->
-                weeklyOccurrenceSummaryKey(
-                    slotId = occurrence.slotId,
-                    occurrenceDate = occurrence.occurrenceDate,
-                )
-            }
-            val pending = normalizedOccurrences.filter { occurrence ->
-                val key = weeklyOccurrenceSummaryKey(
-                    slotId = occurrence.slotId,
-                    occurrenceDate = occurrence.occurrenceDate,
-                )
-                key != null &&
-                    key != selectedKey &&
-                    !_weeklyOccurrenceSummaries.value.containsKey(key)
-            }
-
             pending.forEach { occurrence ->
                 val summary = fetchWeeklyOccurrenceSummary(event, occurrence) ?: return@forEach
                 rememberWeeklyOccurrenceSummary(occurrence, summary)
@@ -2752,7 +2660,7 @@ class DefaultEventDetailComponent(
     }
 
     override fun clearSelectedWeeklySession() {
-        _selectedWeeklyOccurrence.value = null
+        weeklyOccurrenceCoordinator.clearSelectedWeeklySession()
         participantManagementCoordinator.clearParticipantManagementState()
     }
 
@@ -3898,18 +3806,12 @@ class DefaultEventDetailComponent(
                 ).onSuccess { result ->
                     if (requestToken != eventDetailHydrationToken) return@onSuccess
                     applyParticipantSyncResult(result)
-                    _selectedWeeklyOccurrenceSummary.value = if (
-                        isWeeklyParentEvent(result.event) && occurrence != null && !result.weeklySelectionRequired
-                    ) {
-                        WeeklyOccurrenceSummary(
-                            participantCount = result.participantCount,
-                            participantCapacity = result.participantCapacity,
-                        ).also { summary ->
-                            rememberWeeklyOccurrenceSummary(occurrence, summary)
-                        }
-                    } else {
-                        null
-                    }
+                    weeklyOccurrenceCoordinator.applySelectedOccurrenceParticipantSummary(
+                        occurrence = occurrence.takeIf { isWeeklyParentEvent(result.event) },
+                        weeklySelectionRequired = result.weeklySelectionRequired,
+                        participantCount = result.participantCount,
+                        participantCapacity = result.participantCapacity,
+                    )
                     refreshParticipantManagementSnapshotIfNeeded(result.event)
                     refreshParticipantComplianceIfNeeded(result.event)
                 }.onFailure { throwable ->
