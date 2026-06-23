@@ -74,7 +74,6 @@ import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.data.repositories.userMessage
 import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
-import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
@@ -685,28 +684,23 @@ class DefaultEventDetailComponent(
         }
     }
 
-    private val _editedEvent = MutableStateFlow(event)
-    override var editedEvent = _editedEvent.asStateFlow()
-
-    private val _isEditing = MutableStateFlow(
-        event.state.equals("TEMPLATE", ignoreCase = true) && canEditEventDetails(event)
+    private val editDraftCoordinator = EventEditDraftCoordinator(
+        initialEvent = event,
+        canEditInitial = event.state.equals("TEMPLATE", ignoreCase = true) && canEditEventDetails(event),
     )
-    override var isEditing = _isEditing.asStateFlow()
+    override var editedEvent = editDraftCoordinator.editedEvent
+    override var isEditing = editDraftCoordinator.isEditing
 
-    private val _fieldCount = MutableStateFlow(0)
-    private val _editableLeagueTimeSlots = MutableStateFlow<List<TimeSlot>>(emptyList())
-    override val editableLeagueTimeSlots = _editableLeagueTimeSlots.asStateFlow()
-    private val _editableFields = MutableStateFlow<List<Field>>(emptyList())
-    override val editableFields = _editableFields.asStateFlow()
+    override val editableLeagueTimeSlots = editDraftCoordinator.editableLeagueTimeSlots
+    override val editableFields = editDraftCoordinator.editableFields
     private val rentalResourcesCoordinator = EventRentalResourcesCoordinator()
     override val availableRentalResources = rentalResourcesCoordinator.availableResources
     override val selectedRentalResourceIds = rentalResourcesCoordinator.selectedResourceIds
-    private val _editableLeagueScoringConfig = MutableStateFlow(LeagueScoringConfigDTO())
-    override val editableLeagueScoringConfig = _editableLeagueScoringConfig.asStateFlow()
+    override val editableLeagueScoringConfig = editDraftCoordinator.editableLeagueScoringConfig
 
     override val backCallback = BackCallback {
         if (isEditing.value) {
-            _isEditing.value = false
+            editDraftCoordinator.setEditing(false)
         } else if (showDetails.value) {
             _showDetails.value = false
         } else {
@@ -1322,7 +1316,7 @@ class DefaultEventDetailComponent(
 
     init {
         backHandler.register(backCallback)
-        if (_isEditing.value) {
+        if (editDraftCoordinator.isEditing.value) {
             loadSports(reportErrors = true)
         }
         scope.launch {
@@ -1519,7 +1513,7 @@ class DefaultEventDetailComponent(
             }
         }
         scope.launch {
-            _isEditing.collect { isEditing ->
+            editDraftCoordinator.isEditing.collect { isEditing ->
                 backCallback.isEnabled = isEditing
             }
         }
@@ -1602,7 +1596,7 @@ class DefaultEventDetailComponent(
         scope.launch {
             matchRepository.setIgnoreMatch(null)
             try {
-                combine(selectedEventId, _isEditing, matchEditingCoordinator.isEditingMatches) { eventId, isEditing, isEditingMatches ->
+                combine(selectedEventId, editDraftCoordinator.isEditing, matchEditingCoordinator.isEditingMatches) { eventId, isEditing, isEditingMatches ->
                     Triple(eventId, isEditing, isEditingMatches)
                 }.collectLatest { (eventId, isEditing, isEditingMatches) ->
                     if (eventId.isBlank()) {
@@ -1623,16 +1617,13 @@ class DefaultEventDetailComponent(
         }
         scope.launch {
             eventWithRelations.collect { relations ->
-                if (!canEditEventDetails(relations.event) && _isEditing.value) {
-                    _isEditing.value = false
-                    _editedEvent.value = relations.event
+                if (!canEditEventDetails(relations.event) && editDraftCoordinator.isEditing.value) {
+                    editDraftCoordinator.forceExitEditing(relations.event)
                 }
-                if (!_isEditing.value) {
-                    _editableLeagueTimeSlots.value = editableLeagueTimeSlotsForEvent(
-                        event = relations.event,
-                        timeSlots = relations.timeSlots,
-                    )
-                }
+                editDraftCoordinator.replaceReadOnlyTimeSlots(
+                    event = relations.event,
+                    timeSlots = relations.timeSlots,
+                )
                 val activeDivision = _selectedDivision.value ?: relations.event.resolveDefaultSelectedDivisionId()
                 if (!activeDivision.isNullOrBlank()) {
                     selectDivision(activeDivision)
@@ -1697,19 +1688,16 @@ class DefaultEventDetailComponent(
                 }
         }
         scope.launch {
-            combine(eventWithRelations, eventFields, _isEditing) { relations, fieldsWithMatches, editing ->
+            combine(eventWithRelations, eventFields, editDraftCoordinator.isEditing) { relations, fieldsWithMatches, editing ->
                 Triple(relations, fieldsWithMatches.map { relation -> relation.field }, editing)
             }.collect { (relations, fields, editing) ->
                 if (!editing) {
-                    val refreshedFields = buildEditableFieldDrafts(
+                    editDraftCoordinator.refreshReadOnlyDraft(
                         event = relations.event,
                         sourceFields = fields,
+                        leagueScoringConfig = relations.leagueScoringConfig?.toDto()
+                            ?: LeagueScoringConfigDTO(),
                     )
-                    _editableFields.value = refreshedFields
-                    _fieldCount.value = refreshedFields.size
-                    _editableLeagueScoringConfig.value = relations.leagueScoringConfig?.toDto()
-                        ?: LeagueScoringConfigDTO()
-                    _editedEvent.value = relations.event.copy(fieldIds = refreshedFields.map { field -> field.id })
                 }
             }
         }
@@ -1830,16 +1818,18 @@ class DefaultEventDetailComponent(
                 .onSuccess {
                     loadedSports = true
                     _sports.value = it
-                    if (_isEditing.value) {
-                        _editedEvent.value = syncOfficialStaffingForSportTransition(
-                            previous = _editedEvent.value,
-                            updated = _editedEvent.value.withSportRules(_sports.value),
-                        )
+                    if (editDraftCoordinator.isEditing.value) {
+                        editDraftCoordinator.updateEditedEvent { previous ->
+                            syncOfficialStaffingForSportTransition(
+                                previous = previous,
+                                updated = previous.withSportRules(_sports.value),
+                            )
+                        }
                     }
                 }
                 .onFailure {
                     Napier.w("Failed to load sports.", it)
-                    if (reportSportsLoadErrors || _isEditing.value) {
+                    if (reportSportsLoadErrors || editDraftCoordinator.isEditing.value) {
                         _errorState.value = ErrorMessage("Failed to load sports: ${it.userMessage()}")
                     }
                 }
@@ -1850,7 +1840,7 @@ class DefaultEventDetailComponent(
                 }
                 .onFailure {
                     Napier.w("Failed to load division options.", it)
-                    if (reportSportsLoadErrors || _isEditing.value) {
+                    if (reportSportsLoadErrors || editDraftCoordinator.isEditing.value) {
                         _errorState.value = ErrorMessage("Failed to load division options: ${it.userMessage()}")
                     }
                 }
@@ -3843,7 +3833,7 @@ class DefaultEventDetailComponent(
     }
 
     override fun toggleEdit() {
-        setEventEditMode(enabled = !_isEditing.value)
+        setEventEditMode(enabled = !editDraftCoordinator.isEditing.value)
     }
 
     override fun startEditingEvent() {
@@ -3862,7 +3852,7 @@ class DefaultEventDetailComponent(
             )
             return
         }
-        if (_isEditing.value == enabled) {
+        if (editDraftCoordinator.isEditing.value == enabled) {
             return
         }
         if (enabled && !sportsCatalogLoaded) {
@@ -3878,22 +3868,16 @@ class DefaultEventDetailComponent(
         } else {
             selected
         }
-        val seededEditableFields = buildEditableFieldDrafts(
+        editDraftCoordinator.seedDraftForEditing(
             event = seededEvent,
             sourceFields = eventFields.value.map { relation -> relation.field },
-        )
-        _editableLeagueScoringConfig.value = eventWithRelations.value.leagueScoringConfig?.toDto()
-            ?: LeagueScoringConfigDTO()
-        _editedEvent.value = seededEvent.copy(fieldIds = seededEditableFields.map { field -> field.id })
-        _editableFields.value = seededEditableFields
-        _fieldCount.value = seededEditableFields.size
-        _editableLeagueTimeSlots.value = editableLeagueTimeSlotsForEvent(
-            event = seededEvent,
             timeSlots = eventWithRelations.value.timeSlots,
+            leagueScoringConfig = eventWithRelations.value.leagueScoringConfig?.toDto()
+                ?: LeagueScoringConfigDTO(),
         )
         if (enabled) {
             val changedRentalSelection = rentalResourcesCoordinator.setAttachedResourceSelection(
-                slots = _editableLeagueTimeSlots.value,
+                slots = editDraftCoordinator.editableLeagueTimeSlots.value,
                 eventId = seededEvent.id,
             )
             if (changedRentalSelection && rentalResourcesCoordinator.selectedResourceIds.value.isNotEmpty()) {
@@ -3904,41 +3888,29 @@ class DefaultEventDetailComponent(
             eventInviteCoordinator.clearPendingStaffInvites()
             eventInviteCoordinator.clearSuggestedUsers()
         }
-        _isEditing.value = enabled
+        editDraftCoordinator.setEditing(enabled)
     }
 
     override fun editEventField(update: Event.() -> Event) {
-        val previous = _editedEvent.value
-        val updated = syncOfficialStaffingForSportTransition(
-            previous = previous,
-            updated = previous
-                .update()
-                .withSportRules(_sports.value),
-        )
-        _editedEvent.value = updated
-        _editableFields.value = syncEditableFieldsForEvent(previous, updated, _editableFields.value)
-        _editableLeagueTimeSlots.value = syncEditableLeagueSlotBoundaries(
-            previousEvent = previous,
-            updatedEvent = updated,
-            slots = _editableLeagueTimeSlots.value,
-        )
+        editDraftCoordinator.updateEditedEvent { previous ->
+            syncOfficialStaffingForSportTransition(
+                previous = previous,
+                updated = previous
+                    .update()
+                    .withSportRules(_sports.value),
+            )
+        }
     }
 
     override fun editTournamentField(update: Event.() -> Event) {
-        val previous = _editedEvent.value
-        val updated = syncOfficialStaffingForSportTransition(
-            previous = previous,
-            updated = previous
-                .update()
-                .withSportRules(_sports.value),
-        )
-        _editedEvent.value = updated
-        _editableFields.value = syncEditableFieldsForEvent(previous, updated, _editableFields.value)
-        _editableLeagueTimeSlots.value = syncEditableLeagueSlotBoundaries(
-            previousEvent = previous,
-            updatedEvent = updated,
-            slots = _editableLeagueTimeSlots.value,
-        )
+        editDraftCoordinator.updateEditedEvent { previous ->
+            syncOfficialStaffingForSportTransition(
+                previous = previous,
+                updated = previous
+                    .update()
+                    .withSportRules(_sports.value),
+            )
+        }
     }
 
     override fun searchUsers(query: String) {
@@ -4166,7 +4138,7 @@ class DefaultEventDetailComponent(
             roles = roles,
         ).getOrThrow()
 
-        val event = _editedEvent.value
+        val event = editDraftCoordinator.editedEvent.value
         val assignedUserIds = normalizedDraft.roles
             .flatMap { role -> event.assignedUserIdsForRole(role) }
             .distinct()
@@ -4367,7 +4339,7 @@ class DefaultEventDetailComponent(
 
     override fun createTemplateFromCurrentEvent() {
         scope.launch {
-            val sourceEvent = if (_isEditing.value) _editedEvent.value else selectedEvent.value
+            val sourceEvent = if (editDraftCoordinator.isEditing.value) editDraftCoordinator.editedEvent.value else selectedEvent.value
             if (sourceEvent.state.equals("TEMPLATE", ignoreCase = true)) {
                 _errorState.value = ErrorMessage("This event is already a template.")
                 return@launch
@@ -4380,12 +4352,12 @@ class DefaultEventDetailComponent(
                     sourceEvent = sourceEvent,
                     currentUserId = currentUser.value.id,
                     sourceSport = resolveSport(sourceEvent.sportId),
-                    isEditing = _isEditing.value,
-                    editableFields = _editableFields.value,
+                    isEditing = editDraftCoordinator.isEditing.value,
+                    editableFields = editDraftCoordinator.editableFields.value,
                     relationFields = eventFields.value.map { relation -> relation.field },
-                    editableTimeSlots = _editableLeagueTimeSlots.value,
+                    editableTimeSlots = editDraftCoordinator.editableLeagueTimeSlots.value,
                     relationTimeSlots = eventWithRelations.value.timeSlots,
-                    editableLeagueScoringConfig = _editableLeagueScoringConfig.value,
+                    editableLeagueScoringConfig = editDraftCoordinator.editableLeagueScoringConfig.value,
                     nextId = ::newId,
                 ),
             )
@@ -4687,59 +4659,11 @@ class DefaultEventDetailComponent(
     }
 
     override fun selectFieldCount(count: Int) {
-        val normalized = count.coerceAtLeast(0)
-        _fieldCount.value = normalized
-
-        val currentEvent = _editedEvent.value
-        val resized = _editableFields.value
-            .take(normalized)
-            .mapIndexed { index, field ->
-                field.copy(
-                    id = if (field.id.isBlank()) newId() else field.id,
-                    fieldNumber = index + 1,
-                    divisions = field.divisions
-                        .normalizeDivisionIdentifiers()
-                        .ifEmpty { defaultFieldDivisions(currentEvent) },
-                    location = eventFieldLocationDefault(field, currentEvent),
-                    organizationId = resolveFieldOrganizationId(
-                        fieldOrganizationId = field.organizationId,
-                        eventOrganizationId = currentEvent.organizationId,
-                    ),
-                )
-            }
-            .toMutableList()
-
-        while (resized.size < normalized) {
-            val fieldNumber = resized.size + 1
-            resized += Field(
-                fieldNumber = fieldNumber,
-                organizationId = currentEvent.organizationId,
-                id = newId(),
-            ).copy(
-                name = "Field $fieldNumber",
-                divisions = defaultFieldDivisions(currentEvent),
-                location = defaultFieldLocation(currentEvent),
-            )
-        }
-
-        _editableFields.value = resized
-        _editedEvent.value = currentEvent.copy(fieldIds = resized.map { field -> field.id })
-
-        val validFieldIds = resized.map { field -> field.id }.toSet()
-        _editableLeagueTimeSlots.value = _editableLeagueTimeSlots.value.map { slot ->
-            val remainingFieldIds = slot.normalizedScheduledFieldIds().filter(validFieldIds::contains)
-            slot.copy(
-                scheduledFieldId = remainingFieldIds.firstOrNull(),
-                scheduledFieldIds = remainingFieldIds,
-            )
-        }
+        editDraftCoordinator.selectFieldCount(count)
     }
 
     override fun updateLocalFieldName(index: Int, name: String) {
-        val fields = _editableFields.value.toMutableList()
-        if (index !in fields.indices) return
-        fields[index] = fields[index].copy(name = name)
-        _editableFields.value = fields
+        editDraftCoordinator.updateLocalFieldName(index, name)
     }
 
     override fun setRentalResourceSelected(optionId: String, selected: Boolean) {
@@ -4749,26 +4673,23 @@ class DefaultEventDetailComponent(
     }
 
     override fun updateLeagueScoringConfig(update: LeagueScoringConfigDTO.() -> LeagueScoringConfigDTO) {
-        _editableLeagueScoringConfig.value = _editableLeagueScoringConfig.value.update()
+        editDraftCoordinator.updateLeagueScoringConfig(update)
     }
 
     override fun addLeagueTimeSlot() {
-        _editableLeagueTimeSlots.value = _editableLeagueTimeSlots.value + createDefaultLeagueSlot(_editedEvent.value)
+        editDraftCoordinator.addLeagueTimeSlot()
     }
 
     override fun updateLeagueTimeSlot(index: Int, update: TimeSlot.() -> TimeSlot) {
-        val slots = _editableLeagueTimeSlots.value.toMutableList()
-        if (index !in slots.indices) return
-        val validFieldIds = _editableFields.value.map { field -> field.id }.toSet()
-        slots[index] = normalizeRentalSlotResourceSelection(slots[index].update(), validFieldIds)
-        _editableLeagueTimeSlots.value = slots
+        editDraftCoordinator.updateLeagueTimeSlot(
+            index = index,
+            update = update,
+            normalizeSlotResourceSelection = ::normalizeRentalSlotResourceSelection,
+        )
     }
 
     override fun removeLeagueTimeSlot(index: Int) {
-        val slots = _editableLeagueTimeSlots.value.toMutableList()
-        if (index !in slots.indices) return
-        slots.removeAt(index)
-        _editableLeagueTimeSlots.value = slots
+        editDraftCoordinator.removeLeagueTimeSlot(index)
     }
 
     private fun loadAvailableRentalResources(eventId: String) {
@@ -4777,11 +4698,11 @@ class DefaultEventDetailComponent(
                 .onSuccess { options ->
                     val changedSelection = rentalResourcesCoordinator.applyLoadedResources(
                         options = options,
-                        slots = _editableLeagueTimeSlots.value,
+                        slots = editDraftCoordinator.editableLeagueTimeSlots.value,
                         eventId = eventId,
                     )
                     if (changedSelection) {
-                        if (_isEditing.value) {
+                        if (editDraftCoordinator.isEditing.value) {
                             syncSelectedRentalResourcesIntoEditDraft()
                         }
                     }
@@ -4794,20 +4715,17 @@ class DefaultEventDetailComponent(
 
     private fun normalizeRentalSlotResourceSelection(
         slot: TimeSlot,
-        validFieldIds: Set<String> = _editableFields.value.map { field -> field.id }.toSet(),
+        validFieldIds: Set<String> = editDraftCoordinator.editableFieldIds(),
     ): TimeSlot = rentalResourcesCoordinator.normalizeSlotResourceSelection(slot, validFieldIds)
 
     private fun syncSelectedRentalResourcesIntoEditDraft() {
         val draft = rentalResourcesCoordinator.buildEditDraft(
-            event = _editedEvent.value,
-            currentFields = _editableFields.value,
-            currentSlots = _editableLeagueTimeSlots.value,
-            defaultDivisionIds = defaultFieldDivisions(_editedEvent.value),
+            event = editDraftCoordinator.editedEvent.value,
+            currentFields = editDraftCoordinator.editableFields.value,
+            currentSlots = editDraftCoordinator.editableLeagueTimeSlots.value,
+            defaultDivisionIds = defaultFieldDivisions(editDraftCoordinator.editedEvent.value),
         )
-        _editableFields.value = draft.fields
-        _fieldCount.value = draft.fields.size
-        _editableLeagueTimeSlots.value = draft.timeSlots
-        _editedEvent.value = draft.event
+        editDraftCoordinator.applyRentalDraft(draft)
     }
 
     private fun selectedRentalResourceFields(
@@ -4817,13 +4735,15 @@ class DefaultEventDetailComponent(
     private fun prepareEventForUpdate(): PreparedEventForUpdate {
         val result = EventEditPayloadBuilder.prepareForUpdate(
             EventEditPayloadInput(
-                editedEvent = _editedEvent.value.copy(
-                    matchRulesOverride = matchRulesOverrideWithoutSegmentCount(_editedEvent.value.matchRulesOverride),
+                editedEvent = editDraftCoordinator.editedEvent.value.copy(
+                    matchRulesOverride = matchRulesOverrideWithoutSegmentCount(
+                        editDraftCoordinator.editedEvent.value.matchRulesOverride,
+                    ),
                 ),
-                editableFields = _editableFields.value,
-                editableLeagueTimeSlots = _editableLeagueTimeSlots.value,
+                editableFields = editDraftCoordinator.editableFields.value,
+                editableLeagueTimeSlots = editDraftCoordinator.editableLeagueTimeSlots.value,
                 selectedRentalFields = selectedRentalResourceFields(),
-                leagueScoringConfig = _editableLeagueScoringConfig.value,
+                leagueScoringConfig = editDraftCoordinator.editableLeagueScoringConfig.value,
                 originalEventStart = eventWithRelations.value.event.start,
                 normalizeSlotResourceSelection = { slot, validFieldIds ->
                     normalizeRentalSlotResourceSelection(slot, validFieldIds)
@@ -4831,9 +4751,7 @@ class DefaultEventDetailComponent(
             )
         )
         result.editableFields?.let { fields ->
-            _editableFields.value = fields
-            _fieldCount.value = fields.size
-            _editedEvent.value = _editedEvent.value.copy(fieldIds = fields.map { field -> field.id })
+            editDraftCoordinator.applyPreparedEditableFields(fields)
         }
         return result.prepared
     }
