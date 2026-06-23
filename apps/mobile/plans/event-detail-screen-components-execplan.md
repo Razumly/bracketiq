@@ -15,7 +15,7 @@ After this refactor, the app should behave the same, but a developer should be a
 - [x] (2026-06-23 23:35Z) Reviewed `PLANS.md`, current event detail file sizes, and the related existing ExecPlans before writing this plan.
 - [x] (2026-06-23 23:35Z) Confirmed existing unfinished plan items: `event-detail-component-decomposition-execplan.md` still needs final component thinning validation, and `event-details-modularization-execplan.md` still needs further `EventDetails.kt` thinning plus full all-target validation where available.
 - [x] (2026-06-23 23:35Z) Ran the baseline focused event-detail tests and common metadata compilation; both passed.
-- [ ] Extract `EventDetailFloatingActions.kt` as one complete component family.
+- [x] (2026-06-23 23:49Z) Extracted `EventDetailFloatingActions.kt` as one complete component family and validated it.
 - [ ] Extract `EventDetailOverviewSections.kt` as one complete overview/roster component family.
 - [ ] Extract `EventDetailTabNavigation.kt` as one complete navigation/division-selector component family.
 - [ ] Extract `EventDetailJoinAndInviteSheets.kt` as one complete registration, join, invite, and registration-question UI family.
@@ -33,6 +33,9 @@ After this refactor, the app should behave the same, but a developer should be a
 
 - Observation: There are two related unfinished ExecPlans that must not be forgotten while this plan runs.
   Evidence: `rg -n "\[ \]" plans/event-detail-component-decomposition-execplan.md plans/event-details-modularization-execplan.md` shows unchecked items for final `DefaultEventDetailComponent` thinning/validation and further `EventDetails.kt` thinning/all-target validation.
+
+- Observation: Moving the floating action dock as a whole exposed one implicit icon dependency that had previously been satisfied by the large screen file import set.
+  Evidence: `compileCommonMainKotlinMetadata` initially reported unresolved `Groups` in `EventDetailFloatingActions.kt`; adding the explicit `com.razumly.mvp.icons.Groups` import fixed the moved file without behavior changes.
 
 ## Decision Log
 
@@ -215,6 +218,24 @@ Baseline common metadata compilation passed:
     PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:compileCommonMainKotlinMetadata --console=plain
     Result: BUILD SUCCESSFUL in 26s
     Notes: Existing warnings were reported in EventRepository, EventDetails, LeagueScheduleFields, ParticipantsVeiw, RentalSchedulingUtils, Profile screens, and RefundManagerScreen. These warnings did not fail the build.
+
+Floating action extraction file-size evidence:
+
+    6332 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt
+     862 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailFloatingActions.kt
+    7194 total
+
+Floating action extraction validation passed:
+
+    git diff --check -- composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailFloatingActions.kt plans/event-detail-screen-components-execplan.md
+    Result: no whitespace errors
+
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:compileCommonMainKotlinMetadata --console=plain
+    Result: BUILD SUCCESSFUL in 3s
+
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailScreenRoleVisibilityTest*" --tests "*EventDetailWeeklyBehaviorTest*" --console=plain
+    Result: BUILD SUCCESSFUL in 1m 28s
+    Notes: Existing warnings were reported during Kotlin compilation. `startLocalBackend` again reported adb reverse could not be configured because no device/emulator was attached; the JVM tests passed.
 
 ## Interfaces and Dependencies
 
