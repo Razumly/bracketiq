@@ -1,0 +1,275 @@
+package com.razumly.mvp.eventDetail
+
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
+import com.razumly.mvp.core.data.repositories.PurchaseIntent
+import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
+import kotlinx.coroutines.test.runTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+
+class EventJoinExecutionCoordinatorTest {
+    @Test
+    fun execute_self_join_starts_payment_plan_and_refreshes_after_success() = runTest {
+        val registrationFlow = EventRegistrationFlowCoordinator()
+        val coordinator = EventJoinExecutionCoordinator(registrationFlow)
+        val events = mutableListOf<String>()
+
+        coordinator.executeSelfJoinForTest(
+            event = paidPaymentPlanEvent(teamSignup = false),
+            registrationFlow = registrationFlow,
+            events = events,
+        )
+
+        assertEquals(
+            listOf(
+                "show:Joining Event ...",
+                "add-self:event-1:open:null",
+                "show:Starting Payment Plan ...",
+                "bill:USER:user-1:false:open",
+                "show:Reloading Event",
+                "refresh:event-1:Failed to refresh event after starting payment plan.",
+                "clear-progress",
+                "error:Joined. Payment plan started. A bill was created for you. Pay installments from your Profile.",
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun execute_self_join_rolls_back_when_payment_plan_bill_fails_after_join() = runTest {
+        val registrationFlow = EventRegistrationFlowCoordinator()
+        val coordinator = EventJoinExecutionCoordinator(registrationFlow)
+        val events = mutableListOf<String>()
+
+        coordinator.executeSelfJoinForTest(
+            event = paidPaymentPlanEvent(teamSignup = false),
+            registrationFlow = registrationFlow,
+            billResult = Result.failure(IllegalStateException("billing failed")),
+            events = events,
+        )
+
+        assertEquals(
+            listOf(
+                "show:Joining Event ...",
+                "add-self:event-1:open:null",
+                "show:Starting Payment Plan ...",
+                "bill:USER:user-1:false:open",
+                "rollback-user:event-1",
+                "error:billing failed",
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun execute_team_join_creates_purchase_intent_and_sets_join_confirmation_target() = runTest {
+        val registrationFlow = EventRegistrationFlowCoordinator()
+        val coordinator = EventJoinExecutionCoordinator(registrationFlow)
+        val events = mutableListOf<String>()
+        val targetEvents = mutableListOf<JoinConfirmationTarget>()
+
+        coordinator.executeTeamJoinForTest(
+            event = paidPurchaseIntentEvent(),
+            team = team(),
+            registrationFlow = registrationFlow,
+            targetEvents = targetEvents,
+            events = events,
+        )
+
+        assertEquals(
+            listOf(
+                "billing-address-ready",
+                "show:Creating Purchase Request ...",
+                "purchase:team-1:4500:open",
+                "process:registration-1",
+            ),
+            events,
+        )
+        assertEquals(
+            buildJoinConfirmationTarget(
+                eventId = "event-1",
+                registrantType = JoinConfirmationRegistrantType.TEAM,
+                registrantId = "team-1",
+                occurrence = null,
+            ),
+            targetEvents.single(),
+        )
+    }
+
+    @Test
+    fun execute_self_join_reports_missing_division_price_without_repository_calls() = runTest {
+        val registrationFlow = EventRegistrationFlowCoordinator()
+        val coordinator = EventJoinExecutionCoordinator(registrationFlow)
+        val events = mutableListOf<String>()
+
+        coordinator.executeSelfJoinForTest(
+            event = paidPaymentPlanEvent(teamSignup = false).copy(
+                divisionDetails = listOf(
+                    DivisionDetail(
+                        id = "open",
+                        price = null,
+                        allowPaymentPlans = true,
+                    ),
+                ),
+            ),
+            registrationFlow = registrationFlow,
+            events = events,
+        )
+
+        assertEquals(
+            listOf("error:Set a price for this division before joining."),
+            events,
+        )
+    }
+
+    private suspend fun EventJoinExecutionCoordinator.executeSelfJoinForTest(
+        event: Event,
+        registrationFlow: EventRegistrationFlowCoordinator,
+        billResult: Result<PaymentPlanBillStatus> = Result.success(PaymentPlanBillStatus.CREATED),
+        events: MutableList<String>,
+    ) {
+        executeSelfJoin(
+            event = event,
+            currentUserId = "user-1",
+            currentUserIsMinor = false,
+            selectedDivisionId = "open",
+            isEventFull = false,
+            weeklyOccurrence = null,
+            submitMinorJoinRequest = {
+                events += "minor-request"
+            },
+            addCurrentUserToEvent = { targetEvent, divisionId, occurrence ->
+                events += "add-self:${targetEvent.id}:$divisionId:${occurrence?.slotId}"
+                Result.success(SelfRegistrationResult())
+            },
+            createPaymentPlanBill = { ownerType, ownerId, allowSplit, preferredDivisionId ->
+                events += "bill:$ownerType:$ownerId:$allowSplit:$preferredDivisionId"
+                billResult
+            },
+            rollbackUserJoinAfterBillingFailure = { targetEvent ->
+                events += "rollback-user:${targetEvent.id}"
+            },
+            ensureBillingAddressOrPrompt = {
+                error("Billing address should not be requested")
+            },
+            onBillingAddressReady = {
+                error("Billing address continuation should not run")
+            },
+            createPurchaseIntent = { _, _, _, _ ->
+                error("Purchase intent should not be created")
+            },
+            processPurchaseIntent = {
+                error("Purchase intent should not be processed")
+            },
+            refreshAfterParticipantMutation = { eventId, warningMessage ->
+                events += "refresh:$eventId:$warningMessage"
+            },
+            clearRegistrationProgress = {
+                events += "clear-progress"
+            },
+            setPendingJoinConfirmationTarget = registrationFlow::setPendingJoinConfirmationTarget,
+            showLoading = { message -> events += "show:$message" },
+            setError = { message -> events += "error:$message" },
+        )
+    }
+
+    private suspend fun EventJoinExecutionCoordinator.executeTeamJoinForTest(
+        event: Event,
+        team: TeamWithPlayers,
+        registrationFlow: EventRegistrationFlowCoordinator,
+        targetEvents: MutableList<JoinConfirmationTarget>,
+        events: MutableList<String>,
+    ) {
+        executeTeamJoin(
+            event = event,
+            team = team,
+            currentUserIsMinor = false,
+            selectedDivisionId = "open",
+            isEventFull = false,
+            weeklyOccurrence = null,
+            submitMinorJoinRequest = {
+                events += "minor-request"
+            },
+            addTeamToEvent = { _, _, _, _ ->
+                error("Team should not be directly added")
+            },
+            createPaymentPlanBill = { _, _, _, _ ->
+                error("Payment plan should not be created")
+            },
+            rollbackTeamJoinAfterBillingFailure = { _, _ ->
+                error("Team rollback should not run")
+            },
+            ensureBillingAddressOrPrompt = {
+                events += "billing-address-ready"
+                true
+            },
+            onBillingAddressReady = {
+                events += "billing-address-continuation"
+            },
+            createPurchaseIntent = { _, teamId, priceCents, _: EventOccurrenceSelection?, divisionId ->
+                events += "purchase:$teamId:$priceCents:$divisionId"
+                Result.success(PurchaseIntent(registrationId = "registration-1"))
+            },
+            processPurchaseIntent = { intent ->
+                events += "process:${intent.registrationId}"
+            },
+            refreshAfterParticipantMutation = { eventId, warningMessage ->
+                events += "refresh:$eventId:$warningMessage"
+            },
+            clearRegistrationProgress = {
+                events += "clear-progress"
+            },
+            setPendingJoinConfirmationTarget = { target ->
+                registrationFlow.setPendingJoinConfirmationTarget(target)
+                target?.let { targetEvents += it }
+            },
+            showLoading = { message -> events += "show:$message" },
+            setError = { message -> events += "error:$message" },
+        )
+    }
+
+    private fun paidPaymentPlanEvent(teamSignup: Boolean): Event {
+        return Event(
+            id = "event-1",
+            teamSignup = teamSignup,
+            divisions = listOf("open"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "open",
+                    price = 4500,
+                    allowPaymentPlans = true,
+                    installmentAmounts = listOf(1500, 3000),
+                    installmentDueDates = listOf("2026-07-01", "2026-08-01"),
+                ),
+            ),
+        )
+    }
+
+    private fun paidPurchaseIntentEvent(): Event {
+        return Event(
+            id = "event-1",
+            teamSignup = true,
+            divisions = listOf("open"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "open",
+                    price = 4500,
+                    allowPaymentPlans = false,
+                ),
+            ),
+        )
+    }
+
+    private fun team(): TeamWithPlayers {
+        return TeamWithPlayers(
+            team = Team(captainId = "captain-1").copy(id = "team-1"),
+            captain = null,
+            players = emptyList(),
+            pendingPlayers = emptyList(),
+        )
+    }
+}

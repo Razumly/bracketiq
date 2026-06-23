@@ -530,6 +530,7 @@ class DefaultEventDetailComponent(
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
     private val registrationFlowCoordinator = EventRegistrationFlowCoordinator()
+    private val joinExecutionCoordinator = EventJoinExecutionCoordinator(registrationFlowCoordinator)
     private val withdrawalActionCoordinator = EventWithdrawalActionCoordinator(registrationFlowCoordinator)
     private val paymentPlanBillingCoordinator = EventPaymentPlanBillingCoordinator()
     private val purchaseIntentCoordinator = EventPurchaseIntentCoordinator(registrationFlowCoordinator)
@@ -2650,131 +2651,68 @@ class DefaultEventDetailComponent(
             null
         }
         try {
-            val paymentPlan = resolveEffectivePaymentPlan(
+            joinExecutionCoordinator.executeSelfJoin(
                 event = selectedEvent.value,
-                preferredDivisionId = selectedDivision.value,
-            )
-            when (
-                registrationFlowCoordinator.determineJoinExecutionAction(
-                    paymentPlan = paymentPlan,
-                    currentUserIsMinor = currentUser.value.isMinor,
-                    isEventFull = isEventFull.value,
-                    isTeamSignup = selectedEvent.value.teamSignup,
-                    forTeamJoin = false,
-                )
-            ) {
-                JoinExecutionAction.REQUEST_PARENT_APPROVAL -> {
+                currentUserId = currentUser.value.id,
+                currentUserIsMinor = currentUser.value.isMinor,
+                selectedDivisionId = selectedDivision.value,
+                isEventFull = isEventFull.value,
+                weeklyOccurrence = weeklyOccurrence,
+                submitMinorJoinRequest = {
                     submitMinorJoinRequestForParentApproval()
-                    return
-                }
-                JoinExecutionAction.REQUIRE_PRICE -> {
-                    _errorState.value = ErrorMessage("Set a price for this division before joining.")
-                    return
-                }
-                JoinExecutionAction.START_PAYMENT_PLAN -> {
-                    var joinedByThisFlow = false
-                    loadingHandler.showLoading("Joining Event ...")
-                    val registrationResult = addCurrentUserToEventWithRegistrationAnswers(
-                        event = selectedEvent.value,
-                        preferredDivisionId = selectedDivision.value,
-                        occurrence = weeklyOccurrence,
-                    )
-                    val registrationDecision =
-                        registrationFlowCoordinator.selfJoinBeforePaymentPlanDecision(registrationResult)
-                    joinedByThisFlow = registrationDecision.joinedByThisFlow
-                    registrationDecision.message?.let { message ->
-                        _errorState.value = ErrorMessage(message)
-                    }
-                    registrationDecision.failure?.let { failure ->
-                        _errorState.value = ErrorMessage(failure.userMessage())
-                        return
-                    }
-                    if (registrationDecision.shouldReloadEvent) {
-                        loadingHandler.showLoading("Reloading Event")
-                        refreshEventAfterParticipantMutation(
-                            eventId = selectedEvent.value.id,
-                            warningMessage = "Failed to refresh event after joining waitlist.",
-                        )
-                        return
-                    }
-                    if (!registrationDecision.shouldContinueToPaymentPlan) {
-                        return
-                    }
-
-                    loadingHandler.showLoading("Starting Payment Plan ...")
-                    val paymentPlanResult = createPaymentPlanBillForOwner(
-                        ownerType = "USER",
-                        ownerId = currentUser.value.id,
-                        allowSplit = false,
-                        preferredDivisionId = selectedDivision.value,
-                    )
-                    paymentPlanResult.onSuccess { status ->
-                        loadingHandler.showLoading("Reloading Event")
-                        refreshEventAfterParticipantMutation(
-                            eventId = selectedEvent.value.id,
-                            warningMessage = "Failed to refresh event after starting payment plan.",
-                        )
-                        clearCurrentRegistrationProgress()
-                        _errorState.value = ErrorMessage(
-                            registrationFlowCoordinator.paymentPlanBillSuccessMessage(
-                                status = status,
-                                forTeamJoin = false,
-                            ),
-                        )
-                    }.onFailure { throwable ->
-                        if (joinedByThisFlow) {
-                            rollbackUserJoinAfterBillingFailure(selectedEvent.value)
-                        }
-                        _errorState.value = ErrorMessage(throwable.userMessage())
-                    }
-                    return
-                }
-                JoinExecutionAction.JOIN_DIRECTLY -> {
-                    loadingHandler.showLoading("Joining Event ...")
+                },
+                addCurrentUserToEvent = { event, preferredDivisionId, occurrence ->
                     addCurrentUserToEventWithRegistrationAnswers(
-                        event = selectedEvent.value,
-                        preferredDivisionId = selectedDivision.value,
-                        occurrence = weeklyOccurrence,
-                    ).onSuccess { registration ->
-                        loadingHandler.showLoading("Reloading Event")
-                        refreshEventAfterParticipantMutation(
-                            eventId = selectedEvent.value.id,
-                            warningMessage = "Failed to refresh event after joining.",
-                        )
-                        clearCurrentRegistrationProgress()
-                        registrationFlowCoordinator.selfRegistrationResultMessage(registration)?.let { message ->
-                            _errorState.value = ErrorMessage(message)
-                        }
-                    }.onFailure {
-                        _errorState.value = ErrorMessage(it.userMessage())
-                    }
-                }
-                JoinExecutionAction.CREATE_PURCHASE_INTENT -> {
-                    if (!ensureBillingAddressOrPrompt { scope.launch { executeJoinEvent() } }) {
-                        return
-                    }
-                    loadingHandler.showLoading("Creating Purchase Request ...")
-                    createPurchaseIntentWithRegistrationAnswers(
-                        event = selectedEvent.value,
-                        priceCents = paymentPlan.configuredPriceCents,
-                        occurrence = weeklyOccurrence,
-                        divisionId = selectedDivision.value,
+                        event = event,
+                        preferredDivisionId = preferredDivisionId,
+                        occurrence = occurrence,
                     )
-                        .onSuccess { purchaseIntent ->
-                            registrationFlowCoordinator.setPendingJoinConfirmationTarget(
-                                buildJoinConfirmationTarget(
-                                    eventId = selectedEvent.value.id,
-                                    registrantType = JoinConfirmationRegistrantType.SELF,
-                                    registrantId = currentUser.value.id,
-                                    occurrence = weeklyOccurrence,
-                                )
-                            )
-                            processPurchaseIntent(purchaseIntent)
-                        }.onFailure {
-                            _errorState.value = ErrorMessage(it.userMessage())
-                        }
-                }
-            }
+                },
+                createPaymentPlanBill = { ownerType, ownerId, allowSplit, preferredDivisionId ->
+                    createPaymentPlanBillForOwner(
+                        ownerType = ownerType,
+                        ownerId = ownerId,
+                        allowSplit = allowSplit,
+                        preferredDivisionId = preferredDivisionId,
+                    )
+                },
+                rollbackUserJoinAfterBillingFailure = { event ->
+                    rollbackUserJoinAfterBillingFailure(event)
+                },
+                ensureBillingAddressOrPrompt = { onReady ->
+                    ensureBillingAddressOrPrompt(onReady)
+                },
+                onBillingAddressReady = {
+                    scope.launch { executeJoinEvent() }
+                },
+                createPurchaseIntent = { event, priceCents, occurrence, divisionId ->
+                    createPurchaseIntentWithRegistrationAnswers(
+                        event = event,
+                        priceCents = priceCents,
+                        occurrence = occurrence,
+                        divisionId = divisionId,
+                    )
+                },
+                processPurchaseIntent = { purchaseIntent ->
+                    processPurchaseIntent(purchaseIntent)
+                },
+                refreshAfterParticipantMutation = { eventId, warningMessage ->
+                    refreshEventAfterParticipantMutation(
+                        eventId = eventId,
+                        warningMessage = warningMessage,
+                    )
+                },
+                clearRegistrationProgress = {
+                    clearCurrentRegistrationProgress()
+                },
+                setPendingJoinConfirmationTarget = { target ->
+                    registrationFlowCoordinator.setPendingJoinConfirmationTarget(target)
+                },
+                showLoading = loadingHandler::showLoading,
+                setError = { message ->
+                    _errorState.value = ErrorMessage(message)
+                },
+            )
         } finally {
             loadingHandler.hideLoading()
         }
@@ -2790,119 +2728,70 @@ class DefaultEventDetailComponent(
             null
         }
         try {
-            val paymentPlan = resolveEffectivePaymentPlan(
+            joinExecutionCoordinator.executeTeamJoin(
                 event = selectedEvent.value,
-                preferredDivisionId = selectedDivision.value,
-            )
-            when (
-                registrationFlowCoordinator.determineJoinExecutionAction(
-                    paymentPlan = paymentPlan,
-                    currentUserIsMinor = currentUser.value.isMinor,
-                    isEventFull = isEventFull.value,
-                    isTeamSignup = selectedEvent.value.teamSignup,
-                    forTeamJoin = true,
-                )
-            ) {
-                JoinExecutionAction.REQUEST_PARENT_APPROVAL -> {
+                team = team,
+                currentUserIsMinor = currentUser.value.isMinor,
+                selectedDivisionId = selectedDivision.value,
+                isEventFull = isEventFull.value,
+                weeklyOccurrence = weeklyOccurrence,
+                submitMinorJoinRequest = {
                     submitMinorJoinRequestForParentApproval()
-                    return
-                }
-                JoinExecutionAction.REQUIRE_PRICE -> {
-                    _errorState.value = ErrorMessage("Set a price for this division before joining.")
-                    return
-                }
-                JoinExecutionAction.START_PAYMENT_PLAN -> {
-                    var joinedByThisFlow = false
-                    loadingHandler.showLoading("Joining Event ...")
-                    val joinResult = addTeamToEventWithRegistrationAnswers(
-                        event = selectedEvent.value,
-                        team = team.team,
-                        preferredDivisionId = selectedDivision.value,
-                        occurrence = weeklyOccurrence,
-                    )
-                    val joinDecision = registrationFlowCoordinator.teamJoinBeforePaymentPlanDecision(joinResult)
-                    joinedByThisFlow = joinDecision.joinedByThisFlow
-                    joinDecision.failure?.let { failure ->
-                        _errorState.value = ErrorMessage(failure.userMessage())
-                        return
-                    }
-                    if (!joinDecision.shouldContinueToPaymentPlan) {
-                        return
-                    }
-
-                    loadingHandler.showLoading("Starting Payment Plan ...")
-                    val paymentPlanResult = createPaymentPlanBillForOwner(
-                        ownerType = "TEAM",
-                        ownerId = team.team.id,
-                        allowSplit = selectedEvent.value.allowTeamSplitDefault == true,
-                        preferredDivisionId = selectedDivision.value,
-                    )
-                    paymentPlanResult.onSuccess { status ->
-                        loadingHandler.showLoading("Reloading Event")
-                        refreshEventAfterParticipantMutation(
-                            eventId = selectedEvent.value.id,
-                            warningMessage = "Failed to refresh event after starting team payment plan.",
-                        )
-                        clearCurrentRegistrationProgress()
-                        _errorState.value = ErrorMessage(
-                            registrationFlowCoordinator.paymentPlanBillSuccessMessage(
-                                status = status,
-                                forTeamJoin = true,
-                            ),
-                        )
-                    }.onFailure { throwable ->
-                        if (joinedByThisFlow) {
-                            rollbackTeamJoinAfterBillingFailure(selectedEvent.value, team)
-                        }
-                        _errorState.value = ErrorMessage(throwable.userMessage())
-                    }
-                    return
-                }
-                JoinExecutionAction.JOIN_DIRECTLY -> {
-                    loadingHandler.showLoading("Joining Event ...")
+                },
+                addTeamToEvent = { event, targetTeam, preferredDivisionId, occurrence ->
                     addTeamToEventWithRegistrationAnswers(
-                        event = selectedEvent.value,
-                        team = team.team,
-                        preferredDivisionId = selectedDivision.value,
-                        occurrence = weeklyOccurrence,
-                    ).onSuccess {
-                        loadingHandler.showLoading("Reloading Event")
-                        refreshEventAfterParticipantMutation(
-                            eventId = selectedEvent.value.id,
-                            warningMessage = "Failed to refresh event after team join.",
-                        )
-                        clearCurrentRegistrationProgress()
-                    }.onFailure {
-                        _errorState.value = ErrorMessage(it.userMessage())
-                    }
-                }
-                JoinExecutionAction.CREATE_PURCHASE_INTENT -> {
-                    if (!ensureBillingAddressOrPrompt { scope.launch { executeJoinEventAsTeam(team) } }) {
-                        return
-                    }
-                    loadingHandler.showLoading("Creating Purchase Request ...")
-                    createPurchaseIntentWithRegistrationAnswers(
-                        event = selectedEvent.value,
-                        teamId = team.team.id,
-                        priceCents = paymentPlan.configuredPriceCents,
-                        occurrence = weeklyOccurrence,
-                        divisionId = selectedDivision.value,
+                        event = event,
+                        team = targetTeam,
+                        preferredDivisionId = preferredDivisionId,
+                        occurrence = occurrence,
                     )
-                        .onSuccess { purchaseIntent ->
-                            registrationFlowCoordinator.setPendingJoinConfirmationTarget(
-                                buildJoinConfirmationTarget(
-                                    eventId = selectedEvent.value.id,
-                                    registrantType = JoinConfirmationRegistrantType.TEAM,
-                                    registrantId = team.team.id,
-                                    occurrence = weeklyOccurrence,
-                                )
-                            )
-                            processPurchaseIntent(purchaseIntent)
-                        }.onFailure {
-                            _errorState.value = ErrorMessage(it.userMessage())
-                        }
-                }
-            }
+                },
+                createPaymentPlanBill = { ownerType, ownerId, allowSplit, preferredDivisionId ->
+                    createPaymentPlanBillForOwner(
+                        ownerType = ownerType,
+                        ownerId = ownerId,
+                        allowSplit = allowSplit,
+                        preferredDivisionId = preferredDivisionId,
+                    )
+                },
+                rollbackTeamJoinAfterBillingFailure = { event, targetTeam ->
+                    rollbackTeamJoinAfterBillingFailure(event, targetTeam)
+                },
+                ensureBillingAddressOrPrompt = { onReady ->
+                    ensureBillingAddressOrPrompt(onReady)
+                },
+                onBillingAddressReady = {
+                    scope.launch { executeJoinEventAsTeam(team) }
+                },
+                createPurchaseIntent = { event, teamId, priceCents, occurrence, divisionId ->
+                    createPurchaseIntentWithRegistrationAnswers(
+                        event = event,
+                        teamId = teamId,
+                        priceCents = priceCents,
+                        occurrence = occurrence,
+                        divisionId = divisionId,
+                    )
+                },
+                processPurchaseIntent = { purchaseIntent ->
+                    processPurchaseIntent(purchaseIntent)
+                },
+                refreshAfterParticipantMutation = { eventId, warningMessage ->
+                    refreshEventAfterParticipantMutation(
+                        eventId = eventId,
+                        warningMessage = warningMessage,
+                    )
+                },
+                clearRegistrationProgress = {
+                    clearCurrentRegistrationProgress()
+                },
+                setPendingJoinConfirmationTarget = { target ->
+                    registrationFlowCoordinator.setPendingJoinConfirmationTarget(target)
+                },
+                showLoading = loadingHandler::showLoading,
+                setError = { message ->
+                    _errorState.value = ErrorMessage(message)
+                },
+            )
         } finally {
             loadingHandler.hideLoading()
         }
