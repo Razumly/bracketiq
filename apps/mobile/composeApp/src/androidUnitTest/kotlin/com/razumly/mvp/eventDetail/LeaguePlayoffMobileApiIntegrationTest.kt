@@ -5,8 +5,11 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.repositories.UserVisibilityContext
+import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.dto.InviteCreateDto
 import com.razumly.mvp.testing.MOBILE_TEST_HOST_EMAIL
 import com.razumly.mvp.testing.MOBILE_TEST_HOST_PASSWORD
@@ -27,6 +30,11 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.time.DayOfWeek
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
+import java.time.temporal.ChronoUnit
+import java.time.temporal.TemporalAdjusters
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -93,7 +101,23 @@ class LeaguePlayoffMobileApiIntegrationTest {
             invites = staffInvitePayloads(eventId = createdEvent.id, createdBy = hostUser.id),
         ).getOrThrow()
 
-        val scheduledEvent = host.eventRepository.scheduleEvent(createdEvent.id).getOrThrow()
+        host.teamRepository.getTeams(SEEDED_LEAGUE_TEAM_IDS).getOrThrow().forEach { team ->
+            host.eventRepository.addTeamToEvent(
+                event = createdEvent,
+                team = team,
+                preferredDivisionId = SEEDED_DIVISION_ID,
+            ).getOrThrow()
+        }
+
+        val scheduledEvent = host.eventRepository.scheduleEvent(
+            eventId = createdEvent.id,
+            participantCount = SEEDED_LEAGUE_TEAM_IDS.size,
+            includePlaceholderTeams = true,
+        )
+            .getOrElse { error ->
+                val persistedEvent = host.eventRepository.getEvent(createdEvent.id).getOrNull()
+                throw AssertionError(scheduleFailureMessage(error, persistedEvent), error)
+            }
         val scheduledMatches = host.matchRepository.getMatchesOfTournament(createdEvent.id).getOrThrow()
 
         assertTrue(scheduledEvent.includePlayoffs)
@@ -137,7 +161,7 @@ class LeaguePlayoffMobileApiIntegrationTest {
         )
         assertEquals(setOf(TEST_FIELD_ID), loadedFields.map(Field::id).toSet())
         assertEquals(setOf(TEST_SLOT_ID), loadedTimeSlots.map(TimeSlot::id).toSet())
-        assertEquals(SEEDED_TEAM_IDS.size, loadedTeamIds.size)
+        assertEquals(SEEDED_LEAGUE_TEAM_IDS.size, loadedTeamIds.size)
         assertTrue(loadedTeamIds.all(String::isNotBlank))
         assertEquals(scheduledMatches.map { it.id }.toSet(), loadedMatches.map { it.id }.toSet())
         assertEquals(STAFF_INVITE_EMAILS, loadedInvites.mapNotNull { it.email }.toSet())
@@ -165,6 +189,62 @@ class LeaguePlayoffMobileApiIntegrationTest {
         assertTrue(mySchedule.fields.any { it.id == TEST_FIELD_ID })
     }
 
+    @Test
+    fun seeded_official_event_loads_mobile_detail_teams_fields_matches_and_assigned_officials() = runTest(timeout = 3.minutes) {
+        participantSession = MobileApiTestSession.create()
+
+        val participant = participantSession!!
+        participant.userRepository.login(PARTICIPANT_EMAIL, PARTICIPANT_PASSWORD).getOrThrow()
+
+        val event = participant.eventRepository.getEvent(SEEDED_OFFICIAL_EVENT_ID).getOrThrow()
+        val loadedFields = participant.fieldRepository.getFields(event.fieldIds).getOrThrow()
+        val loadedTimeSlots = participant.fieldRepository.getTimeSlots(event.timeSlotIds).getOrThrow()
+        val loadedMatches = participant.matchRepository.getMatchesOfTournament(event.id).getOrThrow()
+        val loadedTeamIds = loadedMatches.flatMap { match ->
+            listOfNotNull(match.team1Id, match.team2Id, match.teamOfficialId)
+        }.distinct()
+        val loadedTeams = participant.teamRepository.getTeams(loadedTeamIds).getOrThrow()
+        val loadedOfficials = participant.userRepository.getUsers(
+            userIds = event.officialIds,
+            visibilityContext = UserVisibilityContext(eventId = event.id),
+        ).getOrThrow()
+
+        assertEquals(SEEDED_OFFICIAL_EVENT_ID, event.id)
+        assertEquals(SEEDED_OFFICIAL_DIVISION_ID, event.divisions.single())
+        assertEquals(SEEDED_OFFICIAL_POSITION_NAMES, event.officialPositions.map { it.name }.toSet())
+        assertEquals(SEEDED_OFFICIAL_USER_IDS, event.officialIds.toSet())
+        assertEquals(SEEDED_OFFICIAL_USER_IDS, event.eventOfficials.map { it.userId }.toSet())
+        assertEquals(setOf(SEEDED_OFFICIAL_FIELD_ID), loadedFields.map(Field::id).toSet())
+        assertEquals(setOf(SEEDED_OFFICIAL_SLOT_ID), loadedTimeSlots.map(TimeSlot::id).toSet())
+        assertEquals(SEEDED_OFFICIAL_TEAM_IDS, loadedTeams.map { it.id }.toSet())
+        assertEquals(SEEDED_OFFICIAL_MATCH_IDS, loadedMatches.map { it.id }.toSet())
+        assertTrue(
+            loadedMatches.all { match -> match.officialIds.size == SEEDED_OFFICIAL_POSITION_NAMES.size },
+            "Expected each seeded official match to include one assignment per official position.",
+        )
+        assertEquals(
+            SEEDED_OFFICIAL_USER_IDS,
+            loadedMatches.flatMap { match -> match.officialIds.map { assignment -> assignment.userId } }.toSet(),
+        )
+        assertEquals(SEEDED_OFFICIAL_USER_IDS, loadedOfficials.map { it.id }.toSet())
+    }
+
+    private fun scheduleFailureMessage(error: Throwable, event: Event?): String {
+        val eventContext = event?.let {
+            " persistedMode=${it.officialSchedulingMode}" +
+                " doTeamsOfficiate=${it.doTeamsOfficiate}" +
+                " teamOfficialsMaySwap=${it.teamOfficialsMaySwap}" +
+                " teamIds=${it.teamIds.size}" +
+                " fields=${it.fieldIds.size}" +
+                " slots=${it.timeSlotIds.size}"
+        }.orEmpty()
+        return if (error is ApiException) {
+            "Schedule request failed with HTTP ${error.statusCode}: ${error.responseBody.orEmpty()}"
+        } else {
+            "Schedule request failed: ${error.message.orEmpty()}"
+        } + eventContext
+    }
+
     private fun buildLeagueEvent(hostUserId: String): Event {
         return Event(
             id = TEST_EVENT_ID,
@@ -177,12 +257,12 @@ class LeaguePlayoffMobileApiIntegrationTest {
                     key = "open",
                     name = "Open",
                     playoffTeamCount = TEST_PLAYOFF_TEAM_COUNT,
-                    teamIds = SEEDED_TEAM_IDS,
+                    teamIds = SEEDED_LEAGUE_TEAM_IDS,
                     fieldIds = listOf(TEST_FIELD_ID),
                 ),
             ),
             location = "Local Sports Complex",
-            start = Instant.parse("2026-06-01T08:00:00Z"),
+            start = TEST_EVENT_START,
             end = TEST_EVENT_END,
             imageId = UPLOADED_DOCUMENT_IMAGE_ID,
             coordinates = listOf(-122.4194, 37.7749),
@@ -190,11 +270,11 @@ class LeaguePlayoffMobileApiIntegrationTest {
             noFixedEndDateTime = false,
             teamSignup = true,
             singleDivision = true,
-            teamIds = SEEDED_TEAM_IDS,
+            teamIds = SEEDED_LEAGUE_TEAM_IDS,
             fieldIds = listOf(TEST_FIELD_ID),
             timeSlotIds = listOf(TEST_SLOT_ID),
             sportId = SEEDED_SPORT_ID,
-            maxParticipants = SEEDED_TEAM_IDS.size,
+            maxParticipants = SEEDED_LEAGUE_TEAM_IDS.size * 2,
             eventType = EventType.LEAGUE,
             gamesPerOpponent = 1,
             includePlayoffs = true,
@@ -202,6 +282,9 @@ class LeaguePlayoffMobileApiIntegrationTest {
             usesSets = false,
             matchDurationMinutes = 60,
             restTimeMinutes = 0,
+            doTeamsOfficiate = false,
+            teamOfficialsMaySwap = false,
+            officialSchedulingMode = OfficialSchedulingMode.OFF,
             state = "PUBLISHED",
         )
     }
@@ -220,8 +303,8 @@ class LeaguePlayoffMobileApiIntegrationTest {
     private fun buildLeagueTimeSlot(): TimeSlot {
         return TimeSlot(
             id = TEST_SLOT_ID,
-            dayOfWeek = 0,
-            daysOfWeek = listOf(0),
+            dayOfWeek = TEST_EVENT_DAY_OF_WEEK,
+            daysOfWeek = listOf(TEST_EVENT_DAY_OF_WEEK),
             divisions = listOf(SEEDED_DIVISION_ID),
             startTimeMinutes = 8 * 60,
             endTimeMinutes = 23 * 60,
@@ -276,6 +359,23 @@ class LeaguePlayoffMobileApiIntegrationTest {
         }
     }
 }
+
+private fun buildFutureMondayAtUtc(hour: Int): Instant {
+    val futureMonday = ZonedDateTime.now(ZoneOffset.UTC)
+        .plusDays(14)
+        .with(TemporalAdjusters.nextOrSame(DayOfWeek.MONDAY))
+        .truncatedTo(ChronoUnit.DAYS)
+        .withHour(hour)
+    return Instant.parse(futureMonday.toInstant().toString())
+}
+
+private fun mondayIndexedDayOfWeek(instant: Instant): Int {
+    val dayOfWeek = java.time.Instant.ofEpochMilli(instant.toEpochMilliseconds())
+        .atZone(ZoneOffset.UTC)
+        .dayOfWeek
+        .value
+    return (dayOfWeek + 6) % 7
+}
 private const val HOST_EMAIL = MOBILE_TEST_HOST_EMAIL
 private const val HOST_PASSWORD = MOBILE_TEST_HOST_PASSWORD
 private const val PARTICIPANT_EMAIL = MOBILE_TEST_PARTICIPANT_EMAIL
@@ -290,8 +390,31 @@ private const val TEST_SLOT_ID = "mobile_api_league_playoff_slot"
 private const val TEST_PLAYOFF_TEAM_COUNT = 4
 private const val TEST_HOST_STAFF_EMAIL = "mobile-api-host-invite@example.test"
 private const val TEST_OFFICIAL_STAFF_EMAIL = "mobile-api-official-invite@example.test"
+private const val SEEDED_OFFICIAL_EVENT_ID = "mobile_api_officials_regression"
+private const val SEEDED_OFFICIAL_DIVISION_ID = "mobile_api_officials_regression_open"
+private const val SEEDED_OFFICIAL_FIELD_ID = "mobile_api_officials_field"
+private const val SEEDED_OFFICIAL_SLOT_ID = "mobile_api_officials_slot"
 
-private val SEEDED_TEAM_IDS = listOf("team_1", "team_2", "team_3", "team_4")
+private val SEEDED_LEAGUE_TEAM_IDS = listOf(
+    "team_1",
+    "team_2",
+    "team_3",
+    "team_4",
+    "team_5",
+    "team_6",
+    "team_7",
+    "team_8",
+)
+private val SEEDED_OFFICIAL_TEAM_IDS = setOf("team_1", "team_2", "team_3", "team_4")
+private val SEEDED_OFFICIAL_MATCH_IDS = setOf("mobile_api_officials_match_1", "mobile_api_officials_match_2")
+private val SEEDED_OFFICIAL_POSITION_NAMES = setOf("R1", "R2")
+private val SEEDED_OFFICIAL_USER_IDS = setOf("official_user_r1", "official_user_r2")
 private val STAFF_INVITE_EMAILS = setOf(TEST_HOST_STAFF_EMAIL, TEST_OFFICIAL_STAFF_EMAIL)
-private val TEST_EVENT_START: Instant = Instant.parse("2026-06-01T08:00:00Z")
-private val TEST_EVENT_END: Instant = Instant.parse("2026-07-27T23:00:00Z")
+private val TEST_EVENT_START: Instant = buildFutureMondayAtUtc(hour = 8)
+private val TEST_EVENT_END: Instant = Instant.parse(
+    java.time.Instant.ofEpochMilli(TEST_EVENT_START.toEpochMilliseconds())
+        .plus(56, ChronoUnit.DAYS)
+        .plus(15, ChronoUnit.HOURS)
+        .toString(),
+)
+private val TEST_EVENT_DAY_OF_WEEK = mondayIndexedDayOfWeek(TEST_EVENT_START)
