@@ -1418,7 +1418,7 @@ fun MatchDetailScreen(
                         Button(
                             onClick = { showMatchDetails = !showMatchDetails },
                         ) {
-                            Text(if (showMatchDetails) "Hide Match Details" else "Match Details")
+                            Text(if (showMatchDetails) "Hide Details" else "Match Details")
                         }
                     }
                     locationTarget.warningDistanceMiles?.let { distance ->
