@@ -14,9 +14,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -37,15 +35,12 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -62,7 +57,6 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
@@ -81,9 +75,7 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
 import com.razumly.mvp.core.data.dataTypes.normalizedOfficialAssignments
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
-import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
-import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.presentation.util.playMatchTimerAlert
 import com.razumly.mvp.core.util.Platform
@@ -99,9 +91,6 @@ import mvp.composeapp.generated.resources.official_check_in_title
 import mvp.composeapp.generated.resources.official_checkin_message
 import org.jetbrains.compose.resources.stringResource
 import kotlinx.coroutines.delay
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.format
-import kotlinx.datetime.toLocalDateTime
 import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -169,13 +158,6 @@ private fun parseMatchInstant(value: String?): Instant? {
     return runCatching { Instant.parse(normalized) }.getOrNull()
 }
 
-private fun actualTimeLabel(value: String?): String {
-    return parseMatchInstant(value)
-        ?.toLocalDateTime(TimeZone.currentSystemDefault())
-        ?.format(dateTimeFormat)
-        ?: "Not set"
-}
-
 private fun formatClockSeconds(seconds: Int): String {
     val safeSeconds = seconds.coerceAtLeast(0)
     val hours = safeSeconds / 3600
@@ -221,17 +203,6 @@ private fun formatAddedTimeIncidentClock(regulationEndSeconds: Int, addedSeconds
     val regulationMinute = (regulationEndSeconds / 60).coerceAtLeast(0)
     val addedMinute = ((addedSeconds.coerceAtLeast(1) + 59) / 60).coerceAtLeast(1)
     return "$regulationMinute+$addedMinute"
-}
-
-private fun shouldShowMatchStatusBlock(match: MatchMVP): Boolean {
-    val statusReason = match.statusReason?.trim().orEmpty()
-    val resultStatus = match.resultStatus?.trim()?.uppercase().orEmpty()
-    val resultType = match.resultType?.trim()?.uppercase().orEmpty()
-    val lifecycleStatus = match.status?.trim()?.uppercase().orEmpty()
-    return statusReason.isNotBlank() ||
-        (resultStatus.isNotBlank() && resultStatus !in setOf("PENDING", "OFFICIAL")) ||
-        (resultType.isNotBlank() && resultType != "REGULATION") ||
-        lifecycleStatus in setOf("CANCELLED", "FORFEIT", "SUSPENDED")
 }
 
 internal fun buildMatchOfficialDetailRows(
@@ -1181,204 +1152,54 @@ fun MatchDetailScreen(
                 }
             }
 
-            AnimatedVisibility(
+            ExpandedMatchDetailsPanel(
                 visible = showMatchDetails,
-                enter = expandVertically(),
-                exit = shrinkVertically(),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    tonalElevation = 3.dp,
-                    shadowElevation = 6.dp,
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(
-                            text = "Match Details",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        if (shouldShowMatchStatusBlock(match.match)) {
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(
-                                    text = "Status",
-                                    style = MaterialTheme.typography.titleSmall,
-                                )
-                                Text(
-                                    text = titleCaseMatchValue(
-                                        match.match.resultStatus ?: match.match.status ?: "Pending",
-                                    ).ifBlank { "Pending" },
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                                match.match.resultType
-                                    ?.let(::titleCaseMatchValue)
-                                    ?.takeIf(String::isNotBlank)
-                                    ?.let { result ->
-                                        Text(
-                                            text = "Result: $result",
-                                            style = MaterialTheme.typography.bodySmall,
-                                        )
-                                    }
-                                match.match.statusReason
-                                    ?.trim()
-                                    ?.takeIf(String::isNotBlank)
-                                    ?.let { reason ->
-                                        Text(
-                                            text = reason,
-                                            style = MaterialTheme.typography.bodySmall,
-                                        )
-                                    }
-                            }
-                        }
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = "Actual Times",
-                                    style = MaterialTheme.typography.titleSmall,
-                                )
-                                if (isOfficial && officialCheckedIn && !editingActualTimes) {
-                                    TextButton(onClick = {
-                                        actualStartDraft = parseMatchInstant(match.match.actualStart)
-                                        actualEndDraft = parseMatchInstant(match.match.actualEnd)
-                                        actualTimeError = null
-                                        editingActualTimes = true
-                                    }) {
-                                        Text("Edit Times")
-                                    }
-                                }
-                            }
-                            if (editingActualTimes) {
-                                actualTimeError?.let { message ->
-                                    Text(
-                                        text = message,
-                                        color = MaterialTheme.colorScheme.error,
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                }
-                                MatchActualTimeField(
-                                    label = "Actual start",
-                                    selectedTime = actualStartDraft,
-                                    onTimeSelected = { actualStartDraft = it },
-                                    onTimeCleared = { actualStartDraft = null },
-                                )
-                                MatchActualTimeField(
-                                    label = "Actual end",
-                                    selectedTime = actualEndDraft,
-                                    onTimeSelected = { actualEndDraft = it },
-                                    onTimeCleared = { actualEndDraft = null },
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.End,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    TextButton(
-                                        onClick = {
-                                            actualStartDraft = parseMatchInstant(match.match.actualStart)
-                                            actualEndDraft = parseMatchInstant(match.match.actualEnd)
-                                            actualTimeError = null
-                                            editingActualTimes = false
-                                        },
-                                        enabled = !matchTimeSaving,
-                                    ) {
-                                        Text("Cancel")
-                                    }
-                                    Button(
-                                        onClick = {
-                                            if (actualStartDraft != null && actualEndDraft != null && actualEndDraft!! <= actualStartDraft!!) {
-                                                actualTimeError = "Actual end time must be after the actual start time."
-                                                return@Button
-                                            }
-                                            actualTimeError = null
-                                            component.updateActualTimes(actualStartDraft, actualEndDraft)
-                                            editingActualTimes = false
-                                        },
-                                        enabled = !matchTimeSaving,
-                                    ) {
-                                        Row(
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                        ) {
-                                            if (matchTimeSaving) {
-                                                CircularProgressIndicator(
-                                                    modifier = Modifier.size(16.dp),
-                                                    strokeWidth = 2.dp,
-                                                    color = MaterialTheme.colorScheme.onPrimary,
-                                                )
-                                            }
-                                            Text("Save Times")
-                                        }
-                                    }
-                                }
-                            } else {
-                                Text(
-                                    text = "Start: ${actualTimeLabel(match.match.actualStart)}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                                Text(
-                                    text = "End: ${actualTimeLabel(match.match.actualEnd)}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                        }
-                        if (showSegmentBreakdown) {
-                            MatchSegmentTable(
-                                segments = orderedSegments,
-                                segmentLabel = segmentBaseLabel,
-                                team1Id = match.match.team1Id,
-                                team2Id = match.match.team2Id,
-                                team1Scores = match.match.team1Points,
-                                team2Scores = match.match.team2Points,
-                                onSegmentSelected = component::selectSegment,
-                            )
-                        }
-                        Text(
-                            text = "Officials",
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        if (officialRows.isEmpty()) {
-                            Text("No official slots assigned.", style = MaterialTheme.typography.bodySmall)
-                        } else {
-                            officialRows.forEach { official ->
-                                Text(
-                                    text = "${official.positionLabel}: ${official.officialName} (${if (official.checkedIn) "checked in" else "not checked in"})",
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                        }
-                        Text(
-                            text = "Match Log",
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        if (visibleIncidents.isEmpty()) {
-                            Text("No match details recorded.", style = MaterialTheme.typography.bodySmall)
-                        } else {
-                            visibleIncidents.sortedBy { incident -> incident.sequence }.forEach { incident ->
-                                MatchIncidentCard(
-                                    summary = buildIncidentSummary(
-                                        incident = incident,
-                                        team1 = team1,
-                                        team2 = team2,
-                                        incidentLabel = { type -> incidentLabel(type) },
-                                    ),
-                                    canRemove = isOfficial && officialCheckedIn,
-                                    onRemove = { component.removeMatchIncident(incident.id) },
-                                )
-                            }
-                        }
+                match = match.match,
+                team1 = team1,
+                team2 = team2,
+                showSegmentBreakdown = showSegmentBreakdown,
+                orderedSegments = orderedSegments,
+                segmentBaseLabel = segmentBaseLabel,
+                officialRows = officialRows,
+                visibleIncidents = visibleIncidents,
+                isOfficial = isOfficial,
+                officialCheckedIn = officialCheckedIn,
+                editingActualTimes = editingActualTimes,
+                actualStartDraft = actualStartDraft,
+                actualEndDraft = actualEndDraft,
+                actualTimeError = actualTimeError,
+                matchTimeSaving = matchTimeSaving,
+                onEditActualTimes = {
+                    actualStartDraft = parseMatchInstant(match.match.actualStart)
+                    actualEndDraft = parseMatchInstant(match.match.actualEnd)
+                    actualTimeError = null
+                    editingActualTimes = true
+                },
+                onActualStartSelected = { actualStartDraft = it },
+                onActualEndSelected = { actualEndDraft = it },
+                onActualStartCleared = { actualStartDraft = null },
+                onActualEndCleared = { actualEndDraft = null },
+                onCancelActualTimes = {
+                    actualStartDraft = parseMatchInstant(match.match.actualStart)
+                    actualEndDraft = parseMatchInstant(match.match.actualEnd)
+                    actualTimeError = null
+                    editingActualTimes = false
+                },
+                onSaveActualTimes = {
+                    val startDraft = actualStartDraft
+                    val endDraft = actualEndDraft
+                    if (startDraft != null && endDraft != null && endDraft <= startDraft) {
+                        actualTimeError = "Actual end time must be after the actual start time."
+                    } else {
+                        actualTimeError = null
+                        component.updateActualTimes(startDraft, endDraft)
+                        editingActualTimes = false
                     }
-                }
-            }
+                },
+                onSegmentSelected = component::selectSegment,
+                incidentLabel = { type -> incidentLabel(type) },
+                onRemoveIncident = component::removeMatchIncident,
+            )
 
             MatchDetailBottomActions(
                 fieldLocationLabel = fieldLocationLabel,
@@ -1502,199 +1323,6 @@ private fun NativeMapRevealOverlay(
         content = content,
     )
 }
-
-@Composable
-private fun MatchActualTimeField(
-    label: String,
-    selectedTime: Instant?,
-    onTimeSelected: (Instant) -> Unit,
-    onTimeCleared: () -> Unit,
-) {
-    var showPicker by remember { mutableStateOf(false) }
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Button(
-            onClick = { showPicker = true },
-            modifier = Modifier.weight(1f),
-        ) {
-            Text(
-                text = "$label: ${
-                    selectedTime
-                        ?.toLocalDateTime(TimeZone.currentSystemDefault())
-                        ?.format(dateTimeFormat)
-                        ?: "Not set"
-                }",
-                textAlign = TextAlign.Start,
-            )
-        }
-        TextButton(onClick = onTimeCleared) {
-            Text("Clear")
-        }
-    }
-
-    if (showPicker) {
-        PlatformDateTimePicker(
-            onDateSelected = { instant ->
-                instant?.let(onTimeSelected)
-                showPicker = false
-            },
-            onDismissRequest = { showPicker = false },
-            showPicker = showPicker,
-            getTime = true,
-            canSelectPast = true,
-            initialDate = selectedTime,
-        )
-    }
-}
-
-@Composable
-private fun MatchSegmentTable(
-    segments: List<MatchSegmentMVP>,
-    segmentLabel: String,
-    team1Id: String?,
-    team2Id: String?,
-    team1Scores: List<Int>,
-    team2Scores: List<Int>,
-    onSegmentSelected: (Int) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    if (segments.isEmpty()) return
-
-    val scrollState = rememberScrollState()
-    val dividerColor = MaterialTheme.colorScheme.outlineVariant
-
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .horizontalScroll(scrollState),
-    ) {
-        MatchSegmentTableRow(
-            label = segmentLabel,
-            values = segments.map { segment -> segment.sequence.toString() },
-            highlightedColumns = segments.map { segment -> segment.isStarted },
-            dividerColor = dividerColor,
-            valueFontWeight = FontWeight.SemiBold,
-            onSegmentSelected = onSegmentSelected,
-        )
-        HorizontalDivider(color = dividerColor)
-        MatchSegmentTableRow(
-            label = "Home",
-            values = segments.mapIndexed { index, segment ->
-                segmentScore(
-                    segment = segment,
-                    teamId = team1Id,
-                    fallbackScores = team1Scores,
-                    index = index,
-                ).toString()
-            },
-            highlightedColumns = segments.map { segment -> segment.isStarted },
-            dividerColor = dividerColor,
-            onSegmentSelected = onSegmentSelected,
-        )
-        HorizontalDivider(color = dividerColor)
-        MatchSegmentTableRow(
-            label = "Away",
-            values = segments.mapIndexed { index, segment ->
-                segmentScore(
-                    segment = segment,
-                    teamId = team2Id,
-                    fallbackScores = team2Scores,
-                    index = index,
-                ).toString()
-            },
-            highlightedColumns = segments.map { segment -> segment.isStarted },
-            dividerColor = dividerColor,
-            onSegmentSelected = onSegmentSelected,
-        )
-    }
-}
-
-@Composable
-private fun MatchSegmentTableRow(
-    label: String,
-    values: List<String>,
-    highlightedColumns: List<Boolean>,
-    dividerColor: androidx.compose.ui.graphics.Color,
-    valueFontWeight: FontWeight = FontWeight.Normal,
-    onSegmentSelected: (Int) -> Unit,
-) {
-    Row(modifier = Modifier.height(IntrinsicSize.Min)) {
-        MatchSegmentCell(
-            text = label,
-            modifier = Modifier.width(88.dp),
-            textAlign = TextAlign.Start,
-            fontWeight = FontWeight.SemiBold,
-        )
-        values.forEachIndexed { index, value ->
-            VerticalDivider(
-                modifier = Modifier.fillMaxHeight(),
-                color = dividerColor,
-            )
-            MatchSegmentCell(
-                text = value,
-                modifier = Modifier
-                    .width(72.dp)
-                    .clickable { onSegmentSelected(index) },
-                highlighted = highlightedColumns.getOrElse(index) { false },
-                textAlign = TextAlign.Center,
-                fontWeight = valueFontWeight,
-            )
-        }
-    }
-}
-
-@Composable
-private fun MatchSegmentCell(
-    text: String,
-    modifier: Modifier,
-    highlighted: Boolean = false,
-    textAlign: TextAlign = TextAlign.Start,
-    fontWeight: FontWeight = FontWeight.Normal,
-) {
-    val backgroundColor = if (highlighted) {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-    } else {
-        androidx.compose.ui.graphics.Color.Transparent
-    }
-    val textColor = if (highlighted) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
-
-    Box(
-        modifier = modifier
-            .background(backgroundColor)
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-        contentAlignment = if (textAlign == TextAlign.Start) Alignment.CenterStart else Alignment.Center,
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
-            color = textColor,
-            fontWeight = fontWeight,
-            textAlign = textAlign,
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
-}
-
-private val MatchSegmentMVP.isStarted: Boolean
-    get() = status.equals("IN_PROGRESS", ignoreCase = true) ||
-        status.equals("STARTED", ignoreCase = true)
-
-private fun segmentScore(
-    segment: MatchSegmentMVP?,
-    teamId: String?,
-    fallbackScores: List<Int>,
-    index: Int,
-): Int = teamId
-    ?.let { resolvedTeamId -> segment?.scores?.get(resolvedTeamId) }
-    ?: fallbackScores.getOrElse(index) { 0 }
 
 @Composable
 fun ScoreCard(
