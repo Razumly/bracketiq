@@ -1,10 +1,12 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
+import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.EventParticipantDivisionWarning
 import com.razumly.mvp.core.data.repositories.EventParticipantManagementEntry
 import com.razumly.mvp.core.data.repositories.EventParticipantManagementSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -148,6 +150,161 @@ class EventParticipantManagementCoordinatorTest {
 
         coordinator.finishParticipantComplianceRequest(second)
 
+        assertFalse(coordinator.participantComplianceLoading.value)
+    }
+
+    @Test
+    fun refresh_participant_management_snapshot_trims_event_id_and_clears_loading() = runTest {
+        val coordinator = EventParticipantManagementCoordinator(
+            eventTeamsAndParticipantsLoadingInitially = false,
+        )
+        val occurrence = EventOccurrenceSelection(
+            slotId = "slot-1",
+            occurrenceDate = "2026-07-01",
+        )
+        var loadedEventId: String? = null
+        var loadedOccurrence: EventOccurrenceSelection? = null
+
+        val error = coordinator.refreshParticipantManagementSnapshot(
+            eventId = " event-1 ",
+            occurrence = occurrence,
+            reportErrors = true,
+        ) { eventId, requestedOccurrence ->
+            assertTrue(coordinator.participantManagementLoading.value)
+            loadedEventId = eventId
+            loadedOccurrence = requestedOccurrence
+            Result.success(EventParticipantManagementSnapshot())
+        }
+
+        assertNull(error)
+        assertEquals("event-1", loadedEventId)
+        assertEquals(occurrence, loadedOccurrence)
+        assertFalse(coordinator.participantManagementLoading.value)
+    }
+
+    @Test
+    fun refresh_participant_management_snapshot_reports_requested_failures_only() = runTest {
+        val coordinator = EventParticipantManagementCoordinator(
+            eventTeamsAndParticipantsLoadingInitially = false,
+        )
+
+        val reported = coordinator.refreshParticipantManagementSnapshot(
+            eventId = "event-1",
+            occurrence = null,
+            reportErrors = true,
+        ) { _, _ ->
+            Result.failure(IllegalStateException("Snapshot unavailable"))
+        }
+
+        assertEquals("Snapshot unavailable", reported?.message)
+        assertFalse(coordinator.participantManagementLoading.value)
+
+        val hidden = coordinator.refreshParticipantManagementSnapshot(
+            eventId = "event-1",
+            occurrence = null,
+            reportErrors = false,
+        ) { _, _ ->
+            Result.failure(IllegalStateException("Snapshot unavailable"))
+        }
+
+        assertNull(hidden)
+        assertFalse(coordinator.participantManagementLoading.value)
+    }
+
+    @Test
+    fun refresh_participant_compliance_uses_team_or_user_loader_and_clears_loading() = runTest {
+        val coordinator = EventParticipantManagementCoordinator(
+            eventTeamsAndParticipantsLoadingInitially = false,
+        )
+        val occurrence = EventOccurrenceSelection(
+            slotId = "slot-1",
+            occurrenceDate = "2026-07-01",
+        )
+        var teamCalls = 0
+        var userCalls = 0
+
+        val teamError = coordinator.refreshParticipantComplianceSummaries(
+            eventId = " event-1 ",
+            occurrence = occurrence,
+            teamSignup = true,
+            reportErrors = true,
+            loadTeamCompliance = { eventId, requestedOccurrence ->
+                assertTrue(coordinator.participantComplianceLoading.value)
+                assertEquals("event-1", eventId)
+                assertEquals(occurrence, requestedOccurrence)
+                teamCalls += 1
+                Result.success(emptyList())
+            },
+            loadUserCompliance = { _, _ ->
+                userCalls += 1
+                Result.failure(IllegalStateException("User loader should not run"))
+            },
+        )
+
+        assertNull(teamError)
+        assertEquals(1, teamCalls)
+        assertEquals(0, userCalls)
+        assertFalse(coordinator.participantComplianceLoading.value)
+
+        val userError = coordinator.refreshParticipantComplianceSummaries(
+            eventId = "event-1",
+            occurrence = null,
+            teamSignup = false,
+            reportErrors = true,
+            loadTeamCompliance = { _, _ ->
+                teamCalls += 1
+                Result.failure(IllegalStateException("Team loader should not run"))
+            },
+            loadUserCompliance = { _, _ ->
+                userCalls += 1
+                Result.failure(IllegalStateException("Compliance unavailable"))
+            },
+        )
+
+        assertEquals("Compliance unavailable", userError?.message)
+        assertEquals(1, teamCalls)
+        assertEquals(1, userCalls)
+        assertFalse(coordinator.participantComplianceLoading.value)
+    }
+
+    @Test
+    fun refresh_participant_management_data_runs_snapshot_and_compliance_and_prefers_compliance_error() = runTest {
+        val coordinator = EventParticipantManagementCoordinator(
+            eventTeamsAndParticipantsLoadingInitially = false,
+        )
+        val target = ParticipantManagementRoomTarget(
+            eventId = "event-1",
+            slotId = "slot-1",
+            occurrenceDate = "2026-07-01",
+            teamSignup = false,
+        )
+        var snapshotCalls = 0
+        var userComplianceCalls = 0
+
+        val error = coordinator.refreshParticipantManagementData(
+            target = target,
+            reportErrors = true,
+            loadSnapshot = { eventId, occurrence ->
+                snapshotCalls += 1
+                assertEquals("event-1", eventId)
+                assertEquals(target.toOccurrence(), occurrence)
+                Result.failure(IllegalStateException("Snapshot unavailable"))
+            },
+            loadTeamCompliance = { _, _ ->
+                Result.failure(IllegalStateException("Team loader should not run"))
+            },
+            loadUserCompliance = { eventId, occurrence ->
+                userComplianceCalls += 1
+                assertEquals("event-1", eventId)
+                assertEquals(target.toOccurrence(), occurrence)
+                Result.failure(IllegalStateException("Compliance unavailable"))
+            },
+        )
+
+        assertEquals("Compliance unavailable", error?.message)
+        assertEquals(1, snapshotCalls)
+        assertEquals(1, userComplianceCalls)
+        assertFalse(coordinator.participantManagementLoading.value)
         assertFalse(coordinator.participantComplianceLoading.value)
     }
 }

@@ -74,6 +74,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-23) Move event-detail access rules and default division helpers into `EventDetailAccessRules` with focused tests.
   - [x] (2026-06-23) Move invite search/add-player/add-team/email side effects into `EventInviteCoordinator` with focused tests.
   - [x] (2026-06-23) Move weekly occurrence start rules and participant-management room target resolution into `EventOccurrenceRules` with focused tests.
+  - [x] (2026-06-23) Move participant-management snapshot/compliance refresh execution into `EventParticipantManagementCoordinator` with focused tests.
 - [ ] Run focused event-detail regression tests and final compile/build validation.
 
 ## Surprises & Discoveries
@@ -293,6 +294,8 @@ The fifty-second implementation milestone extracts pure event-detail access and 
 The fifty-third implementation milestone extracts invite/search side-effect coordination. `EventInviteCoordinator.kt` now owns user search, team invite search, add-team/add-player invite flows, email invite validation, loading wrapping, suggestion removal, and returned UI messages. `DefaultEventDetailComponent` still owns current event/occurrence lookup, repository lambdas, refresh callbacks, and error-state assignment. Focused validation passed with `./gradlew :composeApp:testDebugUnitTest --tests "*EventInviteCoordinatorTest*" --console=plain`, `./gradlew :composeApp:compileDebugKotlinAndroid --console=plain`, and `git diff --check`. `EventDetailComponent.kt` dropped to 5,176 lines after this milestone.
 
 The fifty-fourth implementation milestone extracts occurrence and participant-room rules. `EventOccurrenceRules.kt` now owns event-start checks, selected weekly occurrence start decisions, join-start blocking, weekly parent detection, and participant-management room target normalization. `DefaultEventDetailComponent` still owns selected occurrence state via `EventWeeklyOccurrenceCoordinator`, but now passes that state into pure helpers explicitly. Focused validation passed with `./gradlew :composeApp:testDebugUnitTest --tests "*EventOccurrenceRulesTest*" --console=plain`, `./gradlew :composeApp:compileDebugKotlinAndroid --console=plain`, and `git diff --check`. `EventDetailComponent.kt` dropped to 5,144 lines after this milestone.
+
+The fifty-fifth implementation milestone moves participant-management refresh execution into the existing coordinator. `EventParticipantManagementCoordinator.kt` now owns snapshot refresh execution, team/user compliance refresh execution, loading request-token cleanup, hidden refresh logging, and returned UI error messages. `DefaultEventDetailComponent` keeps permission checks, current event/occurrence target resolution, repository wiring, and error-state assignment. Focused validation passed with `./gradlew :composeApp:testDebugUnitTest --tests "*EventParticipantManagementCoordinatorTest*" --console=plain`, `./gradlew :composeApp:compileDebugKotlinAndroid --console=plain`, and `git diff --check`. `EventDetailComponent.kt` dropped to 5,106 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. Registration coordination and participant/invite coordination are now complete; the remaining work is to keep thinning `DefaultEventDetailComponent` around lower-risk orchestration seams, then run final focused regression and build validation.
 
@@ -1582,3 +1585,4 @@ Revision Note (2026-06-22): Recorded the bracket rounds coordinator slice, focus
 Revision Note (2026-06-22): Recorded the sports catalog coordinator slice, focused tests, fixture fix, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the external action helper slice, focused tests, fixture and expectation fixes, compile checks, and line-count impact.
 Revision Note (2026-06-23): Recorded the occurrence rule helper slice, focused tests, compile checks, and line-count impact.
+Revision Note (2026-06-23): Recorded the participant-management refresh execution coordinator slice, focused tests, compile checks, and line-count impact.

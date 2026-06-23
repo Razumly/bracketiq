@@ -1823,28 +1823,12 @@ class DefaultEventDetailComponent(
         occurrence: EventOccurrenceSelection?,
         reportErrors: Boolean = true,
     ) {
-        val normalizedEventId = eventId.trim()
-        val requestToken = participantManagementCoordinator.beginParticipantManagementRequest(normalizedEventId)
-            ?: return
-        try {
-            eventRepository.getEventParticipantManagementSnapshot(
-                eventId = normalizedEventId,
-                occurrence = occurrence,
-            ).onFailure { throwable ->
-                if (!participantManagementCoordinator.isCurrentParticipantManagementRequest(requestToken)) {
-                    return@onFailure
-                }
-                if (reportErrors) {
-                    _errorState.value = ErrorMessage(
-                        throwable.userMessage("Failed to load participant registrations."),
-                    )
-                } else {
-                    Napier.w("Failed to refresh participant registrations.", throwable)
-                }
-            }
-        } finally {
-            participantManagementCoordinator.finishParticipantManagementRequest(requestToken)
-        }
+        participantManagementCoordinator.refreshParticipantManagementSnapshot(
+            eventId = eventId,
+            occurrence = occurrence,
+            reportErrors = reportErrors,
+            loadSnapshot = eventRepository::getEventParticipantManagementSnapshot,
+        )?.let { error -> _errorState.value = error }
     }
 
     private suspend fun refreshParticipantComplianceSummaries(
@@ -1853,49 +1837,27 @@ class DefaultEventDetailComponent(
         teamSignup: Boolean,
         reportErrors: Boolean = true,
     ) {
-        val normalizedEventId = eventId.trim()
-        val requestToken = participantManagementCoordinator.beginParticipantComplianceRequest(normalizedEventId)
-            ?: return
-
-        try {
-            val result = if (teamSignup) {
-                eventRepository.getEventTeamCompliance(normalizedEventId, occurrence).map { }
-            } else {
-                eventRepository.getEventUserCompliance(normalizedEventId, occurrence).map { }
-            }
-            result.onFailure { throwable ->
-                if (!participantManagementCoordinator.isCurrentParticipantComplianceRequest(requestToken)) {
-                    return@onFailure
-                }
-                if (reportErrors) {
-                    _errorState.value = ErrorMessage(
-                        throwable.userMessage("Failed to load participant payment and document status."),
-                    )
-                } else {
-                    Napier.w("Failed to refresh participant compliance.", throwable)
-                }
-            }
-        } finally {
-            participantManagementCoordinator.finishParticipantComplianceRequest(requestToken)
-        }
+        participantManagementCoordinator.refreshParticipantComplianceSummaries(
+            eventId = eventId,
+            occurrence = occurrence,
+            teamSignup = teamSignup,
+            reportErrors = reportErrors,
+            loadTeamCompliance = eventRepository::getEventTeamCompliance,
+            loadUserCompliance = eventRepository::getEventUserCompliance,
+        )?.let { error -> _errorState.value = error }
     }
 
     private suspend fun refreshParticipantManagementData(
         target: ParticipantManagementRoomTarget,
         reportErrors: Boolean = true,
     ) {
-        val occurrence = target.toOccurrence()
-        refreshParticipantManagementSnapshot(
-            eventId = target.eventId,
-            occurrence = occurrence,
+        participantManagementCoordinator.refreshParticipantManagementData(
+            target = target,
             reportErrors = reportErrors,
-        )
-        refreshParticipantComplianceSummaries(
-            eventId = target.eventId,
-            occurrence = occurrence,
-            teamSignup = target.teamSignup,
-            reportErrors = reportErrors,
-        )
+            loadSnapshot = eventRepository::getEventParticipantManagementSnapshot,
+            loadTeamCompliance = eventRepository::getEventTeamCompliance,
+            loadUserCompliance = eventRepository::getEventUserCompliance,
+        )?.let { error -> _errorState.value = error }
     }
 
     private suspend fun refreshParticipantManagementSnapshotIfNeeded(
