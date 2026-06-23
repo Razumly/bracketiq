@@ -563,9 +563,6 @@ class DefaultEventDetailComponent(
 
     private fun canEditMatchesNow(): Boolean = matchEditingCoordinator.canEditNow(canManageMatchEditing())
 
-    private fun normalizeToken(value: String?): String? =
-        value?.trim()?.takeIf(String::isNotBlank)
-
     private fun Iterable<String>.normalizedTeamIds(): List<String> =
         map(String::trim).filter(String::isNotBlank).distinct()
 
@@ -1030,11 +1027,9 @@ class DefaultEventDetailComponent(
     private val _isBracketView = MutableStateFlow(false)
     override val isBracketView = _isBracketView.asStateFlow()
 
-    private val _rounds = MutableStateFlow<List<List<MatchWithRelations?>>>(emptyList())
-    override val rounds = _rounds.asStateFlow()
-
-    private val _losersBracket = MutableStateFlow(false)
-    override val losersBracket = _losersBracket.asStateFlow()
+    private val bracketRoundsCoordinator = EventBracketRoundsCoordinator()
+    override val rounds = bracketRoundsCoordinator.rounds
+    override val losersBracket = bracketRoundsCoordinator.losersBracket
 
     private val _showDetails = MutableStateFlow(false)
     override val showDetails = _showDetails.asStateFlow()
@@ -2003,8 +1998,7 @@ class DefaultEventDetailComponent(
     }
 
     override fun toggleLosersBracket() {
-        _losersBracket.value = !_losersBracket.value
-        generateRounds()
+        bracketRoundsCoordinator.toggleLosersBracket(divisionContentCoordinator.divisionMatches.value)
         if (matchEditingCoordinator.isEditingMatches.value) {
             refreshEditableRounds()
         }
@@ -4641,7 +4635,7 @@ class DefaultEventDetailComponent(
     }
 
     private fun generateRounds() {
-        _rounds.value = buildBracketRounds(divisionContentCoordinator.divisionMatches.value)
+        bracketRoundsCoordinator.refreshRounds(divisionContentCoordinator.divisionMatches.value)
     }
 
     override fun selectFieldCount(count: Int) {
@@ -4754,89 +4748,6 @@ class DefaultEventDetailComponent(
             "Event ownership payload [$action] eventId=${prepared.event.id} " +
                 "eventOrg=${eventOrgId ?: "null"} fieldOwnership=[$fieldOwnership]",
         )
-    }
-
-    private fun buildBracketRounds(
-        matchesById: Map<String, MatchWithRelations>,
-    ): List<List<MatchWithRelations?>> {
-        if (matchesById.isEmpty()) {
-            return emptyList()
-        }
-
-        val rounds = mutableListOf<List<MatchWithRelations?>>()
-        val visited = mutableSetOf<String>()
-
-        fun nextInScope(matchId: String?): MatchWithRelations? {
-            val normalizedId = normalizeToken(matchId) ?: return null
-            return matchesById[normalizedId]
-        }
-
-        val finalRound = matchesById.values.filter { match ->
-            nextInScope(match.match.winnerNextMatchId) == null &&
-                nextInScope(match.match.loserNextMatchId) == null
-        }
-
-        if (finalRound.isNotEmpty()) {
-            rounds += finalRound
-            visited += finalRound.map { match -> match.match.id }
-        }
-
-        var currentRound: List<MatchWithRelations?> = finalRound
-        while (currentRound.isNotEmpty()) {
-            val nextRound = mutableListOf<MatchWithRelations?>()
-
-            currentRound.filterNotNull().forEach { match ->
-                if (!shouldIncludeInCurrentBracket(match, matchesById)) {
-                    nextRound += listOf(null, null)
-                    return@forEach
-                }
-
-                val leftId = normalizeToken(match.match.previousLeftId)
-                val rightId = normalizeToken(match.match.previousRightId)
-
-                val leftMatch = leftId?.let { id -> matchesById[id] }
-                if (leftMatch == null) {
-                    nextRound += null
-                } else if (visited.add(leftMatch.match.id)) {
-                    nextRound += leftMatch
-                }
-
-                val rightMatch = rightId?.let { id -> matchesById[id] }
-                if (rightMatch == null) {
-                    nextRound += null
-                } else if (visited.add(rightMatch.match.id)) {
-                    nextRound += rightMatch
-                }
-            }
-
-            if (nextRound.any { it != null }) {
-                rounds += nextRound
-                currentRound = nextRound
-            } else {
-                break
-            }
-        }
-
-        return rounds.reversed()
-    }
-
-    private fun shouldIncludeInCurrentBracket(
-        match: MatchWithRelations,
-        matchesById: Map<String, MatchWithRelations>,
-    ): Boolean {
-        if (!losersBracket.value) {
-            return !match.match.losersBracket
-        }
-
-        val left = normalizeToken(match.match.previousLeftId)?.let { id -> matchesById[id] }
-        val right = normalizeToken(match.match.previousRightId)?.let { id -> matchesById[id] }
-
-        val finalsMatch = left != null && right != null && left.match.id == right.match.id
-        val mergeMatch = left != null && right != null && left.match.losersBracket != right.match.losersBracket
-        val opposite = match.match.losersBracket != losersBracket.value
-        val firstRound = left == null && right == null
-
-        return finalsMatch || mergeMatch || !opposite || firstRound
     }
 
     override fun checkIsUserWaitListed(event: Event): Boolean {
@@ -5202,7 +5113,7 @@ class DefaultEventDetailComponent(
         matchEditingCoordinator.refreshEditableRounds(
             event = selectedEvent.value,
             selectedDivisionId = selectedDivision.value,
-            buildRounds = ::buildBracketRounds,
+            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
         )
     }
 
@@ -5225,7 +5136,7 @@ class DefaultEventDetailComponent(
                 now = Clock.System.now(),
             ),
             openEditor = openEditor,
-            buildRounds = ::buildBracketRounds,
+            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
         ) { relation, context, isCreateMode ->
             showMatchEditDialog(
                 match = relation,
@@ -5244,7 +5155,7 @@ class DefaultEventDetailComponent(
                 matches = eventWithRelations.value.matches,
                 event = selectedEvent.value,
                 selectedDivisionId = selectedDivision.value,
-                buildRounds = ::buildBracketRounds,
+                buildRounds = bracketRoundsCoordinator::buildBracketRounds,
             )
         }
     }
@@ -5285,7 +5196,7 @@ class DefaultEventDetailComponent(
             matchId = matchId,
             event = selectedEvent.value,
             selectedDivisionId = selectedDivision.value,
-            buildRounds = ::buildBracketRounds,
+            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
             updater = updater,
         )
     }
@@ -5301,7 +5212,7 @@ class DefaultEventDetailComponent(
             locked = locked,
             event = selectedEvent.value,
             selectedDivisionId = selectedDivision.value,
-            buildRounds = ::buildBracketRounds,
+            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
         )
     }
 
@@ -5330,7 +5241,7 @@ class DefaultEventDetailComponent(
             selectedDivisionId = selectedDivision.value,
             clientId = newId(),
             now = Clock.System.now(),
-            buildRounds = ::buildBracketRounds,
+            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
         )
     }
 
@@ -5345,7 +5256,7 @@ class DefaultEventDetailComponent(
             teamId = teamId,
             event = selectedEvent.value,
             selectedDivisionId = selectedDivision.value,
-            buildRounds = ::buildBracketRounds,
+            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
         )
     }
 
@@ -5391,7 +5302,7 @@ class DefaultEventDetailComponent(
         matchEditingCoordinator.dismissMatchEditDialog(
             event = selectedEvent.value,
             selectedDivisionId = selectedDivision.value,
-            buildRounds = ::buildBracketRounds,
+            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
         )
     }
 
@@ -5403,7 +5314,7 @@ class DefaultEventDetailComponent(
             matchId = matchId,
             event = selectedEvent.value,
             selectedDivisionId = selectedDivision.value,
-            buildRounds = ::buildBracketRounds,
+            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
         )
     }
 
@@ -5415,7 +5326,7 @@ class DefaultEventDetailComponent(
             updatedMatch = updatedMatch,
             event = selectedEvent.value,
             selectedDivisionId = selectedDivision.value,
-            buildRounds = ::buildBracketRounds,
+            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
         )
     }
 

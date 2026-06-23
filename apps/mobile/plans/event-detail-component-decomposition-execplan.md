@@ -65,6 +65,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Move event edit draft state, field resizing, league slot edits, and scoring config mutation into `EventEditDraftCoordinator` with focused tests.
   - [x] (2026-06-22) Move current-user membership, payment-pending flags, captain state, and resolved team state into `EventMembershipCoordinator` with focused tests.
   - [x] (2026-06-22) Move selected division, division team map, and filtered division match map into `EventDivisionContentCoordinator` with focused tests.
+  - [x] (2026-06-22) Move bracket round state, losers-bracket toggle state, and round-building traversal into `EventBracketRoundsCoordinator` with focused tests.
 - [ ] Run focused event-detail regression tests and final compile/build validation.
 
 ## Surprises & Discoveries
@@ -87,8 +88,8 @@ After this refactor, the app should behave the same for users, but the code will
 - Observation: Template creation uses the same division normalization path as event edit field and slot drafts.
   Evidence: The first `EventTemplateCreateBuilderTest` run expected raw `division-a`, but the extracted builder correctly returned `division_a`; updating the test expectation made the focused suite pass.
 
-- Observation: The bracket round layout logic is not purely a graph helper because it still depends on component UI state for the losers bracket toggle.
-  Evidence: `buildBracketRounds(...)` and `shouldIncludeInCurrentBracket(...)` still read `losersBracket.value`, so the second extraction moved bracket node construction, graph normalization, validation, and reset rules but left round layout inside `DefaultEventDetailComponent`.
+- Observation: The bracket round layout logic was not purely a graph helper while it depended on component UI state for the losers bracket toggle.
+  Evidence: The second extraction moved bracket node construction, graph normalization, validation, and reset rules but left round layout inside `DefaultEventDetailComponent`; the later `EventBracketRoundsCoordinator` slice moved the bracket round state and traversal together.
 
 - Observation: The first safe registration extraction is the join-confirmation boundary, not the full registration workflow.
   Evidence: `registrationMatchesJoinConfirmationTarget(...)`, `eventSnapshotMatchesJoinConfirmationTarget(...)`, and registration-cache membership predicates are deterministic, while payment preview, purchase intent processing, signature queues, and withdraw/refund flows still coordinate repositories, state flows, and UI prompts.
@@ -266,6 +267,8 @@ The forty-third implementation milestone extracts edit draft state coordination.
 The forty-fourth implementation milestone extracts current-user membership state coordination. `EventMembershipCoordinator.kt` now owns current user event membership state, registration payment pending/failed flags, waitlist and free-agent state, captain state, resolved user-team state, cached-registration membership resolution, weekly-selection clearing, and ordered team-id fallback selection for snapshot membership refresh. `DefaultEventDetailComponent` still owns repository team fetches, withdraw-target loading, payment-sheet handling, join confirmation polling, and mutation refresh side effects. `EventDetailComponent.kt` dropped to 5,579 lines after this milestone.
 
 The forty-fifth implementation milestone extracts division content state coordination. `EventDivisionContentCoordinator.kt` now owns selected division state, selected-division restoration, division team maps, and filtered division match maps, including linked-match filtering and multi-division normalization. `DefaultEventDetailComponent` still owns event/relation observation, bracket round generation, match-edit round refreshes, league standings loads, and participant mutation side effects. `EventDetailComponent.kt` dropped to 5,564 lines after this milestone.
+
+The forty-sixth implementation milestone extracts bracket round presentation coordination. `EventBracketRoundsCoordinator.kt` now owns bracket round state, losers-bracket toggle state, round refreshing, and the existing bracket traversal logic used by both live division rounds and editable match rounds. `DefaultEventDetailComponent` still owns match-edit permissions, selected event/division context, repository calls, and notification side effects, but no longer owns `_rounds`, `_losersBracket`, or private bracket traversal helpers. `EventDetailComponent.kt` dropped to 5,475 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. Registration coordination and participant/invite coordination are now complete; the remaining work is to keep thinning `DefaultEventDetailComponent` around lower-risk orchestration seams, then run final focused regression and build validation.
 
@@ -1391,6 +1394,32 @@ Forty-fifth milestone line-count evidence:
      132 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventDivisionContentCoordinatorTest.kt
     1468 plans/event-detail-component-decomposition-execplan.md
 
+Bracket rounds coordinator first focused test run caught an expectation mismatch:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventBracketRoundsCoordinatorTest*" --tests "*EventMatchEditingCoordinatorTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 1
+    Result: `EventBracketRoundsCoordinatorTest` expected the loser-bracket leaf round without the null placeholders emitted by the original traversal when the winner final is skipped.
+    Fix: update the expected round shape to preserve the existing null placeholder behavior.
+
+Bracket rounds coordinator focused tests passed after expectation fix:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventBracketRoundsCoordinatorTest*" --tests "*EventMatchEditingCoordinatorTest*" --tests "*EventDetailMobileJoinFlowTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 24s; 43 actionable tasks: 6 executed, 37 up-to-date.
+
+Bracket rounds coordinator common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 16s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Forty-sixth milestone line-count evidence:
+
+    5475 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     108 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventBracketRoundsCoordinator.kt
+     107 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventBracketRoundsCoordinatorTest.kt
+    1498 plans/event-detail-component-decomposition-execplan.md
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -1466,3 +1495,4 @@ Revision Note (2026-06-22): Recorded the weekly occurrence coordinator slice, fo
 Revision Note (2026-06-22): Recorded the edit draft coordinator slice, focused tests, related validation/rental regressions, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the membership coordinator slice, focused tests, test-helper fix, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the division content coordinator slice, focused tests, compile fix, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded the bracket rounds coordinator slice, focused tests, expectation fix, compile checks, and line-count impact.
