@@ -89,12 +89,16 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-23) Move child registration and minor parent-approval join request execution into `EventJoinExecutionCoordinator` with focused tests.
   - [x] (2026-06-23) Move billing-address gate, saved-address lookup, and billing-address submit continuation into `EventPurchaseIntentCoordinator` with focused tests.
   - [x] (2026-06-23) Move required-signature execution, prompt processing, polling, and text-signature recording into `EventSignatureExecutionCoordinator` with focused and related regression tests.
+  - [x] (2026-06-23) Move event-detail hydration, participant sync refresh, and mobile details loading orchestration into `EventDetailHydrationCoordinator` with focused and related regression tests.
 - [ ] Run focused event-detail regression tests and final compile/build validation.
 
 ## Surprises & Discoveries
 
 - Observation: `EventDetailComponent.kt` already has some extracted collaborators, so the refactor should continue the existing pattern instead of creating a new architecture.
   Evidence: Existing nearby helper files include `EventScheduleRules.kt`, `EventMatchRules.kt`, `EventDetailsValidation.kt`, `EventStaffPersistence.kt`, `EventDetailDivisionOptions.kt`, `EventOverviewCapacity.kt`, `data/MatchOperationLocalApplier.kt`, and `data/BracketGraphValidator.kt`.
+
+- Observation: The unfiltered debug unit suite has baseline failures unrelated to the hydration extraction.
+  Evidence: `./gradlew :composeApp:testDebugUnitTest --console=plain` failed before the hydration code change with `EventLifecycleMobileApiIntegrationTest.event_lifecycle_matrix_creates_joins_schedules_and_updates_matches`, `LeaguePlayoffMobileApiIntegrationTest.league_playoff_mobile_api_flow_loads_staff_invites_periphery_join_and_schedule_data`, and `TeamInviteDialogUiTest.existing_team_read_only_view_uses_team_name_title_inline_jersey_and_expandable_details`.
 
 - Observation: `EventDetails.kt` is already covered by a separate plan and has been partially split.
   Evidence: `plans/event-details-modularization-execplan.md` records completed extraction of pure rules, shared UI primitives, read-only helpers, required documents, division list UI, and staff card UI, while leaving `EventDetails.kt` not yet orchestration-only.
@@ -340,6 +344,8 @@ The sixty-eighth implementation milestone expands purchase-intent coordination f
 The sixty-ninth implementation milestone extracts required-signature execution. `EventSignatureExecutionCoordinator.kt` now owns starting required-signature flows, fetching self/team required signing steps, text/web prompt selection, web-signing polling and clearance, signature-context advancement/completion, pending-flow clearing, and text-signature recording. `DefaultEventDetailComponent` keeps selected event reads, repository callback adapters, coroutine launching, and UI error assignment. Focused and related regression validation passed with `./gradlew :composeApp:testDebugUnitTest --tests "*EventSignatureExecutionCoordinatorTest*" --tests "*EventRegistrationFlowCoordinatorTest*" --tests "*EventSignatureFlowHelpersTest*" --tests "*EventDetailMobileJoinFlowTest*" --console=plain`. `EventDetailComponent.kt` is 4,390 lines after this milestone.
 
 Post-batch focused validation for participant mutations, join execution, billing-address handoff, signature execution, registration-flow state, signature helpers, and mobile join flow passed with `./gradlew :composeApp:testDebugUnitTest --tests "*EventParticipantManagementCoordinatorTest*" --tests "*EventJoinExecutionCoordinatorTest*" --tests "*EventPurchaseIntentCoordinatorTest*" --tests "*EventSignatureExecutionCoordinatorTest*" --tests "*EventRegistrationFlowCoordinatorTest*" --tests "*EventSignatureFlowHelpersTest*" --tests "*EventDetailMobileJoinFlowTest*" --console=plain`. Final full debug/release suites and assemble validation remain open under the final validation item.
+
+The seventieth implementation milestone extracts event-detail hydration orchestration. `EventDetailHydrationCoordinator.kt` now owns non-weekly participant prefetch sequencing, weekly occurrence participant sync, participant-sync summary application helpers, refresh-after-participant-mutation sequencing, and mobile details hydration token/loading/error flow for participants and matches. `DefaultEventDetailComponent` keeps current state reads, repository callback wiring, coroutine launching, and UI state assignment. Focused validation passed with `./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailHydrationCoordinatorTest*" --console=plain`; related regression validation passed with `./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailHydrationCoordinatorTest*" --tests "*EventParticipantManagementCoordinatorTest*" --tests "*EventWeeklyOccurrenceCoordinatorTest*" --tests "*EventBootstrapResourcesCoordinatorTest*" --tests "*EventDetailMobileJoinFlowTest*" --console=plain`. `EventDetailComponent.kt` is 4,337 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. Registration coordination and participant/invite coordination are now complete; the remaining work is to keep thinning `DefaultEventDetailComponent` around lower-risk orchestration seams, then run final focused regression and build validation.
 
@@ -1645,3 +1651,4 @@ Revision Note (2026-06-23): Recorded the child/minor join execution coordinator 
 Revision Note (2026-06-23): Recorded the billing-address purchase-intent coordinator slice, focused tests, and line-count impact.
 Revision Note (2026-06-23): Recorded the signature execution coordinator slice, focused and related regression tests, and line-count impact.
 Revision Note (2026-06-23): Recorded the consolidated focused regression pass for the multi-slice event-detail decomposition batch.
+Revision Note (2026-06-23): Recorded the event-detail hydration coordinator slice, baseline full debug unit blockers, focused tests, related regression tests, and line-count impact.

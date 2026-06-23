@@ -533,6 +533,7 @@ class DefaultEventDetailComponent(
     private val paymentPlanBillingCoordinator = EventPaymentPlanBillingCoordinator()
     private val purchaseIntentCoordinator = EventPurchaseIntentCoordinator(registrationFlowCoordinator)
     private val signatureExecutionCoordinator = EventSignatureExecutionCoordinator(registrationFlowCoordinator)
+    private val detailHydrationCoordinator = EventDetailHydrationCoordinator()
     private val joinConfirmationCoordinator = EventJoinConfirmationCoordinator()
     private val eventInviteCoordinator = EventInviteCoordinator()
     override val suggestedUsers = eventInviteCoordinator.suggestedUsers
@@ -886,7 +887,6 @@ class DefaultEventDetailComponent(
     override val eventMatchesLoading = _eventMatchesLoading.asStateFlow()
 
     private var eventDetailHydrationJob: Job? = null
-    private var eventDetailHydrationToken: Long = 0L
     private var weeklyOccurrenceSummaryPrefetchJob: Job? = null
 
     override val showFeeBreakdown = registrationFlowCoordinator.showFeeBreakdown
@@ -1570,33 +1570,30 @@ class DefaultEventDetailComponent(
     private suspend fun prefetchNonWeeklyParticipants(
         event: Event = selectedEvent.value,
     ) {
-        if (isWeeklyParentEvent(event)) {
-            return
-        }
-        val manage = canManageParticipantData(event)
-        markManagedBootstrapRequested(event, occurrence = null, manage = manage)
-        eventRepository.syncEventDetail(
+        detailHydrationCoordinator.prefetchNonWeeklyParticipants(
             event = event,
-            manage = manage,
-        )
-            .onSuccess { result ->
-                applyEventDetailSyncResult(result)
-            }
-            .onFailure { throwable ->
-                clearManagedBootstrapRequestIfCurrent(event, occurrence = null)
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Failed to load teams and participants."),
+            isWeeklyParentEvent = ::isWeeklyParentEvent,
+            manage = canManageParticipantData(event),
+            markManagedBootstrapRequested = ::markManagedBootstrapRequested,
+            syncEventDetail = { targetEvent, occurrence, manage ->
+                eventRepository.syncEventDetail(
+                    event = targetEvent,
+                    occurrence = occurrence,
+                    manage = manage,
                 )
-            }
+            },
+            applyEventDetailSyncResult = ::applyEventDetailSyncResult,
+            clearManagedBootstrapRequestIfCurrent = ::clearManagedBootstrapRequestIfCurrent,
+            setError = { error -> _errorState.value = error },
+        )
     }
 
     private fun applyParticipantSyncResult(result: EventParticipantsSyncResult) {
-        participantManagementCoordinator.replaceParticipantDivisionWarnings(result.divisionWarnings)
-        weeklyOccurrenceCoordinator.applyOverviewParticipantSummary(
-            isWeeklyParent = isWeeklyParentEvent(result.event),
-            weeklySelectionRequired = result.weeklySelectionRequired,
-            participantCount = result.participantCount,
-            participantCapacity = result.participantCapacity,
+        detailHydrationCoordinator.applyParticipantSyncResult(
+            result = result,
+            isWeeklyParentEvent = ::isWeeklyParentEvent,
+            replaceParticipantDivisionWarnings = participantManagementCoordinator::replaceParticipantDivisionWarnings,
+            applyOverviewParticipantSummary = weeklyOccurrenceCoordinator::applyOverviewParticipantSummary,
         )
     }
 
@@ -1627,9 +1624,14 @@ class DefaultEventDetailComponent(
     }
 
     private fun applyEventDetailSyncResult(result: EventDetailSyncResult) {
-        applyParticipantSyncResult(result.participants)
-        bootstrapResourcesCoordinator.applyEventDetailSyncResult(result)
-        _eventStaffInvites.value = result.staffInvites
+        detailHydrationCoordinator.applyEventDetailSyncResult(
+            result = result,
+            applyParticipantSyncResult = ::applyParticipantSyncResult,
+            applyBootstrapSyncResult = bootstrapResourcesCoordinator::applyEventDetailSyncResult,
+            replaceStaffInvites = { syncResult ->
+                _eventStaffInvites.value = syncResult.staffInvites
+            },
+        )
     }
 
     private fun loadSports(reportErrors: Boolean) {
@@ -1946,37 +1948,27 @@ class DefaultEventDetailComponent(
         event: Event = selectedEvent.value,
         reportErrors: Boolean = true,
     ) {
-        if (!isWeeklyParentEvent(event)) {
-            weeklyOccurrenceCoordinator.clearSelectedWeeklyOccurrenceSummary()
-            return
-        }
-
-        val occurrence = currentWeeklyOccurrenceSelection()
-        val manage = canManageParticipantData(event)
-        markManagedBootstrapRequested(event, occurrence = occurrence, manage = manage)
-        eventRepository.syncEventDetail(
+        detailHydrationCoordinator.syncSelectedWeeklyOccurrenceParticipants(
             event = event,
-            occurrence = occurrence,
-            manage = manage,
-        ).onSuccess { result ->
-            applyEventDetailSyncResult(result)
-            val participantResult = result.participants
-            weeklyOccurrenceCoordinator.applySelectedOccurrenceParticipantSummary(
-                occurrence = occurrence,
-                weeklySelectionRequired = participantResult.weeklySelectionRequired,
-                participantCount = participantResult.participantCount,
-                participantCapacity = participantResult.participantCapacity,
-            )
-        }.onFailure { throwable ->
-            clearManagedBootstrapRequestIfCurrent(event, occurrence)
-            if (reportErrors) {
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Failed to load occurrence participants."),
+            occurrence = currentWeeklyOccurrenceSelection(),
+            isWeeklyParentEvent = ::isWeeklyParentEvent,
+            manage = canManageParticipantData(event),
+            reportErrors = reportErrors,
+            clearSelectedWeeklyOccurrenceSummary = weeklyOccurrenceCoordinator::clearSelectedWeeklyOccurrenceSummary,
+            markManagedBootstrapRequested = ::markManagedBootstrapRequested,
+            syncEventDetail = { targetEvent, occurrence, manage ->
+                eventRepository.syncEventDetail(
+                    event = targetEvent,
+                    occurrence = occurrence,
+                    manage = manage,
                 )
-            } else {
-                Napier.w("Failed to refresh selected weekly occurrence participants.", throwable)
-            }
-        }
+            },
+            applyEventDetailSyncResult = ::applyEventDetailSyncResult,
+            applySelectedOccurrenceParticipantSummary = weeklyOccurrenceCoordinator::applySelectedOccurrenceParticipantSummary,
+            clearManagedBootstrapRequestIfCurrent = ::clearManagedBootstrapRequestIfCurrent,
+            setError = { error -> _errorState.value = error },
+            logWarning = Napier::w,
+        )
     }
 
     private suspend fun refreshSelectedWeeklyOccurrenceSummaryIfNeeded(
@@ -1994,25 +1986,18 @@ class DefaultEventDetailComponent(
         eventId: String = selectedEvent.value.id,
         warningMessage: String = "Failed to refresh event after participant update.",
     ) {
-        eventRepository.getEvent(eventId)
-            .onSuccess { refreshed ->
-                val occurrence = currentWeeklyOccurrenceSelection()
-                val syncResult = eventRepository.syncEventParticipants(
-                    event = refreshed,
-                    occurrence = occurrence,
-                ).onFailure { throwable ->
-                    Napier.w(warningMessage, throwable)
-                }.getOrNull()
-                if (syncResult != null) {
-                    applyParticipantSyncResult(syncResult)
-                }
-                val eventForRefresh = syncResult?.event ?: refreshed
-                refreshSelectedWeeklyOccurrenceSummaryIfNeeded(eventForRefresh)
-                refreshParticipantManagementSnapshotIfNeeded(eventForRefresh)
-                refreshParticipantComplianceIfNeeded(eventForRefresh)
-            }.onFailure { throwable ->
-                Napier.w(warningMessage, throwable)
-            }
+        detailHydrationCoordinator.refreshEventAfterParticipantMutation(
+            eventId = eventId,
+            occurrence = currentWeeklyOccurrenceSelection(),
+            warningMessage = warningMessage,
+            getEvent = eventRepository::getEvent,
+            syncEventParticipants = eventRepository::syncEventParticipants,
+            applyParticipantSyncResult = ::applyParticipantSyncResult,
+            refreshSelectedWeeklyOccurrenceSummaryIfNeeded = ::refreshSelectedWeeklyOccurrenceSummaryIfNeeded,
+            refreshParticipantManagementSnapshotIfNeeded = ::refreshParticipantManagementSnapshotIfNeeded,
+            refreshParticipantComplianceIfNeeded = ::refreshParticipantComplianceIfNeeded,
+            logWarning = Napier::w,
+        )
     }
 
     private fun ensureRegistrationOpen(): Boolean {
@@ -3040,72 +3025,34 @@ class DefaultEventDetailComponent(
     }
 
     private fun hydrateEventDetailForMobile(showDetailsOnSuccess: Boolean) {
-        val eventId = selectedEvent.value.id.trim()
-        if (eventId.isEmpty()) {
-            if (showDetailsOnSuccess) {
-                _showDetails.value = true
-            }
-            return
-        }
+        val event = selectedEvent.value
+        val request = detailHydrationCoordinator.beginMobileHydration(
+            event = event,
+            showDetailsOnSuccess = showDetailsOnSuccess,
+            setParticipantLoading = participantManagementCoordinator::setEventTeamsAndParticipantsLoading,
+            setMatchesLoading = { loading -> _eventMatchesLoading.value = loading },
+            showDetails = { _showDetails.value = true },
+        ) ?: return
 
-        eventDetailHydrationToken += 1
-        val requestToken = eventDetailHydrationToken
         eventDetailHydrationJob?.cancel()
-        participantManagementCoordinator.setEventTeamsAndParticipantsLoading(true)
-        _eventMatchesLoading.value = true
-
         eventDetailHydrationJob = scope.launch {
-            try {
-                val refreshedEvent = eventRepository.getEvent(eventId)
-                    .onFailure { throwable ->
-                        if (requestToken != eventDetailHydrationToken) return@onFailure
-                        _errorState.value = ErrorMessage(
-                            throwable.userMessage("Failed to load teams and participants."),
-                        )
-                    }
-                    .getOrElse { selectedEvent.value }
-                if (requestToken != eventDetailHydrationToken) return@launch
-
-                val occurrence = currentWeeklyOccurrenceSelection()
-                eventRepository.syncEventParticipants(
-                    event = refreshedEvent,
-                    occurrence = occurrence,
-                ).onSuccess { result ->
-                    if (requestToken != eventDetailHydrationToken) return@onSuccess
-                    applyParticipantSyncResult(result)
-                    weeklyOccurrenceCoordinator.applySelectedOccurrenceParticipantSummary(
-                        occurrence = occurrence.takeIf { isWeeklyParentEvent(result.event) },
-                        weeklySelectionRequired = result.weeklySelectionRequired,
-                        participantCount = result.participantCount,
-                        participantCapacity = result.participantCapacity,
-                    )
-                    refreshParticipantManagementSnapshotIfNeeded(result.event)
-                    refreshParticipantComplianceIfNeeded(result.event)
-                }.onFailure { throwable ->
-                    if (requestToken != eventDetailHydrationToken) return@onFailure
-                    _errorState.value = ErrorMessage(
-                        throwable.userMessage("Failed to load teams and participants."),
-                    )
-                }
-
-                participantManagementCoordinator.setEventTeamsAndParticipantsLoading(false)
-
-                matchRepository.getMatchesOfTournament(eventId).onFailure { throwable ->
-                    if (requestToken != eventDetailHydrationToken) return@onFailure
-                    _errorState.value = ErrorMessage(
-                        throwable.userMessage("Failed to load schedule matches."),
-                    )
-                }
-
-                if (showDetailsOnSuccess && requestToken == eventDetailHydrationToken) {
-                    _showDetails.value = true
-                }
-            } finally {
-                if (requestToken == eventDetailHydrationToken) {
-                    participantManagementCoordinator.setEventTeamsAndParticipantsLoading(false)
-                    _eventMatchesLoading.value = false
-                }
-            }
+            detailHydrationCoordinator.hydrateMobileEventDetail(
+                request = request,
+                fallbackEvent = event,
+                occurrence = currentWeeklyOccurrenceSelection(),
+                isWeeklyParentEvent = ::isWeeklyParentEvent,
+                getEvent = eventRepository::getEvent,
+                syncEventParticipants = eventRepository::syncEventParticipants,
+                refreshMatches = matchRepository::getMatchesOfTournament,
+                applyParticipantSyncResult = ::applyParticipantSyncResult,
+                applySelectedOccurrenceParticipantSummary = weeklyOccurrenceCoordinator::applySelectedOccurrenceParticipantSummary,
+                refreshParticipantManagementSnapshotIfNeeded = ::refreshParticipantManagementSnapshotIfNeeded,
+                refreshParticipantComplianceIfNeeded = ::refreshParticipantComplianceIfNeeded,
+                setParticipantLoading = participantManagementCoordinator::setEventTeamsAndParticipantsLoading,
+                setMatchesLoading = { loading -> _eventMatchesLoading.value = loading },
+                showDetails = { _showDetails.value = true },
+                setError = { error -> _errorState.value = error },
+            )
         }
     }
 
