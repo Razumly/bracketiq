@@ -21,12 +21,13 @@ class ParticipantsViewTeamFilterTest {
         val teams = listOf(
             buildTeamWithPlayers(teamId = "actual-team"),
             buildTeamWithPlayers(teamId = "placeholder-kind", kind = "PLACEHOLDER", parentTeamId = "parent-team"),
-            buildTeamWithPlayers(teamId = "placeholder-slot", parentTeamId = null),
+            buildTeamWithPlayers(teamId = "placeholder-slot", kind = null, parentTeamId = null, captainId = ""),
+            buildTeamWithPlayers(teamId = "api-team-without-parent", kind = null, parentTeamId = null),
         )
 
         val visibleTeamIds = visibleParticipantTeams(event, teams).map { team -> team.team.id }
 
-        assertEquals(listOf("actual-team"), visibleTeamIds)
+        assertEquals(listOf("actual-team", "api-team-without-parent"), visibleTeamIds)
     }
 
     @Test
@@ -60,7 +61,13 @@ class ParticipantsViewTeamFilterTest {
         val teams = listOf(
             buildTeamWithPlayers(teamId = "open-team", division = "open"),
             buildTeamWithPlayers(teamId = "competitive-team", division = "competitive"),
-            buildTeamWithPlayers(teamId = "placeholder-open", division = "open", parentTeamId = null),
+            buildTeamWithPlayers(
+                teamId = "placeholder-open",
+                division = "open",
+                kind = null,
+                parentTeamId = null,
+                captainId = "",
+            ),
         )
 
         val visibleTeamIds = visibleParticipantTeamsForDivision(

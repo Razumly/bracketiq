@@ -1652,3 +1652,4 @@ Revision Note (2026-06-23): Recorded the billing-address purchase-intent coordin
 Revision Note (2026-06-23): Recorded the signature execution coordinator slice, focused and related regression tests, and line-count impact.
 Revision Note (2026-06-23): Recorded the consolidated focused regression pass for the multi-slice event-detail decomposition batch.
 Revision Note (2026-06-23): Recorded the event-detail hydration coordinator slice, baseline full debug unit blockers, focused tests, related regression tests, and line-count impact.
+Revision Note (2026-06-23): Recorded Android emulator QA for event details, the real-team placeholder-slot fix, passing focused tests, and remaining fixture limitation that the reachable regression event has no assigned officials.
