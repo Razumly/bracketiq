@@ -52,7 +52,6 @@ import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
-import com.razumly.mvp.core.data.repositories.CreateBillRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
@@ -532,6 +531,7 @@ class DefaultEventDetailComponent(
     override val errorState = _errorState.asStateFlow()
     private val registrationFlowCoordinator = EventRegistrationFlowCoordinator()
     private val withdrawalActionCoordinator = EventWithdrawalActionCoordinator(registrationFlowCoordinator)
+    private val paymentPlanBillingCoordinator = EventPaymentPlanBillingCoordinator()
     private val joinConfirmationCoordinator = EventJoinConfirmationCoordinator()
     private val eventInviteCoordinator = EventInviteCoordinator()
     override val suggestedUsers = eventInviteCoordinator.suggestedUsers
@@ -2566,93 +2566,47 @@ class DefaultEventDetailComponent(
         allowSplit: Boolean,
         preferredDivisionId: String?,
     ): Result<PaymentPlanBillStatus> {
-        val event = selectedEvent.value
-        val paymentPlan = resolveEffectivePaymentPlan(event, preferredDivisionId)
-        val normalizedOwnerId = ownerId.trim()
-        if (normalizedOwnerId.isEmpty()) {
-            return Result.failure(IllegalArgumentException("Unable to start payment plan: owner id is missing."))
-        }
-        val priceCents = paymentPlan.priceCents
-        if (priceCents == null) {
-            return Result.failure(IllegalArgumentException("This division does not have a price set."))
-        }
-        if (priceCents <= 0) {
-            return Result.failure(IllegalArgumentException("This division does not have a paid price set for a payment plan."))
-        }
-
-        val useRelativeDueDates = isWeeklyParentEvent(event)
-        val selectedOccurrence = if (useRelativeDueDates) {
-            currentWeeklyOccurrenceSelection()
-        } else {
-            null
-        }
-        if (useRelativeDueDates && selectedOccurrence == null) {
-            return Result.failure(
-                IllegalArgumentException("Select an occurrence before starting a weekly payment plan."),
-            )
-        }
-        val installmentDueDates = if (useRelativeDueDates) {
-            emptyList()
-        } else {
-            paymentPlan.installmentDueDates
-                .mapNotNull { dueDate -> dueDate.trim().takeIf(String::isNotBlank) }
-        }
-        val installmentDueRelativeDays = if (useRelativeDueDates) {
-            paymentPlan.installmentDueRelativeDays
-        } else {
-            emptyList()
-        }
-        if (useRelativeDueDates && installmentDueRelativeDays.size != paymentPlan.installmentAmounts.size) {
-            return Result.failure(
-                IllegalArgumentException("Weekly payment plans need a due offset for each installment."),
-            )
-        }
-
-        return billingRepository.createBill(
-            CreateBillRequest(
-                ownerType = ownerType,
-                ownerId = normalizedOwnerId,
-                totalAmountCents = priceCents,
-                eventId = event.id,
-                slotId = selectedOccurrence?.slotId,
-                occurrenceDate = selectedOccurrence?.occurrenceDate,
-                organizationId = event.organizationId,
-                installmentAmounts = paymentPlan.installmentAmounts,
-                installmentDueDates = installmentDueDates,
-                installmentDueRelativeDays = installmentDueRelativeDays,
-                allowSplit = allowSplit,
-                paymentPlanEnabled = true,
-            )
-        ).fold(
-            onSuccess = { Result.success(PaymentPlanBillStatus.CREATED) },
-            onFailure = { throwable ->
-                if (throwable.isDuplicatePaymentPlanError()) {
-                    Result.success(PaymentPlanBillStatus.ALREADY_EXISTS)
-                } else {
-                    Result.failure(throwable)
-                }
-            },
+        return paymentPlanBillingCoordinator.createPaymentPlanBillForOwner(
+            event = selectedEvent.value,
+            ownerType = ownerType,
+            ownerId = ownerId,
+            allowSplit = allowSplit,
+            preferredDivisionId = preferredDivisionId,
+            selectedWeeklyOccurrence = currentWeeklyOccurrenceSelection(),
+            createBill = billingRepository::createBill,
         )
     }
 
     private suspend fun rollbackUserJoinAfterBillingFailure(event: Event) {
-        eventRepository.removeCurrentUserFromEvent(
+        paymentPlanBillingCoordinator.rollbackUserJoinAfterBillingFailure(
             event = event,
-            targetUserId = currentUser.value.id,
+            currentUserId = currentUser.value.id,
             occurrence = currentWeeklyOccurrenceSelection(),
-        ).onFailure { throwable ->
-            Napier.w("Failed to rollback user join after payment plan billing error.", throwable)
-        }
+            removeCurrentUserFromEvent = { targetEvent, targetUserId, occurrence ->
+                eventRepository.removeCurrentUserFromEvent(
+                    event = targetEvent,
+                    targetUserId = targetUserId,
+                    occurrence = occurrence,
+                )
+            },
+            logWarning = Napier::w,
+        )
     }
 
     private suspend fun rollbackTeamJoinAfterBillingFailure(event: Event, team: TeamWithPlayers) {
-        eventRepository.removeTeamFromEvent(
+        paymentPlanBillingCoordinator.rollbackTeamJoinAfterBillingFailure(
             event = event,
-            teamWithPlayers = team,
+            team = team,
             occurrence = currentWeeklyOccurrenceSelection(),
-        ).onFailure { throwable ->
-            Napier.w("Failed to rollback team join after payment plan billing error.", throwable)
-        }
+            removeTeamFromEvent = { targetEvent, targetTeam, occurrence ->
+                eventRepository.removeTeamFromEvent(
+                    event = targetEvent,
+                    teamWithPlayers = targetTeam,
+                    occurrence = occurrence,
+                )
+            },
+            logWarning = Napier::w,
+        )
     }
 
     private suspend fun submitMinorJoinRequestForParentApproval() {
