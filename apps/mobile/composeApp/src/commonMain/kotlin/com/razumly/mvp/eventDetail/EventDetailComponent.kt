@@ -589,6 +589,7 @@ class DefaultEventDetailComponent(
         }
     }
 
+    private val editActionCoordinator = EventEditActionCoordinator()
     private val editDraftCoordinator = EventEditDraftCoordinator(
         initialEvent = event,
         canEditInitial = event.state.equals("TEMPLATE", ignoreCase = true) && canEditEventDetails(event),
@@ -3869,117 +3870,78 @@ class DefaultEventDetailComponent(
     }
 
     override fun rescheduleEvent() {
-        scope.launch {
-            loadingHandler.showLoading("Rescheduling event...")
-            var shouldExitEditMode = false
-            runCatching {
-                val prepared = prepareEventForUpdate()
-                logPreparedFieldOwnership("reschedule", prepared)
-                val updated = eventRepository.updateEvent(
-                    newEvent = prepared.event,
-                    fields = prepared.fields,
-                    timeSlots = prepared.timeSlots,
-                    leagueScoringConfig = prepared.leagueScoringConfig,
-                ).getOrThrow()
-                val scheduledEvent = eventRepository.scheduleEvent(updated.id).getOrThrow()
-                matchRepository.getMatchesOfTournament(updated.id).getOrThrow()
-                refreshLeagueStandingsAfterSchedule(scheduledEvent)
-                shouldExitEditMode = true
-            }.onFailure { throwable ->
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Failed to reschedule event."),
-                )
-            }
-            loadingHandler.hideLoading()
-            if (shouldExitEditMode) {
-                cancelEditingEvent()
-                _errorState.value = ErrorMessage("Event rescheduled.")
-            }
-        }
+        runScheduleEditAction(EventScheduleEditAction.RESCHEDULE)
     }
 
     override fun buildBrackets() {
-        scope.launch {
-            loadingHandler.showLoading("Building bracket(s)...")
-            var shouldExitEditMode = false
-            runCatching {
-                val prepared = prepareEventForUpdate()
-                logPreparedFieldOwnership("build_brackets", prepared)
-                val updated = eventRepository.updateEvent(
-                    newEvent = prepared.event,
-                    fields = prepared.fields,
-                    timeSlots = prepared.timeSlots,
-                    leagueScoringConfig = prepared.leagueScoringConfig,
-                ).getOrThrow()
-                val participantCount = updated.maxParticipants.takeIf { maxParticipants ->
-                    maxParticipants > 0
-                }
-                matchRepository.deleteMatchesOfTournament(updated.id).getOrThrow()
-                val scheduledEvent = eventRepository.scheduleEvent(updated.id, participantCount).getOrThrow()
-
-                resetBracketMatchesAfterSchedule(
-                    event = updated,
-                    getMatchesOfTournament = { eventId ->
-                        matchRepository.getMatchesOfTournament(eventId).getOrThrow()
-                    },
-                    updateMatchesBulk = { matches ->
-                        matchRepository.updateMatchesBulk(matches).getOrThrow()
-                    },
-                )
-                refreshLeagueStandingsAfterSchedule(scheduledEvent)
-                shouldExitEditMode = true
-            }.onFailure { throwable ->
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Failed to build bracket(s)."),
-                )
-            }
-            loadingHandler.hideLoading()
-            if (shouldExitEditMode) {
-                cancelEditingEvent()
-                _errorState.value = ErrorMessage("Bracket build completed.")
-            }
-        }
+        runScheduleEditAction(EventScheduleEditAction.BUILD_BRACKETS)
     }
 
     override fun rebuildWithoutPlaceholderTeams() {
-        scope.launch {
-            loadingHandler.showLoading("Rebuilding without placeholder teams...")
-            var shouldExitEditMode = false
-            runCatching {
-                val prepared = prepareEventForUpdate()
-                logPreparedFieldOwnership("rebuild_without_placeholders", prepared)
-                val updated = eventRepository.updateEvent(
-                    newEvent = prepared.event,
-                    fields = prepared.fields,
-                    timeSlots = prepared.timeSlots,
-                    leagueScoringConfig = prepared.leagueScoringConfig,
-                ).getOrThrow()
-                matchRepository.deleteMatchesOfTournament(updated.id).getOrThrow()
-                val scheduledEvent = eventRepository.scheduleEvent(
-                    eventId = updated.id,
-                    includePlaceholderTeams = false,
-                ).getOrThrow()
+        runScheduleEditAction(EventScheduleEditAction.REBUILD_WITHOUT_PLACEHOLDER_TEAMS)
+    }
 
-                resetBracketMatchesAfterSchedule(
-                    event = updated,
-                    getMatchesOfTournament = { eventId ->
-                        matchRepository.getMatchesOfTournament(eventId).getOrThrow()
-                    },
-                    updateMatchesBulk = { matches ->
-                        matchRepository.updateMatchesBulk(matches).getOrThrow()
-                    },
-                )
-                refreshLeagueStandingsAfterSchedule(scheduledEvent)
-                shouldExitEditMode = true
-            }.onFailure { throwable ->
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Failed to rebuild without placeholder teams."),
-                )
-            }
-            loadingHandler.hideLoading()
-            if (shouldExitEditMode) {
-                cancelEditingEvent()
-                _errorState.value = ErrorMessage("Schedule rebuilt without placeholder teams.")
+    private fun runScheduleEditAction(action: EventScheduleEditAction) {
+        scope.launch {
+            when (val result = editActionCoordinator.runScheduleEditAction(
+                action = action,
+                prepareEventForUpdate = ::prepareEventForUpdate,
+                logPreparedFieldOwnership = ::logPreparedFieldOwnership,
+                updateEvent = { prepared ->
+                    eventRepository.updateEvent(
+                        newEvent = prepared.event,
+                        fields = prepared.fields,
+                        timeSlots = prepared.timeSlots,
+                        leagueScoringConfig = prepared.leagueScoringConfig,
+                    ).getOrThrow()
+                },
+                deleteMatchesOfTournament = { eventId ->
+                    matchRepository.deleteMatchesOfTournament(eventId).getOrThrow()
+                },
+                scheduleEvent = { scheduleAction, updated ->
+                    when (scheduleAction) {
+                        EventScheduleEditAction.RESCHEDULE -> {
+                            eventRepository.scheduleEvent(updated.id).getOrThrow()
+                        }
+                        EventScheduleEditAction.BUILD_BRACKETS -> {
+                            val participantCount = updated.maxParticipants.takeIf { maxParticipants ->
+                                maxParticipants > 0
+                            }
+                            eventRepository.scheduleEvent(updated.id, participantCount).getOrThrow()
+                        }
+                        EventScheduleEditAction.REBUILD_WITHOUT_PLACEHOLDER_TEAMS -> {
+                            eventRepository.scheduleEvent(
+                                eventId = updated.id,
+                                includePlaceholderTeams = false,
+                            ).getOrThrow()
+                        }
+                    }
+                },
+                refetchMatchesOfTournament = { eventId ->
+                    matchRepository.getMatchesOfTournament(eventId).getOrThrow()
+                },
+                resetBracketMatchesAfterSchedule = { updated ->
+                    resetBracketMatchesAfterSchedule(
+                        event = updated,
+                        getMatchesOfTournament = { eventId ->
+                            matchRepository.getMatchesOfTournament(eventId).getOrThrow()
+                        },
+                        updateMatchesBulk = { matches ->
+                            matchRepository.updateMatchesBulk(matches).getOrThrow()
+                        },
+                    )
+                },
+                refreshLeagueStandingsAfterSchedule = ::refreshLeagueStandingsAfterSchedule,
+                showLoading = { message -> loadingHandler.showLoading(message) },
+                hideLoading = loadingHandler::hideLoading,
+            )) {
+                is EventScheduleEditResult.Success -> {
+                    cancelEditingEvent()
+                    _errorState.value = ErrorMessage(result.message)
+                }
+                is EventScheduleEditResult.Failure -> {
+                    _errorState.value = ErrorMessage(result.throwable.userMessage(result.fallbackMessage))
+                }
             }
         }
     }
