@@ -1,10 +1,14 @@
 package com.razumly.mvp.eventDetail
 
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.EventParticipantDivisionWarning
 import com.razumly.mvp.core.data.repositories.EventParticipantManagementEntry
 import com.razumly.mvp.core.data.repositories.EventParticipantManagementSnapshot
+import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
@@ -428,6 +432,147 @@ class EventParticipantManagementCoordinatorTest {
                 "refresh-after-refund",
             ),
             events,
+        )
+    }
+
+    @Test
+    fun move_team_participant_division_validates_noops_and_applies_successful_move() = runTest {
+        val coordinator = EventParticipantManagementCoordinator(
+            eventTeamsAndParticipantsLoadingInitially = false,
+        )
+        val event = Event(id = "event-1")
+        val team = team(id = " team-1 ", division = "open", name = "Blue")
+        val events = mutableListOf<String>()
+        var appliedDivision: String? = null
+
+        val blankDivision = coordinator.moveTeamParticipantDivision(
+            event = event,
+            team = team,
+            divisionId = " ",
+            occurrence = null,
+            moveTeamDivision = { _, _, _, _ -> error("Should not move") },
+            applySuccessfulMove = { _, _ -> error("Should not apply") },
+            showLoading = { events += "show:$it" },
+            hideLoading = { events += "hide" },
+        )
+        val sameDivision = coordinator.moveTeamParticipantDivision(
+            event = event,
+            team = team,
+            divisionId = "open",
+            occurrence = null,
+            moveTeamDivision = { _, _, _, _ -> error("Should not move") },
+            applySuccessfulMove = { _, _ -> error("Should not apply") },
+            showLoading = { events += "show:$it" },
+            hideLoading = { events += "hide" },
+        )
+        val moved = coordinator.moveTeamParticipantDivision(
+            event = event,
+            team = team,
+            divisionId = " advanced ",
+            occurrence = EventOccurrenceSelection(slotId = "slot-1", occurrenceDate = "2026-07-01"),
+            moveTeamDivision = { targetEvent, targetTeam, divisionId, occurrence ->
+                events += "move:${targetEvent.id}:${targetTeam.id}:$divisionId:${occurrence?.slotId}"
+                Result.success(EventParticipantsSyncResult(event = targetEvent.copy(name = "Updated")))
+            },
+            applySuccessfulMove = { result, divisionId ->
+                events += "apply:${result.event.name}:$divisionId"
+                appliedDivision = divisionId
+            },
+            showLoading = { events += "show:$it" },
+            hideLoading = { events += "hide" },
+        )
+
+        assertEquals("Select a division before moving the team.", (blankDivision as ParticipantMutationResult.Rejected).message)
+        assertEquals(ParticipantMutationResult.NoOp, sameDivision)
+        assertEquals("Blue moved to a new division.", (moved as ParticipantMutationResult.Success).message)
+        assertEquals("advanced", appliedDivision)
+        assertEquals(
+            listOf(
+                "show:Moving team...",
+                "move:event-1:team-1:advanced:slot-1",
+                "apply:Updated:advanced",
+                "hide",
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun remove_participant_mutations_refresh_after_success_and_report_failures() = runTest {
+        val coordinator = EventParticipantManagementCoordinator(
+            eventTeamsAndParticipantsLoadingInitially = false,
+        )
+        val event = Event(id = "event-1")
+        val team = team(id = "team-1", division = "open", name = "Blue")
+        val events = mutableListOf<String>()
+
+        val removedTeam = coordinator.removeTeamParticipant(
+            event = event,
+            team = team,
+            occurrence = null,
+            removeTeam = { targetEvent, targetTeam, occurrence ->
+                events += "remove-team:${targetEvent.id}:${targetTeam.team.id}:${occurrence?.slotId}"
+                Result.success(Unit)
+            },
+            refreshAfterSuccess = { eventId, warning ->
+                events += "refresh-team:$eventId:$warning"
+            },
+            showLoading = { events += "show:$it" },
+            hideLoading = { events += "hide" },
+        )
+        val rejectedUser = coordinator.removeUserParticipant(
+            event = event,
+            userId = " ",
+            occurrence = null,
+            removeUser = { _, _, _ -> error("Should not remove") },
+            refreshAfterSuccess = { _, _ -> error("Should not refresh") },
+            showLoading = { events += "show:$it" },
+            hideLoading = { events += "hide" },
+        )
+        val failedUser = coordinator.removeUserParticipant(
+            event = event,
+            userId = " user-1 ",
+            occurrence = null,
+            removeUser = { targetEvent, userId, occurrence ->
+                events += "remove-user:${targetEvent.id}:$userId:${occurrence?.slotId}"
+                Result.failure(IllegalStateException("remove failed"))
+            },
+            refreshAfterSuccess = { _, _ -> error("Should not refresh failed remove") },
+            showLoading = { events += "show:$it" },
+            hideLoading = { events += "hide" },
+        )
+
+        assertTrue(removedTeam is ParticipantMutationResult.Success)
+        assertEquals("User id is required.", (rejectedUser as ParticipantMutationResult.Rejected).message)
+        assertEquals("remove failed", (failedUser as ParticipantMutationResult.Failed).message)
+        assertEquals(
+            listOf(
+                "show:Removing team...",
+                "remove-team:event-1:team-1:null",
+                "refresh-team:event-1:Failed to refresh event after removing team participant.",
+                "hide",
+                "show:Removing participant...",
+                "remove-user:event-1:user-1:null",
+                "hide",
+            ),
+            events,
+        )
+    }
+
+    private fun team(
+        id: String,
+        division: String,
+        name: String,
+    ): TeamWithPlayers {
+        return TeamWithPlayers(
+            team = Team(captainId = "captain-1").copy(
+                id = id,
+                division = division,
+                name = name,
+            ),
+            captain = null,
+            players = emptyList(),
+            pendingPlayers = emptyList(),
         )
     }
 }

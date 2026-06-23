@@ -1,5 +1,8 @@
 package com.razumly.mvp.eventDetail
 
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
@@ -9,6 +12,8 @@ import com.razumly.mvp.core.data.repositories.EventParticipantManagementSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckoutRequest
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
+import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
+import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.network.userMessage
 import com.razumly.mvp.core.util.ErrorMessage
 import io.github.aakira.napier.Napier
@@ -41,6 +46,13 @@ private data class ParticipantBillingTarget(
     val eventId: String,
     val teamId: String,
 )
+
+internal sealed class ParticipantMutationResult {
+    data object NoOp : ParticipantMutationResult()
+    data class Success(val message: String? = null) : ParticipantMutationResult()
+    data class Rejected(val message: String) : ParticipantMutationResult()
+    data class Failed(val message: String) : ParticipantMutationResult()
+}
 
 internal class EventParticipantManagementCoordinator(
     eventTeamsAndParticipantsLoadingInitially: Boolean,
@@ -340,6 +352,133 @@ internal class EventParticipantManagementCoordinator(
             refreshAfterSuccess()
         }
         return result
+    }
+
+    suspend fun moveTeamParticipantDivision(
+        event: Event,
+        team: TeamWithPlayers,
+        divisionId: String,
+        occurrence: EventOccurrenceSelection?,
+        moveTeamDivision: suspend (
+            event: Event,
+            team: Team,
+            divisionId: String,
+            occurrence: EventOccurrenceSelection?,
+        ) -> Result<EventParticipantsSyncResult>,
+        applySuccessfulMove: suspend (
+            result: EventParticipantsSyncResult,
+            divisionId: String,
+        ) -> Unit,
+        showLoading: (String) -> Unit,
+        hideLoading: () -> Unit,
+    ): ParticipantMutationResult {
+        val normalizedDivisionId = divisionId.normalizeDivisionIdentifier().takeIf(String::isNotBlank)
+            ?: return ParticipantMutationResult.Rejected("Select a division before moving the team.")
+        val currentDivision = team.team.division.normalizeDivisionIdentifier()
+        if (currentDivision == normalizedDivisionId) {
+            return ParticipantMutationResult.NoOp
+        }
+        val eventTeamId = team.team.id.trim().takeIf(String::isNotBlank)
+            ?: team.team.parentTeamId?.trim()?.takeIf(String::isNotBlank)
+            ?: return ParticipantMutationResult.Rejected("Team id is required.")
+        val sourceEventTeam = team.team.copy(id = eventTeamId)
+
+        showLoading("Moving team...")
+        try {
+            return moveTeamDivision(event, sourceEventTeam, normalizedDivisionId, occurrence)
+                .fold(
+                    onSuccess = { result ->
+                        applySuccessfulMove(result, normalizedDivisionId)
+                        ParticipantMutationResult.Success(
+                            "${team.team.name.ifBlank { "Team" }} moved to a new division.",
+                        )
+                    },
+                    onFailure = { throwable ->
+                        ParticipantMutationResult.Failed(
+                            throwable.userMessage("Failed to move team division."),
+                        )
+                    },
+                )
+        } finally {
+            hideLoading()
+        }
+    }
+
+    suspend fun removeTeamParticipant(
+        event: Event,
+        team: TeamWithPlayers,
+        occurrence: EventOccurrenceSelection?,
+        removeTeam: suspend (
+            event: Event,
+            team: TeamWithPlayers,
+            occurrence: EventOccurrenceSelection?,
+        ) -> Result<Unit>,
+        refreshAfterSuccess: suspend (eventId: String, warningMessage: String) -> Unit,
+        showLoading: (String) -> Unit,
+        hideLoading: () -> Unit,
+    ): ParticipantMutationResult {
+        showLoading("Removing team...")
+        try {
+            return removeTeam(event, team, occurrence)
+                .fold(
+                    onSuccess = {
+                        refreshAfterSuccess(
+                            event.id,
+                            "Failed to refresh event after removing team participant.",
+                        )
+                        ParticipantMutationResult.Success()
+                    },
+                    onFailure = { throwable ->
+                        ParticipantMutationResult.Failed(
+                            throwable.userMessage("Failed to remove team participant."),
+                        )
+                    },
+                )
+        } finally {
+            hideLoading()
+        }
+    }
+
+    suspend fun removeUserParticipant(
+        event: Event,
+        userId: String,
+        occurrence: EventOccurrenceSelection?,
+        removeUser: suspend (
+            event: Event,
+            userId: String,
+            occurrence: EventOccurrenceSelection?,
+        ) -> Result<Unit>,
+        refreshAfterSuccess: suspend (eventId: String, warningMessage: String) -> Unit,
+        showLoading: (String) -> Unit,
+        hideLoading: () -> Unit,
+    ): ParticipantMutationResult {
+        val preflight = removeUserParticipantPreflight(userId)
+        if (!preflight.isAccepted) {
+            return ParticipantMutationResult.Rejected(
+                preflight.errorMessage ?: "Failed to remove participant.",
+            )
+        }
+
+        showLoading("Removing participant...")
+        try {
+            return removeUser(event, preflight.normalizedId, occurrence)
+                .fold(
+                    onSuccess = {
+                        refreshAfterSuccess(
+                            event.id,
+                            "Failed to refresh event after removing participant.",
+                        )
+                        ParticipantMutationResult.Success()
+                    },
+                    onFailure = { throwable ->
+                        ParticipantMutationResult.Failed(
+                            throwable.userMessage("Failed to remove participant."),
+                        )
+                    },
+                )
+        } finally {
+            hideLoading()
+        }
     }
 }
 

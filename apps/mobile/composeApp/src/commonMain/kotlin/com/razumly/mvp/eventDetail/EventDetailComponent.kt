@@ -3722,16 +3722,6 @@ class DefaultEventDetailComponent(
     override fun stopManagingParticipants() = Unit
 
     override fun moveTeamParticipantDivision(team: TeamWithPlayers, divisionId: String) {
-        val normalizedDivisionId = divisionId.normalizeDivisionIdentifier().takeIf(String::isNotBlank)
-        if (normalizedDivisionId == null) {
-            _errorState.value = ErrorMessage("Select a division before moving the team.")
-            return
-        }
-        val currentDivision = team.team.division.normalizeDivisionIdentifier()
-        if (currentDivision == normalizedDivisionId) {
-            return
-        }
-
         scope.launch {
             val event = selectedEvent.value
             val weeklyOccurrence = if (isWeeklyParentEvent(event)) {
@@ -3742,35 +3732,31 @@ class DefaultEventDetailComponent(
             } else {
                 null
             }
-            val eventTeamId = team.team.id.trim().takeIf(String::isNotBlank)
-                ?: team.team.parentTeamId?.trim()?.takeIf(String::isNotBlank)
-            if (eventTeamId == null) {
-                _errorState.value = ErrorMessage("Team id is required.")
-                return@launch
-            }
-            val sourceEventTeam = team.team.copy(id = eventTeamId)
-
-            loadingHandler.showLoading("Moving team...")
-            eventRepository.moveTeamParticipantDivision(
-                event = event,
-                team = sourceEventTeam,
-                preferredDivisionId = normalizedDivisionId,
-                occurrence = weeklyOccurrence,
+            applyParticipantMutationResult(
+                participantManagementCoordinator.moveTeamParticipantDivision(
+                    event = event,
+                    team = team,
+                    divisionId = divisionId,
+                    occurrence = weeklyOccurrence,
+                    moveTeamDivision = { targetEvent, targetTeam, targetDivisionId, occurrence ->
+                        eventRepository.moveTeamParticipantDivision(
+                            event = targetEvent,
+                            team = targetTeam,
+                            preferredDivisionId = targetDivisionId,
+                            occurrence = occurrence,
+                        )
+                    },
+                    applySuccessfulMove = { result, normalizedDivisionId ->
+                        applyParticipantSyncResult(result)
+                        selectDivision(normalizedDivisionId)
+                        refreshSelectedWeeklyOccurrenceSummaryIfNeeded(result.event)
+                        refreshParticipantManagementSnapshotIfNeeded(result.event)
+                        refreshParticipantComplianceIfNeeded(result.event)
+                    },
+                    showLoading = loadingHandler::showLoading,
+                    hideLoading = loadingHandler::hideLoading,
+                ),
             )
-                .onSuccess { result ->
-                    applyParticipantSyncResult(result)
-                    selectDivision(normalizedDivisionId)
-                    refreshSelectedWeeklyOccurrenceSummaryIfNeeded(result.event)
-                    refreshParticipantManagementSnapshotIfNeeded(result.event)
-                    refreshParticipantComplianceIfNeeded(result.event)
-                    _errorState.value = ErrorMessage("${team.team.name.ifBlank { "Team" }} moved to a new division.")
-                }
-                .onFailure { throwable ->
-                    _errorState.value = ErrorMessage(
-                        throwable.userMessage("Failed to move team division."),
-                    )
-                }
-            loadingHandler.hideLoading()
         }
     }
 
@@ -3785,20 +3771,28 @@ class DefaultEventDetailComponent(
             } else {
                 null
             }
-            loadingHandler.showLoading("Removing team...")
-            eventRepository.removeTeamFromEvent(event, team, occurrence = weeklyOccurrence)
-                .onSuccess {
-                    refreshEventAfterParticipantMutation(
-                        eventId = event.id,
-                        warningMessage = "Failed to refresh event after removing team participant.",
-                    )
-                }
-                .onFailure { throwable ->
-                    _errorState.value = ErrorMessage(
-                        throwable.userMessage("Failed to remove team participant."),
-                    )
-                }
-            loadingHandler.hideLoading()
+            applyParticipantMutationResult(
+                participantManagementCoordinator.removeTeamParticipant(
+                    event = event,
+                    team = team,
+                    occurrence = weeklyOccurrence,
+                    removeTeam = { targetEvent, targetTeam, occurrence ->
+                        eventRepository.removeTeamFromEvent(
+                            targetEvent,
+                            targetTeam,
+                            occurrence = occurrence,
+                        )
+                    },
+                    refreshAfterSuccess = { eventId, warningMessage ->
+                        refreshEventAfterParticipantMutation(
+                            eventId = eventId,
+                            warningMessage = warningMessage,
+                        )
+                    },
+                    showLoading = loadingHandler::showLoading,
+                    hideLoading = loadingHandler::hideLoading,
+                ),
+            )
         }
     }
 
@@ -3813,31 +3807,39 @@ class DefaultEventDetailComponent(
             } else {
                 null
             }
-            val preflight = removeUserParticipantPreflight(userId)
-            if (!preflight.isAccepted) {
-                _errorState.value = ErrorMessage(preflight.errorMessage ?: "Failed to remove participant.")
-                return@launch
-            }
-            val normalizedUserId = preflight.normalizedId
-            loadingHandler.showLoading("Removing participant...")
-            eventRepository.removeCurrentUserFromEvent(
-                event,
-                targetUserId = normalizedUserId,
-                occurrence = weeklyOccurrence,
+            applyParticipantMutationResult(
+                participantManagementCoordinator.removeUserParticipant(
+                    event = event,
+                    userId = userId,
+                    occurrence = weeklyOccurrence,
+                    removeUser = { targetEvent, targetUserId, occurrence ->
+                        eventRepository.removeCurrentUserFromEvent(
+                            targetEvent,
+                            targetUserId = targetUserId,
+                            occurrence = occurrence,
+                        )
+                    },
+                    refreshAfterSuccess = { eventId, warningMessage ->
+                        refreshEventAfterParticipantMutation(
+                            eventId = eventId,
+                            warningMessage = warningMessage,
+                        )
+                    },
+                    showLoading = loadingHandler::showLoading,
+                    hideLoading = loadingHandler::hideLoading,
+                ),
             )
-                .onSuccess {
-                    refreshEventAfterParticipantMutation(
-                        eventId = event.id,
-                        warningMessage = "Failed to refresh event after removing participant.",
-                    )
-                }
-                .onFailure { throwable ->
-                    _errorState.value = ErrorMessage(
-                        throwable.userMessage("Failed to remove participant."),
-                    )
-                }
-            loadingHandler.hideLoading()
         }
+    }
+
+    private fun applyParticipantMutationResult(result: ParticipantMutationResult) {
+        val message = when (result) {
+            ParticipantMutationResult.NoOp -> null
+            is ParticipantMutationResult.Success -> result.message
+            is ParticipantMutationResult.Rejected -> result.message
+            is ParticipantMutationResult.Failed -> result.message
+        } ?: return
+        _errorState.value = ErrorMessage(message)
     }
 
     override suspend fun getParticipantBillingSnapshot(teamId: String): Result<EventTeamBillingSnapshot> {
