@@ -433,25 +433,6 @@ private fun FamilyChild.toJoinChildOption(): JoinChildOption {
     )
 }
 
-private data class EventScopedValue<T>(
-    val eventId: String,
-    val value: T,
-)
-
-private data class EventTimeSlotLoadTarget(
-    val eventId: String,
-    val slotIds: List<String>,
-    val bootstrapSlots: List<TimeSlot>?,
-    val bootstrapped: Boolean,
-)
-
-private data class EventLeagueScoringLoadTarget(
-    val eventId: String,
-    val scoringConfigId: String,
-    val bootstrapConfig: LeagueScoringConfig?,
-    val bootstrapped: Boolean,
-)
-
 enum class TeamPosition { TEAM1, TEAM2, OFFICIAL }
 
 enum class MatchCreateContext {
@@ -611,9 +592,6 @@ class DefaultEventDetailComponent(
         }
     }.stateIn(scope, SharingStarted.Eagerly, AuthAccount.empty())
     private val _eventStaffInvites = MutableStateFlow<List<Invite>>(emptyList())
-    private val _bootstrappedEventIds = MutableStateFlow<Set<String>>(emptySet())
-    private val _bootstrapTimeSlots = MutableStateFlow<EventScopedValue<List<TimeSlot>>?>(null)
-    private val _bootstrapLeagueScoringConfig = MutableStateFlow<EventScopedValue<LeagueScoringConfig?>?>(null)
 
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
@@ -731,6 +709,16 @@ class DefaultEventDetailComponent(
     override val selectedEvent: StateFlow<Event> =
         eventRelations.map { it.event }.stateIn(scope, SharingStarted.Eagerly, event)
 
+    private val bootstrapResourcesCoordinator = EventBootstrapResourcesCoordinator(
+        selectedEvent = selectedEvent,
+        eventRelations = eventRelations,
+        fieldRepository = fieldRepository,
+        eventRepository = eventRepository,
+        scope = scope,
+    )
+    private val eventTimeSlots = bootstrapResourcesCoordinator.eventTimeSlots
+    private val eventLeagueScoringConfig = bootstrapResourcesCoordinator.eventLeagueScoringConfig
+
     override val isHost = selectedEvent.map { it.hostId == currentUser.value.id }
         .stateIn(scope, SharingStarted.Eagerly, false)
 
@@ -762,88 +750,6 @@ class DefaultEventDetailComponent(
     }
         .distinctUntilChanged()
         .stateIn(scope, SharingStarted.Eagerly, event.teamIds.normalizedTeamIds())
-
-    private val eventTimeSlots: StateFlow<List<TimeSlot>> = selectedEvent
-        .map { selected ->
-            selected.id to selected.timeSlotIds
-                .map { slotId -> slotId.trim() }
-                .filter(String::isNotBlank)
-                .distinct()
-        }
-        .distinctUntilChanged()
-        .combine(_bootstrapTimeSlots) { (eventId, slotIds), bootstrap ->
-            val scopedSlots = bootstrap
-                ?.takeIf { scoped -> scoped.eventId == eventId }
-                ?.value
-                .orEmpty()
-            val slotsById = scopedSlots.associateBy { slot -> slot.id.trim() }
-            val orderedBootstrapSlots = slotIds.mapNotNull(slotsById::get)
-            EventTimeSlotLoadTarget(
-                eventId = eventId,
-                slotIds = slotIds,
-                bootstrapSlots = orderedBootstrapSlots.takeIf { slots -> slots.size == slotIds.size },
-                bootstrapped = _bootstrappedEventIds.value.contains(eventId),
-            )
-        }
-        .distinctUntilChanged()
-        .flatMapLatest { target ->
-            val eventId = target.eventId
-            val slotIds = target.slotIds
-            if (slotIds.isEmpty()) {
-                flowOf(emptyList())
-            } else if (target.bootstrapSlots != null) {
-                flowOf(target.bootstrapSlots)
-            } else if (!target.bootstrapped) {
-                flowOf(emptyList())
-            } else {
-                flow {
-                    val slots = fieldRepository.getTimeSlots(slotIds)
-                        .onFailure { error ->
-                            Napier.w("Failed to refresh time slots for event $eventId: ${error.message}")
-                        }
-                        .getOrElse { emptyList() }
-                    emit(slots)
-                }
-            }
-        }
-        .stateIn(scope, SharingStarted.Eagerly, emptyList())
-
-    private val eventLeagueScoringConfig: StateFlow<LeagueScoringConfig?> = eventRelations
-        .map { relations ->
-            relations.event.id to relations.event.leagueScoringConfigId
-                .orEmpty()
-                .trim()
-        }
-        .distinctUntilChanged()
-        .combine(_bootstrapLeagueScoringConfig) { (eventId, scoringConfigId), bootstrap ->
-            EventLeagueScoringLoadTarget(
-                eventId = eventId,
-                scoringConfigId = scoringConfigId,
-                bootstrapConfig = bootstrap?.takeIf { scoped -> scoped.eventId == eventId }?.value,
-                bootstrapped = _bootstrappedEventIds.value.contains(eventId),
-            )
-        }
-        .distinctUntilChanged()
-        .flatMapLatest { target ->
-            val eventId = target.eventId
-            val scoringConfigId = target.scoringConfigId
-            if (scoringConfigId.isBlank()) {
-                flowOf<LeagueScoringConfig?>(null)
-            } else if (target.bootstrapped) {
-                flowOf(target.bootstrapConfig)
-            } else {
-                flowOf(
-                    eventRepository.getLeagueScoringConfig(eventId)
-                        .onFailure { error ->
-                            Napier.w(
-                                "Failed to load league scoring config for event $eventId: ${error.message}"
-                            )
-                        }
-                        .getOrNull()
-                )
-            }
-        }
-        .stateIn(scope, SharingStarted.Eagerly, null)
 
     private val eventMatches: StateFlow<List<MatchWithRelations>> = selectedEventId
         .flatMapLatest { eventId ->
@@ -979,7 +885,7 @@ class DefaultEventDetailComponent(
     override val eventFields: StateFlow<List<FieldWithMatches>> = combine(
         selectedEventId,
         eventFieldIds,
-        _bootstrappedEventIds,
+        bootstrapResourcesCoordinator.bootstrappedEventIds,
     ) { eventId, fieldIds, bootstrappedEventIds ->
         Triple(eventId, fieldIds, bootstrappedEventIds.contains(eventId))
     }.flatMapLatest { (eventId, fieldIds, bootstrapped) ->
@@ -1780,12 +1686,7 @@ class DefaultEventDetailComponent(
 
     private fun applyEventDetailSyncResult(result: EventDetailSyncResult) {
         applyParticipantSyncResult(result.participants)
-        val normalizedEventId = result.event.id.trim()
-        if (normalizedEventId.isNotBlank()) {
-            _bootstrappedEventIds.value = _bootstrappedEventIds.value + normalizedEventId
-            _bootstrapTimeSlots.value = EventScopedValue(normalizedEventId, result.timeSlots)
-            _bootstrapLeagueScoringConfig.value = EventScopedValue(normalizedEventId, result.leagueScoringConfig)
-        }
+        bootstrapResourcesCoordinator.applyEventDetailSyncResult(result)
         _eventStaffInvites.value = result.staffInvites
     }
 

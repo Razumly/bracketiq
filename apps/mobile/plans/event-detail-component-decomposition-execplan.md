@@ -68,6 +68,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Move bracket round state, losers-bracket toggle state, and round-building traversal into `EventBracketRoundsCoordinator` with focused tests.
   - [x] (2026-06-22) Move sports catalog state, load-error reporting decisions, sport lookup, and edit-draft sport transitions into `EventSportsCatalogCoordinator` with focused tests.
   - [x] (2026-06-22) Move external action decisions for event deletion, sharing, QR sharing, and directions into `EventExternalActionHelpers` with focused tests.
+  - [x] (2026-06-23) Move bootstrapped time-slot and league-scoring resource state into `EventBootstrapResourcesCoordinator` with focused tests.
 - [ ] Run focused event-detail regression tests and final compile/build validation.
 
 ## Surprises & Discoveries
@@ -275,6 +276,8 @@ The forty-sixth implementation milestone extracts bracket round presentation coo
 The forty-seventh implementation milestone extracts sports catalog state coordination. `EventSportsCatalogCoordinator.kt` now owns sports list state, division type parameters, catalog-loaded tracking, report-error carryover while a load is active, sport lookup for template creation, and sport-rule/official-staffing transitions used when edit drafts change sport. `DefaultEventDetailComponent` still owns the sports repository calls and coroutine job lifecycle, but no longer owns `_sports`, `_divisionTypeParameters`, catalog-loaded flags, report-error flags, or local sport lookup/transition helpers. `EventDetailComponent.kt` dropped to 5,446 lines after this milestone.
 
 The forty-eighth implementation milestone extracts external event-action decisions. `EventExternalActionHelpers.kt` now owns delete/refund loading-plan selection, share payload construction, QR-code payload construction, and directions URL/unavailable-location decisions. `DefaultEventDetailComponent` still owns repository/API calls, loading/error mutation, share service invocation, URL-handler invocation, and navigation callbacks. `EventDetailComponent.kt` dropped to 5,432 lines after this milestone.
+
+The forty-ninth implementation milestone extracts bootstrapped event resource coordination. `EventBootstrapResourcesCoordinator.kt` now owns bootstrapped event-id tracking, scoped hydrated time slots, scoped hydrated league-scoring config, and the derived flows that decide whether to use hydration results, return empty pre-bootstrap state, or refresh from repositories. `DefaultEventDetailComponent` still owns event relation assembly, field loading, and hydration job lifecycle. Focused validation passed with `./gradlew :composeApp:testDebugUnitTest --tests "*EventBootstrapResourcesCoordinatorTest*" --console=plain`, `./gradlew :composeApp:compileDebugKotlinAndroid --console=plain`, and `git diff --check`. `EventDetailComponent.kt` dropped to 5,333 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. Registration coordination and participant/invite coordination are now complete; the remaining work is to keep thinning `DefaultEventDetailComponent` around lower-risk orchestration seams, then run final focused regression and build validation.
 
