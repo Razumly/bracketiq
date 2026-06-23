@@ -30,7 +30,6 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
-import com.razumly.mvp.core.data.dataTypes.canManageEventsForViewer
 import com.razumly.mvp.core.data.dataTypes.isPaymentPending
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -501,84 +500,24 @@ class DefaultEventDetailComponent(
         const val MATCH_REALTIME_EDIT_PAUSE_REASON = "event-detail-editing"
     }
 
-    private fun canEditEventDetails(targetEvent: Event): Boolean {
-        return mobileEventEditUnsupportedFeatures(targetEvent).isEmpty()
-    }
-
-    private fun canManageMatchEditing(): Boolean {
-        val currentUserId = currentUser.value.id.trim()
-        if (currentUserId.isBlank()) {
-            return false
-        }
-        val targetEvent = selectedEvent.value
-        if (targetEvent.hostId == currentUserId) {
-            return true
-        }
-        if (targetEvent.assistantHostIds.any { assistantHostId -> assistantHostId == currentUserId }) {
-            return true
-        }
-        val organization = eventWithRelations.value.organization
-        return organization?.canManageEventsForViewer(currentUserId) == true
-    }
+    private fun canManageMatchEditing(): Boolean =
+        canManageEventForUser(
+            event = selectedEvent.value,
+            user = currentUser.value,
+            organization = eventWithRelations.value.organization,
+        )
 
     private fun canManageParticipantData(
         event: Event = selectedEvent.value,
         user: UserData = currentUser.value,
         organization: Organization? = eventWithRelations.value.organization,
-    ): Boolean {
-        val currentUserId = user.id.trim()
-        if (currentUserId.isBlank()) {
-            return false
-        }
-        return event.hostId.trim() == currentUserId ||
-            event.assistantHostIds.any { assistantHostId -> assistantHostId.trim() == currentUserId } ||
-            organization?.canManageEventsForViewer(currentUserId) == true
-    }
+    ): Boolean = canManageEventForUser(
+        event = event,
+        user = user,
+        organization = organization,
+    )
 
     private fun canEditMatchesNow(): Boolean = matchEditingCoordinator.canEditNow(canManageMatchEditing())
-
-    private fun Iterable<String>.normalizedTeamIds(): List<String> =
-        map(String::trim).filter(String::isNotBlank).distinct()
-
-    private fun Event.playoffPlacementDivisionIdsNormalized(): Set<String> {
-        val mappedPlayoffIds = divisionDetails
-            .flatMap { detail -> detail.playoffPlacementDivisionIds }
-            .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
-            .filter(String::isNotBlank)
-            .toMutableSet()
-
-        divisionDetails
-            .filter { detail -> detail.isTournamentPlayoffDivision() }
-            .map { detail -> detail.normalizedTournamentDivisionId() }
-            .filter(String::isNotBlank)
-            .forEach { divisionId -> mappedPlayoffIds += divisionId }
-
-        inferredTournamentBracketDivisionIds()
-            .filter(String::isNotBlank)
-            .forEach { divisionId -> mappedPlayoffIds += divisionId }
-
-        return mappedPlayoffIds
-    }
-
-    private fun Event.isPlayoffPlacementDivision(divisionId: String?): Boolean {
-        val normalizedDivisionId = divisionId
-            ?.normalizeDivisionIdentifier()
-            ?.takeIf(String::isNotBlank)
-            ?: return false
-        return normalizedDivisionId in playoffPlacementDivisionIdsNormalized()
-    }
-
-    private fun Event.resolveDefaultSelectedDivisionId(): String? {
-        val normalizedDivisions = divisions
-            .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
-            .filter(String::isNotBlank)
-        if (normalizedDivisions.isEmpty()) return null
-        if (eventType != EventType.LEAGUE) return normalizedDivisions.firstOrNull()
-
-        val playoffIds = playoffPlacementDivisionIdsNormalized()
-        return normalizedDivisions.firstOrNull { divisionId -> divisionId !in playoffIds }
-            ?: normalizedDivisions.firstOrNull()
-    }
 
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
     override val currentUser = userRepository.currentUser.map { it.getOrNull() ?: UserData() }
