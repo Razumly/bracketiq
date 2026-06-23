@@ -76,7 +76,6 @@ import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.core.presentation.util.ShareServiceProvider
-import com.razumly.mvp.core.presentation.util.convertPhotoResultToUploadFile
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.emailAddressRegex
@@ -486,13 +485,13 @@ class DefaultEventDetailComponent(
     private val userRepository: IUserRepository,
     fieldRepository: IFieldRepository,
     event: Event,
-    private val notificationsRepository: IPushNotificationsRepository,
+    notificationsRepository: IPushNotificationsRepository,
     private val billingRepository: IBillingRepository,
     private val eventRepository: IEventRepository,
     private val matchRepository: IMatchRepository,
     private val teamRepository: ITeamRepository,
     private val sportsRepository: ISportsRepository,
-    private val imageRepository: IImagesRepository,
+    imageRepository: IImagesRepository,
     private val navigationHandler: INavigationHandler,
     private val currentUserDataSource: CurrentUserDataSource? = null,
     private val apiClient: MvpApiClient? = null,
@@ -676,8 +675,9 @@ class DefaultEventDetailComponent(
         }
     }
 
-    override val eventImageIds =
-        imageRepository.getUserImageIdsFlow().stateIn(scope, SharingStarted.Eagerly, emptyList())
+    private val imageCoordinator = EventImageCoordinator(imageRepository, scope)
+    override val eventImageIds = imageCoordinator.eventImageIds
+    private val notificationCoordinator = EventNotificationCoordinator(notificationsRepository)
 
     private val organizationTemplatesCoordinator = EventOrganizationTemplatesCoordinator()
     override val organizationTemplates = organizationTemplatesCoordinator.templates
@@ -1897,15 +1897,13 @@ class DefaultEventDetailComponent(
 
     override fun onUploadSelected(photo: GalleryPhotoResult) {
         scope.launch {
-            imageRepository.uploadImage(convertPhotoResultToUploadFile(photo))
+            imageCoordinator.uploadSelected(photo)
         }
     }
 
     override fun deleteImage(imageId: String) {
         scope.launch {
-            loadingHandler.showLoading("Deleting Image ...")
-            imageRepository.deleteImage(imageId)
-            loadingHandler.hideLoading()
+            imageCoordinator.deleteImage(imageId, loadingHandler)
         }
     }
 
@@ -5148,11 +5146,9 @@ class DefaultEventDetailComponent(
 
     override fun sendNotification(title: String, message: String) {
         scope.launch {
-            notificationsRepository.sendEventNotification(
-                eventWithRelations.value.event.id, title, message, true
-            ).onFailure {
-                _errorState.value = ErrorMessage("Failed to send message: ${it.userMessage()}")
-            }
+            notificationCoordinator
+                .sendEventNotification(eventWithRelations.value.event.id, title, message)
+                ?.let { errorMessage -> _errorState.value = errorMessage }
         }
     }
 
