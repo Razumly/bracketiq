@@ -59,6 +59,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-22) Move league standings state and division target decisions into `EventLeagueStandingsCoordinator` with focused tests.
   - [x] (2026-06-22) Move organization-template loading state into `EventOrganizationTemplatesCoordinator` with focused tests.
   - [x] (2026-06-22) Move rental resource selection, slot normalization, and rental-backed edit draft construction into `EventRentalResourcesCoordinator` with focused tests.
+  - [x] (2026-06-22) Move template event creation and field/timeslot clone preparation into `EventTemplateCreateBuilder` with focused tests.
 - [ ] Run focused event-detail regression tests and final compile/build validation.
 
 ## Surprises & Discoveries
@@ -77,6 +78,9 @@ After this refactor, the app should behave the same for users, but the code will
 
 - Observation: Event division defaults are normalized before being assigned to field drafts.
   Evidence: `EventEditPayloadBuilderTest.buildEditableFieldDrafts_defaults_empty_field_divisions_to_event_divisions` initially expected `division-a`; the code correctly returned the existing normalized identifier `division_a`, so the test was corrected and passed.
+
+- Observation: Template creation uses the same division normalization path as event edit field and slot drafts.
+  Evidence: The first `EventTemplateCreateBuilderTest` run expected raw `division-a`, but the extracted builder correctly returned `division_a`; updating the test expectation made the focused suite pass.
 
 - Observation: The bracket round layout logic is not purely a graph helper because it still depends on component UI state for the losers bracket toggle.
   Evidence: `buildBracketRounds(...)` and `shouldIncludeInCurrentBracket(...)` still read `losersBracket.value`, so the second extraction moved bracket node construction, graph normalization, validation, and reset rules but left round layout inside `DefaultEventDetailComponent`.
@@ -245,6 +249,8 @@ The thirty-seventh implementation milestone starts the final component-thinning 
 The thirty-eighth implementation milestone moves organization-template loading state into a coordinator. `EventOrganizationTemplatesCoordinator.kt` now owns template list, loading, error, clear, success, and failure state transitions while `DefaultEventDetailComponent` keeps the billing repository call, organization selection, logging, and error-message normalization. `EventDetailComponent.kt` dropped to 6,375 lines after this milestone.
 
 The thirty-ninth implementation milestone extracts a larger rental-resource chunk. `EventRentalResourcesCoordinator.kt` now owns available rental resources, selected rental resource ids, attached-resource selection from existing rental-backed slots, selection changes, selected rental fields, non-rental slot cleanup, rental-backed slot normalization, and rental-backed edit draft construction. `DefaultEventDetailComponent` still owns billing repository loading, edit-flow assignment, and event draft state exposure. `EventDetailComponent.kt` dropped to 6,217 lines after this milestone.
+
+The fortieth implementation milestone extracts another larger template-creation chunk. `EventTemplateCreateBuilder.kt` now owns template event shell construction, participant/staff reset, official id remapping, field clone/persistence decisions, timeslot remapping/cloning, and league scoring config selection. `DefaultEventDetailComponent` still owns already-template validation, current event/edit-state selection, repository creation, loading/error side effects, and navigation-facing state. `EventDetailComponent.kt` dropped to 6,060 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. Registration coordination and participant/invite coordination are now complete; the remaining work is to keep thinning `DefaultEventDetailComponent` around lower-risk orchestration seams, then run final focused regression and build validation.
 
@@ -1217,6 +1223,32 @@ Thirty-ninth milestone line-count evidence:
      175 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinatorTest.kt
     1288 plans/event-detail-component-decomposition-execplan.md
 
+Template create builder first focused test run caught a test expectation issue:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventTemplateCreateBuilderTest*" --tests "*EventEditPayloadBuilderTest*"
+    Exit code: 1
+    Result: `EventTemplateCreateBuilderTest.league_template_clones_fields_slots_and_scoring_config` expected raw `division-a`, but the existing normalization path returned `division_a`.
+    Fix: update the test to assert normalized division ids.
+
+Template create builder focused tests passed after expectation fix:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventTemplateCreateBuilderTest*" --tests "*EventEditPayloadBuilderTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 52s; 43 actionable tasks: 6 executed, 37 up-to-date.
+
+Template create builder common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 27s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Fortieth milestone line-count evidence:
+
+    6060 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     211 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventTemplateCreateBuilder.kt
+     181 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventTemplateCreateBuilderTest.kt
+    1321 plans/event-detail-component-decomposition-execplan.md
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -1286,3 +1318,4 @@ Revision Note (2026-06-22): Recorded the participant invite/add/remove preflight
 Revision Note (2026-06-22): Recorded the league standings coordinator slice, focused tests, compile fix, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the organization templates coordinator slice, focused tests, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the rental resources coordinator slice, focused tests, expectation fix, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded the template creation builder slice, focused tests, expectation fix, compile checks, and line-count impact.

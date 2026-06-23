@@ -32,9 +32,7 @@ import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.canManageEventsForViewer
 import com.razumly.mvp.core.data.dataTypes.isPaymentPending
-import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
-import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.shouldReplaceOfficialPositionsWithSportDefaults
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
@@ -4497,44 +4495,20 @@ class DefaultEventDetailComponent(
 
             loadingHandler.showLoading("Creating template ...")
 
-            val templateId = newId()
-            val currentUserId = currentUser.value.id.trim().takeIf(String::isNotBlank)
-            val sourceSport = resolveSport(sourceEvent.sportId)
-            val templatePositions = sourceEvent.officialPositions.mapIndexed { index, position ->
-                position.copy(
-                    id = com.razumly.mvp.core.data.dataTypes.buildEventOfficialPositionId(
-                        eventId = templateId,
-                        order = index,
-                        name = position.name,
-                    ),
-                    order = index,
-                )
-            }
-            val templatePositionIdsByPreviousId = sourceEvent.officialPositions
-                .mapIndexed { index, position -> position.id to templatePositions[index].id }
-                .toMap()
-            val templateEvent = sourceEvent.copy(
-                id = templateId,
-                name = addTemplateSuffix(sourceEvent.name),
-                state = "TEMPLATE",
-                hostId = currentUserId ?: sourceEvent.hostId,
-                userIds = emptyList(),
-                teamIds = emptyList(),
-                waitListIds = emptyList(),
-                freeAgentIds = emptyList(),
-                officialPositions = templatePositions,
-                eventOfficials = sourceEvent.eventOfficials.map { official ->
-                    official.copy(
-                        id = com.razumly.mvp.core.data.dataTypes.buildEventOfficialRecordId(
-                            eventId = templateId,
-                            userId = official.userId,
-                        ),
-                        positionIds = official.positionIds.mapNotNull(templatePositionIdsByPreviousId::get),
-                    )
-                },
-            ).syncOfficialStaffing(sport = sourceSport)
-
-            val templatePayload = prepareTemplateForCreate(templateEvent)
+            val templatePayload = EventTemplateCreateBuilder.prepare(
+                EventTemplateCreateInput(
+                    sourceEvent = sourceEvent,
+                    currentUserId = currentUser.value.id,
+                    sourceSport = resolveSport(sourceEvent.sportId),
+                    isEditing = _isEditing.value,
+                    editableFields = _editableFields.value,
+                    relationFields = eventFields.value.map { relation -> relation.field },
+                    editableTimeSlots = _editableLeagueTimeSlots.value,
+                    relationTimeSlots = eventWithRelations.value.timeSlots,
+                    editableLeagueScoringConfig = _editableLeagueScoringConfig.value,
+                    nextId = ::newId,
+                ),
+            )
             eventRepository.createEvent(
                 newEvent = templatePayload.event,
                 requiredTemplateIds = emptyList(),
@@ -4959,125 +4933,6 @@ class DefaultEventDetailComponent(
     private fun selectedRentalResourceFields(
         options: List<RentalResourceOption> = rentalResourcesCoordinator.selectedOptions(),
     ): List<Field> = rentalResourcesCoordinator.selectedFields(options)
-
-    private data class PreparedTemplateForCreate(
-        val event: Event,
-        val fields: List<Field>? = null,
-        val timeSlots: List<TimeSlot>? = null,
-        val leagueScoringConfig: LeagueScoringConfigDTO? = null,
-    )
-
-    private fun prepareTemplateForCreate(templateEvent: Event): PreparedTemplateForCreate {
-        val shouldPersistFieldsAndSlots = templateEvent.eventType == EventType.LEAGUE ||
-            templateEvent.eventType == EventType.TOURNAMENT ||
-            templateEvent.eventType == EventType.WEEKLY_EVENT
-        if (!shouldPersistFieldsAndSlots) {
-            return PreparedTemplateForCreate(
-                event = templateEvent,
-                fields = null,
-                timeSlots = null,
-                leagueScoringConfig = null,
-            )
-        }
-
-        val sourceFields = buildEditableFieldDrafts(
-            event = templateEvent,
-            sourceFields = if (_isEditing.value) {
-                _editableFields.value
-            } else {
-                eventFields.value.map { relation -> relation.field }
-            },
-        )
-        val sourceSlots = if (_isEditing.value) {
-            _editableLeagueTimeSlots.value
-        } else {
-            eventWithRelations.value.timeSlots
-        }
-
-        val isOrganizationManaged = !templateEvent.organizationId.isNullOrBlank()
-        val clonedFields = if (isOrganizationManaged) {
-            null
-        } else {
-            sourceFields.mapIndexed { index, field ->
-                field.copy(
-                    id = newId(),
-                    fieldNumber = index + 1,
-                    name = field.name?.takeIf(String::isNotBlank) ?: "Field ${index + 1}",
-                    divisions = field.divisions
-                        .normalizeDivisionIdentifiers()
-                        .ifEmpty { defaultFieldDivisions(templateEvent) },
-                    location = eventFieldLocationDefault(field, templateEvent),
-                    organizationId = resolveFieldOrganizationId(
-                        fieldOrganizationId = field.organizationId,
-                        eventOrganizationId = templateEvent.organizationId,
-                    ),
-                )
-            }
-        }
-
-        val fieldIdRemap = if (clonedFields != null) {
-            sourceFields.zip(clonedFields).mapNotNull { (source, clone) ->
-                val sourceId = source.id.trim().takeIf(String::isNotBlank) ?: return@mapNotNull null
-                sourceId to clone.id
-            }.toMap()
-        } else {
-            emptyMap()
-        }
-
-        val resolvedFieldIds = if (clonedFields != null) {
-            clonedFields.map { field -> field.id }
-        } else {
-            templateEvent.fieldIds
-                .map { fieldId -> fieldId.trim() }
-                .filter(String::isNotBlank)
-                .ifEmpty {
-                    sourceFields
-                        .map { field -> field.id.trim() }
-                        .filter(String::isNotBlank)
-                }
-        }
-        val resolvedFieldIdSet = resolvedFieldIds.toSet()
-
-        val clonedTimeSlots = sourceSlots.mapNotNull { slot ->
-            val mappedFieldIds = slot.normalizedScheduledFieldIds()
-                .map { fieldId -> fieldIdRemap[fieldId] ?: fieldId }
-                .filter(resolvedFieldIdSet::contains)
-                .distinct()
-            if (mappedFieldIds.isEmpty()) {
-                return@mapNotNull null
-            }
-            val normalizedDays = slot.normalizedDaysOfWeek()
-            val normalizedDivisions = slot.normalizedDivisionIds()
-                .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
-                .filter(String::isNotBlank)
-                .distinct()
-                .ifEmpty { defaultFieldDivisions(templateEvent) }
-            slot.copy(
-                id = newId(),
-                dayOfWeek = normalizedDays.firstOrNull(),
-                daysOfWeek = normalizedDays,
-                divisions = normalizedDivisions,
-                scheduledFieldId = mappedFieldIds.firstOrNull(),
-                scheduledFieldIds = mappedFieldIds,
-            )
-        }
-
-        val leagueScoringConfig = if (templateEvent.eventType == EventType.LEAGUE) {
-            _editableLeagueScoringConfig.value
-        } else {
-            null
-        }
-
-        return PreparedTemplateForCreate(
-            event = templateEvent.copy(
-                fieldIds = resolvedFieldIds,
-                timeSlotIds = clonedTimeSlots.map { slot -> slot.id },
-            ),
-            fields = clonedFields,
-            timeSlots = clonedTimeSlots,
-            leagueScoringConfig = leagueScoringConfig,
-        )
-    }
 
     private fun prepareEventForUpdate(): PreparedEventForUpdate {
         val result = EventEditPayloadBuilder.prepareForUpdate(
@@ -6202,16 +6057,4 @@ class DefaultEventDetailComponent(
         return false
     }
 
-}
-
-private fun addTemplateSuffix(name: String): String {
-    val trimmed = name.trim()
-    if (trimmed.isEmpty()) {
-        return "(TEMPLATE)"
-    }
-    return if (trimmed.endsWith("(TEMPLATE)", ignoreCase = true)) {
-        trimmed
-    } else {
-        "$trimmed (TEMPLATE)"
-    }
 }
