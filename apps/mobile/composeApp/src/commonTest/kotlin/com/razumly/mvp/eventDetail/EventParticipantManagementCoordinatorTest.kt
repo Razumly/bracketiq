@@ -5,7 +5,11 @@ import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.EventParticipantDivisionWarning
 import com.razumly.mvp.core.data.repositories.EventParticipantManagementEntry
 import com.razumly.mvp.core.data.repositories.EventParticipantManagementSnapshot
+import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
+import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
+import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
+import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckoutRequest
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -306,5 +310,124 @@ class EventParticipantManagementCoordinatorTest {
         assertEquals(1, userComplianceCalls)
         assertFalse(coordinator.participantManagementLoading.value)
         assertFalse(coordinator.participantComplianceLoading.value)
+    }
+
+    @Test
+    fun participant_billing_snapshot_and_checkout_trim_ids_and_reject_blank_targets() = runTest {
+        val coordinator = EventParticipantManagementCoordinator(
+            eventTeamsAndParticipantsLoadingInitially = false,
+        )
+        val snapshot = EventTeamBillingSnapshot(teamId = "team-1")
+        val checkout = EventTeamPaymentCheckout(
+            checkoutUrl = "https://checkout.example",
+            qrCodeUrl = "https://qr.example",
+            amountCents = 1000,
+            eventAmountCents = 900,
+            billOwnerType = "TEAM",
+            billOwnerId = "team-1",
+        )
+        val checkoutRequest = EventTeamPaymentCheckoutRequest(
+            ownerType = "TEAM",
+            eventAmountCents = 900,
+        )
+        val calls = mutableListOf<String>()
+
+        val loadedSnapshot = coordinator.getParticipantBillingSnapshot(
+            eventId = " event-1 ",
+            teamId = " team-1 ",
+        ) { eventId, teamId ->
+            calls += "snapshot:$eventId:$teamId"
+            Result.success(snapshot)
+        }
+        val loadedCheckout = coordinator.createParticipantPaymentCheckout(
+            eventId = " event-1 ",
+            teamId = " team-1 ",
+            request = checkoutRequest,
+        ) { eventId, teamId, request ->
+            calls += "checkout:$eventId:$teamId:${request.eventAmountCents}"
+            Result.success(checkout)
+        }
+        val rejected = coordinator.getParticipantBillingSnapshot(
+            eventId = " ",
+            teamId = "team-1",
+        ) { _, _ ->
+            calls += "should-not-load"
+            Result.success(snapshot)
+        }
+
+        assertEquals(snapshot, loadedSnapshot.getOrThrow())
+        assertEquals(checkout, loadedCheckout.getOrThrow())
+        assertTrue(rejected.isFailure)
+        assertEquals(
+            listOf(
+                "snapshot:event-1:team-1",
+                "checkout:event-1:team-1:900",
+            ),
+            calls,
+        )
+    }
+
+    @Test
+    fun participant_bill_and_refund_refresh_after_success_only() = runTest {
+        val coordinator = EventParticipantManagementCoordinator(
+            eventTeamsAndParticipantsLoadingInitially = false,
+        )
+        val billRequest = EventTeamBillCreateRequest(
+            ownerType = "TEAM",
+            eventAmountCents = 1200,
+        )
+        val events = mutableListOf<String>()
+
+        val created = coordinator.createParticipantBill(
+            eventId = " event-1 ",
+            teamId = " team-1 ",
+            request = billRequest,
+            createBill = { eventId, teamId, request ->
+                events += "bill:$eventId:$teamId:${request.eventAmountCents}"
+                Result.success("bill-1")
+            },
+            refreshAfterSuccess = {
+                events += "refresh-after-bill"
+            },
+        )
+        val failedBill = coordinator.createParticipantBill(
+            eventId = "event-1",
+            teamId = "team-1",
+            request = billRequest,
+            createBill = { _, _, _ ->
+                events += "bill-failed"
+                Result.failure(IllegalStateException("bill failed"))
+            },
+            refreshAfterSuccess = {
+                events += "should-not-refresh-bill"
+            },
+        )
+        val refunded = coordinator.refundParticipantPayment(
+            eventId = " event-1 ",
+            teamId = " team-1 ",
+            billPaymentId = " payment-1 ",
+            amountCents = 500,
+            refundPayment = { eventId, teamId, billPaymentId, amountCents ->
+                events += "refund:$eventId:$teamId:$billPaymentId:$amountCents"
+                Result.success(Unit)
+            },
+            refreshAfterSuccess = {
+                events += "refresh-after-refund"
+            },
+        )
+
+        assertTrue(created.isSuccess)
+        assertTrue(failedBill.isFailure)
+        assertTrue(refunded.isSuccess)
+        assertEquals(
+            listOf(
+                "bill:event-1:team-1:1200",
+                "refresh-after-bill",
+                "bill-failed",
+                "refund:event-1:team-1: payment-1 :500",
+                "refresh-after-refund",
+            ),
+            events,
+        )
     }
 }

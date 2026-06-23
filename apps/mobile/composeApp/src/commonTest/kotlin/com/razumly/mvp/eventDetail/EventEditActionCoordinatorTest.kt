@@ -1,12 +1,81 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
 class EventEditActionCoordinatorTest {
+    @Test
+    fun runSaveEventAction_updates_staff_reconciles_final_event_and_refetches_matches() = runTest {
+        val coordinator = EventEditActionCoordinator()
+        val selected = Event(
+            id = "event-1",
+            officialIds = listOf(" official-1 "),
+            assistantHostIds = listOf("assistant-1", " "),
+        )
+        val preparedEvent = Event(id = "event-1", eventType = EventType.LEAGUE)
+        val updated = preparedEvent.copy(name = "Updated")
+        val final = updated.copy(assistantHostIds = listOf("assistant-2"))
+        val staffInvite = Invite(
+            id = "invite-1",
+            type = "STAFF",
+            email = "staff@example.com",
+            eventId = "event-1",
+        )
+        val events = mutableListOf<String>()
+
+        val result = coordinator.runSaveEventAction(
+            selectedEvent = selected,
+            pendingStaffInvites = emptyList(),
+            existingStaffInvites = emptyList(),
+            currentUserId = "current-user",
+            prepareEventForUpdate = {
+                events += "prepare"
+                PreparedEventForUpdate(event = preparedEvent)
+            },
+            updatePreparedEvent = { prepared ->
+                events += "updatePrepared:${prepared.event.id}"
+                updated
+            },
+            reconcileStaffInvites = { event, _, _, previouslyAssignedUserIds, createdByUserId ->
+                events += "reconcile:${event.id}:${previouslyAssignedUserIds.sorted().joinToString("|")}:$createdByUserId"
+                EventStaffSaveOutcome(
+                    event = final,
+                    staffInvites = listOf(staffInvite),
+                )
+            },
+            updateFinalEvent = { event ->
+                events += "updateFinal:${event.assistantHostIds.single()}"
+                event
+            },
+            refetchMatchesOfTournament = { eventId ->
+                events += "refetch:$eventId"
+            },
+            showLoading = { message -> events += "show:$message" },
+            hideLoading = { events += "hide" },
+        )
+
+        val success = assertIs<EventSaveActionResult.Success>(result)
+        assertEquals(final, success.finalEvent)
+        assertEquals(listOf(staffInvite), success.staffInvites)
+        assertEquals(
+            listOf(
+                "show:Saving event...",
+                "prepare",
+                "updatePrepared:event-1",
+                "reconcile:event-1:assistant-1|official-1:current-user",
+                "updateFinal:assistant-2",
+                "refetch:event-1",
+                "hide",
+            ),
+            events,
+        )
+    }
+
     @Test
     fun runScheduleEditAction_reschedules_with_refetch_and_standings_refresh() = runTest {
         val coordinator = EventEditActionCoordinator()
@@ -174,6 +243,106 @@ class EventEditActionCoordinatorTest {
                 "prepare",
                 "log:rebuild_without_placeholders",
                 "update",
+                "hide",
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun runCreateTemplateAction_skips_existing_template_and_creates_new_template() = runTest {
+        val coordinator = EventEditActionCoordinator()
+        val events = mutableListOf<String>()
+
+        val alreadyTemplate = coordinator.runCreateTemplateAction(
+            sourceEvent = Event(id = "template-1", state = "TEMPLATE"),
+            prepareTemplate = {
+                events += "prepare-existing"
+                PreparedTemplateForCreate(event = Event())
+            },
+            createTemplate = {
+                events += "create-existing"
+                Event()
+            },
+            showLoading = { message -> events += "show:$message" },
+            hideLoading = { events += "hide" },
+        )
+
+        assertEquals(
+            EventTemplateCreateResult.AlreadyTemplate("This event is already a template."),
+            alreadyTemplate,
+        )
+        assertEquals(emptyList(), events)
+
+        val createdTemplate = Event(id = "template-2", state = "TEMPLATE")
+        val created = coordinator.runCreateTemplateAction(
+            sourceEvent = Event(id = "event-1", state = "DRAFT"),
+            prepareTemplate = {
+                events += "prepare"
+                PreparedTemplateForCreate(event = createdTemplate)
+            },
+            createTemplate = { payload ->
+                events += "create:${payload.event.id}"
+                payload.event
+            },
+            showLoading = { message -> events += "show:$message" },
+            hideLoading = { events += "hide" },
+        )
+
+        assertEquals(
+            EventTemplateCreateResult.Success("Template created and added to your templates."),
+            created,
+        )
+        assertEquals(
+            listOf(
+                "show:Creating template ...",
+                "prepare",
+                "create:template-2",
+                "hide",
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun runPublishEventAction_skips_published_event_and_refreshes_after_update_failure() = runTest {
+        val coordinator = EventEditActionCoordinator()
+        val events = mutableListOf<String>()
+
+        val alreadyPublished = coordinator.runPublishEventAction(
+            currentEvent = Event(id = "event-1", state = "PUBLISHED"),
+            updateEvent = {
+                events += "update-published"
+                Result.success(it)
+            },
+            refreshEvent = { eventId -> events += "refresh-published:$eventId" },
+            showLoading = { message -> events += "show:$message" },
+            hideLoading = { events += "hide" },
+        )
+
+        assertEquals(EventPublishResult.AlreadyPublished, alreadyPublished)
+        assertEquals(emptyList(), events)
+
+        val failure = IllegalStateException("nope")
+        val failedPublish = coordinator.runPublishEventAction(
+            currentEvent = Event(id = "event-1", state = "DRAFT"),
+            updateEvent = { event ->
+                events += "update:${event.state}"
+                Result.failure(failure)
+            },
+            refreshEvent = { eventId -> events += "refresh:$eventId" },
+            showLoading = { message -> events += "show:$message" },
+            hideLoading = { events += "hide" },
+        )
+
+        val error = assertIs<EventPublishResult.Failure>(failedPublish)
+        assertEquals(failure, error.throwable)
+        assertEquals("Failed to publish event.", error.fallbackMessage)
+        assertEquals(
+            listOf(
+                "show:Publishing event...",
+                "update:PUBLISHED",
+                "refresh:event-1",
                 "hide",
             ),
             events,

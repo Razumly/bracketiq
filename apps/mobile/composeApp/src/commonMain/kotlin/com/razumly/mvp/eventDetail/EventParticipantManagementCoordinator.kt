@@ -1,9 +1,13 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
+import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
+import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.EventParticipantDivisionWarning
 import com.razumly.mvp.core.data.repositories.EventParticipantManagementSnapshot
+import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
+import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckoutRequest
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.network.userMessage
 import com.razumly.mvp.core.util.ErrorMessage
@@ -31,6 +35,11 @@ internal data class ParticipantManagementLocalState(
     val snapshot: EventParticipantManagementSnapshot = EventParticipantManagementSnapshot(),
     val teamSummaries: Map<String, EventTeamComplianceSummary> = emptyMap(),
     val userSummaries: Map<String, EventComplianceUserSummary> = emptyMap(),
+)
+
+private data class ParticipantBillingTarget(
+    val eventId: String,
+    val teamId: String,
 )
 
 internal class EventParticipantManagementCoordinator(
@@ -261,4 +270,94 @@ internal class EventParticipantManagementCoordinator(
         )
         return complianceError ?: snapshotError
     }
+
+    suspend fun getParticipantBillingSnapshot(
+        eventId: String,
+        teamId: String,
+        loadSnapshot: suspend (eventId: String, teamId: String) -> Result<EventTeamBillingSnapshot>,
+    ): Result<EventTeamBillingSnapshot> {
+        val target = participantBillingTarget(eventId, teamId).getOrElse { throwable ->
+            return Result.failure(throwable)
+        }
+        return loadSnapshot(target.eventId, target.teamId)
+    }
+
+    suspend fun createParticipantBill(
+        eventId: String,
+        teamId: String,
+        request: EventTeamBillCreateRequest,
+        createBill: suspend (
+            eventId: String,
+            teamId: String,
+            request: EventTeamBillCreateRequest,
+        ) -> Result<Any?>,
+        refreshAfterSuccess: suspend () -> Unit,
+    ): Result<Unit> {
+        val target = participantBillingTarget(eventId, teamId).getOrElse { throwable ->
+            return Result.failure(throwable)
+        }
+        val result = createBill(target.eventId, target.teamId, request).map { }
+        if (result.isSuccess) {
+            refreshAfterSuccess()
+        }
+        return result
+    }
+
+    suspend fun createParticipantPaymentCheckout(
+        eventId: String,
+        teamId: String,
+        request: EventTeamPaymentCheckoutRequest,
+        createCheckout: suspend (
+            eventId: String,
+            teamId: String,
+            request: EventTeamPaymentCheckoutRequest,
+        ) -> Result<EventTeamPaymentCheckout>,
+    ): Result<EventTeamPaymentCheckout> {
+        val target = participantBillingTarget(eventId, teamId).getOrElse { throwable ->
+            return Result.failure(throwable)
+        }
+        return createCheckout(target.eventId, target.teamId, request)
+    }
+
+    suspend fun refundParticipantPayment(
+        eventId: String,
+        teamId: String,
+        billPaymentId: String,
+        amountCents: Int,
+        refundPayment: suspend (
+            eventId: String,
+            teamId: String,
+            billPaymentId: String,
+            amountCents: Int,
+        ) -> Result<Unit>,
+        refreshAfterSuccess: suspend () -> Unit,
+    ): Result<Unit> {
+        val target = participantBillingTarget(eventId, teamId).getOrElse { throwable ->
+            return Result.failure(throwable)
+        }
+        val result = refundPayment(target.eventId, target.teamId, billPaymentId, amountCents)
+        if (result.isSuccess) {
+            refreshAfterSuccess()
+        }
+        return result
+    }
+}
+
+private fun participantBillingTarget(
+    eventId: String,
+    teamId: String,
+): Result<ParticipantBillingTarget> {
+    val normalizedEventId = eventId.trim()
+    val normalizedTeamId = teamId.trim()
+    if (normalizedEventId.isEmpty() || normalizedTeamId.isEmpty()) {
+        return Result.failure(
+            IllegalArgumentException("Event and participant team ids are required."),
+        )
+    }
+    return Result.success(
+        ParticipantBillingTarget(
+            eventId = normalizedEventId,
+            teamId = normalizedTeamId,
+        ),
+    )
 }

@@ -1,6 +1,8 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 
 internal enum class EventScheduleEditAction(
     val loadingMessage: String,
@@ -48,7 +50,92 @@ internal sealed class EventScheduleEditResult {
     ) : EventScheduleEditResult()
 }
 
+internal sealed class EventSaveActionResult {
+    data class Success(
+        val finalEvent: Event,
+        val staffInvites: List<Invite>,
+    ) : EventSaveActionResult()
+
+    data class Failure(
+        val throwable: Throwable,
+        val fallbackMessage: String,
+    ) : EventSaveActionResult()
+}
+
+internal sealed class EventTemplateCreateResult {
+    data class AlreadyTemplate(val message: String) : EventTemplateCreateResult()
+    data class Success(val message: String) : EventTemplateCreateResult()
+    data class Failure(
+        val throwable: Throwable,
+        val fallbackMessage: String,
+    ) : EventTemplateCreateResult()
+}
+
+internal sealed class EventPublishResult {
+    object AlreadyPublished : EventPublishResult()
+    object Success : EventPublishResult()
+    data class Failure(
+        val throwable: Throwable,
+        val fallbackMessage: String,
+    ) : EventPublishResult()
+}
+
 internal class EventEditActionCoordinator {
+    suspend fun runSaveEventAction(
+        selectedEvent: Event,
+        pendingStaffInvites: List<PendingStaffInviteDraft>,
+        existingStaffInvites: List<Invite>,
+        currentUserId: String?,
+        prepareEventForUpdate: () -> PreparedEventForUpdate,
+        updatePreparedEvent: suspend (PreparedEventForUpdate) -> Event,
+        reconcileStaffInvites: suspend (
+            Event,
+            List<PendingStaffInviteDraft>,
+            List<Invite>,
+            Set<String>,
+            String?,
+        ) -> EventStaffSaveOutcome,
+        updateFinalEvent: suspend (Event) -> Event,
+        refetchMatchesOfTournament: suspend (String) -> Unit,
+        showLoading: (String) -> Unit,
+        hideLoading: () -> Unit,
+    ): EventSaveActionResult {
+        showLoading("Saving event...")
+        return try {
+            val previouslyAssignedStaffUserIds = selectedEvent.assignedStaffUserIds()
+            val prepared = prepareEventForUpdate()
+            val updated = updatePreparedEvent(prepared)
+            val saveOutcome = reconcileStaffInvites(
+                updated,
+                pendingStaffInvites,
+                existingStaffInvites,
+                previouslyAssignedStaffUserIds,
+                currentUserId,
+            )
+            val finalEvent = if (saveOutcome.event == updated) {
+                updated
+            } else {
+                updateFinalEvent(saveOutcome.event)
+            }
+
+            if (finalEvent.eventType == EventType.LEAGUE || finalEvent.eventType == EventType.TOURNAMENT) {
+                refetchMatchesOfTournament(finalEvent.id)
+            }
+
+            EventSaveActionResult.Success(
+                finalEvent = finalEvent,
+                staffInvites = saveOutcome.staffInvites,
+            )
+        } catch (throwable: Throwable) {
+            EventSaveActionResult.Failure(
+                throwable = throwable,
+                fallbackMessage = "Unable to save event.",
+            )
+        } finally {
+            hideLoading()
+        }
+    }
+
     suspend fun runScheduleEditAction(
         action: EventScheduleEditAction,
         prepareEventForUpdate: () -> PreparedEventForUpdate,
@@ -94,4 +181,68 @@ internal class EventEditActionCoordinator {
             hideLoading()
         }
     }
+
+    suspend fun runCreateTemplateAction(
+        sourceEvent: Event,
+        prepareTemplate: () -> PreparedTemplateForCreate,
+        createTemplate: suspend (PreparedTemplateForCreate) -> Event,
+        showLoading: (String) -> Unit,
+        hideLoading: () -> Unit,
+    ): EventTemplateCreateResult {
+        if (sourceEvent.state.equals("TEMPLATE", ignoreCase = true)) {
+            return EventTemplateCreateResult.AlreadyTemplate("This event is already a template.")
+        }
+
+        showLoading("Creating template ...")
+        return try {
+            createTemplate(prepareTemplate())
+            EventTemplateCreateResult.Success("Template created and added to your templates.")
+        } catch (throwable: Throwable) {
+            EventTemplateCreateResult.Failure(
+                throwable = throwable,
+                fallbackMessage = "Failed to create template.",
+            )
+        } finally {
+            hideLoading()
+        }
+    }
+
+    suspend fun runPublishEventAction(
+        currentEvent: Event,
+        updateEvent: suspend (Event) -> Result<Event>,
+        refreshEvent: suspend (String) -> Unit,
+        showLoading: (String) -> Unit,
+        hideLoading: () -> Unit,
+    ): EventPublishResult {
+        if (currentEvent.state == "PUBLISHED") {
+            return EventPublishResult.AlreadyPublished
+        }
+
+        showLoading("Publishing event...")
+        return try {
+            val updateResult = updateEvent(currentEvent.copy(state = "PUBLISHED"))
+            refreshEvent(currentEvent.id)
+            updateResult.fold(
+                onSuccess = { EventPublishResult.Success },
+                onFailure = { throwable ->
+                    EventPublishResult.Failure(
+                        throwable = throwable,
+                        fallbackMessage = "Failed to publish event.",
+                    )
+                },
+            )
+        } catch (throwable: Throwable) {
+            EventPublishResult.Failure(
+                throwable = throwable,
+                fallbackMessage = "Failed to publish event.",
+            )
+        } finally {
+            hideLoading()
+        }
+    }
+}
+
+private fun Event.assignedStaffUserIds(): Set<String> = buildSet {
+    addAll(officialIds.map(String::trim).filter(String::isNotBlank))
+    addAll(assistantHostIds.map(String::trim).filter(String::isNotBlank))
 }

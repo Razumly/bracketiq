@@ -3818,53 +3818,48 @@ class DefaultEventDetailComponent(
 
     override fun updateEvent() {
         scope.launch {
-            loadingHandler.showLoading("Saving event...")
-            runCatching {
-                val previouslyAssignedStaffUserIds = buildSet {
-                    addAll(
-                        selectedEvent.value.officialIds
-                            .map(String::trim)
-                            .filter(String::isNotBlank),
-                    )
-                    addAll(
-                        selectedEvent.value.assistantHostIds
-                            .map(String::trim)
-                            .filter(String::isNotBlank),
-                    )
+            when (val result = editActionCoordinator.runSaveEventAction(
+                selectedEvent = selectedEvent.value,
+                pendingStaffInvites = eventInviteCoordinator.pendingStaffInvites.value,
+                existingStaffInvites = _eventStaffInvites.value,
+                currentUserId = currentUser.value.id,
+                prepareEventForUpdate = ::prepareEventForUpdate,
+                updatePreparedEvent = { prepared ->
+                    eventRepository.updateEvent(
+                        newEvent = prepared.event,
+                        fields = prepared.fields,
+                        timeSlots = prepared.timeSlots,
+                        leagueScoringConfig = prepared.leagueScoringConfig,
+                    ).getOrThrow()
+                },
+                reconcileStaffInvites = { event, pendingStaffInvites, existingStaffInvites, previouslyAssignedUserIds, createdByUserId ->
+                    reconcileEventStaffInvites(
+                        userRepository = userRepository,
+                        event = event,
+                        pendingStaffInvites = pendingStaffInvites,
+                        existingStaffInvites = existingStaffInvites,
+                        previouslyAssignedUserIds = previouslyAssignedUserIds,
+                        createdByUserId = createdByUserId,
+                    ).getOrThrow()
+                },
+                updateFinalEvent = { event ->
+                    eventRepository.updateEvent(event).getOrThrow()
+                },
+                refetchMatchesOfTournament = { eventId ->
+                    matchRepository.getMatchesOfTournament(eventId)
+                },
+                showLoading = { message -> loadingHandler.showLoading(message) },
+                hideLoading = loadingHandler::hideLoading,
+            )) {
+                is EventSaveActionResult.Success -> {
+                    _eventStaffInvites.value = result.staffInvites
+                    eventInviteCoordinator.clearPendingStaffInvites()
+                    eventInviteCoordinator.clearSuggestedUsers()
+                    cancelEditingEvent()
                 }
-                val prepared = prepareEventForUpdate()
-                val updated = eventRepository.updateEvent(
-                    newEvent = prepared.event,
-                    fields = prepared.fields,
-                    timeSlots = prepared.timeSlots,
-                    leagueScoringConfig = prepared.leagueScoringConfig,
-                ).getOrThrow()
-                val saveOutcome = reconcileEventStaffInvites(
-                    userRepository = userRepository,
-                    event = updated,
-                    pendingStaffInvites = eventInviteCoordinator.pendingStaffInvites.value,
-                    existingStaffInvites = _eventStaffInvites.value,
-                    previouslyAssignedUserIds = previouslyAssignedStaffUserIds,
-                    createdByUserId = currentUser.value.id,
-                ).getOrThrow()
-                val finalEvent = if (saveOutcome.event == updated) {
-                    updated
-                } else {
-                    eventRepository.updateEvent(saveOutcome.event).getOrThrow()
+                is EventSaveActionResult.Failure -> {
+                    _errorState.value = ErrorMessage(result.throwable.userMessage(result.fallbackMessage))
                 }
-                _eventStaffInvites.value = saveOutcome.staffInvites
-                eventInviteCoordinator.clearPendingStaffInvites()
-                eventInviteCoordinator.clearSuggestedUsers()
-                if (finalEvent.eventType == EventType.LEAGUE || finalEvent.eventType == EventType.TOURNAMENT) {
-                    matchRepository.getMatchesOfTournament(finalEvent.id)
-                }
-                finalEvent
-            }.onSuccess {
-                loadingHandler.hideLoading()
-                cancelEditingEvent()
-            }.onFailure { error ->
-                loadingHandler.hideLoading()
-                _errorState.value = ErrorMessage(error.userMessage("Unable to save event."))
             }
         }
     }
@@ -3949,58 +3944,66 @@ class DefaultEventDetailComponent(
     override fun createTemplateFromCurrentEvent() {
         scope.launch {
             val sourceEvent = if (editDraftCoordinator.isEditing.value) editDraftCoordinator.editedEvent.value else selectedEvent.value
-            if (sourceEvent.state.equals("TEMPLATE", ignoreCase = true)) {
-                _errorState.value = ErrorMessage("This event is already a template.")
-                return@launch
+            when (val result = editActionCoordinator.runCreateTemplateAction(
+                sourceEvent = sourceEvent,
+                prepareTemplate = {
+                    EventTemplateCreateBuilder.prepare(
+                        EventTemplateCreateInput(
+                            sourceEvent = sourceEvent,
+                            currentUserId = currentUser.value.id,
+                            sourceSport = sportsCatalogCoordinator.sportForId(sourceEvent.sportId),
+                            isEditing = editDraftCoordinator.isEditing.value,
+                            editableFields = editDraftCoordinator.editableFields.value,
+                            relationFields = eventFields.value.map { relation -> relation.field },
+                            editableTimeSlots = editDraftCoordinator.editableLeagueTimeSlots.value,
+                            relationTimeSlots = eventWithRelations.value.timeSlots,
+                            editableLeagueScoringConfig = editDraftCoordinator.editableLeagueScoringConfig.value,
+                            nextId = ::newId,
+                        ),
+                    )
+                },
+                createTemplate = { templatePayload ->
+                    eventRepository.createEvent(
+                        newEvent = templatePayload.event,
+                        requiredTemplateIds = emptyList(),
+                        leagueScoringConfig = templatePayload.leagueScoringConfig,
+                        fields = templatePayload.fields,
+                        timeSlots = templatePayload.timeSlots,
+                    ).getOrThrow()
+                },
+                showLoading = { message -> loadingHandler.showLoading(message) },
+                hideLoading = loadingHandler::hideLoading,
+            )) {
+                is EventTemplateCreateResult.AlreadyTemplate -> {
+                    _errorState.value = ErrorMessage(result.message)
+                }
+                is EventTemplateCreateResult.Success -> {
+                    _errorState.value = ErrorMessage(result.message)
+                }
+                is EventTemplateCreateResult.Failure -> {
+                    _errorState.value = ErrorMessage(result.throwable.userMessage(result.fallbackMessage))
+                }
             }
-
-            loadingHandler.showLoading("Creating template ...")
-
-            val templatePayload = EventTemplateCreateBuilder.prepare(
-                EventTemplateCreateInput(
-                    sourceEvent = sourceEvent,
-                    currentUserId = currentUser.value.id,
-                    sourceSport = sportsCatalogCoordinator.sportForId(sourceEvent.sportId),
-                    isEditing = editDraftCoordinator.isEditing.value,
-                    editableFields = editDraftCoordinator.editableFields.value,
-                    relationFields = eventFields.value.map { relation -> relation.field },
-                    editableTimeSlots = editDraftCoordinator.editableLeagueTimeSlots.value,
-                    relationTimeSlots = eventWithRelations.value.timeSlots,
-                    editableLeagueScoringConfig = editDraftCoordinator.editableLeagueScoringConfig.value,
-                    nextId = ::newId,
-                ),
-            )
-            eventRepository.createEvent(
-                newEvent = templatePayload.event,
-                requiredTemplateIds = emptyList(),
-                leagueScoringConfig = templatePayload.leagueScoringConfig,
-                fields = templatePayload.fields,
-                timeSlots = templatePayload.timeSlots,
-            )
-                .onSuccess {
-                    _errorState.value = ErrorMessage("Template created and added to your templates.")
-                }
-                .onFailure {
-                    _errorState.value = ErrorMessage(it.userMessage("Failed to create template."))
-                }
-
-            loadingHandler.hideLoading()
         }
     }
 
     override fun publishEvent() {
         scope.launch {
-            val currentEvent = selectedEvent.value
-            if (currentEvent.state == "PUBLISHED") {
-                return@launch
-            }
-            loadingHandler.showLoading("Publishing event...")
-            eventRepository.updateEvent(currentEvent.copy(state = "PUBLISHED"))
-                .onFailure { error ->
-                    _errorState.value = ErrorMessage(error.userMessage("Failed to publish event."))
+            when (val result = editActionCoordinator.runPublishEventAction(
+                currentEvent = selectedEvent.value,
+                updateEvent = eventRepository::updateEvent,
+                refreshEvent = { eventId ->
+                    eventRepository.getEvent(eventId)
+                },
+                showLoading = { message -> loadingHandler.showLoading(message) },
+                hideLoading = loadingHandler::hideLoading,
+            )) {
+                EventPublishResult.AlreadyPublished,
+                EventPublishResult.Success -> Unit
+                is EventPublishResult.Failure -> {
+                    _errorState.value = ErrorMessage(result.throwable.userMessage(result.fallbackMessage))
                 }
-            eventRepository.getEvent(currentEvent.id)
-            loadingHandler.hideLoading()
+            }
         }
     }
 
@@ -4153,16 +4156,10 @@ class DefaultEventDetailComponent(
     }
 
     override suspend fun getParticipantBillingSnapshot(teamId: String): Result<EventTeamBillingSnapshot> {
-        val normalizedEventId = selectedEvent.value.id.trim()
-        val normalizedTeamId = teamId.trim()
-        if (normalizedEventId.isEmpty() || normalizedTeamId.isEmpty()) {
-            return Result.failure(
-                IllegalArgumentException("Event and participant team ids are required."),
-            )
-        }
-        return billingRepository.getEventTeamBillingSnapshot(
-            eventId = normalizedEventId,
-            teamId = normalizedTeamId,
+        return participantManagementCoordinator.getParticipantBillingSnapshot(
+            eventId = selectedEvent.value.id,
+            teamId = teamId,
+            loadSnapshot = billingRepository::getEventTeamBillingSnapshot,
         )
     }
 
@@ -4170,39 +4167,26 @@ class DefaultEventDetailComponent(
         teamId: String,
         request: EventTeamBillCreateRequest,
     ): Result<Unit> {
-        val normalizedEventId = selectedEvent.value.id.trim()
-        val normalizedTeamId = teamId.trim()
-        if (normalizedEventId.isEmpty() || normalizedTeamId.isEmpty()) {
-            return Result.failure(
-                IllegalArgumentException("Event and participant team ids are required."),
-            )
-        }
-        val result = billingRepository.createEventTeamBill(
-            eventId = normalizedEventId,
-            teamId = normalizedTeamId,
+        return participantManagementCoordinator.createParticipantBill(
+            eventId = selectedEvent.value.id,
+            teamId = teamId,
             request = request,
-        ).map { }
-        if (result.isSuccess) {
-            refreshParticipantComplianceIfNeeded(selectedEvent.value)
-        }
-        return result
+            createBill = billingRepository::createEventTeamBill,
+            refreshAfterSuccess = {
+                refreshParticipantComplianceIfNeeded(selectedEvent.value)
+            },
+        )
     }
 
     override suspend fun createParticipantPaymentCheckout(
         teamId: String,
         request: EventTeamPaymentCheckoutRequest,
     ): Result<EventTeamPaymentCheckout> {
-        val normalizedEventId = selectedEvent.value.id.trim()
-        val normalizedTeamId = teamId.trim()
-        if (normalizedEventId.isEmpty() || normalizedTeamId.isEmpty()) {
-            return Result.failure(
-                IllegalArgumentException("Event and participant team ids are required."),
-            )
-        }
-        return billingRepository.createEventTeamPaymentCheckout(
-            eventId = normalizedEventId,
-            teamId = normalizedTeamId,
+        return participantManagementCoordinator.createParticipantPaymentCheckout(
+            eventId = selectedEvent.value.id,
+            teamId = teamId,
             request = request,
+            createCheckout = billingRepository::createEventTeamPaymentCheckout,
         )
     }
 
@@ -4211,23 +4195,16 @@ class DefaultEventDetailComponent(
         billPaymentId: String,
         amountCents: Int,
     ): Result<Unit> {
-        val normalizedEventId = selectedEvent.value.id.trim()
-        val normalizedTeamId = teamId.trim()
-        if (normalizedEventId.isEmpty() || normalizedTeamId.isEmpty()) {
-            return Result.failure(
-                IllegalArgumentException("Event and participant team ids are required."),
-            )
-        }
-        val result = billingRepository.refundEventTeamBillPayment(
-            eventId = normalizedEventId,
-            teamId = normalizedTeamId,
+        return participantManagementCoordinator.refundParticipantPayment(
+            eventId = selectedEvent.value.id,
+            teamId = teamId,
             billPaymentId = billPaymentId,
             amountCents = amountCents,
+            refundPayment = billingRepository::refundEventTeamBillPayment,
+            refreshAfterSuccess = {
+                refreshParticipantComplianceIfNeeded(selectedEvent.value)
+            },
         )
-        if (result.isSuccess) {
-            refreshParticipantComplianceIfNeeded(selectedEvent.value)
-        }
-        return result
     }
 
     override fun selectPlace(place: MVPPlace?) {
