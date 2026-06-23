@@ -177,6 +177,23 @@ internal fun MatchMVP.toEmptyBracketMatch(): MatchMVP = copy(
     locked = false,
 )
 
+internal suspend fun resetBracketMatchesAfterSchedule(
+    event: Event,
+    getMatchesOfTournament: suspend (String) -> List<MatchMVP>,
+    updateMatchesBulk: suspend (List<MatchMVP>) -> Unit,
+): List<MatchMVP> {
+    val scheduledMatches = getMatchesOfTournament(event.id)
+    val bracketMatches = scheduledMatches
+        .filter { match -> shouldResetBracketMatch(event, match) }
+        .map { match -> match.toEmptyBracketMatch() }
+
+    if (bracketMatches.isNotEmpty()) {
+        updateMatchesBulk(bracketMatches)
+    }
+
+    return getMatchesOfTournament(event.id)
+}
+
 private fun doMatchesOverlap(match1: MatchMVP, match2: MatchMVP): Boolean {
     val match1Start = match1.start ?: return false
     val match2Start = match2.start ?: return false

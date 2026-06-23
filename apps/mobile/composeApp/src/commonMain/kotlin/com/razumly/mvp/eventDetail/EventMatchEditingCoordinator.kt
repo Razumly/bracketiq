@@ -1,9 +1,11 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.eventDetail.data.StagedMatchCreate
@@ -33,6 +35,12 @@ internal data class PreparedMatchBulkUpdate(
 internal sealed class MatchEditCommitPreparation {
     data class Valid(val payload: PreparedMatchBulkUpdate) : MatchEditCommitPreparation()
     data class Invalid(val errorMessage: String) : MatchEditCommitPreparation()
+}
+
+internal sealed class MatchEditCommitResult {
+    object Success : MatchEditCommitResult()
+    data class Invalid(val errorMessage: String) : MatchEditCommitResult()
+    data class Failure(val throwable: Exception) : MatchEditCommitResult()
 }
 
 internal class EventMatchEditingCoordinator {
@@ -72,6 +80,25 @@ internal class EventMatchEditingCoordinator {
         pendingCreateMatchId = null
         refreshEditableRounds(event, selectedDivisionId, buildRounds)
         _isEditingMatches.value = true
+    }
+
+    fun beginEditingIfAllowed(
+        canManageMatchEditing: Boolean,
+        matches: List<MatchWithRelations>,
+        event: Event,
+        selectedDivisionId: String?,
+        buildRounds: (Map<String, MatchWithRelations>) -> List<List<MatchWithRelations?>>,
+    ): Boolean {
+        if (!canManageMatchEditing) {
+            return false
+        }
+        beginEditing(
+            matches = matches,
+            event = event,
+            selectedDivisionId = selectedDivisionId,
+            buildRounds = buildRounds,
+        )
+        return true
     }
 
     fun cancelEditing() {
@@ -190,6 +217,24 @@ internal class EventMatchEditingCoordinator {
         return relation
     }
 
+    fun createStagedMatchIfEditable(
+        canEditMatchesNow: Boolean,
+        input: StagedMatchInput,
+        openEditor: Boolean,
+        buildRounds: (Map<String, MatchWithRelations>) -> List<List<MatchWithRelations?>>,
+        showEditor: (MatchWithRelations, MatchCreateContext, Boolean) -> Unit = { _, _, _ -> },
+    ): MatchWithRelations? {
+        if (!canEditMatchesNow) {
+            return null
+        }
+        return createStagedMatch(
+            input = input,
+            openEditor = openEditor,
+            buildRounds = buildRounds,
+            showEditor = showEditor,
+        )
+    }
+
     fun addBracketMatchFromAnchor(
         anchorMatchId: String,
         slot: BracketAddSlot,
@@ -241,6 +286,30 @@ internal class EventMatchEditingCoordinator {
         return staged
     }
 
+    fun addBracketMatchFromAnchorIfEditable(
+        canEditMatchesNow: Boolean,
+        anchorMatchId: String,
+        slot: BracketAddSlot,
+        event: Event,
+        selectedDivisionId: String?,
+        clientId: String,
+        now: Instant,
+        buildRounds: (Map<String, MatchWithRelations>) -> List<List<MatchWithRelations?>>,
+    ): MatchWithRelations? {
+        if (!canEditMatchesNow) {
+            return null
+        }
+        return addBracketMatchFromAnchor(
+            anchorMatchId = anchorMatchId,
+            slot = slot,
+            event = event,
+            selectedDivisionId = selectedDivisionId,
+            clientId = clientId,
+            now = now,
+            buildRounds = buildRounds,
+        )
+    }
+
     fun updateEditableMatch(
         matchId: String,
         event: Event,
@@ -280,6 +349,31 @@ internal class EventMatchEditingCoordinator {
         refreshEditableRounds(event, selectedDivisionId, buildRounds)
     }
 
+    fun setLockForEditableMatchesIfEditable(
+        canEditMatchesNow: Boolean,
+        matchIds: List<String>,
+        locked: Boolean,
+        event: Event,
+        selectedDivisionId: String?,
+        buildRounds: (Map<String, MatchWithRelations>) -> List<List<MatchWithRelations?>>,
+    ): Boolean {
+        if (!canEditMatchesNow || matchIds.isEmpty()) {
+            return false
+        }
+        val targetIds = matchIds.mapNotNull { id -> id.normalizedToken() }.toSet()
+        if (targetIds.isEmpty()) {
+            return false
+        }
+        setLockForEditableMatches(
+            matchIds = targetIds.toList(),
+            locked = locked,
+            event = event,
+            selectedDivisionId = selectedDivisionId,
+            buildRounds = buildRounds,
+        )
+        return true
+    }
+
     fun showTeamSelection(matchId: String, position: TeamPosition, availableTeams: List<TeamWithPlayers>) {
         _showTeamSelectionDialog.value = TeamSelectionDialogState(
             matchId = matchId,
@@ -317,6 +411,37 @@ internal class EventMatchEditingCoordinator {
 
     fun showMatchEditDialog(state: MatchEditDialogState) {
         _showMatchEditDialog.value = state
+    }
+
+    fun showMatchEditDialogIfEditable(
+        canEditMatchesNow: Boolean,
+        match: MatchWithRelations,
+        teams: List<TeamWithPlayers>,
+        fields: List<FieldWithMatches>,
+        fallbackMatches: List<MatchWithRelations>,
+        event: Event,
+        players: List<UserData>,
+        creationContext: MatchCreateContext,
+        isCreateMode: Boolean,
+    ): Boolean {
+        if (!canEditMatchesNow) {
+            return false
+        }
+        showMatchEditDialog(
+            MatchEditDialogState(
+                match = match,
+                teams = teams,
+                fields = fields,
+                allMatches = availableMatchesForDialog(fallbackMatches),
+                eventOfficials = event.eventOfficials,
+                officialPositions = event.officialPositions,
+                players = players,
+                eventType = event.eventType,
+                isCreateMode = isCreateMode,
+                creationContext = creationContext,
+            ),
+        )
+        return true
     }
 
     fun availableMatchesForDialog(fallbackMatches: List<MatchWithRelations>): List<MatchWithRelations> =
@@ -379,6 +504,25 @@ internal class EventMatchEditingCoordinator {
         _showMatchEditDialog.value = null
     }
 
+    fun deleteMatchFromDialogIfEditable(
+        canEditMatchesNow: Boolean,
+        matchId: String,
+        event: Event,
+        selectedDivisionId: String?,
+        buildRounds: (Map<String, MatchWithRelations>) -> List<List<MatchWithRelations?>>,
+    ): Boolean {
+        if (!canEditMatchesNow) {
+            return false
+        }
+        deleteMatchFromDialog(
+            matchId = matchId,
+            event = event,
+            selectedDivisionId = selectedDivisionId,
+            buildRounds = buildRounds,
+        )
+        return true
+    }
+
     fun updateMatchFromDialog(
         updatedMatch: MatchWithRelations,
         event: Event,
@@ -405,6 +549,25 @@ internal class EventMatchEditingCoordinator {
         pendingCreateMatchId = null
         refreshEditableRounds(event, selectedDivisionId, buildRounds)
         _showMatchEditDialog.value = null
+    }
+
+    fun updateMatchFromDialogIfEditable(
+        canEditMatchesNow: Boolean,
+        updatedMatch: MatchWithRelations,
+        event: Event,
+        selectedDivisionId: String?,
+        buildRounds: (Map<String, MatchWithRelations>) -> List<List<MatchWithRelations?>>,
+    ): Boolean {
+        if (!canEditMatchesNow) {
+            return false
+        }
+        updateMatchFromDialog(
+            updatedMatch = updatedMatch,
+            event = event,
+            selectedDivisionId = selectedDivisionId,
+            buildRounds = buildRounds,
+        )
+        return true
     }
 
     fun prepareCommit(isTournament: Boolean): MatchEditCommitPreparation {
@@ -448,6 +611,30 @@ internal class EventMatchEditingCoordinator {
                 deletes = _stagedMatchDeletes.value.toList(),
             ),
         )
+    }
+
+    suspend fun commitChanges(
+        isTournament: Boolean,
+        updateMatchesBulk: suspend (PreparedMatchBulkUpdate) -> Result<List<MatchMVP>>,
+        onCommitStarted: () -> Unit = {},
+        onCommitFinished: () -> Unit = {},
+    ): MatchEditCommitResult {
+        val preparation = prepareCommit(isTournament = isTournament)
+        if (preparation is MatchEditCommitPreparation.Invalid) {
+            return MatchEditCommitResult.Invalid(preparation.errorMessage)
+        }
+        val payload = (preparation as MatchEditCommitPreparation.Valid).payload
+
+        onCommitStarted()
+        return try {
+            updateMatchesBulk(payload).getOrThrow()
+            finishCommitSuccess()
+            MatchEditCommitResult.Success
+        } catch (exception: Exception) {
+            MatchEditCommitResult.Failure(exception)
+        } finally {
+            onCommitFinished()
+        }
     }
 
     private fun nextEditableMatchNumber(): Int {

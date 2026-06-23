@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -197,6 +198,68 @@ class EventMatchEditHelpersTest {
         assertEquals(emptyList(), reset.setResults)
         assertFalse(reset.locked)
         assertEquals("final", reset.winnerNextMatchId)
+    }
+
+    @Test
+    fun resetBracketMatchesAfterSchedule_resets_matching_matches_and_refetches() = runTest {
+        val scoredBracketMatch = match(
+            id = "bracket",
+            matchId = 1,
+            winnerNextMatchId = "final",
+        ).copy(
+            officialId = "official-1",
+            team1Points = listOf(3),
+            locked = true,
+        )
+        val scheduleMatch = match(id = "schedule", matchId = 2)
+        val finalSnapshot = listOf(scoredBracketMatch.toEmptyBracketMatch(), scheduleMatch)
+        val requestedEventIds = mutableListOf<String>()
+        val updates = mutableListOf<List<MatchMVP>>()
+
+        val result = resetBracketMatchesAfterSchedule(
+            event = Event(
+                id = "event-1",
+                eventType = EventType.LEAGUE,
+                includePlayoffs = true,
+            ),
+            getMatchesOfTournament = { eventId ->
+                requestedEventIds += eventId
+                if (requestedEventIds.size == 1) {
+                    listOf(scoredBracketMatch, scheduleMatch)
+                } else {
+                    finalSnapshot
+                }
+            },
+            updateMatchesBulk = { matches -> updates += matches },
+        )
+
+        assertEquals(listOf("event-1", "event-1"), requestedEventIds)
+        assertEquals(listOf(listOf(scoredBracketMatch.toEmptyBracketMatch())), updates)
+        assertEquals(finalSnapshot, result)
+    }
+
+    @Test
+    fun resetBracketMatchesAfterSchedule_skips_update_when_no_matches_need_reset() = runTest {
+        val scheduleMatch = match(id = "schedule", matchId = 1)
+        val requestedEventIds = mutableListOf<String>()
+        val updates = mutableListOf<List<MatchMVP>>()
+
+        val result = resetBracketMatchesAfterSchedule(
+            event = Event(
+                id = "event-1",
+                eventType = EventType.LEAGUE,
+                includePlayoffs = true,
+            ),
+            getMatchesOfTournament = { eventId ->
+                requestedEventIds += eventId
+                listOf(scheduleMatch)
+            },
+            updateMatchesBulk = { matches -> updates += matches },
+        )
+
+        assertEquals(listOf("event-1", "event-1"), requestedEventIds)
+        assertEquals(emptyList(), updates)
+        assertEquals(listOf(scheduleMatch), result)
     }
 
     private fun relation(match: MatchMVP): MatchWithRelations {
