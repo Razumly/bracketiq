@@ -16,7 +16,7 @@ After this refactor, the app should behave the same, but a developer should be a
 - [x] (2026-06-23 23:35Z) Confirmed existing unfinished plan items: `event-detail-component-decomposition-execplan.md` still needs final component thinning validation, and `event-details-modularization-execplan.md` still needs further `EventDetails.kt` thinning plus full all-target validation where available.
 - [x] (2026-06-23 23:35Z) Ran the baseline focused event-detail tests and common metadata compilation; both passed.
 - [x] (2026-06-23 23:49Z) Extracted `EventDetailFloatingActions.kt` as one complete component family and validated it.
-- [ ] Extract `EventDetailOverviewSections.kt` as one complete overview/roster component family.
+- [x] (2026-06-23 23:56Z) Extracted `EventDetailOverviewSections.kt` as one complete overview/roster component family and validated it.
 - [ ] Extract `EventDetailTabNavigation.kt` as one complete navigation/division-selector component family.
 - [ ] Extract `EventDetailJoinAndInviteSheets.kt` as one complete registration, join, invite, and registration-question UI family.
 - [ ] Extract `EventDetailStandingsTab.kt` as one complete standings component family.
@@ -36,6 +36,9 @@ After this refactor, the app should behave the same, but a developer should be a
 
 - Observation: Moving the floating action dock as a whole exposed one implicit icon dependency that had previously been satisfied by the large screen file import set.
   Evidence: `compileCommonMainKotlinMetadata` initially reported unresolved `Groups` in `EventDetailFloatingActions.kt`; adding the explicit `com.razumly.mvp.icons.Groups` import fixed the moved file without behavior changes.
+
+- Observation: The weekly occurrence fullness helpers moved with the overview section but still need package visibility because the join sheet displays the same fullness labels.
+  Evidence: `EventDetailScreen.kt` still calls `formatWeeklyOccurrenceFullness(...)` and `WeeklyOccurrenceSummary.isFull()` from the join options UI after `EventDetailOverviewSections.kt` owns their implementation.
 
 ## Decision Log
 
@@ -235,6 +238,24 @@ Floating action extraction validation passed:
 
     PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailScreenRoleVisibilityTest*" --tests "*EventDetailWeeklyBehaviorTest*" --console=plain
     Result: BUILD SUCCESSFUL in 1m 28s
+    Notes: Existing warnings were reported during Kotlin compilation. `startLocalBackend` again reported adb reverse could not be configured because no device/emulator was attached; the JVM tests passed.
+
+Overview extraction file-size evidence:
+
+    5738 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt
+     644 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailOverviewSections.kt
+    6382 total
+
+Overview extraction validation passed:
+
+    git diff --check -- composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailOverviewSections.kt plans/event-detail-screen-components-execplan.md
+    Result: no whitespace errors
+
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:compileCommonMainKotlinMetadata --console=plain
+    Result: BUILD SUCCESSFUL in 15s before import cleanup, then BUILD SUCCESSFUL in 16s after removing overview-only imports from `EventDetailScreen.kt`
+
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --tests "*EventOverviewCapacityTest*" --tests "*EventDetailWeeklyBehaviorTest*" --console=plain
+    Result: BUILD SUCCESSFUL in 1m 35s
     Notes: Existing warnings were reported during Kotlin compilation. `startLocalBackend` again reported adb reverse could not be configured because no device/emulator was attached; the JVM tests passed.
 
 ## Interfaces and Dependencies
