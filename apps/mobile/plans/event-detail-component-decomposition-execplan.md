@@ -58,6 +58,7 @@ After this refactor, the app should behave the same for users, but the code will
 - [ ] Thin `DefaultEventDetailComponent` so it owns Decompose lifecycle, public state exposure, and delegation, while helpers own domain-specific transformations.
   - [x] (2026-06-22) Move league standings state and division target decisions into `EventLeagueStandingsCoordinator` with focused tests.
   - [x] (2026-06-22) Move organization-template loading state into `EventOrganizationTemplatesCoordinator` with focused tests.
+  - [x] (2026-06-22) Move rental resource selection, slot normalization, and rental-backed edit draft construction into `EventRentalResourcesCoordinator` with focused tests.
 - [ ] Run focused event-detail regression tests and final compile/build validation.
 
 ## Surprises & Discoveries
@@ -242,6 +243,8 @@ The thirty-sixth implementation milestone completes the participant/invite coord
 The thirty-seventh implementation milestone starts the final component-thinning task. `EventLeagueStandingsCoordinator.kt` now owns league standings data/loading/confirming state, standings load-target resolution, current standings division resolution, and confirmation success copy. `DefaultEventDetailComponent` still owns repository calls, schedule refresh triggers, selected event/division flows, loading/error side effects, and match/event refreshes after confirmation. `EventDetailComponent.kt` dropped to 6,382 lines after this milestone.
 
 The thirty-eighth implementation milestone moves organization-template loading state into a coordinator. `EventOrganizationTemplatesCoordinator.kt` now owns template list, loading, error, clear, success, and failure state transitions while `DefaultEventDetailComponent` keeps the billing repository call, organization selection, logging, and error-message normalization. `EventDetailComponent.kt` dropped to 6,375 lines after this milestone.
+
+The thirty-ninth implementation milestone extracts a larger rental-resource chunk. `EventRentalResourcesCoordinator.kt` now owns available rental resources, selected rental resource ids, attached-resource selection from existing rental-backed slots, selection changes, selected rental fields, non-rental slot cleanup, rental-backed slot normalization, and rental-backed edit draft construction. `DefaultEventDetailComponent` still owns billing repository loading, edit-flow assignment, and event draft state exposure. `EventDetailComponent.kt` dropped to 6,217 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. Registration coordination and participant/invite coordination are now complete; the remaining work is to keep thinning `DefaultEventDetailComponent` around lower-risk orchestration seams, then run final focused regression and build validation.
 
@@ -1188,6 +1191,32 @@ Thirty-eighth milestone line-count evidence:
       60 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventOrganizationTemplatesCoordinatorTest.kt
     1258 plans/event-detail-component-decomposition-execplan.md
 
+Rental resources coordinator slice first focused test run caught a test expectation issue:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventRentalResourcesCoordinatorTest*"
+    Exit code: 1
+    Result: `EventRentalResourcesCoordinatorTest.edit_draft_merges_selected_rental_fields_and_slots_with_custom_resources` expected rental slot order before custom slot order, but the preserved component behavior sorts by start, start time, and id.
+    Fix: update the test to assert the preserved sorted order and identify the rental slot by `sourceType`.
+
+Rental resources coordinator slice focused tests passed after expectation fix:
+
+    ./gradlew :composeApp:testDebugUnitTest --tests "*EventRentalResourcesCoordinatorTest*"
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 1m 57s; 43 actionable tasks: 9 executed, 34 up-to-date.
+
+Rental resources coordinator slice common metadata compilation passed:
+
+    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    Exit code: 0
+    Result: BUILD SUCCESSFUL in 18s; 11 actionable tasks: 3 executed, 8 up-to-date.
+
+Thirty-ninth milestone line-count evidence:
+
+    6217 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     240 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt
+     175 composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinatorTest.kt
+    1288 plans/event-detail-component-decomposition-execplan.md
+
 ## Interfaces and Dependencies
 
 Expected internal interfaces and helpers may include these names, but exact names can change if implementation reveals a better local fit:
@@ -1256,3 +1285,4 @@ Revision Note (2026-06-22): Recorded the participant management coordinator slic
 Revision Note (2026-06-22): Recorded the participant invite/add/remove preflight helper slice, focused tests, compile checks, and marked participant/invite coordination complete.
 Revision Note (2026-06-22): Recorded the league standings coordinator slice, focused tests, compile fix, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the organization templates coordinator slice, focused tests, compile checks, and line-count impact.
+Revision Note (2026-06-22): Recorded the rental resources coordinator slice, focused tests, expectation fix, compile checks, and line-count impact.
