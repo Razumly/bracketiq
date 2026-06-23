@@ -962,14 +962,10 @@ class DefaultEventDetailComponent(
         EventWithFullRelations(event, emptyList(), emptyList(), emptyList()),
     )
 
-    private val _divisionMatches = MutableStateFlow<Map<String, MatchWithRelations>>(emptyMap())
-    override val divisionMatches = _divisionMatches.asStateFlow()
-
-    private val _divisionTeams = MutableStateFlow<Map<String, TeamWithPlayers>>(emptyMap())
-    override val divisionTeams = _divisionTeams.asStateFlow()
-
-    private val _selectedDivision = MutableStateFlow<String?>(null)
-    override val selectedDivision = _selectedDivision.asStateFlow()
+    private val divisionContentCoordinator = EventDivisionContentCoordinator()
+    override val divisionMatches = divisionContentCoordinator.divisionMatches
+    override val divisionTeams = divisionContentCoordinator.divisionTeams
+    override val selectedDivision = divisionContentCoordinator.selectedDivision
 
     private val weeklyOccurrenceCoordinator = EventWeeklyOccurrenceCoordinator()
     override val selectedWeeklyOccurrence = weeklyOccurrenceCoordinator.selectedWeeklyOccurrence
@@ -1209,7 +1205,7 @@ class DefaultEventDetailComponent(
         val draft = currentUserDataSource?.loadRegistrationProgress(key)
         registrationFlowCoordinator.applyRegistrationProgressDraft(draft)
             ?.let { restoredDivisionId ->
-                _selectedDivision.value = restoredDivisionId
+                divisionContentCoordinator.restoreSelectedDivision(restoredDivisionId)
             }
     }
 
@@ -1622,7 +1618,8 @@ class DefaultEventDetailComponent(
                     event = relations.event,
                     timeSlots = relations.timeSlots,
                 )
-                val activeDivision = _selectedDivision.value ?: relations.event.resolveDefaultSelectedDivisionId()
+                val activeDivision = divisionContentCoordinator.currentSelectedDivision()
+                    ?: relations.event.resolveDefaultSelectedDivisionId()
                 if (!activeDivision.isNullOrBlank()) {
                     selectDivision(activeDivision)
                 } else {
@@ -1646,7 +1643,9 @@ class DefaultEventDetailComponent(
                         .map { it.normalizeDivisionIdentifier() }
                         .filter(String::isNotBlank)
                         .toSet()
-                    val currentDivisionId = _selectedDivision.value?.normalizeDivisionIdentifier()?.takeIf(String::isNotBlank)
+                    val currentDivisionId = divisionContentCoordinator.currentSelectedDivision()
+                        ?.normalizeDivisionIdentifier()
+                        ?.takeIf(String::isNotBlank)
                     if (currentDivisionId == null || (availableDivisionIds.isNotEmpty() && currentDivisionId !in availableDivisionIds)) {
                         selectDivision(resolvedDivisionId)
                     }
@@ -1701,7 +1700,7 @@ class DefaultEventDetailComponent(
         }
         scope.launch {
             selectedDivision.collect { _ ->
-                _selectedDivision.value?.let { selectDivision(it) }
+                divisionContentCoordinator.currentSelectedDivision()?.let { selectDivision(it) }
             }
         }
         scope.launch {
@@ -1730,7 +1729,7 @@ class DefaultEventDetailComponent(
                 }
         }
         scope.launch {
-            _divisionMatches.collect { generateRounds() }
+            divisionContentCoordinator.divisionMatches.collect { generateRounds() }
         }
     }
 
@@ -1879,35 +1878,21 @@ class DefaultEventDetailComponent(
     }
 
     override fun selectDivision(division: String) {
-        val normalizedDivision = division.normalizeDivisionIdentifier()
-        _selectedDivision.value = normalizedDivision.ifEmpty { null }
-        refreshSelectedDivisionContent()
+        divisionContentCoordinator.selectDivision(
+            division = division,
+            selectedEvent = selectedEvent.value,
+            relations = eventWithRelations.value,
+        )
+        if (matchEditingCoordinator.isEditingMatches.value) {
+            refreshEditableRounds()
+        }
     }
 
     private fun refreshSelectedDivisionContent() {
-        _divisionTeams.value = eventWithRelations.value.teams.associateBy { it.team.id }
-        val divisionFilter = _selectedDivision.value
-        _divisionMatches.value = if (!selectedEvent.value.singleDivision && !divisionFilter.isNullOrEmpty()) {
-            val normalizedDivisionFilter = divisionFilter.normalizeDivisionIdentifier()
-            eventWithRelations.value.matches.filter {
-                it.match.division?.normalizeDivisionIdentifier() == normalizedDivisionFilter && !(
-                    it.previousRightMatch == null &&
-                    it.previousLeftMatch == null &&
-                    it.winnerNextMatch == null &&
-                    it.loserNextMatch == null
-                )
-            }
-                .associateBy { it.match.id }
-        } else {
-            eventWithRelations.value.matches.filter {
-                !(
-                    it.previousRightMatch == null &&
-                    it.previousLeftMatch == null &&
-                    it.winnerNextMatch == null &&
-                    it.loserNextMatch == null
-                )
-            }.associateBy { it.match.id }
-        }
+        divisionContentCoordinator.refreshSelectedDivisionContent(
+            selectedEvent = selectedEvent.value,
+            relations = eventWithRelations.value,
+        )
         if (matchEditingCoordinator.isEditingMatches.value) {
             refreshEditableRounds()
         }
@@ -4656,7 +4641,7 @@ class DefaultEventDetailComponent(
     }
 
     private fun generateRounds() {
-        _rounds.value = buildBracketRounds(_divisionMatches.value)
+        _rounds.value = buildBracketRounds(divisionContentCoordinator.divisionMatches.value)
     }
 
     override fun selectFieldCount(count: Int) {
