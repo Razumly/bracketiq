@@ -1814,53 +1814,8 @@ class DefaultEventDetailComponent(
         }
     }
 
-    private fun hasEventStarted(event: Event = selectedEvent.value): Boolean =
-        Clock.System.now() >= event.start
-
-    private fun hasSelectedEventOrOccurrenceStarted(event: Event = selectedEvent.value): Boolean =
-        if (isWeeklyParentEvent(event)) {
-            hasSelectedWeeklyOccurrenceStarted(event)
-        } else {
-            hasEventStarted(event)
-        }
-
-    private fun hasSelectedWeeklyOccurrenceStarted(event: Event = selectedEvent.value): Boolean {
-        if (!isWeeklyParentEvent(event)) {
-            return false
-        }
-        return weeklyOccurrenceCoordinator.hasSelectedOccurrenceStarted(Clock.System.now())
-    }
-
-    private fun isJoinBlockedByStart(event: Event = selectedEvent.value): Boolean {
-        if (isWeeklyParentEvent(event)) {
-            return hasSelectedWeeklyOccurrenceStarted(event)
-        }
-        if (!hasEventStarted(event)) return false
-        return event.eventType != EventType.WEEKLY_EVENT
-    }
-
-    private fun isWeeklyParentEvent(event: Event = selectedEvent.value): Boolean =
-        event.eventType == EventType.WEEKLY_EVENT &&
-            event.timeSlotIds.any { slotId -> slotId.isNotBlank() }
-
     private fun currentWeeklyOccurrenceSelection(): EventOccurrenceSelection? {
         return weeklyOccurrenceCoordinator.currentSelection()
-    }
-
-    private fun participantManagementRoomTarget(
-        event: Event,
-        occurrence: EventOccurrenceSelection?,
-    ): ParticipantManagementRoomTarget? {
-        val eventId = event.id.trim().takeIf(String::isNotBlank) ?: return null
-        if (isWeeklyParentEvent(event) && occurrence == null) {
-            return null
-        }
-        return ParticipantManagementRoomTarget(
-            eventId = eventId,
-            slotId = occurrence?.slotId?.trim()?.takeIf(String::isNotBlank),
-            occurrenceDate = occurrence?.occurrenceDate?.trim()?.takeIf(String::isNotBlank),
-            teamSignup = event.teamSignup,
-        )
     }
 
     private suspend fun refreshParticipantManagementSnapshot(
@@ -2090,9 +2045,16 @@ class DefaultEventDetailComponent(
     }
 
     private fun ensureRegistrationOpen(): Boolean {
-        if (!isJoinBlockedByStart()) return true
+        val event = selectedEvent.value
+        val selectedWeeklyOccurrenceStarted = weeklyOccurrenceCoordinator.hasSelectedOccurrenceStarted(Clock.System.now())
+        if (!isJoinBlockedByStart(event, selectedWeeklyOccurrenceStarted)) return true
         _errorState.value = ErrorMessage(
-            if (hasSelectedWeeklyOccurrenceStarted()) {
+            if (
+                hasSelectedWeeklyOccurrenceStarted(
+                    isWeeklyParent = isWeeklyParentEvent(event),
+                    selectedWeeklyOccurrenceStarted = selectedWeeklyOccurrenceStarted,
+                )
+            ) {
                 "This weekly occurrence has already started. Joining is closed."
             } else {
                 "This event has already started. Registration is closed."
@@ -2594,7 +2556,7 @@ class DefaultEventDetailComponent(
 
     private suspend fun executeChildRegistration(child: JoinChildOption) {
         if (!ensureRegistrationOpen()) return
-        val weeklyOccurrence = if (isWeeklyParentEvent()) {
+        val weeklyOccurrence = if (isWeeklyParentEvent(selectedEvent.value)) {
             requireSelectedWeeklyOccurrence(
                 errorMessage = "Select an occurrence before registering a child.",
             ) ?: return
@@ -2722,7 +2684,7 @@ class DefaultEventDetailComponent(
     }
 
     private suspend fun submitMinorJoinRequestForParentApproval() {
-        val weeklyOccurrence = if (isWeeklyParentEvent()) {
+        val weeklyOccurrence = if (isWeeklyParentEvent(selectedEvent.value)) {
             requireSelectedWeeklyOccurrence(
                 errorMessage = "Select an occurrence before requesting to join.",
             ) ?: return
@@ -2753,7 +2715,7 @@ class DefaultEventDetailComponent(
 
     private suspend fun executeJoinEvent() {
         if (!ensureRegistrationOpen()) return
-        val weeklyOccurrence = if (isWeeklyParentEvent()) {
+        val weeklyOccurrence = if (isWeeklyParentEvent(selectedEvent.value)) {
             requireSelectedWeeklyOccurrence(
                 errorMessage = "Select an occurrence before joining.",
             ) ?: return
@@ -2893,7 +2855,7 @@ class DefaultEventDetailComponent(
 
     private suspend fun executeJoinEventAsTeam(team: TeamWithPlayers) {
         if (!ensureRegistrationOpen()) return
-        val weeklyOccurrence = if (isWeeklyParentEvent()) {
+        val weeklyOccurrence = if (isWeeklyParentEvent(selectedEvent.value)) {
             requireSelectedWeeklyOccurrence(
                 errorMessage = "Select an occurrence before joining with a team.",
             ) ?: return
@@ -3398,7 +3360,10 @@ class DefaultEventDetailComponent(
                 membership = membership,
                 weeklyOccurrence = weeklyOccurrence,
                 currentUserIsFreeAgent = checkIsUserFreeAgent(event),
-                eventOrOccurrenceStarted = hasSelectedEventOrOccurrenceStarted(event),
+                eventOrOccurrenceStarted = hasSelectedEventOrOccurrenceStarted(
+                    event = event,
+                    selectedWeeklyOccurrenceStarted = weeklyOccurrenceCoordinator.hasSelectedOccurrenceStarted(Clock.System.now()),
+                ),
             )
             decision.errorMessage?.let { message ->
                 _errorState.value = ErrorMessage(message)
@@ -3467,7 +3432,10 @@ class DefaultEventDetailComponent(
                 membership = membership,
                 weeklyOccurrence = weeklyOccurrence,
                 currentUserIsFreeAgent = checkIsUserFreeAgent(event),
-                eventOrOccurrenceStarted = hasSelectedEventOrOccurrenceStarted(event),
+                eventOrOccurrenceStarted = hasSelectedEventOrOccurrenceStarted(
+                    event = event,
+                    selectedWeeklyOccurrenceStarted = weeklyOccurrenceCoordinator.hasSelectedOccurrenceStarted(Clock.System.now()),
+                ),
             )
             decision.errorMessage?.let { message ->
                 _errorState.value = ErrorMessage(message)

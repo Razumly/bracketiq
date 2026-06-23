@@ -73,6 +73,7 @@ After this refactor, the app should behave the same for users, but the code will
   - [x] (2026-06-23) Move league standings load and confirmation side effects into `EventLeagueStandingsCoordinator` with focused tests.
   - [x] (2026-06-23) Move event-detail access rules and default division helpers into `EventDetailAccessRules` with focused tests.
   - [x] (2026-06-23) Move invite search/add-player/add-team/email side effects into `EventInviteCoordinator` with focused tests.
+  - [x] (2026-06-23) Move weekly occurrence start rules and participant-management room target resolution into `EventOccurrenceRules` with focused tests.
 - [ ] Run focused event-detail regression tests and final compile/build validation.
 
 ## Surprises & Discoveries
@@ -290,6 +291,8 @@ The fifty-first implementation milestone extracts league standings side-effect c
 The fifty-second implementation milestone extracts pure event-detail access and default-division rules. `EventDetailAccessRules.kt` now owns mobile edit support checks, event management permission checks for hosts/assistant hosts/org managers, normalized team-id lists, playoff-placement division detection, and default selected-division resolution. `DefaultEventDetailComponent` now delegates those rules while keeping state access and public action wiring. Focused validation passed with `./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailAccessRulesTest*" --console=plain`, `./gradlew :composeApp:compileDebugKotlinAndroid --console=plain`, and `git diff --check`. `EventDetailComponent.kt` dropped to 5,237 lines after this milestone.
 
 The fifty-third implementation milestone extracts invite/search side-effect coordination. `EventInviteCoordinator.kt` now owns user search, team invite search, add-team/add-player invite flows, email invite validation, loading wrapping, suggestion removal, and returned UI messages. `DefaultEventDetailComponent` still owns current event/occurrence lookup, repository lambdas, refresh callbacks, and error-state assignment. Focused validation passed with `./gradlew :composeApp:testDebugUnitTest --tests "*EventInviteCoordinatorTest*" --console=plain`, `./gradlew :composeApp:compileDebugKotlinAndroid --console=plain`, and `git diff --check`. `EventDetailComponent.kt` dropped to 5,176 lines after this milestone.
+
+The fifty-fourth implementation milestone extracts occurrence and participant-room rules. `EventOccurrenceRules.kt` now owns event-start checks, selected weekly occurrence start decisions, join-start blocking, weekly parent detection, and participant-management room target normalization. `DefaultEventDetailComponent` still owns selected occurrence state via `EventWeeklyOccurrenceCoordinator`, but now passes that state into pure helpers explicitly. Focused validation passed with `./gradlew :composeApp:testDebugUnitTest --tests "*EventOccurrenceRulesTest*" --console=plain`, `./gradlew :composeApp:compileDebugKotlinAndroid --console=plain`, and `git diff --check`. `EventDetailComponent.kt` dropped to 5,144 lines after this milestone.
 
 Focused helper tests and related schedule/weekly/match/join/payment/signature/question regression tests pass. Registration coordination and participant/invite coordination are now complete; the remaining work is to keep thinning `DefaultEventDetailComponent` around lower-risk orchestration seams, then run final focused regression and build validation.
 
@@ -1578,3 +1581,4 @@ Revision Note (2026-06-22): Recorded the division content coordinator slice, foc
 Revision Note (2026-06-22): Recorded the bracket rounds coordinator slice, focused tests, expectation fix, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the sports catalog coordinator slice, focused tests, fixture fix, compile checks, and line-count impact.
 Revision Note (2026-06-22): Recorded the external action helper slice, focused tests, fixture and expectation fixes, compile checks, and line-count impact.
+Revision Note (2026-06-23): Recorded the occurrence rule helper slice, focused tests, compile checks, and line-count impact.
