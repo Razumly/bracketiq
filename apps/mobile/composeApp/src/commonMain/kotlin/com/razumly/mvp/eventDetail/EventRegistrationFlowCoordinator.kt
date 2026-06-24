@@ -20,8 +20,10 @@ import com.razumly.mvp.core.data.repositories.requiresAdditionalSigning
 import com.razumly.mvp.core.data.repositories.requiresChildEmail
 import com.razumly.mvp.core.data.repositories.userMessage
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.coroutines.resume
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
@@ -85,6 +87,12 @@ internal data class PendingSignatureStepState(
     val step: SignStep,
     val currentStep: Int,
     val totalSteps: Int,
+)
+
+data class DiscountCodePromptState(
+    val title: String = "Discount code",
+    val description: String = "Enter a discount code for this checkout, or continue without one.",
+    val initialCode: String = "",
 )
 
 internal enum class WithdrawalActionKind {
@@ -168,6 +176,9 @@ internal class EventRegistrationFlowCoordinator {
     private val _billingAddressPrompt = MutableStateFlow<BillingAddressDraft?>(null)
     val billingAddressPrompt = _billingAddressPrompt.asStateFlow()
 
+    private val _discountCodePrompt = MutableStateFlow<DiscountCodePromptState?>(null)
+    val discountCodePrompt = _discountCodePrompt.asStateFlow()
+
     private val _joinChoiceDialog = MutableStateFlow<JoinChoiceDialogState?>(null)
     val joinChoiceDialog = _joinChoiceDialog.asStateFlow()
 
@@ -187,6 +198,7 @@ internal class EventRegistrationFlowCoordinator {
     private var questionsConfirmed = false
     private var pendingPaymentPlanPreviewAction: (() -> Unit)? = null
     private var pendingBillingAddressAction: (() -> Unit)? = null
+    private var pendingDiscountCodeAction: ((String?) -> Unit)? = null
     private var pendingJoinableChildren: List<JoinChildOption> = emptyList()
     private var pendingTeamJoinQuestionTeam: TeamWithPlayers? = null
     private var pendingJoinConfirmationTarget: JoinConfirmationTarget? = null
@@ -216,6 +228,49 @@ internal class EventRegistrationFlowCoordinator {
     fun dismissQuestionDialog() {
         _questionDialog.value = null
         pendingQuestionContinuation = null
+    }
+
+    fun showDiscountCodePrompt(
+        title: String = "Discount code",
+        description: String = "Enter a discount code for this checkout, or continue without one.",
+        initialCode: String = "",
+        onContinue: (String?) -> Unit,
+    ) {
+        pendingDiscountCodeAction = onContinue
+        _discountCodePrompt.value = DiscountCodePromptState(
+            title = title,
+            description = description,
+            initialCode = initialCode,
+        )
+    }
+
+    suspend fun requestDiscountCode(
+        title: String = "Discount code",
+        description: String = "Enter a discount code for this checkout, or continue without one.",
+    ): String? = suspendCancellableCoroutine { continuation ->
+        showDiscountCodePrompt(
+            title = title,
+            description = description,
+        ) { code ->
+            if (continuation.isActive) {
+                continuation.resume(code?.trim()?.takeIf(String::isNotBlank))
+            }
+        }
+        continuation.invokeOnCancellation {
+            pendingDiscountCodeAction = null
+            _discountCodePrompt.value = null
+        }
+    }
+
+    fun continueFromDiscountCodePrompt(code: String?) {
+        val action = pendingDiscountCodeAction
+        pendingDiscountCodeAction = null
+        _discountCodePrompt.value = null
+        action?.invoke(code?.trim()?.takeIf(String::isNotBlank))
+    }
+
+    fun dismissDiscountCodePrompt() {
+        continueFromDiscountCodePrompt(null)
     }
 
     fun submitQuestionDialogAnswers(answers: Map<String, String>): EventRegistrationQuestionSubmitResult? {

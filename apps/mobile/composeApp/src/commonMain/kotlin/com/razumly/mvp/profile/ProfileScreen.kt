@@ -9,6 +9,7 @@ import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.decompose.extensions.compose.experimental.stack.ChildStack
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
+import com.razumly.mvp.core.presentation.composables.DiscountCodeDialog
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.util.backAnimation
 import com.razumly.mvp.core.util.LocalLoadingHandler
@@ -22,6 +23,7 @@ fun ProfileScreen(component: ProfileComponent) {
 
     val childStack by component.childStack.subscribeAsState()
     val billingAddressPrompt by component.billingAddressPrompt.collectAsState()
+    val discountCodePrompt by component.discountCodePrompt.collectAsState()
     val popupHandler = LocalPopupHandler.current
     val loadingHandler = LocalLoadingHandler.current
 
@@ -83,6 +85,10 @@ fun ProfileScreen(component: ProfileComponent) {
                 ProfileDocumentsScreen(component = instance.component)
             }
 
+            is ProfileComponent.Child.Discounts -> {
+                ProfileDiscountsScreen(component = instance.component)
+            }
+
             is ProfileComponent.Child.MySchedule -> {
                 ProfileMyScheduleScreen(component = instance.component)
             }
@@ -102,6 +108,16 @@ fun ProfileScreen(component: ProfileComponent) {
             initialAddress = address,
             onConfirm = component::submitBillingAddress,
             onDismiss = component::dismissBillingAddressPrompt,
+        )
+    }
+
+    discountCodePrompt?.let { prompt ->
+        DiscountCodeDialog(
+            title = prompt.title,
+            description = prompt.description,
+            initialCode = prompt.initialCode,
+            onContinue = component::continueFromDiscountCodePrompt,
+            onDismiss = component::dismissDiscountCodePrompt,
         )
     }
 }

@@ -54,6 +54,7 @@ import com.razumly.mvp.core.data.dataTypes.notificationSettingOptions
 import com.razumly.mvp.core.data.dataTypes.staffInviteRoleLabel
 import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
 import com.razumly.mvp.core.data.repositories.ProfileDocumentType
+import com.razumly.mvp.core.data.repositories.DiscountOffer
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
@@ -88,6 +89,232 @@ fun ProfilePaymentsScreen(component: ProfileComponent) {
             Text(if (hasStripeAccount) "Manage Stripe Account" else "Connect Stripe Account")
         }
 
+    }
+}
+
+@Composable
+fun ProfileDiscountsScreen(component: ProfileComponent) {
+    val state by component.discountsState.collectAsState()
+    var priceText by remember(state.selectedTargetId) {
+        mutableStateOf(
+            if (state.discountedPriceCents > 0) {
+                MoneyInputUtils.centsToDisplayValue(state.discountedPriceCents)
+            } else {
+                ""
+            },
+        )
+    }
+    val selectedTarget = remember(state.targets, state.selectedTargetId) {
+        state.targets.firstOrNull { it.id == state.selectedTargetId }
+    }
+    val itemTypeOptions = remember {
+        listOf(
+            DropdownOption("EVENT", "Event"),
+            DropdownOption("TEAM_REGISTRATION", "Team registration"),
+        )
+    }
+    val targetOptions = remember(state.targets) {
+        state.targets.map { target ->
+            DropdownOption(
+                value = target.id,
+                label = "${target.label} (${formatCurrency(target.priceCents)})",
+            )
+        }
+    }
+
+    LaunchedEffect(component) {
+        component.refreshDiscounts()
+    }
+
+    ProfileSectionScaffold(
+        title = "Discounts",
+        description = "Create user-owned discounts and generate codes for your paid events and team registrations.",
+        onBack = component::onBackClicked,
+        onRefresh = component::refreshDiscounts,
+        isRefreshing = state.isLoading,
+    ) {
+        state.error?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            ),
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("Create discount", style = MaterialTheme.typography.titleMedium)
+                PlatformDropdown(
+                    selectedValue = state.itemType,
+                    onSelectionChange = component::setDiscountItemType,
+                    options = itemTypeOptions,
+                    label = "Item type",
+                )
+                StandardTextField(
+                    value = state.targetSearch,
+                    onValueChange = component::setDiscountTargetSearch,
+                    label = "Search items",
+                )
+                PlatformDropdown(
+                    selectedValue = state.selectedTargetId.orEmpty(),
+                    onSelectionChange = component::selectDiscountTarget,
+                    options = targetOptions,
+                    label = "Item",
+                    placeholder = if (state.targetLoading) "Loading..." else "Select item",
+                    enabled = !state.targetLoading,
+                )
+                selectedTarget?.let { target ->
+                    Text(
+                        text = "Current price: ${formatCurrency(target.priceCents)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                StandardTextField(
+                    value = state.name,
+                    onValueChange = component::updateDiscountName,
+                    label = "Discount name",
+                )
+                StandardTextField(
+                    value = state.description,
+                    onValueChange = component::updateDiscountDescription,
+                    label = "Description",
+                    supportingText = "Optional",
+                )
+                StandardTextField(
+                    value = priceText,
+                    onValueChange = { value ->
+                        priceText = MoneyInputUtils.moneyInputFilter(value)
+                        component.updateDiscountedPriceCents(MoneyInputUtils.displayValueToCents(priceText))
+                    },
+                    label = "New price",
+                    keyboardType = "money",
+                    supportingText = "Stored as the discounted final price.",
+                )
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.isCreating && selectedTarget != null,
+                    onClick = component::createUserDiscount,
+                ) {
+                    Text(if (state.isCreating) "Creating..." else "Create discount")
+                }
+            }
+        }
+
+        Text("Your discounts", style = MaterialTheme.typography.titleMedium)
+        when {
+            state.isLoading -> Text("Loading discounts...")
+            state.discounts.isEmpty() -> Text(
+                text = "No discounts yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            else -> state.discounts.forEach { discount ->
+                DiscountOfferCard(
+                    discount = discount,
+                    codeInput = state.codeInputs[discount.id].orEmpty(),
+                    usageLimitInput = state.usageLimitInputs[discount.id].orEmpty(),
+                    isGenerating = state.generatingCodeDiscountId == discount.id,
+                    onCodeChanged = { component.updateDiscountCodeInput(discount.id, it) },
+                    onUsageLimitChanged = { component.updateDiscountUsageLimitInput(discount.id, it) },
+                    onGenerate = { component.generateDiscountCode(discount) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiscountOfferCard(
+    discount: DiscountOffer,
+    codeInput: String,
+    usageLimitInput: String,
+    isGenerating: Boolean,
+    onCodeChanged: (String) -> Unit,
+    onUsageLimitChanged: (String) -> Unit,
+    onGenerate: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(discount.name, style = MaterialTheme.typography.titleMedium)
+            discount.description?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                text = "${discount.targetType.displayDiscountTargetType()} • ${formatCurrency(discount.discountedPriceCents)} of ${formatCurrency(discount.originalPriceCents)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (discount.codes.isEmpty()) {
+                Text(
+                    text = "No codes generated yet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    discount.codes.forEach { code ->
+                        val limitLabel = code.usageLimit?.let { limit -> " / $limit" } ?: ""
+                        Text(
+                            text = "${code.code} • ${code.usedCount}$limitLabel used • ${code.status}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
+            StandardTextField(
+                value = codeInput,
+                onValueChange = onCodeChanged,
+                label = "New code",
+                supportingText = "Optional. Leave blank to generate one.",
+            )
+            StandardTextField(
+                value = usageLimitInput,
+                onValueChange = onUsageLimitChanged,
+                label = "Usage limit",
+                keyboardType = "number",
+                supportingText = "Optional",
+            )
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isGenerating,
+                onClick = onGenerate,
+            ) {
+                Text(if (isGenerating) "Generating..." else "Generate code")
+            }
+        }
+    }
+}
+
+private fun String.displayDiscountTargetType(): String {
+    return when (trim().uppercase()) {
+        "TEAM_REGISTRATION" -> "Team registration"
+        "PRODUCT" -> "Product"
+        else -> lowercase().replaceFirstChar { char ->
+            if (char.isLowerCase()) char.titlecase() else char.toString()
+        }
     }
 }
 

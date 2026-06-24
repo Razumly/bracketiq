@@ -37,6 +37,7 @@ import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.newId
 import com.razumly.mvp.eventDetail.TextSignaturePromptState
 import com.razumly.mvp.eventDetail.WebSignaturePromptState
+import com.razumly.mvp.eventDetail.DiscountCodePromptState
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import com.razumly.mvp.eventSearch.RentalAvailabilityLoader
 import com.razumly.mvp.eventSearch.RentalBusyBlock
@@ -53,6 +54,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import kotlin.time.Clock
 import kotlin.time.Instant
 
@@ -95,6 +98,7 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     val loadingTeamMemberComplianceId: StateFlow<String?>
     val textSignaturePrompt: StateFlow<TextSignaturePromptState?>
     val webSignaturePrompt: StateFlow<WebSignaturePromptState?>
+    val discountCodePrompt: StateFlow<DiscountCodePromptState?>
     val isReservingRental: StateFlow<Boolean>
     val completedRentalReservation: StateFlow<RentalReservationComplete?>
 
@@ -114,6 +118,8 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     fun confirmTextSignature()
     fun dismissTextSignature()
     fun dismissWebSignaturePrompt()
+    fun continueFromDiscountCodePrompt(code: String?)
+    fun dismissDiscountCodePrompt()
     fun startRentalReservation(context: RentalCreateContext, selections: List<RentalOrderSelectionRequest>)
     fun createEventFromCompletedRentalReservation()
     fun dismissCompletedRentalReservation()
@@ -187,6 +193,8 @@ class DefaultOrganizationDetailComponent(
     override val textSignaturePrompt: StateFlow<TextSignaturePromptState?> = _textSignaturePrompt.asStateFlow()
     private val _webSignaturePrompt = MutableStateFlow<WebSignaturePromptState?>(null)
     override val webSignaturePrompt: StateFlow<WebSignaturePromptState?> = _webSignaturePrompt.asStateFlow()
+    private val _discountCodePrompt = MutableStateFlow<DiscountCodePromptState?>(null)
+    override val discountCodePrompt: StateFlow<DiscountCodePromptState?> = _discountCodePrompt.asStateFlow()
     private val _isReservingRental = MutableStateFlow(false)
     override val isReservingRental: StateFlow<Boolean> = _isReservingRental.asStateFlow()
     private val _completedRentalReservation = MutableStateFlow<RentalReservationComplete?>(null)
@@ -210,6 +218,7 @@ class DefaultOrganizationDetailComponent(
     private var pendingProductPurchase: Product? = null
     private var pendingTeamRegistration: TeamWithPlayers? = null
     private var pendingBillingAddressAction: (() -> Unit)? = null
+    private var pendingDiscountCodeAction: ((String?) -> Unit)? = null
     private var pendingTeamSignatureSteps: List<SignStep> = emptyList()
     private var pendingTeamSignatureStepIndex = 0
     private var pendingTeamSignatureTeamId: String? = null
@@ -455,14 +464,17 @@ class DefaultOrganizationDetailComponent(
                 if (!ensureBillingAddressOrPrompt { startProductPurchase(product) }) {
                     return@launch
                 }
+                val discountCode = requestDiscountCode(
+                    description = "Enter a discount code for ${product.name}, or continue without one.",
+                )
 
                 if (::loadingHandler.isInitialized) {
                     loadingHandler.showLoading("Preparing checkout...")
                 }
                 val purchaseIntentResult = if (product.isSinglePurchase()) {
-                    billingRepository.createProductPurchaseIntent(product.id)
+                    billingRepository.createProductPurchaseIntent(product.id, discountCode)
                 } else {
-                    billingRepository.createProductSubscriptionIntent(product.id)
+                    billingRepository.createProductSubscriptionIntent(product.id, discountCode)
                 }
                 purchaseIntentResult
                     .onSuccess { intent ->
@@ -699,9 +711,13 @@ class DefaultOrganizationDetailComponent(
                 if (::loadingHandler.isInitialized) {
                     loadingHandler.showLoading("Preparing checkout...")
                 }
+                val discountCode = requestDiscountCode(
+                    description = "Enter a discount code for this team registration, or continue without one.",
+                )
                 billingRepository.createTeamRegistrationPurchaseIntent(
                     team = team.team,
                     teamRegistration = result.registration,
+                    discountCode = discountCode,
                 ).onSuccess { intent ->
                     pendingTeamRegistration = team
                     showPaymentSheet(intent, accountEmail, payerName)
@@ -775,6 +791,17 @@ class DefaultOrganizationDetailComponent(
     override fun dismissBillingAddressPrompt() {
         _billingAddressPrompt.value = null
         pendingBillingAddressAction = null
+    }
+
+    override fun continueFromDiscountCodePrompt(code: String?) {
+        val action = pendingDiscountCodeAction
+        pendingDiscountCodeAction = null
+        _discountCodePrompt.value = null
+        action?.invoke(code?.trim()?.takeIf(String::isNotBlank))
+    }
+
+    override fun dismissDiscountCodePrompt() {
+        continueFromDiscountCodePrompt(null)
     }
 
     override fun confirmTextSignature() {
@@ -960,6 +987,21 @@ class DefaultOrganizationDetailComponent(
         pendingBillingAddressAction = onReady
         _billingAddressPrompt.value = billingAddress ?: BillingAddressDraft()
         return false
+    }
+
+    private suspend fun requestDiscountCode(
+        description: String = "Enter a discount code for this checkout, or continue without one.",
+    ): String? = suspendCancellableCoroutine { continuation ->
+        pendingDiscountCodeAction = { code ->
+            if (continuation.isActive) {
+                continuation.resume(code?.trim()?.takeIf(String::isNotBlank))
+            }
+        }
+        _discountCodePrompt.value = DiscountCodePromptState(description = description)
+        continuation.invokeOnCancellation {
+            pendingDiscountCodeAction = null
+            _discountCodePrompt.value = null
+        }
     }
 
     private suspend fun fetchRequiredTeamSignatureSteps(teamId: String): Result<List<SignStep>> =

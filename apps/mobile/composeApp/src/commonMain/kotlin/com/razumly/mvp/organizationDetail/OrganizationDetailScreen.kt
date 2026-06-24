@@ -60,6 +60,7 @@ import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
+import com.razumly.mvp.core.presentation.composables.DiscountCodeDialog
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.composables.EventCard
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
@@ -124,6 +125,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val loadingTeamMemberComplianceId by component.loadingTeamMemberComplianceId.collectAsState()
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
     val webSignaturePrompt by component.webSignaturePrompt.collectAsState()
+    val discountCodePrompt by component.discountCodePrompt.collectAsState()
     val isReservingRental by component.isReservingRental.collectAsState()
     val completedRentalReservation by component.completedRentalReservation.collectAsState()
 
@@ -652,6 +654,16 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
             initialAddress = address,
             onConfirm = component::submitBillingAddress,
             onDismiss = component::dismissBillingAddressPrompt,
+        )
+    }
+
+    discountCodePrompt?.let { prompt ->
+        DiscountCodeDialog(
+            title = prompt.title,
+            description = prompt.description,
+            initialCode = prompt.initialCode,
+            onContinue = component::continueFromDiscountCodePrompt,
+            onDismiss = component::dismissDiscountCodePrompt,
         )
     }
 

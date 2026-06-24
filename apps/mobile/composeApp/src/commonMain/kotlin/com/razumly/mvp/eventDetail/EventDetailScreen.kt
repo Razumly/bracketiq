@@ -126,6 +126,7 @@ import com.razumly.mvp.core.presentation.EventDetailInitialTab
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
 import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
+import com.razumly.mvp.core.presentation.composables.DiscountCodeDialog
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
@@ -920,6 +921,7 @@ fun EventDetailScreen(
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
     val webSignaturePrompt by component.webSignaturePrompt.collectAsState()
     val billingAddressPrompt by component.billingAddressPrompt.collectAsState()
+    val discountCodePrompt by component.discountCodePrompt.collectAsState()
     val eventImageIds by component.eventImageIds.collectAsState()
     val organizationTemplates by component.organizationTemplates.collectAsState()
     val organizationTemplatesLoading by component.organizationTemplatesLoading.collectAsState()
@@ -3687,6 +3689,16 @@ fun EventDetailScreen(
                     feeBreakdown = currentFeeBreakdown!!,
                     onConfirm = { component.confirmFeeBreakdown() },
                     onCancel = { component.dismissFeeBreakdown() })
+            }
+
+            discountCodePrompt?.let { prompt ->
+                DiscountCodeDialog(
+                    title = prompt.title,
+                    description = prompt.description,
+                    initialCode = prompt.initialCode,
+                    onContinue = component::continueFromDiscountCodePrompt,
+                    onDismiss = component::dismissDiscountCodePrompt,
+                )
             }
 
             billingAddressPrompt?.let { address ->

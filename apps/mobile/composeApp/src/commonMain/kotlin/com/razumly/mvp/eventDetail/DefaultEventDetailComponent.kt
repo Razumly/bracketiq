@@ -200,6 +200,7 @@ class DefaultEventDetailComponent(
     override val inviteTeamsLoading = eventInviteCoordinator.inviteTeamsLoading
     override val pendingStaffInvites = eventInviteCoordinator.pendingStaffInvites
     override val billingAddressPrompt = registrationFlowCoordinator.billingAddressPrompt
+    override val discountCodePrompt = registrationFlowCoordinator.discountCodePrompt
     override val startingTeamRegistrationId = registrationFlowCoordinator.startingTeamRegistrationId
 
     private lateinit var loadingHandler: LoadingHandler
@@ -789,6 +790,7 @@ class DefaultEventDetailComponent(
         priceCents: Int,
         occurrence: EventOccurrenceSelection?,
         divisionId: String?,
+        discountCode: String? = null,
     ): Result<PurchaseIntent> {
         return registrationFlowCoordinator.createPurchaseIntentWithRegistrationAnswers(
             event = event,
@@ -803,6 +805,7 @@ class DefaultEventDetailComponent(
                     priceCents = targetPriceCents,
                     occurrence = selectedOccurrence,
                     divisionId = targetDivisionId,
+                    discountCode = discountCode,
                 )
             },
             createWithAnswers = { targetEvent, targetTeamId, targetPriceCents, selectedOccurrence, targetDivisionId, answers ->
@@ -813,9 +816,18 @@ class DefaultEventDetailComponent(
                     occurrence = selectedOccurrence,
                     divisionId = targetDivisionId,
                     answers = answers,
+                    discountCode = discountCode,
                 )
             },
         )
+    }
+
+    override fun continueFromDiscountCodePrompt(code: String?) {
+        registrationFlowCoordinator.continueFromDiscountCodePrompt(code)
+    }
+
+    override fun dismissDiscountCodePrompt() {
+        registrationFlowCoordinator.dismissDiscountCodePrompt()
     }
 
     init {

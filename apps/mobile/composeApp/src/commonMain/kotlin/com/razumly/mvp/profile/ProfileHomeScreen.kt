@@ -198,6 +198,14 @@ fun ProfileHomeScreen(component: ProfileComponent) {
             )
             add(
                 ProfileAction(
+                    title = "Discounts",
+                    description = "Manage your discount codes",
+                    icon = MVPIcons.ProfileActionPayments,
+                    onClick = component::navigateToDiscounts,
+                ),
+            )
+            add(
+                ProfileAction(
                     title = "Documents",
                     description = "Sign and review documents",
                     icon = MVPIcons.ProfileActionDetails,

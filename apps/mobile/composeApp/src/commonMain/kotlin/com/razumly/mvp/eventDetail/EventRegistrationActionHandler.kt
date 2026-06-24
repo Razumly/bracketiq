@@ -72,6 +72,7 @@ internal class EventRegistrationActionHandler(
         priceCents: Int,
         occurrence: EventOccurrenceSelection?,
         divisionId: String?,
+        discountCode: String?,
     ) -> Result<PurchaseIntent>,
     private val refreshEventAfterParticipantMutation: suspend (
         eventId: String,
@@ -757,12 +758,16 @@ internal class EventRegistrationActionHandler(
                     scope.launch { executeJoinEvent() }
                 },
                 createPurchaseIntent = { targetEvent, priceCents, occurrence, divisionId ->
+                    val discountCode = registrationFlowCoordinator.requestDiscountCode(
+                        description = "Enter a discount code for this event registration, or continue without one.",
+                    )
                     createPurchaseIntentWithRegistrationAnswers(
                         targetEvent,
                         null,
                         priceCents,
                         occurrence,
                         divisionId,
+                        discountCode,
                     )
                 },
                 processPurchaseIntent = { purchaseIntent ->
@@ -824,12 +829,16 @@ internal class EventRegistrationActionHandler(
                     scope.launch { executeJoinEventAsTeam(team) }
                 },
                 createPurchaseIntent = { targetEvent, teamId, priceCents, occurrence, divisionId ->
+                    val discountCode = registrationFlowCoordinator.requestDiscountCode(
+                        description = "Enter a discount code for this team event registration, or continue without one.",
+                    )
                     createPurchaseIntentWithRegistrationAnswers(
                         targetEvent,
                         teamId,
                         priceCents,
                         occurrence,
                         divisionId,
+                        discountCode,
                     )
                 },
                 processPurchaseIntent = { purchaseIntent ->

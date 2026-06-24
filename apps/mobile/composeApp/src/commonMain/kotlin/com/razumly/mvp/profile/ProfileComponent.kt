@@ -36,6 +36,8 @@ import com.razumly.mvp.core.data.repositories.FamilyChild
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequest
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequestAction
 import com.razumly.mvp.core.data.repositories.IBillingRepository
+import com.razumly.mvp.core.data.repositories.DiscountOffer
+import com.razumly.mvp.core.data.repositories.DiscountTarget
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
@@ -54,11 +56,13 @@ import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.core.presentation.PaymentProcessor
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
+import com.razumly.mvp.eventDetail.DiscountCodePromptState
 import io.github.aakira.napier.Napier
 import com.razumly.mvp.profile.profileDetails.ProfileDetailsComponent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -68,6 +72,7 @@ import kotlinx.serialization.Serializable
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
 import kotlin.native.ObjCName
+import kotlin.coroutines.resume
 import kotlin.time.Clock
 
 data class ProfilePaymentPlan(
@@ -224,6 +229,24 @@ data class ProfileDocumentsState(
     val error: String? = null,
 )
 
+data class ProfileDiscountsState(
+    val isLoading: Boolean = false,
+    val discounts: List<DiscountOffer> = emptyList(),
+    val itemType: String = "EVENT",
+    val targetSearch: String = "",
+    val targets: List<DiscountTarget> = emptyList(),
+    val selectedTargetId: String? = null,
+    val targetLoading: Boolean = false,
+    val name: String = "",
+    val description: String = "",
+    val discountedPriceCents: Int = 0,
+    val isCreating: Boolean = false,
+    val codeInputs: Map<String, String> = emptyMap(),
+    val usageLimitInputs: Map<String, String> = emptyMap(),
+    val generatingCodeDiscountId: String? = null,
+    val error: String? = null,
+)
+
 data class ProfileMyScheduleState(
     val isLoading: Boolean = false,
     val events: List<Event> = emptyList(),
@@ -309,6 +332,7 @@ interface ProfileComponent : IPaymentProcessor {
     val childrenState: StateFlow<ProfileChildrenState>
     val connectionsState: StateFlow<ProfileConnectionsState>
     val documentsState: StateFlow<ProfileDocumentsState>
+    val discountsState: StateFlow<ProfileDiscountsState>
     val myScheduleState: StateFlow<ProfileMyScheduleState>
     val pushTargetDebugState: StateFlow<ProfilePushTargetDebugState>
     val notificationSettingsState: StateFlow<ProfileNotificationSettingsState>
@@ -320,6 +344,7 @@ interface ProfileComponent : IPaymentProcessor {
     val textSignaturePrompt: StateFlow<ProfileTextSignaturePromptState?>
     val webDocumentPrompt: StateFlow<ProfileWebDocumentPromptState?>
     val billingAddressPrompt: StateFlow<BillingAddressDraft?>
+    val discountCodePrompt: StateFlow<DiscountCodePromptState?>
     val isStripeAccountConnected: StateFlow<Boolean>
 
     fun onBackClicked()
@@ -333,6 +358,7 @@ interface ProfileComponent : IPaymentProcessor {
     fun navigateToChildren()
     fun navigateToConnections()
     fun navigateToDocuments()
+    fun navigateToDiscounts()
     fun navigateToMySchedule()
     fun navigateToInvites()
     fun navigateToNotifications()
@@ -371,6 +397,17 @@ interface ProfileComponent : IPaymentProcessor {
     fun blockUser(user: UserData, leaveSharedChats: Boolean = true)
     fun unblockUser(user: UserData)
     fun refreshDocuments()
+    fun refreshDiscounts()
+    fun setDiscountItemType(itemType: String)
+    fun setDiscountTargetSearch(query: String)
+    fun selectDiscountTarget(targetId: String?)
+    fun updateDiscountName(name: String)
+    fun updateDiscountDescription(description: String)
+    fun updateDiscountedPriceCents(cents: Int)
+    fun createUserDiscount()
+    fun updateDiscountCodeInput(discountId: String, value: String)
+    fun updateDiscountUsageLimitInput(discountId: String, value: String)
+    fun generateDiscountCode(discount: DiscountOffer)
     fun refreshMySchedule()
     fun refreshInvites()
     fun acceptInvite(invite: Invite)
@@ -385,6 +422,8 @@ interface ProfileComponent : IPaymentProcessor {
     fun dismissWebDocumentPrompt()
     fun submitBillingAddress(address: BillingAddressDraft)
     fun dismissBillingAddressPrompt()
+    fun continueFromDiscountCodePrompt(code: String?)
+    fun dismissDiscountCodePrompt()
     fun createChild(
         firstName: String,
         lastName: String,
@@ -418,6 +457,7 @@ interface ProfileComponent : IPaymentProcessor {
         data class Children(val component: ProfileComponent) : Child()
         data class Connections(val component: ProfileComponent) : Child()
         data class Documents(val component: ProfileComponent) : Child()
+        data class Discounts(val component: ProfileComponent) : Child()
         data class MySchedule(val component: ProfileComponent) : Child()
         data class Invites(val component: ProfileComponent) : Child()
         data class Notifications(val component: ProfileComponent) : Child()
@@ -452,6 +492,9 @@ private sealed class ProfileConfig {
 
     @Serializable
     data object Documents : ProfileConfig()
+
+    @Serializable
+    data object Discounts : ProfileConfig()
 
     @Serializable
     data object MySchedule : ProfileConfig()
@@ -508,6 +551,9 @@ class DefaultProfileComponent(
     private val _documentsState = MutableStateFlow(ProfileDocumentsState())
     override val documentsState = _documentsState.asStateFlow()
 
+    private val _discountsState = MutableStateFlow(ProfileDiscountsState())
+    override val discountsState = _discountsState.asStateFlow()
+
     private val _myScheduleState = MutableStateFlow(ProfileMyScheduleState())
     override val myScheduleState = _myScheduleState.asStateFlow()
 
@@ -524,6 +570,8 @@ class DefaultProfileComponent(
     override val pendingInviteCount = _pendingInviteCount.asStateFlow()
     private val _billingAddressPrompt = MutableStateFlow<BillingAddressDraft?>(null)
     override val billingAddressPrompt = _billingAddressPrompt.asStateFlow()
+    private val _discountCodePrompt = MutableStateFlow<DiscountCodePromptState?>(null)
+    override val discountCodePrompt = _discountCodePrompt.asStateFlow()
 
     private val _activeBillPaymentId = MutableStateFlow<String?>(null)
     override val activeBillPaymentId = _activeBillPaymentId.asStateFlow()
@@ -549,6 +597,7 @@ class DefaultProfileComponent(
     private var childrenTabVisibilityUserId: String? = null
     private var pendingDocumentSyncJob: Job? = null
     private var pendingBillingAddressAction: (() -> Unit)? = null
+    private var pendingDiscountCodeAction: ((String?) -> Unit)? = null
     private var pendingChildTeamRegistrationPayment: Team? = null
 
     override val childStack: Value<ChildStack<*, ProfileComponent.Child>> = childStack(
@@ -683,6 +732,10 @@ class DefaultProfileComponent(
 
     override fun navigateToDocuments() {
         push(ProfileConfig.Documents)
+    }
+
+    override fun navigateToDiscounts() {
+        push(ProfileConfig.Discounts)
     }
 
     override fun navigateToMySchedule() {
@@ -1591,11 +1644,15 @@ class DefaultProfileComponent(
             if (!ensureBillingAddressOrPrompt { startChildTeamRegistrationPayment(team, registration) }) {
                 return@launch
             }
+            val discountCode = requestDiscountCode(
+                description = "Enter a discount code for this team registration, or continue without one.",
+            )
 
             loadingHandler?.showLoading("Preparing checkout...")
             billingRepository.createTeamRegistrationPurchaseIntent(
                 team = team,
                 teamRegistration = registration,
+                discountCode = discountCode,
             ).onSuccess { intent ->
                 runCatching {
                     pendingChildTeamRegistrationPayment = team
@@ -1864,6 +1921,178 @@ class DefaultProfileComponent(
         }
     }
 
+    override fun refreshDiscounts() {
+        scope.launch {
+            _discountsState.value = _discountsState.value.copy(
+                isLoading = true,
+                error = null,
+            )
+            billingRepository.listDiscounts(ownerType = "USER")
+                .onSuccess { discounts ->
+                    _discountsState.value = _discountsState.value.copy(
+                        isLoading = false,
+                        discounts = discounts,
+                        error = null,
+                    )
+                }
+                .onFailure { throwable ->
+                    _discountsState.value = _discountsState.value.copy(
+                        isLoading = false,
+                        error = throwable.userMessage("Failed to load discounts."),
+                    )
+                }
+            refreshDiscountTargets()
+        }
+    }
+
+    override fun setDiscountItemType(itemType: String) {
+        _discountsState.value = _discountsState.value.copy(
+            itemType = itemType.trim().uppercase().ifBlank { "EVENT" },
+            selectedTargetId = null,
+            targets = emptyList(),
+            error = null,
+        )
+        refreshDiscountTargets()
+    }
+
+    override fun setDiscountTargetSearch(query: String) {
+        _discountsState.value = _discountsState.value.copy(targetSearch = query)
+        refreshDiscountTargets()
+    }
+
+    override fun selectDiscountTarget(targetId: String?) {
+        val selected = _discountsState.value.targets.firstOrNull { it.id == targetId }
+        _discountsState.value = _discountsState.value.copy(
+            selectedTargetId = selected?.id,
+            discountedPriceCents = selected?.priceCents ?: 0,
+            name = selected?.let { "${it.label} discount" } ?: _discountsState.value.name,
+            error = null,
+        )
+    }
+
+    override fun updateDiscountName(name: String) {
+        _discountsState.value = _discountsState.value.copy(name = name)
+    }
+
+    override fun updateDiscountDescription(description: String) {
+        _discountsState.value = _discountsState.value.copy(description = description)
+    }
+
+    override fun updateDiscountedPriceCents(cents: Int) {
+        val selected = selectedDiscountTarget()
+        val bounded = cents.coerceIn(0, selected?.priceCents ?: Int.MAX_VALUE)
+        _discountsState.value = _discountsState.value.copy(discountedPriceCents = bounded)
+    }
+
+    override fun createUserDiscount() {
+        val state = _discountsState.value
+        val target = selectedDiscountTarget()
+        if (target == null) {
+            _discountsState.value = state.copy(error = "Select an item for this discount.")
+            return
+        }
+        val normalizedName = state.name.trim().takeIf(String::isNotBlank)
+        if (normalizedName == null) {
+            _discountsState.value = state.copy(error = "Discount name is required.")
+            return
+        }
+        scope.launch {
+            _discountsState.value = _discountsState.value.copy(isCreating = true, error = null)
+            billingRepository.createDiscount(
+                ownerType = "USER",
+                name = normalizedName,
+                description = state.description,
+                targetType = target.targetType,
+                targetId = target.id,
+                discountedPriceCents = state.discountedPriceCents.coerceIn(0, target.priceCents),
+            ).onSuccess {
+                _discountsState.value = _discountsState.value.copy(
+                    isCreating = false,
+                    name = "",
+                    description = "",
+                    selectedTargetId = null,
+                    discountedPriceCents = 0,
+                    error = null,
+                )
+                refreshDiscounts()
+            }.onFailure { throwable ->
+                _discountsState.value = _discountsState.value.copy(
+                    isCreating = false,
+                    error = throwable.userMessage("Failed to create discount."),
+                )
+            }
+        }
+    }
+
+    override fun updateDiscountCodeInput(discountId: String, value: String) {
+        _discountsState.value = _discountsState.value.copy(
+            codeInputs = _discountsState.value.codeInputs + (discountId to value),
+        )
+    }
+
+    override fun updateDiscountUsageLimitInput(discountId: String, value: String) {
+        _discountsState.value = _discountsState.value.copy(
+            usageLimitInputs = _discountsState.value.usageLimitInputs + (discountId to value.filter(Char::isDigit)),
+        )
+    }
+
+    override fun generateDiscountCode(discount: DiscountOffer) {
+        val discountId = discount.id.trim()
+        if (discountId.isEmpty()) return
+        val state = _discountsState.value
+        scope.launch {
+            _discountsState.value = state.copy(generatingCodeDiscountId = discountId, error = null)
+            billingRepository.generateDiscountCode(
+                discountId = discountId,
+                code = state.codeInputs[discountId],
+                usageLimit = state.usageLimitInputs[discountId]?.toIntOrNull(),
+            ).onSuccess {
+                _discountsState.value = _discountsState.value.copy(
+                    generatingCodeDiscountId = null,
+                    codeInputs = _discountsState.value.codeInputs - discountId,
+                    usageLimitInputs = _discountsState.value.usageLimitInputs - discountId,
+                    error = null,
+                )
+                refreshDiscounts()
+            }.onFailure { throwable ->
+                _discountsState.value = _discountsState.value.copy(
+                    generatingCodeDiscountId = null,
+                    error = throwable.userMessage("Failed to generate code."),
+                )
+            }
+        }
+    }
+
+    private fun refreshDiscountTargets() {
+        scope.launch {
+            val state = _discountsState.value
+            _discountsState.value = state.copy(targetLoading = true, error = null)
+            billingRepository.listDiscountTargets(
+                ownerType = "USER",
+                itemType = state.itemType,
+                query = state.targetSearch,
+            ).onSuccess { targets ->
+                _discountsState.value = _discountsState.value.copy(
+                    targetLoading = false,
+                    targets = targets,
+                    selectedTargetId = _discountsState.value.selectedTargetId
+                        ?.takeIf { selected -> targets.any { it.id == selected } },
+                    error = null,
+                )
+            }.onFailure { throwable ->
+                _discountsState.value = _discountsState.value.copy(
+                    targetLoading = false,
+                    error = throwable.userMessage("Failed to load discount targets."),
+                )
+            }
+        }
+    }
+
+    private fun selectedDiscountTarget(): DiscountTarget? {
+        val state = _discountsState.value
+        return state.targets.firstOrNull { it.id == state.selectedTargetId }
+    }
+
     override fun signDocument(document: ProfileDocumentCard) {
         val currentUserId = userRepository.currentUser.value.getOrNull()?.id?.trim().orEmpty()
         if (document.requiresChildEmail) {
@@ -2089,6 +2318,17 @@ class DefaultProfileComponent(
         pendingBillingAddressAction = null
     }
 
+    override fun continueFromDiscountCodePrompt(code: String?) {
+        val action = pendingDiscountCodeAction
+        pendingDiscountCodeAction = null
+        _discountCodePrompt.value = null
+        action?.invoke(code?.trim()?.takeIf(String::isNotBlank))
+    }
+
+    override fun dismissDiscountCodePrompt() {
+        continueFromDiscountCodePrompt(null)
+    }
+
     private suspend fun ensureBillingAddressOrPrompt(onReady: () -> Unit): Boolean {
         val billingAddress = billingRepository.getBillingAddress()
             .getOrElse { error ->
@@ -2105,6 +2345,21 @@ class DefaultProfileComponent(
         pendingBillingAddressAction = onReady
         _billingAddressPrompt.value = billingAddress ?: BillingAddressDraft()
         return false
+    }
+
+    private suspend fun requestDiscountCode(
+        description: String = "Enter a discount code for this checkout, or continue without one.",
+    ): String? = suspendCancellableCoroutine { continuation ->
+        pendingDiscountCodeAction = { code ->
+            if (continuation.isActive) {
+                continuation.resume(code?.trim()?.takeIf(String::isNotBlank))
+            }
+        }
+        _discountCodePrompt.value = DiscountCodePromptState(description = description)
+        continuation.invokeOnCancellation {
+            pendingDiscountCodeAction = null
+            _discountCodePrompt.value = null
+        }
     }
 
     private suspend fun loadSavedBillingAddress(): BillingAddressDraft? {
@@ -2288,6 +2543,7 @@ class DefaultProfileComponent(
         ProfileConfig.Children -> ProfileComponent.Child.Children(this@DefaultProfileComponent)
         ProfileConfig.Connections -> ProfileComponent.Child.Connections(this@DefaultProfileComponent)
         ProfileConfig.Documents -> ProfileComponent.Child.Documents(this@DefaultProfileComponent)
+        ProfileConfig.Discounts -> ProfileComponent.Child.Discounts(this@DefaultProfileComponent)
         ProfileConfig.MySchedule -> ProfileComponent.Child.MySchedule(this@DefaultProfileComponent)
         ProfileConfig.Invites -> ProfileComponent.Child.Invites(this@DefaultProfileComponent)
         ProfileConfig.Notifications -> ProfileComponent.Child.Notifications(this@DefaultProfileComponent)

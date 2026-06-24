@@ -111,6 +111,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val textSignaturePrompt: StateFlow<TextSignaturePromptState?>
     val webSignaturePrompt: StateFlow<WebSignaturePromptState?>
     val billingAddressPrompt: StateFlow<BillingAddressDraft?>
+    val discountCodePrompt: StateFlow<DiscountCodePromptState?>
     val startingTeamRegistrationId: StateFlow<String?>
     val eventImageIds: StateFlow<List<String>>
     val organizationTemplates: StateFlow<List<OrganizationTemplateDocument>>
@@ -247,6 +248,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun dismissWebSignaturePrompt()
     fun submitBillingAddress(address: BillingAddressDraft)
     fun dismissBillingAddressPrompt()
+    fun continueFromDiscountCodePrompt(code: String?)
+    fun dismissDiscountCodePrompt()
     fun onUploadSelected(photo: GalleryPhotoResult)
     fun deleteImage(imageId: String)
     fun sendNotification(title: String, message: String)

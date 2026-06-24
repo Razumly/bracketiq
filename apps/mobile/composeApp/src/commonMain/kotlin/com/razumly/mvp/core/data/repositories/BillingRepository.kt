@@ -320,6 +320,38 @@ data class BoldSignOperationStatus(
     }
 }
 
+data class DiscountCode(
+    val id: String,
+    val discountId: String,
+    val code: String,
+    val usageLimit: Int? = null,
+    val usedCount: Int = 0,
+    val status: String = "ACTIVE",
+)
+
+data class DiscountOffer(
+    val id: String,
+    val ownerType: String,
+    val ownerId: String,
+    val name: String,
+    val description: String? = null,
+    val status: String = "ACTIVE",
+    val targetType: String,
+    val targetId: String,
+    val originalPriceCents: Int,
+    val discountedPriceCents: Int,
+    val codes: List<DiscountCode> = emptyList(),
+)
+
+data class DiscountTarget(
+    val id: String,
+    val label: String,
+    val description: String? = null,
+    val priceCents: Int,
+    val itemType: String,
+    val targetType: String,
+)
+
 interface IBillingRepository : IMVPRepository {
     suspend fun createPurchaseIntent(
         event: Event,
@@ -328,6 +360,7 @@ interface IBillingRepository : IMVPRepository {
         timeSlotContext: PurchaseIntentTimeSlotContext? = null,
         occurrence: EventOccurrenceSelection? = null,
         divisionId: String? = null,
+        discountCode: String? = null,
     ): Result<PurchaseIntent>
     suspend fun createPurchaseIntent(
         event: Event,
@@ -337,6 +370,7 @@ interface IBillingRepository : IMVPRepository {
         occurrence: EventOccurrenceSelection? = null,
         divisionId: String? = null,
         answers: Map<String, String>,
+        discountCode: String? = null,
     ): Result<PurchaseIntent> = createPurchaseIntent(
         event = event,
         teamId = teamId,
@@ -344,10 +378,12 @@ interface IBillingRepository : IMVPRepository {
         timeSlotContext = timeSlotContext,
         occurrence = occurrence,
         divisionId = divisionId,
+        discountCode = discountCode,
     )
     suspend fun createTeamRegistrationPurchaseIntent(
         team: Team,
         teamRegistration: TeamPlayerRegistration? = null,
+        discountCode: String? = null,
     ): Result<PurchaseIntent>
     suspend fun getRequiredSignLinks(eventId: String): Result<List<SignStep>>
     suspend fun getRequiredSignLinks(
@@ -439,7 +475,32 @@ interface IBillingRepository : IMVPRepository {
     suspend fun getProductsByIds(productIds: List<String>): Result<List<Product>>
     suspend fun listProductsByOrganization(organizationId: String): Result<List<Product>>
     suspend fun createProductPurchaseIntent(productId: String): Result<PurchaseIntent>
+    suspend fun createProductPurchaseIntent(productId: String, discountCode: String?): Result<PurchaseIntent> =
+        createProductPurchaseIntent(productId)
     suspend fun createProductSubscriptionIntent(productId: String): Result<PurchaseIntent>
+    suspend fun createProductSubscriptionIntent(productId: String, discountCode: String?): Result<PurchaseIntent> =
+        createProductSubscriptionIntent(productId)
+    suspend fun listDiscounts(ownerType: String = "USER", ownerId: String? = null): Result<List<DiscountOffer>>
+    suspend fun listDiscountTargets(
+        ownerType: String = "USER",
+        ownerId: String? = null,
+        itemType: String,
+        query: String? = null,
+    ): Result<List<DiscountTarget>>
+    suspend fun createDiscount(
+        ownerType: String = "USER",
+        ownerId: String? = null,
+        name: String,
+        description: String? = null,
+        targetType: String,
+        targetId: String,
+        discountedPriceCents: Int,
+    ): Result<DiscountOffer>
+    suspend fun generateDiscountCode(
+        discountId: String,
+        code: String? = null,
+        usageLimit: Int? = null,
+    ): Result<DiscountCode>
     suspend fun createProductSubscription(
         productId: String,
         organizationId: String? = null,
@@ -477,6 +538,7 @@ class BillingRepository(
         timeSlotContext: PurchaseIntentTimeSlotContext?,
         occurrence: EventOccurrenceSelection?,
         divisionId: String?,
+        discountCode: String?,
     ): Result<PurchaseIntent> = createPurchaseIntent(
         event = event,
         teamId = teamId,
@@ -485,6 +547,7 @@ class BillingRepository(
         occurrence = occurrence,
         divisionId = divisionId,
         answers = emptyMap(),
+        discountCode = discountCode,
     )
 
     override suspend fun createPurchaseIntent(
@@ -495,6 +558,7 @@ class BillingRepository(
         occurrence: EventOccurrenceSelection?,
         divisionId: String?,
         answers: Map<String, String>,
+        discountCode: String?,
     ): Result<PurchaseIntent> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
         val email = userRepository.currentAccount.value.getOrNull()?.email
@@ -545,6 +609,7 @@ class BillingRepository(
                 },
                 slotId = occurrence?.slotId?.trim()?.takeIf(String::isNotBlank),
                 occurrenceDate = occurrence?.occurrenceDate?.trim()?.takeIf(String::isNotBlank),
+                discountCode = discountCode?.trim()?.takeIf(String::isNotBlank),
                 answers = answers.toRegistrationQuestionAnswerDtos(),
             ),
         )
@@ -558,6 +623,7 @@ class BillingRepository(
     override suspend fun createTeamRegistrationPurchaseIntent(
         team: Team,
         teamRegistration: TeamPlayerRegistration?,
+        discountCode: String?,
     ): Result<PurchaseIntent> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
         val email = userRepository.currentAccount.value.getOrNull()?.email
@@ -576,6 +642,7 @@ class BillingRepository(
                 teamRegistration = teamRegistration
                     ?.toTeamRegistrationCheckoutTarget(normalizedTeamId)
                     ?: BillingTeamRefDto(teamId = normalizedTeamId),
+                discountCode = discountCode?.trim()?.takeIf(String::isNotBlank),
             ),
         )
 
@@ -1307,7 +1374,13 @@ class BillingRepository(
         response.products.mapNotNull { it.toProductOrNull() }
     }
 
-    override suspend fun createProductPurchaseIntent(productId: String): Result<PurchaseIntent> = runCatching {
+    override suspend fun createProductPurchaseIntent(productId: String): Result<PurchaseIntent> =
+        createProductPurchaseIntent(productId, null)
+
+    override suspend fun createProductPurchaseIntent(
+        productId: String,
+        discountCode: String?,
+    ): Result<PurchaseIntent> = runCatching {
         val normalizedId = productId.trim()
         if (normalizedId.isEmpty()) {
             throw Exception("Product id is required.")
@@ -1321,6 +1394,7 @@ class BillingRepository(
             body = PurchaseIntentRequestDto(
                 user = BillingUserRefDto(id = user.id, email = email),
                 productId = normalizedId,
+                discountCode = discountCode?.trim()?.takeIf(String::isNotBlank),
             ),
         )
 
@@ -1330,15 +1404,23 @@ class BillingRepository(
         response
     }
 
-    override suspend fun createProductSubscriptionIntent(productId: String): Result<PurchaseIntent> = runCatching {
+    override suspend fun createProductSubscriptionIntent(productId: String): Result<PurchaseIntent> =
+        createProductSubscriptionIntent(productId, null)
+
+    override suspend fun createProductSubscriptionIntent(
+        productId: String,
+        discountCode: String?,
+    ): Result<PurchaseIntent> = runCatching {
         val normalizedId = productId.trim()
         if (normalizedId.isEmpty()) {
             throw Exception("Product id is required.")
         }
 
-        val response = api.post<EmptyRequestDto, PurchaseIntent>(
+        val response = api.post<ProductSubscriptionCheckoutRequestDto, PurchaseIntent>(
             path = "api/products/$normalizedId/subscriptions",
-            body = EmptyRequestDto(),
+            body = ProductSubscriptionCheckoutRequestDto(
+                discountCode = discountCode?.trim()?.takeIf(String::isNotBlank),
+            ),
         )
 
         if (!response.error.isNullOrBlank()) {
@@ -1368,6 +1450,97 @@ class BillingRepository(
         )
 
         response.toSubscriptionOrNull() ?: error("Create subscription response missing subscription")
+    }
+
+    override suspend fun listDiscounts(ownerType: String, ownerId: String?): Result<List<DiscountOffer>> = runCatching {
+        val normalizedOwnerType = ownerType.trim().uppercase().ifBlank { "USER" }
+        val params = buildList {
+            add("ownerType=${normalizedOwnerType.encodeURLQueryComponent()}")
+            ownerId?.trim()?.takeIf(String::isNotBlank)?.let { id ->
+                add("ownerId=${id.encodeURLQueryComponent()}")
+            }
+        }.joinToString("&")
+        val response = api.get<DiscountsResponseDto>(path = "api/discounts?$params")
+        if (!response.error.isNullOrBlank()) {
+            throw Exception(response.error)
+        }
+        response.discounts.map { it.toDiscountOffer() }
+    }
+
+    override suspend fun listDiscountTargets(
+        ownerType: String,
+        ownerId: String?,
+        itemType: String,
+        query: String?,
+    ): Result<List<DiscountTarget>> = runCatching {
+        val normalizedOwnerType = ownerType.trim().uppercase().ifBlank { "USER" }
+        val normalizedItemType = itemType.trim().uppercase().ifBlank { "EVENT" }
+        val params = buildList {
+            add("ownerType=${normalizedOwnerType.encodeURLQueryComponent()}")
+            add("itemType=${normalizedItemType.encodeURLQueryComponent()}")
+            ownerId?.trim()?.takeIf(String::isNotBlank)?.let { id ->
+                add("ownerId=${id.encodeURLQueryComponent()}")
+            }
+            query?.trim()?.takeIf(String::isNotBlank)?.let { search ->
+                add("query=${search.encodeURLQueryComponent()}")
+            }
+        }.joinToString("&")
+        val response = api.get<DiscountTargetsResponseDto>(path = "api/discounts/targets?$params")
+        if (!response.error.isNullOrBlank()) {
+            throw Exception(response.error)
+        }
+        response.targets.map { it.toDiscountTarget() }
+    }
+
+    override suspend fun createDiscount(
+        ownerType: String,
+        ownerId: String?,
+        name: String,
+        description: String?,
+        targetType: String,
+        targetId: String,
+        discountedPriceCents: Int,
+    ): Result<DiscountOffer> = runCatching {
+        val response = api.post<CreateDiscountRequestDto, DiscountResponseDto>(
+            path = "api/discounts",
+            body = CreateDiscountRequestDto(
+                ownerType = ownerType.trim().uppercase().ifBlank { "USER" },
+                ownerId = ownerId?.trim()?.takeIf(String::isNotBlank),
+                name = name.trim(),
+                description = description?.trim()?.takeIf(String::isNotBlank),
+                targetType = targetType.trim().uppercase(),
+                targetId = targetId.trim(),
+                discountedPriceCents = discountedPriceCents.coerceAtLeast(0),
+            ),
+        )
+        if (!response.error.isNullOrBlank()) {
+            throw Exception(response.error)
+        }
+        response.discount?.toDiscountOffer()
+            ?: throw Exception("Discount response was invalid.")
+    }
+
+    override suspend fun generateDiscountCode(
+        discountId: String,
+        code: String?,
+        usageLimit: Int?,
+    ): Result<DiscountCode> = runCatching {
+        val normalizedDiscountId = discountId.trim()
+        if (normalizedDiscountId.isEmpty()) {
+            throw Exception("Discount id is required.")
+        }
+        val response = api.post<GenerateDiscountCodeRequestDto, DiscountCodeResponseDto>(
+            path = "api/discounts/${normalizedDiscountId.encodeURLQueryComponent()}/codes",
+            body = GenerateDiscountCodeRequestDto(
+                code = code?.trim()?.takeIf(String::isNotBlank),
+                usageLimit = usageLimit?.takeIf { it > 0 },
+            ),
+        )
+        if (!response.error.isNullOrBlank()) {
+            throw Exception(response.error)
+        }
+        response.code?.toDiscountCode()
+            ?: throw Exception("Discount code response was invalid.")
     }
 
     override suspend fun listOrganizations(limit: Int): Result<List<Organization>> = runCatching {
@@ -1710,6 +1883,119 @@ private fun TeamPlayerRegistration.toTeamRegistrationCheckoutTarget(teamId: Stri
 @Serializable
 private data class EmptyRequestDto(
     val noop: Boolean = true,
+)
+
+@Serializable
+private data class ProductSubscriptionCheckoutRequestDto(
+    val discountCode: String? = null,
+)
+
+@Serializable
+private data class DiscountsResponseDto(
+    val discounts: List<DiscountOfferDto> = emptyList(),
+    val error: String? = null,
+)
+
+@Serializable
+private data class DiscountResponseDto(
+    val discount: DiscountOfferDto? = null,
+    val error: String? = null,
+)
+
+@Serializable
+private data class DiscountOfferDto(
+    val id: String? = null,
+    val ownerType: String? = null,
+    val ownerId: String? = null,
+    val name: String? = null,
+    val description: String? = null,
+    val status: String? = null,
+    val targetType: String? = null,
+    val targetId: String? = null,
+    val originalPriceCents: Int? = null,
+    val discountedPriceCents: Int? = null,
+    val codes: List<DiscountCodeDto> = emptyList(),
+) {
+    fun toDiscountOffer(): DiscountOffer = DiscountOffer(
+        id = id.orEmpty(),
+        ownerType = ownerType?.trim()?.takeIf(String::isNotBlank) ?: "USER",
+        ownerId = ownerId.orEmpty(),
+        name = name?.trim()?.takeIf(String::isNotBlank) ?: "Discount",
+        description = description?.trim()?.takeIf(String::isNotBlank),
+        status = status?.trim()?.takeIf(String::isNotBlank) ?: "ACTIVE",
+        targetType = targetType?.trim()?.takeIf(String::isNotBlank) ?: "EVENT",
+        targetId = targetId.orEmpty(),
+        originalPriceCents = (originalPriceCents ?: 0).coerceAtLeast(0),
+        discountedPriceCents = (discountedPriceCents ?: 0).coerceAtLeast(0),
+        codes = codes.map { it.toDiscountCode() },
+    )
+}
+
+@Serializable
+private data class DiscountCodeResponseDto(
+    val code: DiscountCodeDto? = null,
+    val error: String? = null,
+)
+
+@Serializable
+private data class DiscountCodeDto(
+    val id: String? = null,
+    val discountId: String? = null,
+    val code: String? = null,
+    val usageLimit: Int? = null,
+    val usedCount: Int? = null,
+    val status: String? = null,
+) {
+    fun toDiscountCode(): DiscountCode = DiscountCode(
+        id = id.orEmpty(),
+        discountId = discountId.orEmpty(),
+        code = code?.trim()?.takeIf(String::isNotBlank) ?: "CODE",
+        usageLimit = usageLimit?.takeIf { it > 0 },
+        usedCount = (usedCount ?: 0).coerceAtLeast(0),
+        status = status?.trim()?.takeIf(String::isNotBlank) ?: "ACTIVE",
+    )
+}
+
+@Serializable
+private data class DiscountTargetsResponseDto(
+    val targets: List<DiscountTargetDto> = emptyList(),
+    val error: String? = null,
+)
+
+@Serializable
+private data class DiscountTargetDto(
+    val id: String? = null,
+    val label: String? = null,
+    val description: String? = null,
+    val priceCents: Int? = null,
+    val itemType: String? = null,
+    val targetType: String? = null,
+) {
+    fun toDiscountTarget(): DiscountTarget = DiscountTarget(
+        id = id.orEmpty(),
+        label = label?.trim()?.takeIf(String::isNotBlank) ?: "Item",
+        description = description?.trim()?.takeIf(String::isNotBlank),
+        priceCents = (priceCents ?: 0).coerceAtLeast(0),
+        itemType = itemType?.trim()?.takeIf(String::isNotBlank) ?: "EVENT",
+        targetType = targetType?.trim()?.takeIf(String::isNotBlank) ?: "EVENT",
+    )
+}
+
+@Serializable
+private data class CreateDiscountRequestDto(
+    val ownerType: String,
+    val ownerId: String? = null,
+    val name: String,
+    val description: String? = null,
+    val targetType: String,
+    val targetId: String,
+    val discountedPriceCents: Int,
+)
+
+@Serializable
+private data class GenerateDiscountCodeRequestDto(
+    val code: String? = null,
+    val usageLimit: Int? = null,
 )
 
 @Serializable

@@ -70,6 +70,7 @@ data class PurchaseIntentRequestDto(
     val occurrenceDate: String? = null,
     val productId: String? = null,
     val billingAddress: BillingAddressDto? = null,
+    val discountCode: String? = null,
     val answers: List<RegistrationQuestionAnswerDto> = emptyList(),
 )
 
