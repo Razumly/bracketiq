@@ -26,6 +26,7 @@ After this refactor, the app should behave the same, but the code will be organi
   - [x] (2026-06-24 01:24Z) Extracted the Registration card into `EventDetailsRegistrationSection.kt`, including read-only price/registration/division/question content and edit-mode event type, team, age, refund, registration cutoff, and required-document controls.
   - [x] (2026-06-24 01:30Z) Extracted the Match Rules card into `EventDetailsMatchRulesSection.kt`, including read-only match-rule rows, edit-mode overtime/shootout/timekeeping controls, incident type selection, custom incident creation, and reset-to-default behavior.
   - [x] (2026-06-24 01:45Z) Extracted the Staff card into `EventDetailsStaffSection.kt`, including read-only staff summary, team-official settings, official scheduling, official positions, staff search, email invites, and assigned staff lists.
+  - [x] (2026-06-24 02:03Z) Extracted the Divisions/Specifics card wrapper, read-only summary, division add/update controls, validation messages, and division list into `EventDetailsDivisionsSection.kt`.
 - [x] (2026-04-18) Run focused regression tests after extraction.
 - [ ] Run the full requested Gradle test suite. Android debug/release unit tests and Android JVM aggregation passed; `allTests` is blocked locally by missing macOS `xcrun`.
 - [x] (2026-04-18) Run Android debug build/install and emulator QA using the `test-android-apps` workflow.
@@ -41,6 +42,7 @@ After this refactor, the app should behave the same, but the code will be organi
 - Registration is a useful standalone component because it owns both participant-facing registration summaries and edit-time registration/payment prerequisite controls without needing schedule, staff, or division editor state.
 - Match Rules is a good standalone section because its UI is driven by resolved sport defaults plus a narrow event override callback, and it can carry the custom incident helper logic out of the parent file.
 - Staff is a clean section boundary after the existing `staff` package helpers because the parent can keep transient search/invite state while the extracted section owns all visible staff layout.
+- The Divisions/Specifics card is the highest-risk remaining section because the middle editor form still mutates parent-owned division editor, payment plan, and date-picker state. The stable card/read-only/action/list boundaries can move first without changing public behavior.
 
 ## Decision Log
 
@@ -291,6 +293,19 @@ Staff extraction evidence:
      541 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailsStaffSection.kt
 
 Validation after Staff extraction:
+
+    git diff --check
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:compileCommonMainKotlinMetadata --console=plain
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailsMatchRulesTest*" --tests "*EventDetailsScheduleLockingTest*" --tests "*LeagueSlotValidationTest*" --tests "*EventDetailsDivisionEditorHelpersTest*" --console=plain
+
+All three commands passed on 2026-06-24. The focused test run reported adb reverse could not be configured because no device/emulator was attached, but the JVM tests completed successfully.
+
+Divisions/Specifics extraction evidence:
+
+    3908 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetails.kt
+     341 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailsDivisionsSection.kt
+
+Validation after Divisions/Specifics extraction:
 
     git diff --check
     PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:compileCommonMainKotlinMetadata --console=plain

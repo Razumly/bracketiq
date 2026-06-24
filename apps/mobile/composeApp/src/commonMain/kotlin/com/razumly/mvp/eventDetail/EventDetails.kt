@@ -111,7 +111,6 @@ import com.razumly.mvp.core.data.dataTypes.officialPositionSummary
 import com.razumly.mvp.core.data.dataTypes.positionSummary
 import com.razumly.mvp.core.data.dataTypes.toLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
-import com.razumly.mvp.core.data.dataTypes.usesTeamOfficialScheduling
 import com.razumly.mvp.core.data.dataTypes.withLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.withTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
@@ -131,7 +130,6 @@ import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.extractDivisionTokenFromId
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
-import com.razumly.mvp.core.data.util.toDivisionDisplayLabels
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import com.razumly.mvp.core.presentation.IPaymentProcessor
@@ -150,7 +148,6 @@ import com.razumly.mvp.core.presentation.util.getScreenHeight
 import com.razumly.mvp.core.presentation.util.moneyFormat
 import com.razumly.mvp.core.presentation.util.toEnumTitleCase
 import com.razumly.mvp.core.presentation.util.toNameCase
-import com.razumly.mvp.core.presentation.util.teamSizeFormat
 import com.razumly.mvp.core.presentation.util.timeFormat
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.presentation.util.transitionSpec
@@ -166,7 +163,6 @@ import com.razumly.mvp.eventDetail.composables.RegistrationOptions
 import com.razumly.mvp.eventDetail.composables.SelectEventImage
 import com.razumly.mvp.eventDetail.composables.TextInputField
 import com.razumly.mvp.eventDetail.composables.TournamentConfigurationFields
-import com.razumly.mvp.eventDetail.division.DivisionDetailEditList
 import com.razumly.mvp.eventDetail.edit.RequiredDocumentsSection
 import com.razumly.mvp.eventDetail.readonly.HostedByReadOnlyRow
 import com.razumly.mvp.eventDetail.readonly.ReadOnlyDivisionsList
@@ -177,16 +173,10 @@ import com.razumly.mvp.eventDetail.readonly.buildScheduleDetailsRows
 import com.razumly.mvp.eventDetail.readonly.resolveReadOnlyFieldCount
 import com.razumly.mvp.eventDetail.shared.BackgroundImage
 import com.razumly.mvp.eventDetail.shared.CollapsibleEditorSubsectionHeader
-import com.razumly.mvp.eventDetail.shared.DetailGridItem
-import com.razumly.mvp.eventDetail.shared.DetailKeyValueList
 import com.razumly.mvp.eventDetail.shared.DetailRowSpec
-import com.razumly.mvp.eventDetail.shared.DetailStatsGrid
 import com.razumly.mvp.eventDetail.shared.FormSectionDivider
 import com.razumly.mvp.eventDetail.shared.LabeledCheckboxRow
-import com.razumly.mvp.eventDetail.shared.SummaryTagChip
-import com.razumly.mvp.eventDetail.shared.animatedCardSection
 import com.razumly.mvp.eventDetail.shared.localImageScheme
-import com.razumly.mvp.eventDetail.staff.EditableStaffCardList
 import com.razumly.mvp.eventDetail.staff.StaffAssignmentCard
 import com.razumly.mvp.eventDetail.staff.StaffAssignmentCardModel
 import com.razumly.mvp.eventDetail.staff.buildAssignedStaffCards
@@ -2578,135 +2568,24 @@ fun EventDetails(
                     ),
                 )
 
-                if (editView) {
-                    // Specifics Card
-                    animatedCardSection(
-                        sectionId = readOnlyUiModel.divisions.sectionId,
+                eventDetailsDivisionsSection(
+                    state = EventDetailsDivisionsSectionState(
+                        readOnlySection = readOnlyUiModel.divisions,
+                        editSection = editUiModel.divisions,
                         sectionExpansionStates = sectionExpansionStates,
-                        sectionTitle = readOnlyUiModel.divisions.title,
-                        collapsibleInEditMode = true,
-                        collapsibleInViewMode = true,
-                        viewSummary = readOnlyUiModel.divisions.summary,
-                        enabled = sportRequiredSectionEnabled,
-                        onDisabledClick = ::showSelectSportMessage,
-                        isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
+                        eventDetailsMode = eventDetailsMode,
                         lazyListState = lazyListState,
                         stickyHeaderTopInset = stickyHeaderTopInset,
-                        animationDelay = 400,
-                        requiredMissingCount = editUiModel.divisions.requiredMissingCount,
-                        viewContent = {
-                        val maxParticipantsLabel =
-                            if (event.teamSignup) "Max teams" else "Max players"
-                        val divisionsText =
-                            event.divisions.toDivisionDisplayLabels(event.divisionDetails).joinToString()
-                                .ifBlank { "Not set" }
-                        DetailStatsGrid(
-                            items = listOf(
-                                DetailGridItem(maxParticipantsLabel, event.maxParticipants.toString()),
-                                DetailGridItem("Team size", event.teamSizeLimit.teamSizeFormat()),
-                                DetailGridItem("Team event", if (event.teamSignup) "Yes" else "No"),
-                                DetailGridItem("Division mode", if (event.singleDivision) "Single" else "Multi"),
-                                DetailGridItem("Teams", teamsCount.toString()),
-                                DetailGridItem("Free agents", freeAgentCount.toString()),
-                            ),
-                        )
-                        DetailKeyValueList(
-                            rows = buildList {
-                                add(DetailRowSpec("Divisions", divisionsText))
-                                when (event.eventType) {
-                                    EventType.LEAGUE -> {
-                                        add(DetailRowSpec("Games per opponent", "${event.gamesPerOpponent ?: 1}"))
-                                        if (event.usesSets) {
-                                            add(DetailRowSpec("Sets per match", "${event.setsPerMatch ?: 1}"))
-                                            add(DetailRowSpec("Set duration", "${event.setDurationMinutes ?: 20} minutes"))
-                                            if (event.pointsToVictory.isNotEmpty()) {
-                                                add(
-                                                    DetailRowSpec(
-                                                        "Points to victory",
-                                                        event.pointsToVictory.joinToString(),
-                                                    ),
-                                                )
-                                            }
-                                        } else {
-                                            add(
-                                                DetailRowSpec(
-                                                    "Match duration",
-                                                    "${event.matchDurationMinutes ?: 60} minutes",
-                                                ),
-                                            )
-                                        }
-                                        add(DetailRowSpec("Rest time", "${event.restTimeMinutes ?: 0} minutes"))
-                                        if (event.includePlayoffs) {
-                                            add(
-                                                DetailRowSpec(
-                                                    "Playoffs",
-                                                    if (event.singleDivision) {
-                                                        event.playoffTeamCount?.let { "$it teams" } ?: "Not set"
-                                                    } else {
-                                                        "Configured per division"
-                                                    },
-                                                ),
-                                            )
-                                        }
-                                    }
-
-                                    EventType.TOURNAMENT -> {
-                                        if (event.usesSets) {
-                                            add(
-                                                DetailRowSpec(
-                                                    "Set duration",
-                                                    "${event.setDurationMinutes ?: 20} minutes",
-                                                ),
-                                            )
-                                        } else {
-                                            add(
-                                                DetailRowSpec(
-                                                    "Match duration",
-                                                    "${event.matchDurationMinutes ?: 60} minutes",
-                                                ),
-                                            )
-                                        }
-                                        add(
-                                            DetailRowSpec(
-                                                "Bracket",
-                                                if (event.doubleElimination) "Double elimination" else "Single elimination",
-                                            ),
-                                        )
-                                        add(DetailRowSpec("Winner set count", event.winnerSetCount.toString()))
-                                        if (event.winnerBracketPointsToVictory.isNotEmpty()) {
-                                            add(
-                                                DetailRowSpec(
-                                                    "Winner points",
-                                                    event.winnerBracketPointsToVictory.joinToString(),
-                                                ),
-                                            )
-                                        }
-                                        if (event.doubleElimination) {
-                                            add(
-                                                DetailRowSpec(
-                                                    "Loser set count",
-                                                    event.loserSetCount.toString(),
-                                                ),
-                                            )
-                                            if (event.loserBracketPointsToVictory.isNotEmpty()) {
-                                                add(
-                                                    DetailRowSpec(
-                                                        "Loser points",
-                                                        event.loserBracketPointsToVictory.joinToString(),
-                                                    ),
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    EventType.EVENT, EventType.WEEKLY_EVENT -> {
-                                        // No additional event-only rows for now.
-                                    }
-                                }
-                            },
-                        )
-                        },
-                        editContent = {
+                        enabled = sportRequiredSectionEnabled,
+                        editView = editView,
+                        event = event,
+                        teamsCount = teamsCount,
+                        freeAgentCount = freeAgentCount,
+                    ),
+                    actions = EventDetailsDivisionsSectionActions(
+                        onDisabledClick = ::showSelectSportMessage,
+                    ),
+                    editContent = {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -3561,123 +3440,28 @@ fun EventDetails(
                         }
                     }
 
-                    val showDivisionPlayoffTeamCount =
-                        editEvent.eventType == EventType.LEAGUE &&
-                            editEvent.includePlayoffs &&
-                            !editEvent.singleDivision
-                    val isEditingDivision = !divisionEditor.editingId.isNullOrBlank()
-                    @Composable
-                    fun DivisionActionLeadingField(modifier: Modifier) {
-                        when {
-                            showDivisionPlayoffTeamCount -> {
-                                NumberInputField(
-                                    modifier = modifier,
-                                    value = divisionEditor.playoffTeamCount?.toString().orEmpty(),
-                                    label = "Division Playoff Team Count",
-                                    enabled = divisionEditorReady,
-                                    onValueChange = { value ->
-                                        if (!divisionEditorReady) {
-                                            return@NumberInputField
-                                        }
-                                        if (value.isEmpty() || value.all { it.isDigit() }) {
-                                            val parsed = if (value.isBlank()) null else value.toIntOrNull()
-                                            divisionEditor = divisionEditor.copy(
-                                                playoffTeamCount = parsed,
-                                                error = null,
-                                            )
-                                        }
-                                    },
-                                    isError = (divisionEditor.playoffTeamCount ?: 0) < 2,
-                                    errorMessage = "Required and must be at least 2.",
-                                )
-                            }
-                            else -> Spacer(modifier = modifier)
-                        }
-                    }
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (isEditingDivision) {
-                            if (showDivisionPlayoffTeamCount) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.Top,
-                                ) {
-                                    DivisionActionLeadingField(Modifier.weight(1f))
-                                    Spacer(modifier = Modifier.weight(1f))
-                                }
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Button(
-                                    onClick = { handleSaveDivisionDetail() },
-                                    enabled = true,
-                                ) {
-                                    Text("Update Division")
-                                }
-                                TextButton(onClick = { resetDivisionEditor() }) {
-                                    Text("Cancel Edit")
-                                }
-                            }
-                        } else {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                DivisionActionLeadingField(Modifier.weight(1f))
-                                Button(
-                                    onClick = { handleSaveDivisionDetail() },
-                                    enabled = true,
-                                ) {
-                                    Text("Add Division")
-                                }
-                            }
                         }
                     }
 
-                    if (divisionEditor.error != null) {
-                        Text(
-                            text = divisionEditor.error.orEmpty(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                    if (!isSkillLevelValid) {
-                        Text(
-                            text = "Add at least one division.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                    if (
-                        editEvent.eventType == EventType.TOURNAMENT &&
-                        editEvent.includePlayoffs &&
-                        !isLeaguePlayoffTeamsValid
-                    ) {
-                        Text(
-                            text = "Pool play requires pool count, bracket team count, and even pool sizing for each division.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-
-                        }
-                    }
-
-                    DivisionDetailEditList(
-                        event = editEvent,
-                        divisionDetails = divisionDetailsForSettings,
-                        onEditDivision = ::handleEditDivisionDetail,
-                        onRemoveDivision = ::handleRemoveDivisionDetail,
+                    EventDetailsDivisionEditorActionsContent(
+                        state = EventDetailsDivisionEditorActionsState(
+                            editEvent = editEvent,
+                            divisionEditor = divisionEditor,
+                            divisionEditorReady = divisionEditorReady,
+                            isSkillLevelValid = isSkillLevelValid,
+                            isLeaguePlayoffTeamsValid = isLeaguePlayoffTeamsValid,
+                            divisionDetails = divisionDetailsForSettings,
+                        ),
+                        actions = EventDetailsDivisionEditorActions(
+                            onDivisionEditorChange = { divisionEditor = it },
+                            onSaveDivision = ::handleSaveDivisionDetail,
+                            onResetDivisionEditor = ::resetDivisionEditor,
+                            onEditDivision = ::handleEditDivisionDetail,
+                            onRemoveDivision = ::handleRemoveDivisionDetail,
+                        ),
                     )
-
-                    }
-
-                    )
-                }
+                    },
+                )
 
                 eventDetailsLeagueScoringSection(
                     state = EventDetailsLeagueScoringState(
