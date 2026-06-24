@@ -108,16 +108,18 @@ internal fun formatTeamsNeedingPlayersSummary(teamsNeedingPlayers: List<Int>): S
 
 @Composable
 internal fun EventOverviewSections(
-    eventWithRelations: EventWithFullRelations,
-    teamsAndParticipantsLoading: Boolean,
-    matchesLoading: Boolean,
-    showFullnessSummary: Boolean,
-    selectedWeeklyOccurrenceLabel: String? = null,
-    selectedWeeklyOccurrenceSummary: WeeklyOccurrenceSummary? = null,
-    overviewParticipantSummary: EventParticipantsSummary? = null,
-    showOpenDetailsAction: Boolean,
-    onOpenDetails: () -> Unit,
+    state: EventDetailOverviewState,
+    actions: EventDetailOverviewActions,
 ) {
+    val eventWithRelations = state.eventWithRelations
+    val teamsAndParticipantsLoading = state.teamsAndParticipantsLoading
+    val matchesLoading = state.matchesLoading
+    val showFullnessSummary = state.showFullnessSummary
+    val selectedWeeklyOccurrenceLabel = state.selectedWeeklyOccurrenceLabel
+    val selectedWeeklyOccurrenceSummary = state.selectedWeeklyOccurrenceSummary
+    val overviewParticipantSummary = state.overviewParticipantSummary
+    val showOpenDetailsAction = state.showOpenDetailsAction
+    val onOpenDetails = actions.onOpenDetails
     val event = eventWithRelations.event
     val showRosterSections = shouldShowOverviewRosterSections(event)
     val loadedParticipantSummary = selectedWeeklyOccurrenceSummary?.let { summary ->

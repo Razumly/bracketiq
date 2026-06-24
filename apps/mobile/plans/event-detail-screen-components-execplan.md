@@ -22,8 +22,8 @@ After this refactor, the app should behave the same, but a developer should be a
 - [x] (2026-06-24 00:10Z) Extracted `EventDetailJoinAndInviteSheets.kt` as one complete registration, join, invite, and registration-question UI family.
 - [x] (2026-06-24 00:27Z) Extracted `EventDetailStandingsTab.kt` as one complete standings component family and validated it.
 - [x] (2026-06-24 00:34Z) Extracted `EventDetailDialogs.kt` for remaining route-level modal rendering that is not naturally owned by another component family.
-- [ ] Introduce section-level immutable state and action containers for the largest extracted regions, then update extracted composables to receive those containers instead of long raw parameter lists.
-- [ ] Evaluate which section containers should become true child components and record the decision in this plan before creating any Decompose child component.
+- [x] (2026-06-24 00:42Z) Introduced section-level immutable state and action containers for overview, join sheets, and standings, then updated extracted composables to receive those containers instead of long raw parameter lists.
+- [x] (2026-06-24 00:42Z) Evaluated which section containers should become true child components; no new Decompose child component is warranted in this screen-only pass.
 - [ ] Run focused event-detail regression tests, common metadata compilation, Android debug build/install, and emulator QA after the component extraction milestones.
 - [ ] Update the related plans if this work closes or changes any of their remaining unchecked items.
 
@@ -53,6 +53,12 @@ After this refactor, the app should behave the same, but a developer should be a
 - Observation: `TextSignatureDialog` has a cross-feature caller and should remain publicly importable after the dialog move.
   Evidence: `composeApp/src/commonMain/kotlin/com/razumly/mvp/organizationDetail/OrganizationDetailScreen.kt` imports `com.razumly.mvp.eventDetail.TextSignatureDialog`, so `EventDetailDialogs.kt` keeps that function public while route-only dialogs are internal or private.
 
+- Observation: The largest extracted regions benefit from state/action containers, but the route still needs to construct those containers from local UI state and collected component state.
+  Evidence: `EventDetailScreenModels.kt` now defines `EventDetailOverviewState`, `EventDetailOverviewActions`, `EventDetailJoinSheetsState`, `EventDetailJoinSheetsActions`, `EventDetailStandingsState`, and `EventDetailStandingsActions`; `EventDetailScreen.kt` wires them at the existing overview, join sheet, and standings call sites.
+
+- Observation: The join sheet only needs payment presentation capability from the event component, not the full component interface.
+  Evidence: `EventDetailJoinSheetsState.paymentProcessor` is typed as `IPaymentProcessor`, and `JoinOptionsSheet` no longer receives `EventDetailComponent` directly.
+
 ## Decision Log
 
 - Decision: Extract whole screen regions first, not individual helper functions.
@@ -75,9 +81,13 @@ After this refactor, the app should behave the same, but a developer should be a
   Rationale: Event detail covers event viewing, registration, payments, schedule, participants, standings, and match management. Component extraction can compile while changing parameter wiring or visibility behavior, so each milestone needs focused validation before the next extraction.
   Date/Author: 2026-06-23 / Codex
 
+- Decision: Do not create a new Decompose child component during this screen-section refactor.
+  Rationale: Overview and standings are presentational, and the registration/join/payment/signature flow already has state and workflow ownership in `EventDetailComponent` and its coordinators. Promoting those flows to child components belongs in the related component-decomposition plan, not this UI file split.
+  Date/Author: 2026-06-24 / Codex
+
 ## Outcomes & Retrospective
 
-No implementation has started under this plan. The desired end state is a smaller `EventDetailScreen.kt` that routes state and callbacks into extracted section components, plus a documented decision about which sections deserve true child components later. The related existing ExecPlans remain active until their unchecked items are completed or explicitly revised.
+Implementation is in progress under this plan. `EventDetailScreen.kt` now routes state and callbacks into extracted section components, and the child-component decision has been documented. The related existing ExecPlans remain active until their unchecked items are completed or explicitly revised.
 
 ## Related Plan Tracking
 
@@ -218,6 +228,22 @@ Current related-plan unchecked items:
 
     plans/event-details-modularization-execplan.md:22:- [ ] Thin `EventDetails.kt` further toward orchestration only.
     plans/event-details-modularization-execplan.md:24:- [ ] Run the full requested Gradle test suite. Android debug/release unit tests and Android JVM aggregation passed; `allTests` is blocked locally by missing macOS `xcrun`.
+
+State/action container milestone:
+
+    3701 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt
+      60 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreenModels.kt
+     646 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailOverviewSections.kt
+     897 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailJoinAndInviteSheets.kt
+     343 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailStandingsTab.kt
+
+Validation after the state/action container milestone:
+
+    git diff --check
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:compileCommonMainKotlinMetadata --console=plain
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --tests "*EventOverviewCapacityTest*" --tests "*EventDetailWeeklyBehaviorTest*" --tests "*EventDetailInviteDialogUiTest*" --tests "*EventDetailMobileJoinFlowTest*" --tests "*LeagueStandingsPresentationTest*" --tests "*EventLeagueStandingsCoordinatorTest*" --console=plain
+
+All three commands passed on 2026-06-24. The focused unit test run reported that adb reverse could not configure because no emulator/device was connected, but the JVM tests completed successfully.
     plans/event-detail-component-decomposition-execplan.md:58:- [ ] Thin `DefaultEventDetailComponent` so it owns Decompose lifecycle, public state exposure, and delegation, while helpers own domain-specific transformations.
     plans/event-detail-component-decomposition-execplan.md:93:- [ ] Run focused event-detail regression tests and final compile/build validation.
 

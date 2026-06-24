@@ -41,7 +41,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.util.isScrollingUp
@@ -52,23 +51,24 @@ import kotlinx.datetime.toLocalDateTime
 
 @Composable
 internal fun LeagueStandingsTab(
-    standings: List<TeamStanding>,
-    standingsDivisionKey: String,
-    showDrawColumn: Boolean,
-    topContentPadding: Dp = 0.dp,
-    standingsConfirmedAt: Instant?,
-    validationMessages: List<String>,
-    isLoading: Boolean,
-    isConfirming: Boolean,
-    canConfirmStandings: Boolean,
-    showFab: (Boolean) -> Unit,
+    state: EventDetailStandingsState,
+    actions: EventDetailStandingsActions,
 ) {
+    val standings = state.standings
+    val standingsDivisionKey = state.standingsDivisionKey
+    val showDrawColumn = state.showDrawColumn
+    val topContentPadding = state.topContentPadding
+    val standingsConfirmedAt = state.standingsConfirmedAt
+    val validationMessages = state.validationMessages
+    val isLoading = state.isLoading
+    val isConfirming = state.isConfirming
+    val canConfirmStandings = state.canConfirmStandings
     val standingsListState = rememberLazyListState()
     val standingsColumns = remember(showDrawColumn) {
         visibleLeagueStandingsColumns(showDrawColumn)
     }
     val isScrollingUp by standingsListState.isScrollingUp()
-    showFab(if (standings.isEmpty()) true else isScrollingUp)
+    actions.showFab(if (standings.isEmpty()) true else isScrollingUp)
     val visibleValidationMessages = if (canConfirmStandings) validationMessages else emptyList()
     val confirmedLabel = standingsConfirmedAt?.let(::formatStandingsConfirmedAt)
     val normalizedStandingsDivisionKey = standingsDivisionKey.trim().ifBlank { "all" }

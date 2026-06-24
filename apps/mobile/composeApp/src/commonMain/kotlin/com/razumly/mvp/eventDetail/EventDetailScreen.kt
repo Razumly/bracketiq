@@ -2232,15 +2232,20 @@ fun EventDetailScreen(
                                     }
                                 } else {
                                     EventOverviewSections(
-                                        eventWithRelations = selectedEvent,
-                                        teamsAndParticipantsLoading = eventTeamsAndParticipantsLoading,
-                                        matchesLoading = eventMatchesLoading,
-                                        showFullnessSummary = !isWeeklyParentEvent || selectedWeeklyOccurrenceSummary != null,
-                                        selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
-                                        selectedWeeklyOccurrenceSummary = selectedWeeklyOccurrenceSummary,
-                                        overviewParticipantSummary = overviewParticipantSummary,
-                                        showOpenDetailsAction = showOverviewOpenDetailsAction,
-                                        onOpenDetails = component::viewEvent
+                                        state = EventDetailOverviewState(
+                                            eventWithRelations = selectedEvent,
+                                            teamsAndParticipantsLoading = eventTeamsAndParticipantsLoading,
+                                            matchesLoading = eventMatchesLoading,
+                                            showFullnessSummary = !isWeeklyParentEvent ||
+                                                selectedWeeklyOccurrenceSummary != null,
+                                            selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
+                                            selectedWeeklyOccurrenceSummary = selectedWeeklyOccurrenceSummary,
+                                            overviewParticipantSummary = overviewParticipantSummary,
+                                            showOpenDetailsAction = showOverviewOpenDetailsAction,
+                                        ),
+                                        actions = EventDetailOverviewActions(
+                                            onOpenDetails = component::viewEvent,
+                                        ),
                                     )
                                 }
                             }
@@ -2897,22 +2902,26 @@ fun EventDetailScreen(
                                                 selectedStandingsDataDivisionId.normalizeDivisionIdentifier()
                                     }
                                     LeagueStandingsTab(
-                                        standings = leagueStandings,
-                                        standingsDivisionKey = selectedStandingsDataDivisionId
-                                            ?.trim()
-                                            ?.takeIf(String::isNotBlank)
-                                            ?: selectedStandingsDivisionId
+                                        state = EventDetailStandingsState(
+                                            standings = leagueStandings,
+                                            standingsDivisionKey = selectedStandingsDataDivisionId
                                                 ?.trim()
                                                 ?.takeIf(String::isNotBlank)
-                                            ?: "all",
-                                        showDrawColumn = showStandingsDrawColumn,
-                                        topContentPadding = tabContentTopOffset,
-                                        showFab = { showFab = it },
-                                        standingsConfirmedAt = selectedLeagueDivisionStandings?.standingsConfirmedAt,
-                                        validationMessages = selectedLeagueDivisionStandings?.validationMessages.orEmpty(),
-                                        isLoading = false,
-                                        isConfirming = leagueStandingsConfirming,
-                                        canConfirmStandings = canManageLeagueStandings,
+                                                ?: selectedStandingsDivisionId
+                                                    ?.trim()
+                                                    ?.takeIf(String::isNotBlank)
+                                                ?: "all",
+                                            showDrawColumn = showStandingsDrawColumn,
+                                            topContentPadding = tabContentTopOffset,
+                                            standingsConfirmedAt = selectedLeagueDivisionStandings?.standingsConfirmedAt,
+                                            validationMessages = selectedLeagueDivisionStandings?.validationMessages.orEmpty(),
+                                            isLoading = false,
+                                            isConfirming = leagueStandingsConfirming,
+                                            canConfirmStandings = canManageLeagueStandings,
+                                        ),
+                                        actions = EventDetailStandingsActions(
+                                            showFab = { showFab = it },
+                                        ),
                                     )
                                 }
 
@@ -3270,41 +3279,45 @@ fun EventDetailScreen(
                     onDismissRequest = { showJoinOptionsSheet = false }
                 ) {
                     JoinOptionsSheet(
-                        options = joinOptions,
-                        paymentProcessor = component,
-                        registrationHoldExpiresAt = registrationHoldExpiresAt,
-                        isWeeklyParentEvent = isWeeklyParentEvent,
-                        weeklySessionOptions = weeklySessionOptions,
-                        weeklyOccurrenceSummaries = weeklyOccurrenceSummaries,
-                        selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
-                        selectedWeeklyOccurrenceSummary = selectedWeeklyOccurrenceSummary,
-                        selectedWeeklyOccurrenceJoined = selectedWeeklyOccurrenceJoined,
-                        selectedWeeklyOccurrenceStarted = joinBlockedByStart && isWeeklyParentEvent,
-                        selectedDivisionId = selectedJoinOptionDivisionId,
-                        divisionOptions = if (teamSignup) {
-                            registrationJoinDivisionOptions
-                        } else {
-                            emptyList()
-                        },
-                        onDivisionSelected = { divisionId ->
-                            selectedJoinOptionDivisionId = divisionId
-                            component.selectDivision(divisionId)
-                        },
-                        onDismiss = { showJoinOptionsSheet = false },
-                        onSelectOption = { action ->
-                            showJoinOptionsSheet = false
-                            action.onClick()
-                        },
-                        onSelectWeeklySession = { session ->
-                            component.selectWeeklySession(
-                                sessionStart = session.start,
-                                sessionEnd = session.end,
-                                slotId = session.slotId,
-                                occurrenceDate = session.occurrenceDate,
-                                label = session.label,
-                            )
-                        },
-                        onRegistrationHoldExpired = component::registrationHoldExpired,
+                        state = EventDetailJoinSheetsState(
+                            options = joinOptions,
+                            paymentProcessor = component,
+                            registrationHoldExpiresAt = registrationHoldExpiresAt,
+                            isWeeklyParentEvent = isWeeklyParentEvent,
+                            weeklySessionOptions = weeklySessionOptions,
+                            weeklyOccurrenceSummaries = weeklyOccurrenceSummaries,
+                            selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
+                            selectedWeeklyOccurrenceSummary = selectedWeeklyOccurrenceSummary,
+                            selectedWeeklyOccurrenceJoined = selectedWeeklyOccurrenceJoined,
+                            selectedWeeklyOccurrenceStarted = joinBlockedByStart && isWeeklyParentEvent,
+                            selectedDivisionId = selectedJoinOptionDivisionId,
+                            divisionOptions = if (teamSignup) {
+                                registrationJoinDivisionOptions
+                            } else {
+                                emptyList()
+                            },
+                        ),
+                        actions = EventDetailJoinSheetsActions(
+                            onDivisionSelected = { divisionId ->
+                                selectedJoinOptionDivisionId = divisionId
+                                component.selectDivision(divisionId)
+                            },
+                            onDismiss = { showJoinOptionsSheet = false },
+                            onSelectOption = { action ->
+                                showJoinOptionsSheet = false
+                                action.onClick()
+                            },
+                            onSelectWeeklySession = { session ->
+                                component.selectWeeklySession(
+                                    sessionStart = session.start,
+                                    sessionEnd = session.end,
+                                    slotId = session.slotId,
+                                    occurrenceDate = session.occurrenceDate,
+                                    label = session.label,
+                                )
+                            },
+                            onRegistrationHoldExpired = component::registrationHoldExpired,
+                        ),
                     )
                 }
             }

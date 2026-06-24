@@ -377,24 +377,26 @@ private fun String.isValidInviteEmail(): Boolean {
 
 @Composable
 internal fun JoinOptionsSheet(
-    options: List<JoinOption>,
-    paymentProcessor: EventDetailComponent,
-    registrationHoldExpiresAt: String?,
-    isWeeklyParentEvent: Boolean,
-    weeklySessionOptions: List<WeeklySessionOption>,
-    weeklyOccurrenceSummaries: Map<String, WeeklyOccurrenceSummary>,
-    selectedWeeklyOccurrenceLabel: String?,
-    selectedWeeklyOccurrenceSummary: WeeklyOccurrenceSummary?,
-    selectedWeeklyOccurrenceJoined: Boolean,
-    selectedWeeklyOccurrenceStarted: Boolean,
-    selectedDivisionId: String?,
-    divisionOptions: List<BracketDivisionOption>,
-    onDivisionSelected: (String) -> Unit,
-    onDismiss: () -> Unit,
-    onSelectOption: (JoinOption) -> Unit,
-    onSelectWeeklySession: (WeeklySessionOption) -> Unit,
-    onRegistrationHoldExpired: () -> Unit,
+    state: EventDetailJoinSheetsState,
+    actions: EventDetailJoinSheetsActions,
 ) {
+    val options = state.options
+    val paymentProcessor = state.paymentProcessor
+    val registrationHoldExpiresAt = state.registrationHoldExpiresAt
+    val isWeeklyParentEvent = state.isWeeklyParentEvent
+    val weeklySessionOptions = state.weeklySessionOptions
+    val weeklyOccurrenceSummaries = state.weeklyOccurrenceSummaries
+    val selectedWeeklyOccurrenceLabel = state.selectedWeeklyOccurrenceLabel
+    val selectedWeeklyOccurrenceSummary = state.selectedWeeklyOccurrenceSummary
+    val selectedWeeklyOccurrenceJoined = state.selectedWeeklyOccurrenceJoined
+    val selectedWeeklyOccurrenceStarted = state.selectedWeeklyOccurrenceStarted
+    val selectedDivisionId = state.selectedDivisionId
+    val divisionOptions = state.divisionOptions
+    val onDivisionSelected = actions.onDivisionSelected
+    val onDismiss = actions.onDismiss
+    val onSelectOption = actions.onSelectOption
+    val onSelectWeeklySession = actions.onSelectWeeklySession
+    val onRegistrationHoldExpired = actions.onRegistrationHoldExpired
     var isDivisionMenuExpanded by remember { mutableStateOf(false) }
     var divisionMenuAnchorSize by remember { mutableStateOf(IntSize.Zero) }
     val density = LocalDensity.current
