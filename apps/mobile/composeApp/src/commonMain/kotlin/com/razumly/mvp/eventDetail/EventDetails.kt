@@ -1,51 +1,26 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.network.userMessage
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -53,7 +28,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -70,18 +44,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.zIndex
-import coil3.compose.AsyncImage
 import com.kmpalette.loader.rememberNetworkLoader
 import com.kmpalette.rememberDominantColorState
 import com.materialkolor.scheme.DynamicScheme
@@ -90,8 +58,6 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
-import com.razumly.mvp.core.data.dataTypes.MatchIncidentTypeDefinitionMVP
-import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
@@ -99,10 +65,8 @@ import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.LeagueConfig
-import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
-import com.razumly.mvp.core.data.dataTypes.MatchTimekeepingConfigMVP
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.divisionPriceRangeLabel
@@ -113,34 +77,20 @@ import com.razumly.mvp.core.data.dataTypes.toLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.withLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.withTournamentConfig
-import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
-import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.dataTypes.skillsForSport
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeName
-import com.razumly.mvp.core.data.util.buildEventDivisionId
-import com.razumly.mvp.core.data.util.buildGenderSkillAgeDivisionToken
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
-import com.razumly.mvp.core.data.util.normalizeDivisionDetail
-import com.razumly.mvp.core.presentation.composables.OrganizationVerificationBadge
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
-import com.razumly.mvp.core.data.util.divisionsEquivalent
-import com.razumly.mvp.core.data.util.extractDivisionTokenFromId
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.composables.DropdownOption
-import com.razumly.mvp.core.presentation.composables.MoneyInputField
-import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
-import com.razumly.mvp.core.presentation.composables.PlatformDropdown
-import com.razumly.mvp.core.presentation.composables.StandardTextField
-import com.razumly.mvp.core.presentation.composables.PlayerCardWithActions
-import com.razumly.mvp.core.presentation.composables.StripeButton
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.core.presentation.util.getImageUrl
@@ -150,34 +100,13 @@ import com.razumly.mvp.core.presentation.util.toEnumTitleCase
 import com.razumly.mvp.core.presentation.util.toNameCase
 import com.razumly.mvp.core.presentation.util.timeFormat
 import com.razumly.mvp.core.presentation.util.toTitleCase
-import com.razumly.mvp.core.presentation.util.transitionSpec
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.core.util.resolvedTimeZone
-import com.razumly.mvp.eventDetail.composables.CancellationRefundOptions
-import com.razumly.mvp.eventDetail.composables.LeagueConfigurationFields
-import com.razumly.mvp.eventDetail.composables.LeaguePlayoffConfigurationFields
-import com.razumly.mvp.eventDetail.composables.LeagueScoringConfigFields
-import com.razumly.mvp.eventDetail.composables.LeagueScheduleFields
-import com.razumly.mvp.eventDetail.composables.NumberInputField
-import com.razumly.mvp.eventDetail.composables.RegistrationOptions
 import com.razumly.mvp.eventDetail.composables.SelectEventImage
-import com.razumly.mvp.eventDetail.composables.TextInputField
-import com.razumly.mvp.eventDetail.composables.TournamentConfigurationFields
-import com.razumly.mvp.eventDetail.edit.RequiredDocumentsSection
-import com.razumly.mvp.eventDetail.readonly.HostedByReadOnlyRow
-import com.razumly.mvp.eventDetail.readonly.ReadOnlyDivisionsList
-import com.razumly.mvp.eventDetail.readonly.ReadOnlyNameList
-import com.razumly.mvp.eventDetail.readonly.ScheduleTimeslotsReadOnlyList
-import com.razumly.mvp.eventDetail.readonly.buildEventDetailsRows
-import com.razumly.mvp.eventDetail.readonly.buildScheduleDetailsRows
 import com.razumly.mvp.eventDetail.readonly.resolveReadOnlyFieldCount
 import com.razumly.mvp.eventDetail.shared.BackgroundImage
-import com.razumly.mvp.eventDetail.shared.CollapsibleEditorSubsectionHeader
 import com.razumly.mvp.eventDetail.shared.DetailRowSpec
-import com.razumly.mvp.eventDetail.shared.FormSectionDivider
-import com.razumly.mvp.eventDetail.shared.LabeledCheckboxRow
 import com.razumly.mvp.eventDetail.shared.localImageScheme
-import com.razumly.mvp.eventDetail.staff.StaffAssignmentCard
 import com.razumly.mvp.eventDetail.staff.StaffAssignmentCardModel
 import com.razumly.mvp.eventDetail.staff.buildAssignedStaffCards
 import com.razumly.mvp.eventDetail.staff.buildDraftStaffCards
@@ -200,9 +129,6 @@ import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.format
 import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
-import mvp.composeapp.generated.resources.Res
-import mvp.composeapp.generated.resources.enter_value
-import org.jetbrains.compose.resources.stringResource
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.math.roundToInt
@@ -758,33 +684,6 @@ fun EventDetails(
             onEditTournament {
                 withTournamentConfig(normalizedTournamentConfig)
             }
-        }
-    }
-    fun applySingleDivisionDefaultsToDetails(
-        details: List<DivisionDetail>,
-        defaultPriceCents: Int,
-        defaultMaxParticipants: Int,
-        defaultPlayoffTeamCount: Int?,
-        defaultPoolCount: Int? = null,
-    ): List<DivisionDetail> {
-        val normalizedPriceCents = defaultPriceCents.coerceAtLeast(0)
-        val normalizedMaxParticipants = defaultMaxParticipants.takeIf { value -> value >= 2 }
-        val normalizedPoolCount = defaultPoolCount?.takeIf { value -> value >= 1 }
-        return details.map { detail ->
-            detail.copy(
-                price = normalizedPriceCents,
-                maxParticipants = normalizedMaxParticipants,
-                playoffTeamCount = defaultPlayoffTeamCount,
-                poolCount = normalizedPoolCount ?: detail.poolCount,
-                poolTeamCount = if (normalizedPoolCount != null && normalizedMaxParticipants != null) {
-                    derivePoolTeamCount(
-                        maxTeams = normalizedMaxParticipants,
-                        poolCount = normalizedPoolCount,
-                    )
-                } else {
-                    detail.poolTeamCount
-                },
-            )
         }
     }
     fun syncLeagueSlotsForSelectedDivisions(
@@ -2586,862 +2485,45 @@ fun EventDetails(
                         onDisabledClick = ::showSelectSportMessage,
                     ),
                     editContent = {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        Box(modifier = Modifier.weight(1f)) {
-                            LabeledCheckboxRow(
-                                checked = editEvent.singleDivision,
-                                label = "Single Division",
-                                enabled = true,
-                                onCheckedChange = { checked ->
-                                    val explicitPlayoffCount =
-                                        editEvent.playoffTeamCount
-                                            ?: divisionDetailsForSettings.firstOrNull()?.playoffTeamCount
-                                    val explicitPoolCount =
-                                        divisionDetailsForSettings.firstOrNull()?.poolCount
-                                            ?: divisionEditor.poolCount
-                                    val defaultInstallmentAmounts = editEvent.installmentAmounts.map { amount ->
-                                        amount.coerceAtLeast(0)
-                                    }
-                                    val defaultInstallmentDueDates = editEvent.installmentDueDates
-                                        .map { dueDate -> dueDate.trim() }
-                                        .filter(String::isNotBlank)
-                                    val defaultInstallmentDueRelativeDays = editEvent.installmentDueRelativeDays
-                                    val useRelativeDueDates = editEvent.eventType == EventType.WEEKLY_EVENT
-                                    val defaultInstallmentCount = maxOf(
-                                        editEvent.installmentCount ?: 0,
-                                        defaultInstallmentAmounts.size,
-                                        if (useRelativeDueDates) {
-                                            defaultInstallmentDueRelativeDays.size
-                                        } else {
-                                            defaultInstallmentDueDates.size
-                                        },
-                                    ).takeIf { count -> count > 0 }
-                                    val defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true &&
-                                        defaultInstallmentCount != null &&
-                                        editEvent.priceCents.coerceAtLeast(0) > 0
-                                    onEditEvent {
-                                        val normalizedDivisions = divisions.normalizeDivisionIdentifiers()
-                                        val nextDivisionDetails = mergeDivisionDetailsForDivisions(
-                                            divisions = normalizedDivisions,
-                                            existingDetails = divisionDetails,
-                                            eventId = id,
-                                        ).map { existing ->
-                                            val nextPlayoffCount = if (!includePlayoffs) {
-                                                null
-                                            } else if (checked) {
-                                                explicitPlayoffCount ?: existing.playoffTeamCount
-                                            } else {
-                                                existing.playoffTeamCount ?: playoffTeamCount
-                                            }
-                                            if (checked) {
-                                                existing.copy(
-                                                    price = editEvent.priceCents.coerceAtLeast(0),
-                                                    maxParticipants = editEvent.maxParticipants
-                                                        .takeIf { value -> value >= 2 },
-                                                    playoffTeamCount = nextPlayoffCount,
-                                                    poolCount = explicitPoolCount,
-                                                    poolTeamCount = derivePoolTeamCount(
-                                                        maxTeams = editEvent.maxParticipants,
-                                                        poolCount = explicitPoolCount,
-                                                    ),
-                                                    allowPaymentPlans = defaultAllowPaymentPlans,
-                                                    installmentCount = defaultInstallmentCount,
-                                                    installmentDueDates = if (defaultAllowPaymentPlans) {
-                                                        if (useRelativeDueDates) emptyList() else defaultInstallmentDueDates
-                                                    } else {
-                                                        emptyList()
-                                                    },
-                                                    installmentDueRelativeDays = if (defaultAllowPaymentPlans && useRelativeDueDates) {
-                                                        defaultInstallmentDueRelativeDays
-                                                    } else {
-                                                        emptyList()
-                                                    },
-                                                    installmentAmounts = if (defaultAllowPaymentPlans) {
-                                                        defaultInstallmentAmounts
-                                                    } else {
-                                                        emptyList()
-                                                    },
-                                                )
-                                            } else {
-                                                val existingInstallmentAmounts = existing.installmentAmounts
-                                                    .map { amount -> amount.coerceAtLeast(0) }
-                                                val existingInstallmentDueDates = existing.installmentDueDates
-                                                    .map { dueDate -> dueDate.trim() }
-                                                    .filter(String::isNotBlank)
-                                                val existingInstallmentDueRelativeDays = existing.installmentDueRelativeDays
-                                                val existingInstallmentCount = maxOf(
-                                                    existing.installmentCount ?: 0,
-                                                    existingInstallmentAmounts.size,
-                                                    if (useRelativeDueDates) {
-                                                        existingInstallmentDueRelativeDays.size
-                                                    } else {
-                                                        existingInstallmentDueDates.size
-                                                    },
-                                                ).takeIf { count -> count > 0 } ?: defaultInstallmentCount
-                                                val existingAllowPaymentPlans = when (existing.allowPaymentPlans) {
-                                                    null -> defaultAllowPaymentPlans
-                                                    else -> existing.allowPaymentPlans == true
-                                                } && existingInstallmentCount != null
-                                                existing.copy(
-                                                    playoffTeamCount = nextPlayoffCount,
-                                                    allowPaymentPlans = existingAllowPaymentPlans,
-                                                    installmentCount = if (existingAllowPaymentPlans) {
-                                                        existingInstallmentCount
-                                                    } else {
-                                                        null
-                                                    },
-                                                    installmentDueDates = if (existingAllowPaymentPlans) {
-                                                        if (useRelativeDueDates) {
-                                                            emptyList()
-                                                        } else if (existingInstallmentDueDates.isNotEmpty()) {
-                                                            existingInstallmentDueDates
-                                                        } else {
-                                                            defaultInstallmentDueDates
-                                                        }
-                                                    } else {
-                                                        emptyList()
-                                                    },
-                                                    installmentDueRelativeDays = if (existingAllowPaymentPlans && useRelativeDueDates) {
-                                                        if (existingInstallmentDueRelativeDays.isNotEmpty()) {
-                                                            existingInstallmentDueRelativeDays
-                                                        } else {
-                                                            defaultInstallmentDueRelativeDays
-                                                        }
-                                                    } else {
-                                                        emptyList()
-                                                    },
-                                                    installmentAmounts = if (existingAllowPaymentPlans) {
-                                                        if (existingInstallmentAmounts.isNotEmpty()) {
-                                                            existingInstallmentAmounts
-                                                        } else {
-                                                            defaultInstallmentAmounts
-                                                        }
-                                                    } else {
-                                                        emptyList()
-                                                    },
-                                                )
-                                            }
-                                        }
-                                        copy(
-                                            singleDivision = checked,
-                                            allowTeamSplitDefault = if (checked) false else allowTeamSplitDefault,
-                                            playoffTeamCount = if (includePlayoffs) {
-                                                if (checked) {
-                                                    explicitPlayoffCount
-                                                } else {
-                                                    playoffTeamCount
-                                                }
-                                            } else {
-                                                null
-                                            },
-                                            divisionDetails = nextDivisionDetails,
-                                        )
-                                    }
-                                    syncLeagueSlotsForSelectedDivisions(
-                                        normalizedSelection = selectedDivisions,
-                                        splitByDivisionOverride = !checked,
-                                    )
-                                },
-                            )
-                        }
-                        Box(modifier = Modifier.weight(1f))
-                    }
-
-                    @Composable
-                    fun DivisionScheduleConfigurationFields() {
-                        if (editEvent.eventType == EventType.TOURNAMENT && editEvent.includePlayoffs) {
-                            LeagueConfigurationFields(
-                                title = "Pool Configuration",
-                                leagueConfig = normalizeLeagueConfigWithSportMode(divisionEditor.leagueConfig).copy(
-                                    includePlayoffs = false,
-                                    playoffTeamCount = null,
-                                ),
-                                onLeagueConfigChange = ::updateDivisionLeagueConfig,
-                            )
-                        }
-
-                        if (editEvent.eventType == EventType.TOURNAMENT) {
-                            TournamentConfigurationFields(
-                                title = "Tournament Configuration",
-                                usesSets = divisionScheduleUsesSets,
-                                tournamentConfig = divisionEditor.playoffConfig,
-                                onTournamentConfigChange = ::updateDivisionTournamentConfig,
-                            )
-                        }
-
-                        if (editEvent.eventType == EventType.LEAGUE) {
-                            LeagueConfigurationFields(
-                                leagueConfig = normalizeLeagueConfigWithSportMode(divisionEditor.leagueConfig).copy(
-                                    includePlayoffs = editEvent.includePlayoffs,
-                                    playoffTeamCount = divisionEditor.playoffTeamCount,
-                                ),
-                                onLeagueConfigChange = ::updateDivisionLeagueConfig,
-                            )
-                            if (editEvent.includePlayoffs) {
-                                LeaguePlayoffConfigurationFields(
-                                    leagueConfig = normalizeLeagueConfigWithSportMode(divisionEditor.leagueConfig).copy(
-                                        includePlayoffs = true,
-                                        playoffTeamCount = divisionEditor.playoffTeamCount,
-                                    ),
-                                    playoffConfig = divisionEditor.playoffConfig,
-                                    onPlayoffConfigChange = ::updateDivisionPlayoffConfig,
-                                )
-                            }
-                        }
-                    }
-
-                    AnimatedVisibility(editEvent.singleDivision) {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            val singleDivisionTournamentPoolPlayEnabled = editEvent.isTournamentPoolPlayEnabled()
-                            val singleDivisionPoolCount =
-                                divisionEditorDefaults.poolCount
-                                    ?: divisionDetailsForSettings.firstOrNull()?.poolCount
-                                    ?: divisionEditor.poolCount
-                            val singleDivisionPoolTeamCount = derivePoolTeamCount(
-                                maxTeams = editEvent.maxParticipants,
-                                poolCount = singleDivisionPoolCount,
-                            )
-                            FlowRow(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                MoneyInputField(
-                                    value = editEvent.priceCents.coerceAtLeast(0).toString(),
-                                    onValueChange = { value ->
-                                        if (!hostHasAccount) {
-                                            return@MoneyInputField
-                                        }
-                                        val parsedPrice = value
-                                            .filter(Char::isDigit)
-                                            .toIntOrNull()
-                                            ?.coerceAtLeast(0)
-                                            ?: 0
-                                        divisionEditorDefaults = divisionEditorDefaults.copy(
-                                            priceCents = parsedPrice,
-                                        )
-                                        if (divisionEditor.editingId.isNullOrBlank()) {
-                                            divisionEditor = divisionEditor.copy(
-                                                priceCents = parsedPrice,
-                                                error = null,
-                                            )
-                                        }
-                                        onEditEvent {
-                                            val nextDetails = applySingleDivisionDefaultsToDetails(
-                                                details = divisionDetails,
-                                                defaultPriceCents = parsedPrice,
-                                                defaultMaxParticipants = maxParticipants,
-                                                defaultPlayoffTeamCount = if (includePlayoffs) playoffTeamCount else null,
-                                                defaultPoolCount = if (singleDivisionTournamentPoolPlayEnabled) {
-                                                    singleDivisionPoolCount
-                                                } else {
-                                                    null
-                                                },
-                                            )
-                                            copy(
-                                                priceCents = parsedPrice,
-                                                divisionDetails = nextDetails,
-                                            )
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxWidth(0.48f),
-                                    label = "Price",
-                                    enabled = hostHasAccount,
-                                    supportingContent = {
-                                        PriceWithFeesPreviewSupportingText(
-                                            amountCents = editEvent.priceCents,
-                                            eventType = editEvent.eventType,
-                                            baseLabel = "Price",
-                                            onShowBreakdown = { pricePreviewBreakdown = it },
-                                        )
-                                    },
-                                )
-                                NumberInputField(
-                                    modifier = Modifier.fillMaxWidth(0.48f),
-                                    value = editEvent.maxParticipants
-                                        .takeIf { value -> value > 0 }
-                                        ?.toString()
-                                        .orEmpty(),
-                                    label = if (editEvent.teamSignup) "Max Teams" else "Max Participants",
-                                    onValueChange = { value ->
-                                        if (value.isEmpty() || value.all { it.isDigit() }) {
-                                            val parsedMaxParticipants = value.toIntOrNull() ?: 0
-                                            val nextDefaultMaxParticipants = parsedMaxParticipants
-                                                .takeIf { parsed -> parsed >= 2 }
-                                            divisionEditorDefaults = divisionEditorDefaults.copy(
-                                                maxParticipants = nextDefaultMaxParticipants,
-                                            )
-                                            if (divisionEditor.editingId.isNullOrBlank()) {
-                                                divisionEditor = divisionEditor.copy(
-                                                    maxParticipants = nextDefaultMaxParticipants,
-                                                    error = null,
-                                                )
-                                            }
-                                            onEditEvent {
-                                                val nextDetails = applySingleDivisionDefaultsToDetails(
-                                                    details = divisionDetails,
-                                                    defaultPriceCents = priceCents,
-                                                    defaultMaxParticipants = parsedMaxParticipants,
-                                                    defaultPlayoffTeamCount = if (includePlayoffs) playoffTeamCount else null,
-                                                    defaultPoolCount = if (singleDivisionTournamentPoolPlayEnabled) {
-                                                        singleDivisionPoolCount
-                                                    } else {
-                                                        null
-                                                    },
-                                                )
-                                                copy(
-                                                    maxParticipants = parsedMaxParticipants,
-                                                    divisionDetails = nextDetails,
-                                                )
-                                            }
-                                        }
-                                    },
-                                    isError = editEvent.maxParticipants < 2,
-                                    errorMessage = "Required and must be at least 2.",
-                                )
-                                if (
-                                    editEvent.includePlayoffs &&
-                                    editEvent.eventType == EventType.LEAGUE
-                                ) {
-                                    Spacer(modifier = Modifier.fillMaxWidth(0.48f))
-                                    NumberInputField(
-                                        modifier = Modifier.fillMaxWidth(0.48f),
-                                        value = editEvent.playoffTeamCount?.toString().orEmpty(),
-                                        label = "Playoff Team Count",
-                                        onValueChange = { value ->
-                                            if (value.isNotEmpty() && !value.all { it.isDigit() }) {
-                                                return@NumberInputField
-                                            }
-                                            val parsedPlayoffCount = value.toIntOrNull()
-                                            divisionEditorDefaults = divisionEditorDefaults.copy(
-                                                playoffTeamCount = parsedPlayoffCount?.takeIf { count -> count >= 2 },
-                                            )
-                                            if (divisionEditor.editingId.isNullOrBlank()) {
-                                                divisionEditor = divisionEditor.copy(
-                                                    playoffTeamCount = parsedPlayoffCount,
-                                                    error = null,
-                                                )
-                                            }
-                                            onEditEvent {
-                                                val nextDetails = applySingleDivisionDefaultsToDetails(
-                                                    details = divisionDetails,
-                                                    defaultPriceCents = priceCents,
-                                                    defaultMaxParticipants = maxParticipants,
-                                                    defaultPlayoffTeamCount = parsedPlayoffCount,
-                                                    defaultPoolCount = null,
-                                                )
-                                                copy(
-                                                    playoffTeamCount = parsedPlayoffCount,
-                                                    divisionDetails = nextDetails,
-                                                )
-                                            }
-                                        },
-                                        isError = (editEvent.playoffTeamCount ?: 0) < 2,
-                                        errorMessage = "Required and must be at least 2.",
-                                    )
-                                }
-                                if (singleDivisionTournamentPoolPlayEnabled) {
-                                    NumberInputField(
-                                        modifier = Modifier.fillMaxWidth(0.48f),
-                                        value = editEvent.playoffTeamCount?.toString().orEmpty(),
-                                        label = "Bracket Teams",
-                                        onValueChange = { value ->
-                                            if (value.isNotEmpty() && !value.all { it.isDigit() }) {
-                                                return@NumberInputField
-                                            }
-                                            val parsedBracketTeams = value.toIntOrNull()
-                                            divisionEditorDefaults = divisionEditorDefaults.copy(
-                                                playoffTeamCount = parsedBracketTeams?.takeIf { count -> count >= 2 },
-                                            )
-                                            if (divisionEditor.editingId.isNullOrBlank()) {
-                                                divisionEditor = divisionEditor.copy(
-                                                    playoffTeamCount = parsedBracketTeams,
-                                                    error = null,
-                                                )
-                                            }
-                                            onEditEvent {
-                                                val nextDetails = applySingleDivisionDefaultsToDetails(
-                                                    details = divisionDetails,
-                                                    defaultPriceCents = priceCents,
-                                                    defaultMaxParticipants = maxParticipants,
-                                                    defaultPlayoffTeamCount = parsedBracketTeams,
-                                                    defaultPoolCount = singleDivisionPoolCount,
-                                                )
-                                                copy(
-                                                    playoffTeamCount = parsedBracketTeams,
-                                                    divisionDetails = nextDetails,
-                                                )
-                                            }
-                                        },
-                                        isError = (editEvent.playoffTeamCount ?: 0) < 2 ||
-                                            (
-                                                singleDivisionPoolCount != null &&
-                                                    editEvent.playoffTeamCount != null &&
-                                                    editEvent.playoffTeamCount % singleDivisionPoolCount != 0
-                                                ),
-                                        errorMessage = "Must be at least 2 and divide evenly by pools.",
-                                    )
-                                    NumberInputField(
-                                        modifier = Modifier.fillMaxWidth(0.48f),
-                                        value = singleDivisionPoolCount?.toString().orEmpty(),
-                                        label = "Pool Count",
-                                        onValueChange = { value ->
-                                            if (value.isNotEmpty() && !value.all { it.isDigit() }) {
-                                                return@NumberInputField
-                                            }
-                                            val parsedPoolCount = value.toIntOrNull()
-                                            divisionEditorDefaults = divisionEditorDefaults.copy(
-                                                poolCount = parsedPoolCount?.takeIf { count -> count >= 1 },
-                                            )
-                                            if (divisionEditor.editingId.isNullOrBlank()) {
-                                                divisionEditor = divisionEditor.copy(
-                                                    poolCount = parsedPoolCount,
-                                                    error = null,
-                                                )
-                                            }
-                                            onEditEvent {
-                                                val nextDetails = applySingleDivisionDefaultsToDetails(
-                                                    details = divisionDetails,
-                                                    defaultPriceCents = priceCents,
-                                                    defaultMaxParticipants = maxParticipants,
-                                                    defaultPlayoffTeamCount = playoffTeamCount,
-                                                    defaultPoolCount = parsedPoolCount,
-                                                )
-                                                copy(divisionDetails = nextDetails)
-                                            }
-                                        },
-                                        isError = (singleDivisionPoolCount ?: 0) < 1 ||
-                                            (
-                                                singleDivisionPoolCount != null &&
-                                                    editEvent.maxParticipants % singleDivisionPoolCount != 0
-                                                ),
-                                        errorMessage = "Max teams must divide evenly by pools.",
-                                    )
-                                    NumberInputField(
-                                        modifier = Modifier.fillMaxWidth(0.48f),
-                                        value = singleDivisionPoolTeamCount?.toString().orEmpty(),
-                                        label = "Pool Team Count",
-                                        enabled = false,
-                                        onValueChange = {},
-                                        isError = singleDivisionPoolTeamCount == null,
-                                        errorMessage = "Derived from Pool Count and Max Teams",
-                                        supportingText = "Derived from Pool Count and Max Teams",
-                                    )
-                                }
-                            }
-                            DivisionScheduleConfigurationFields()
-                        }
-                    }
-
-                    if (isNewEvent) {
-                        AnimatedVisibility(!editEvent.teamSignup) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.Top,
-                            ) {
-                                Box(modifier = Modifier.weight(1f)) {
-                                    LabeledCheckboxRow(
-                                        checked = addSelfToEvent,
-                                        label = "Join as participant",
-                                        onCheckedChange = {
-                                            addSelfToEvent = it
-                                            onAddCurrentUser(it)
-                                        },
-                                    )
-                                }
-                                Box(modifier = Modifier.weight(1f))
-                            }
-                        }
-                    }
-
-                    val divisionInputsTitle = if (divisionEditor.editingId.isNullOrBlank()) {
-                        "New Division"
-                    } else {
-                        "Edit Division"
-                    }
-                    FormSectionDivider()
-                    CollapsibleEditorSubsectionHeader(
-                        title = divisionInputsTitle,
-                        expanded = divisionInputsExpanded,
-                        onToggle = { divisionInputsExpanded = !divisionInputsExpanded },
-                    )
-                    AnimatedVisibility(visible = divisionInputsExpanded) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            if (!editEvent.singleDivision) {
-                                DivisionScheduleConfigurationFields()
-                            }
-
-                    Text(
-                        text = "Division Info",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = Color(localImageScheme.current.onSurface),
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        PlatformDropdown(
-                            selectedValue = divisionEditor.gender,
-                            onSelectionChange = { value ->
-                                updateDivisionEditorSelection(gender = value)
-                            },
-                            options = genderSelectOptions,
-                            modifier = Modifier.weight(1f),
-                            label = "Gender",
-                            placeholder = "Select gender",
-                            isError = divisionEditor.gender.isBlank(),
-                            supportingText = if (divisionEditor.gender.isBlank()) {
-                                "Select a gender."
-                            } else {
-                                ""
-                            },
+                        EventDetailsDivisionEditorForm(
+                            state = EventDetailsDivisionEditorFormState(
+                                editEvent = editEvent,
+                                divisionDetails = divisionDetailsForSettings,
+                                selectedDivisions = selectedDivisions,
+                                divisionEditor = divisionEditor,
+                                divisionEditorDefaults = divisionEditorDefaults,
+                                divisionEditorReady = divisionEditorReady,
+                                divisionScheduleUsesSets = divisionScheduleUsesSets,
+                                skillDivisionTypeOptions = skillDivisionTypeSelectOptions,
+                                ageDivisionTypeOptions = ageDivisionTypeSelectOptions,
+                                genderOptions = genderSelectOptions,
+                                divisionInputsExpanded = divisionInputsExpanded,
+                                hostHasAccount = hostHasAccount,
+                                isNewEvent = isNewEvent,
+                                addSelfToEvent = addSelfToEvent,
+                            ),
+                            actions = EventDetailsDivisionEditorFormActions(
+                                onEditEvent = onEditEvent,
+                                onDivisionEditorChange = { divisionEditor = it },
+                                onDivisionEditorDefaultsChange = { divisionEditorDefaults = it },
+                                onUpdateDivisionEditorSelection = ::updateDivisionEditorSelection,
+                                onNormalizeLeagueConfigWithSportMode = ::normalizeLeagueConfigWithSportMode,
+                                onUpdateDivisionLeagueConfig = ::updateDivisionLeagueConfig,
+                                onUpdateDivisionPlayoffConfig = ::updateDivisionPlayoffConfig,
+                                onUpdateDivisionTournamentConfig = ::updateDivisionTournamentConfig,
+                                onSyncLeagueSlotsForSelectedDivisions = ::syncLeagueSlotsForSelectedDivisions,
+                                onSetDivisionPaymentPlansEnabled = ::setDivisionPaymentPlansEnabled,
+                                onSyncDivisionInstallmentCount = ::syncDivisionInstallmentCount,
+                                onUpdateDivisionInstallmentAmount = ::updateDivisionInstallmentAmount,
+                                onSetDivisionInstallmentDueDatePickerIndex = { divisionInstallmentDueDatePickerIndex = it },
+                                onAddDivisionInstallmentRow = ::addDivisionInstallmentRow,
+                                onRemoveDivisionInstallmentRow = ::removeDivisionInstallmentRow,
+                                onAddSelfToEventChange = { addSelfToEvent = it },
+                                onAddCurrentUser = onAddCurrentUser,
+                                onDivisionInputsExpandedChange = { divisionInputsExpanded = it },
+                                onShowPriceBreakdown = { pricePreviewBreakdown = it },
+                            ),
                         )
-                        PlatformDropdown(
-                            selectedValue = divisionEditor.skillDivisionTypeId,
-                            onSelectionChange = { value ->
-                                updateDivisionEditorSelection(skillDivisionTypeId = value)
-                            },
-                            options = skillDivisionTypeSelectOptions,
-                            modifier = Modifier.weight(1f),
-                            label = "Skill Division",
-                            placeholder = "Select skill division",
-                            isError = divisionEditor.skillDivisionTypeId.isBlank(),
-                            supportingText = if (divisionEditor.skillDivisionTypeId.isBlank()) {
-                                "Select a skill division."
-                            } else {
-                                ""
-                            },
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        PlatformDropdown(
-                            selectedValue = divisionEditor.ageDivisionTypeId,
-                            onSelectionChange = { value ->
-                                updateDivisionEditorSelection(ageDivisionTypeId = value)
-                            },
-                            options = ageDivisionTypeSelectOptions,
-                            modifier = Modifier.weight(1f),
-                            label = "Age Division",
-                            placeholder = "Select age division",
-                            isError = divisionEditor.ageDivisionTypeId.isBlank(),
-                            supportingText = if (divisionEditor.ageDivisionTypeId.isBlank()) {
-                                "Select an age division."
-                            } else {
-                                ""
-                            },
-                        )
-                        StandardTextField(
-                            value = divisionEditor.name,
-                            onValueChange = { value ->
-                                divisionEditor = divisionEditor.copy(
-                                    name = value,
-                                    nameTouched = true,
-                                    error = null,
-                                )
-                            },
-                            modifier = Modifier.weight(1f),
-                            label = "Division Name",
-                            enabled = divisionEditorReady,
-                        )
-                    }
-
-                    AnimatedVisibility(!editEvent.singleDivision) {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FormSectionDivider()
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.Top,
-                            ) {
-                                MoneyInputField(
-                                    value = divisionEditor.priceCents.coerceAtLeast(0).toString(),
-                                    onValueChange = { value ->
-                                        if (!divisionEditorReady || !hostHasAccount) {
-                                            return@MoneyInputField
-                                        }
-                                        divisionEditor = divisionEditor.copy(
-                                            priceCents = value.filter(Char::isDigit).toIntOrNull()?.coerceAtLeast(0) ?: 0,
-                                            error = null,
-                                        )
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                    label = "Division Price",
-                                    enabled = hostHasAccount && divisionEditorReady,
-                                    supportingContent = {
-                                        PriceWithFeesPreviewSupportingText(
-                                            amountCents = divisionEditor.priceCents,
-                                            eventType = editEvent.eventType,
-                                            baseLabel = "Division price",
-                                            onShowBreakdown = { pricePreviewBreakdown = it },
-                                        )
-                                    },
-                                )
-                                NumberInputField(
-                                    modifier = Modifier.weight(1f),
-                                    value = divisionEditor.maxParticipants?.toString().orEmpty(),
-                                    label = if (editEvent.teamSignup) {
-                                        "Division Max Teams"
-                                    } else {
-                                        "Division Max Participants"
-                                    },
-                                    enabled = divisionEditorReady,
-                                    onValueChange = { value ->
-                                        if (!divisionEditorReady) {
-                                            return@NumberInputField
-                                        }
-                                        if (value.isEmpty() || value.all { it.isDigit() }) {
-                                            divisionEditor = divisionEditor.copy(
-                                                maxParticipants = value.toIntOrNull(),
-                                                error = null,
-                                            )
-                                        }
-                                    },
-                                    isError = divisionEditor.maxParticipants.let { maxParticipants ->
-                                        maxParticipants == null || maxParticipants < 2
-                                    },
-                                    errorMessage = "Required and must be at least 2.",
-                                )
-                            }
-                        }
-                    }
-
-                    if (editEvent.eventType == EventType.TOURNAMENT && !editEvent.singleDivision) {
-                        val tournamentPoolPlayEnabled = editEvent.isTournamentPoolPlayEnabled()
-                        val divisionMaxTeams = if (editEvent.singleDivision) {
-                            editEvent.maxParticipants.takeIf { value -> value >= 2 } ?: 0
-                        } else {
-                            divisionEditor.maxParticipants ?: 0
-                        }
-                        val divisionPoolCount = divisionEditor.poolCount
-                        val divisionBracketTeamCount = divisionEditor.playoffTeamCount
-                        val divisionPoolTeamCount = derivePoolTeamCount(
-                            maxTeams = divisionMaxTeams,
-                            poolCount = divisionPoolCount,
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.Top,
-                        ) {
-                            if (editEvent.singleDivision) {
-                                Box(modifier = Modifier.weight(1f))
-                            } else {
-                                NumberInputField(
-                                    modifier = Modifier.weight(1f),
-                                    value = divisionBracketTeamCount?.toString().orEmpty(),
-                                    label = "Bracket Teams",
-                                    enabled = tournamentPoolPlayEnabled && divisionEditorReady,
-                                    onValueChange = { value ->
-                                        if (!divisionEditorReady || !tournamentPoolPlayEnabled) {
-                                            return@NumberInputField
-                                        }
-                                        if (value.isEmpty() || value.all { it.isDigit() }) {
-                                            divisionEditor = divisionEditor.copy(
-                                                playoffTeamCount = if (value.isBlank()) null else value.toIntOrNull(),
-                                                error = null,
-                                            )
-                                        }
-                                    },
-                                    isError = tournamentPoolPlayEnabled &&
-                                        ((divisionBracketTeamCount ?: 0) < 2 ||
-                                            (
-                                                divisionPoolCount != null &&
-                                                    divisionBracketTeamCount != null &&
-                                                    divisionBracketTeamCount % divisionPoolCount != 0
-                                                )),
-                                    errorMessage = "Must be at least 2 and divide evenly by pools.",
-                                )
-                            }
-                            NumberInputField(
-                                modifier = Modifier.weight(1f),
-                                value = divisionPoolCount?.toString().orEmpty(),
-                                label = "Pool Count",
-                                enabled = tournamentPoolPlayEnabled && divisionEditorReady,
-                                onValueChange = { value ->
-                                    if (!divisionEditorReady || !tournamentPoolPlayEnabled) {
-                                        return@NumberInputField
-                                    }
-                                    if (value.isEmpty() || value.all { it.isDigit() }) {
-                                        divisionEditor = divisionEditor.copy(
-                                            poolCount = if (value.isBlank()) null else value.toIntOrNull(),
-                                            error = null,
-                                        )
-                                    }
-                                },
-                                isError = tournamentPoolPlayEnabled &&
-                                    ((divisionPoolCount ?: 0) < 1 ||
-                                        (
-                                            divisionPoolCount != null &&
-                                                divisionMaxTeams % divisionPoolCount != 0
-                                            )),
-                                errorMessage = "Max teams must divide evenly by pools.",
-                            )
-                        }
-                        NumberInputField(
-                            modifier = Modifier.fillMaxWidth(0.48f),
-                            value = divisionPoolTeamCount?.toString().orEmpty(),
-                            label = "Pool Team Count",
-                            enabled = false,
-                            onValueChange = {},
-                            isError = divisionPoolTeamCount == null,
-                            errorMessage = "Derived from Pool Count and Max Teams",
-                            supportingText = "Derived from Pool Count and Max Teams",
-                        )
-                    }
-
-                    if (!isNewEvent && !editEvent.singleDivision) {
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                        Text(
-                            text = "Division Payment Plan",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = Color(localImageScheme.current.onSurface),
-                        )
-                        LabeledCheckboxRow(
-                            checked = divisionEditor.allowPaymentPlans,
-                            label = "Allow payment plan for this division",
-                            enabled = hostHasAccount && divisionEditor.priceCents > 0 && divisionEditorReady,
-                            onCheckedChange = { checked ->
-                                if (!divisionEditorReady || !hostHasAccount) {
-                                    return@LabeledCheckboxRow
-                                }
-                                setDivisionPaymentPlansEnabled(checked)
-                            },
-                        )
-                        if (divisionEditor.allowPaymentPlans) {
-                            val useRelativeDueDates = editEvent.eventType == EventType.WEEKLY_EVENT
-                            val installmentCount = maxOf(
-                                divisionEditor.installmentCount,
-                                divisionEditor.installmentAmounts.size,
-                                if (useRelativeDueDates) {
-                                    divisionEditor.installmentDueRelativeDays.size
-                                } else {
-                                    divisionEditor.installmentDueDates.size
-                                },
-                                1,
-                            )
-                            NumberInputField(
-                                value = installmentCount.toString(),
-                                label = "Installment Count",
-                                onValueChange = { newValue ->
-                                    if (!newValue.all { it.isDigit() }) return@NumberInputField
-                                    val parsed = newValue.toIntOrNull() ?: 1
-                                    syncDivisionInstallmentCount(parsed.coerceAtLeast(1))
-                                },
-                                isError = installmentCount <= 0,
-                                errorMessage = "Installment count must be at least 1.",
-                            )
-                            repeat(installmentCount) { index ->
-                                val amountCents = divisionEditor.installmentAmounts.getOrNull(index) ?: 0
-                                val dueDate = divisionEditor.installmentDueDates.getOrNull(index).orEmpty()
-                                val dueOffset = divisionEditor.installmentDueRelativeDays.getOrNull(index) ?: 0
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.Top,
-                                ) {
-                                    MoneyInputField(
-                                        value = amountCents.toString(),
-                                        label = "Installment ${index + 1} Amount",
-                                        onValueChange = { newValue ->
-                                            val parsed = newValue.filter(Char::isDigit).toIntOrNull() ?: 0
-                                            updateDivisionInstallmentAmount(index, parsed)
-                                        },
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    if (useRelativeDueDates) {
-                                        StandardTextField(
-                                            value = dueOffset.toString(),
-                                            onValueChange = { newValue ->
-                                                val parsed = newValue.toIntOrNull() ?: 0
-                                                val targetCount = maxOf(
-                                                    installmentCount,
-                                                    divisionEditor.installmentAmounts.size,
-                                                    divisionEditor.installmentDueRelativeDays.size,
-                                                )
-                                                val nextRelativeDueDays = MutableList(targetCount) { dueIndex ->
-                                                    divisionEditor.installmentDueRelativeDays.getOrNull(dueIndex) ?: 0
-                                                }
-                                                if (index in nextRelativeDueDays.indices) {
-                                                    nextRelativeDueDays[index] = parsed
-                                                }
-                                                divisionEditor = divisionEditor.copy(
-                                                    installmentDueDates = emptyList(),
-                                                    installmentDueRelativeDays = nextRelativeDueDays,
-                                                    error = null,
-                                                )
-                                            },
-                                            label = "Due Offset",
-                                            placeholder = "0",
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                    } else {
-                                        StandardTextField(
-                                            value = dueDate,
-                                            onValueChange = {},
-                                            label = "Due Date",
-                                            placeholder = "YYYY-MM-DD",
-                                            modifier = Modifier.weight(1f),
-                                            readOnly = true,
-                                            onTap = { divisionInstallmentDueDatePickerIndex = index },
-                                        )
-                                    }
-                                }
-                                if (installmentCount > 1) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.End,
-                                    ) {
-                                        TextButton(
-                                            onClick = { removeDivisionInstallmentRow(index) },
-                                        ) {
-                                            Text(
-                                                text = "Remove installment",
-                                                color = MaterialTheme.colorScheme.error,
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                TextButton(onClick = { addDivisionInstallmentRow() }) {
-                                    Text("Add installment")
-                                }
-                                val installmentTotal = divisionEditor.installmentAmounts.sum()
-                                val totalsMatch = installmentTotal == divisionEditor.priceCents
-                                Text(
-                                    text = "Total ${installmentTotal.toDouble().div(100).moneyFormat()} / ${divisionEditor.priceCents.toDouble().div(100).moneyFormat()}",
-                                    color = if (totalsMatch) {
-                                        Color(localImageScheme.current.onSurfaceVariant)
-                                    } else {
-                                        MaterialTheme.colorScheme.error
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                        }
-                    }
-
-                        }
-                    }
 
                     EventDetailsDivisionEditorActionsContent(
                         state = EventDetailsDivisionEditorActionsState(
@@ -3733,7 +2815,7 @@ fun EventDetails(
     }
 }
 
-private data class PricePreviewBreakdown(
+internal data class PricePreviewBreakdown(
     val baseLabel: String,
     val amountCents: Int,
     val mvpFeeCents: Int,
@@ -3752,7 +2834,7 @@ private data class PricePreviewBreakdown(
 }
 
 @Composable
-private fun PriceWithFeesPreviewSupportingText(
+internal fun PriceWithFeesPreviewSupportingText(
     amountCents: Int,
     eventType: EventType,
     baseLabel: String,
