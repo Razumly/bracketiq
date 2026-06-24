@@ -733,23 +733,18 @@ val startLocalBackend = tasks.register("startLocalBackend") {
         if (isPortOpen("127.0.0.1", backendPort)) {
             logger.lifecycle(
                 "startLocalBackend: port $backendPort is open but ${backendHealthUrl(backendPort)} is not responding; " +
-                    "waiting briefly before treating it as stale."
+                    "waiting briefly before reusing the existing backend process."
             )
             if (waitForBackendHttp(backendPort, timeoutSeconds = 8)) {
                 logger.lifecycle("startLocalBackend: backend became reachable on ${backendHealthUrl(backendPort)}")
                 return@doLast
             }
 
-            val trackedPid = pidFile.takeIf { it.exists() }?.readText()?.trim()?.toLongOrNull()
-            if (trackedPid != null && stopProcessByPid(trackedPid)) {
-                logger.lifecycle("startLocalBackend: stopped stale tracked backend pid=$trackedPid")
-                pidFile.delete()
-            } else {
-                throw GradleException(
-                    "startLocalBackend: port $backendPort is occupied but ${backendHealthUrl(backendPort)} is not " +
-                        "responding. Stop the stale process on port $backendPort, then rerun the app."
-                )
-            }
+            logger.lifecycle(
+                "startLocalBackend: port $backendPort is already occupied; assuming the local backend is running " +
+                    "and skipping startup."
+            )
+            return@doLast
         } else if (pidFile.exists()) {
             pidFile.delete()
         }

@@ -2,7 +2,7 @@
 
 package com.razumly.mvp.eventDetail.composables
 
-import androidx.compose.foundation.border
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,8 +31,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -200,16 +202,7 @@ fun MatchCard(
                     CurrentUserMatchRole.OFFICIAL -> MaterialTheme.colorScheme.onSurface
                     null -> null
                 }
-                val currentUserHighlightBorderWidth = when (currentUserMatchRole) {
-                    CurrentUserMatchRole.OFFICIAL -> 4.dp
-                    CurrentUserMatchRole.PARTICIPANT -> 1.5.dp
-                    null -> 0.dp
-                }
-                val currentUserHighlightElevation = when (currentUserMatchRole) {
-                    CurrentUserMatchRole.OFFICIAL -> 18.dp
-                    CurrentUserMatchRole.PARTICIPANT -> 14.dp
-                    null -> 0.dp
-                }
+                val officialGlowOnDarkSurface = MaterialTheme.colorScheme.surface.luminance() < 0.5f
                 FloatingBox(
                     modifier = Modifier.align(Alignment.TopCenter).offset(y = (-20).dp).zIndex(1f),
                     color = localColors.current.primaryContainer
@@ -221,69 +214,81 @@ fun MatchCard(
                         color = localColors.current.onPrimaryContainer
                     )
                 }
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .then(
-                            if (currentUserGlowColor != null) {
-                                Modifier
-                                    .shadow(
-                                        elevation = currentUserHighlightElevation,
-                                        shape = MatchCardShape,
-                                        ambientColor = currentUserGlowColor.copy(alpha = 0.7f),
-                                        spotColor = currentUserGlowColor.copy(alpha = 0.85f),
-                                    )
-                                    .border(
-                                        width = currentUserHighlightBorderWidth,
-                                        color = currentUserGlowColor,
-                                        shape = MatchCardShape,
-                                    )
-                            } else {
-                                Modifier
-                            }
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    if (currentUserGlowColor != null) {
+                        val outerGlowAlpha = when (currentUserMatchRole) {
+                            CurrentUserMatchRole.OFFICIAL -> if (officialGlowOnDarkSurface) 0.82f else 0.42f
+                            CurrentUserMatchRole.PARTICIPANT -> 0.74f
+                            null -> 0f
+                        }
+                        val innerGlowAlpha = when (currentUserMatchRole) {
+                            CurrentUserMatchRole.OFFICIAL -> if (officialGlowOnDarkSurface) 0.58f else 0.32f
+                            CurrentUserMatchRole.PARTICIPANT -> 0.52f
+                            null -> 0f
+                        }
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .blur(
+                                    radius = if (currentUserMatchRole == CurrentUserMatchRole.OFFICIAL) 38.dp else 32.dp,
+                                    edgeTreatment = BlurredEdgeTreatment.Unbounded,
+                                )
+                                .background(currentUserGlowColor.copy(alpha = outerGlowAlpha), MatchCardShape),
                         )
-                        .clickable(onClick = onClick),
-                    shape = MatchCardShape,
-                    elevation = CardDefaults.cardElevation(
-                        defaultElevation = if (currentUserGlowColor != null) 8.dp else 4.dp,
-                    ),
-                    colors = CardDefaults.cardColors(
-                        containerColor = localColors.current.primary,
-                        contentColor = localColors.current.onPrimary
-                    )
-                ) {
-                    BoxWithConstraints {
-                        val maxMatchInfoWidth = maxWidth * MATCH_CARD_INFO_MAX_WIDTH_FRACTION
-                        Row(
-                            modifier = Modifier.padding(vertical = 4.dp),
-                            verticalAlignment = if (showManageOfficials) Alignment.Top else Alignment.CenterVertically
-                        ) {
-                            MatchInfoSection(
-                                match = match,
-                                fields = fields,
-                                showManageOfficials = showManageOfficials,
-                                manageOfficialRows = manageOfficialRows,
-                                modifier = Modifier.widthIn(max = maxMatchInfoWidth),
-                            )
-                            VerticalDivider(color = localColors.current.onPrimary)
-                            val scoreDisplay = remember(selectedEvent, eventWithRelations.sport, match.match) {
-                                resolveMatchCardScoreDisplay(
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .blur(
+                                    radius = if (currentUserMatchRole == CurrentUserMatchRole.OFFICIAL) 20.dp else 18.dp,
+                                    edgeTreatment = BlurredEdgeTreatment.Unbounded,
+                                )
+                                .background(currentUserGlowColor.copy(alpha = innerGlowAlpha), MatchCardShape),
+                        )
+                    }
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = onClick),
+                        shape = MatchCardShape,
+                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = localColors.current.primary,
+                            contentColor = localColors.current.onPrimary
+                        )
+                    ) {
+                        BoxWithConstraints {
+                            val maxMatchInfoWidth = maxWidth * MATCH_CARD_INFO_MAX_WIDTH_FRACTION
+                            Row(
+                                modifier = Modifier.padding(vertical = 4.dp),
+                                verticalAlignment = if (showManageOfficials) Alignment.Top else Alignment.CenterVertically
+                            ) {
+                                MatchInfoSection(
+                                    match = match,
+                                    fields = fields,
+                                    showManageOfficials = showManageOfficials,
+                                    manageOfficialRows = manageOfficialRows,
+                                    modifier = Modifier.widthIn(max = maxMatchInfoWidth),
+                                )
+                                VerticalDivider(color = localColors.current.onPrimary)
+                                val scoreDisplay = remember(selectedEvent, eventWithRelations.sport, match.match) {
+                                    resolveMatchCardScoreDisplay(
+                                        event = selectedEvent,
+                                        sport = eventWithRelations.sport,
+                                        match = match.match,
+                                    )
+                                }
+                                TeamsSection(
                                     event = selectedEvent,
-                                    sport = eventWithRelations.sport,
-                                    match = match.match,
+                                    team1 = teams[match.match.team1Id],
+                                    team2 = teams[match.match.team2Id],
+                                    match = match,
+                                    matches = matches,
+                                    playoffPlaceholders = playoffPlaceholderBySlot,
+                                    scoreDisplay = scoreDisplay,
+                                    showManageOfficials = showManageOfficials,
+                                    manageOfficialRows = manageOfficialRows,
                                 )
                             }
-                            TeamsSection(
-                                event = selectedEvent,
-                                team1 = teams[match.match.team1Id],
-                                team2 = teams[match.match.team2Id],
-                                match = match,
-                                matches = matches,
-                                playoffPlaceholders = playoffPlaceholderBySlot,
-                                scoreDisplay = scoreDisplay,
-                                showManageOfficials = showManageOfficials,
-                                manageOfficialRows = manageOfficialRows,
-                            )
                         }
                     }
                 }
