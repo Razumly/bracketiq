@@ -2469,426 +2469,114 @@ fun EventDetails(
                     ),
                 )
 
-                if (showOfficialsPanel) {
-                    animatedCardSection(
-                        sectionId = readOnlyUiModel.staff.sectionId,
+                eventDetailsStaffSection(
+                    state = EventDetailsStaffState(
+                        readOnlySection = readOnlyUiModel.staff,
                         sectionExpansionStates = sectionExpansionStates,
-                        sectionTitle = readOnlyUiModel.staff.title,
-                        collapsibleInEditMode = true,
-                        collapsibleInViewMode = true,
-                        viewSummary = readOnlyUiModel.staff.summary,
-                        enabled = sportRequiredSectionEnabled,
-                        onDisabledClick = ::showSelectSportMessage,
-                        isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
+                        eventDetailsMode = eventDetailsMode,
                         lazyListState = lazyListState,
                         stickyHeaderTopInset = stickyHeaderTopInset,
-                        animationDelay = 300,
-                        viewContent = {
-                            DetailKeyValueList(
-                                rows = buildList {
-                                    add(
-                                        DetailRowSpec(
-                                            "Teams provide officials",
-                                            if (event.usesTeamOfficialScheduling()) "Yes" else "No",
-                                        ),
-                                    )
-                                    if (event.usesTeamOfficialScheduling()) {
-                                        add(
-                                            DetailRowSpec(
-                                                "Team officials may swap",
-                                                if (event.teamOfficialsMaySwap == true) "Yes" else "No",
-                                            ),
-                                        )
-                                    }
-                                    add(DetailRowSpec("Primary host", resolvedHostDisplay))
-                                    add(DetailRowSpec("Assistant hosts", assistantHostIds.size.toString()))
-                                    add(DetailRowSpec("Officials", event.officialIds.size.toString()))
-                                    add(
-                                        DetailRowSpec(
-                                            "Staffing mode",
-                                            event.officialSchedulingMode.label(),
-                                        ),
-                                    )
-                                    add(DetailRowSpec("Official positions", officialPositionSummary))
-                                },
+                        enabled = sportRequiredSectionEnabled,
+                        showOfficialsPanel = showOfficialsPanel,
+                        event = event,
+                        editEvent = editEvent,
+                        resolvedHostDisplay = resolvedHostDisplay,
+                        assistantHostIds = assistantHostIds,
+                        officialPositionSummary = officialPositionSummary,
+                        officialSchedulingModeOptions = officialSchedulingModeOptions,
+                        officialPositionsExpanded = officialPositionsExpanded,
+                        canLoadOfficialPositionDefaults = selectedSportForOfficialDefaults != null,
+                        staffSearchQuery = staffSearchQuery,
+                        visibleUserSuggestions = visibleUserSuggestions,
+                        staffInviteFirstName = staffInviteFirstName,
+                        staffInviteLastName = staffInviteLastName,
+                        staffInviteEmail = staffInviteEmail,
+                        draftInviteOfficial = draftInviteOfficial,
+                        draftInviteAssistantHost = draftInviteAssistantHost,
+                        staffEditorError = staffEditorError,
+                        assignedStaffExpanded = assignedStaffExpanded,
+                        officialStaffCards = officialStaffCards,
+                        hostStaffCards = hostStaffCards,
+                        editableOfficialStaffListHeight = editableOfficialStaffListHeight,
+                        editableHostStaffListHeight = editableHostStaffListHeight,
+                        eventOfficialRecordsByUserId = eventOfficialRecordsByUserId,
+                        officialPositionOptions = officialPositionOptions,
+                    ),
+                    actions = EventDetailsStaffActions(
+                        onDisabledClick = ::showSelectSportMessage,
+                        onUpdateDoTeamsOfficiate = onUpdateDoTeamsOfficiate,
+                        onUpdateTeamOfficialsMaySwap = onUpdateTeamOfficialsMaySwap,
+                        onUpdateOfficialSchedulingMode = onUpdateOfficialSchedulingMode,
+                        onToggleOfficialPositionsExpanded = {
+                            officialPositionsExpanded = !officialPositionsExpanded
+                        },
+                        onLoadOfficialPositionDefaults = onLoadOfficialPositionDefaults,
+                        onAddOfficialPosition = onAddOfficialPosition,
+                        onUpdateOfficialPositionName = onUpdateOfficialPositionName,
+                        onUpdateOfficialPositionCount = onUpdateOfficialPositionCount,
+                        onRemoveOfficialPosition = onRemoveOfficialPosition,
+                        onStaffSearchQueryChange = { newValue ->
+                            staffSearchQuery = newValue
+                            staffEditorError = null
+                            onSearchUsers(newValue)
+                        },
+                        onAddOfficialId = { userId ->
+                            staffEditorError = null
+                            onAddOfficialId(userId)
+                        },
+                        onAddAssistantHostId = { userId ->
+                            staffEditorError = null
+                            onUpdateAssistantHostIds(
+                                (assistantHostIds + userId)
+                                    .map(String::trim)
+                                    .filter(String::isNotBlank)
+                                    .distinct()
+                                    .filterNot { existingUserId -> existingUserId == editEvent.hostId },
                             )
                         },
-                        editContent = {
-                            LabeledCheckboxRow(
-                                checked = editEvent.usesTeamOfficialScheduling(),
-                                label = "Teams provide officials",
-                                onCheckedChange = onUpdateDoTeamsOfficiate,
-                            )
-                            if (editEvent.usesTeamOfficialScheduling()) {
-                                LabeledCheckboxRow(
-                                    checked = editEvent.teamOfficialsMaySwap == true,
-                                    label = "Team officials may swap",
-                                    onCheckedChange = onUpdateTeamOfficialsMaySwap,
-                                )
+                        onStaffInviteFirstNameChange = { staffInviteFirstName = it },
+                        onStaffInviteLastNameChange = { staffInviteLastName = it },
+                        onStaffInviteEmailChange = { staffInviteEmail = it },
+                        onDraftInviteOfficialChange = { draftInviteOfficial = it },
+                        onDraftInviteAssistantHostChange = { draftInviteAssistantHost = it },
+                        onAddEmailInvite = {
+                            val roles = buildSet {
+                                if (draftInviteOfficial) add(EventStaffRole.OFFICIAL)
+                                if (draftInviteAssistantHost) add(EventStaffRole.ASSISTANT_HOST)
                             }
-                            Text(
-                                text = "Official scheduling",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = Color(localImageScheme.current.onSurface),
-                            )
-                            PlatformDropdown(
-                                selectedValue = editEvent.officialSchedulingMode.name,
-                                onSelectionChange = { selectedMode ->
-                                    OfficialSchedulingMode.entries
-                                        .firstOrNull { mode -> mode.name == selectedMode }
-                                        ?.let(onUpdateOfficialSchedulingMode)
-                                },
-                                options = officialSchedulingModeOptions,
-                                label = "Scheduling mode",
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            FormSectionDivider()
-                            CollapsibleEditorSubsectionHeader(
-                                title = "Event official positions",
-                                expanded = officialPositionsExpanded,
-                                onToggle = { officialPositionsExpanded = !officialPositionsExpanded },
-                            )
-                            AnimatedVisibility(visible = officialPositionsExpanded) {
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    Text(
-                                        text = "Sport defaults are copied into this event.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = Color(localImageScheme.current.onSurfaceVariant),
-                                    )
-                                    TextButton(
-                                        onClick = onLoadOfficialPositionDefaults,
-                                        enabled = selectedSportForOfficialDefaults != null,
-                                        modifier = Modifier.align(Alignment.End),
-                                    ) {
-                                        Text("Load defaults")
-                                    }
-                                    if (editEvent.officialPositions.isEmpty()) {
-                                        Text(
-                                            text = "No official positions configured yet.",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = Color(localImageScheme.current.onSurfaceVariant),
-                                        )
-                                    } else {
-                                        editEvent.officialPositions
-                                            .sortedBy(EventOfficialPosition::order)
-                                            .forEach { position ->
-                                                Card(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    colors = CardDefaults.cardColors(
-                                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                                    ),
-                                                ) {
-                                                    Column(
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .padding(12.dp),
-                                                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                                                    ) {
-                                                        StandardTextField(
-                                                            value = position.name,
-                                                            onValueChange = { newName ->
-                                                                onUpdateOfficialPositionName(position.id, newName)
-                                                            },
-                                                            label = "Position name",
-                                                            modifier = Modifier.fillMaxWidth(),
-                                                        )
-                                                        Row(
-                                                            modifier = Modifier.fillMaxWidth(),
-                                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                                            verticalAlignment = Alignment.Bottom,
-                                                        ) {
-                                                            NumberInputField(
-                                                                modifier = Modifier.weight(1f),
-                                                                value = position.count.toString(),
-                                                                label = "Slots",
-                                                                isError = false,
-                                                                onValueChange = { newValue ->
-                                                                    val nextCount = newValue.toIntOrNull()
-                                                                    if (newValue.isBlank()) {
-                                                                        onUpdateOfficialPositionCount(position.id, 1)
-                                                                    } else if (nextCount != null) {
-                                                                        onUpdateOfficialPositionCount(position.id, nextCount.coerceAtLeast(1))
-                                                                    }
-                                                                },
-                                                            )
-                                                            Button(
-                                                                onClick = { onRemoveOfficialPosition(position.id) },
-                                                            ) {
-                                                                Text("Remove")
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                    }
-                                    TextButton(
-                                        onClick = onAddOfficialPosition,
-                                        modifier = Modifier.align(Alignment.End),
-                                    ) {
-                                        Text("Add position")
-                                    }
-                                }
-                            }
-                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                            Text(
-                                text = "Add / Invite Staff",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = Color(localImageScheme.current.onSurface),
-                            )
-                            StandardTextField(
-                                value = staffSearchQuery,
-                                onValueChange = { newValue ->
-                                    staffSearchQuery = newValue
+                            coroutineScope.launch {
+                                onAddPendingStaffInvite(
+                                    staffInviteFirstName,
+                                    staffInviteLastName,
+                                    staffInviteEmail,
+                                    roles,
+                                ).onSuccess {
                                     staffEditorError = null
-                                    onSearchUsers(newValue)
-                                },
-                                label = "Search existing users",
-                                placeholder = "Name or username",
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            if (staffSearchQuery.isNotBlank() && visibleUserSuggestions.isEmpty()) {
-                                Text(
-                                    text = "No matching users.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color(localImageScheme.current.onSurfaceVariant),
-                                )
-                            }
-                            visibleUserSuggestions.take(6).forEach { suggestedUser ->
-                                val canAddOfficial = !editEvent.officialIds.contains(suggestedUser.id)
-                                val canAddAssistant = suggestedUser.id != editEvent.hostId &&
-                                    !assistantHostIds.contains(suggestedUser.id)
-                                Card(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                    ),
-                                ) {
-                                    Column(
-                                        modifier = Modifier.fillMaxWidth().padding(12.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        Text(
-                                            text = userDisplayName(suggestedUser),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.SemiBold,
-                                        )
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        ) {
-                                            Button(
-                                                onClick = {
-                                                    staffEditorError = null
-                                                    onAddOfficialId(suggestedUser.id)
-                                                },
-                                                enabled = canAddOfficial,
-                                                modifier = Modifier.weight(1f),
-                                            ) {
-                                                Text("Add as official")
-                                            }
-                                            Button(
-                                                onClick = {
-                                                    staffEditorError = null
-                                                    onUpdateAssistantHostIds(
-                                                        (assistantHostIds + suggestedUser.id)
-                                                            .map(String::trim)
-                                                            .filter(String::isNotBlank)
-                                                            .distinct()
-                                                            .filterNot { userId -> userId == editEvent.hostId },
-                                                    )
-                                                },
-                                                enabled = canAddAssistant,
-                                                modifier = Modifier.weight(1f),
-                                            ) {
-                                                Text("Add as assistant")
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                            Text(
-                                text = "Email invite",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = Color(localImageScheme.current.onSurface),
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                StandardTextField(
-                                    value = staffInviteFirstName,
-                                    onValueChange = { staffInviteFirstName = it },
-                                    label = "First Name",
-                                    modifier = Modifier.weight(1f),
-                                )
-                                StandardTextField(
-                                    value = staffInviteLastName,
-                                    onValueChange = { staffInviteLastName = it },
-                                    label = "Last Name",
-                                    modifier = Modifier.weight(1f),
-                                )
-                            }
-                            StandardTextField(
-                                value = staffInviteEmail,
-                                onValueChange = { staffInviteEmail = it },
-                                label = "Email",
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Box(modifier = Modifier.weight(1f)) {
-                                    LabeledCheckboxRow(
-                                        checked = draftInviteOfficial,
-                                        label = "Official",
-                                        onCheckedChange = { draftInviteOfficial = it },
-                                    )
-                                }
-                                Box(modifier = Modifier.weight(1f)) {
-                                    LabeledCheckboxRow(
-                                        checked = draftInviteAssistantHost,
-                                        label = "Assistant Host",
-                                        onCheckedChange = { draftInviteAssistantHost = it },
-                                    )
-                                }
-                            }
-                            Button(
-                                onClick = {
-                                    val roles = buildSet {
-                                        if (draftInviteOfficial) add(EventStaffRole.OFFICIAL)
-                                        if (draftInviteAssistantHost) add(EventStaffRole.ASSISTANT_HOST)
-                                    }
-                                    coroutineScope.launch {
-                                        onAddPendingStaffInvite(
-                                            staffInviteFirstName,
-                                            staffInviteLastName,
-                                            staffInviteEmail,
-                                            roles,
-                                        ).onSuccess {
-                                            staffEditorError = null
-                                            staffInviteFirstName = ""
-                                            staffInviteLastName = ""
-                                            staffInviteEmail = ""
-                                            draftInviteOfficial = false
-                                            draftInviteAssistantHost = false
-                                        }.onFailure { error ->
-                                            staffEditorError = error.userMessage("Unable to add staff invite.")
-                                        }
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Text("Add email invite")
-                            }
-                            staffEditorError?.let { errorText ->
-                                Text(
-                                    text = errorText,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                )
-                            }
-                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                            CollapsibleEditorSubsectionHeader(
-                                title = "Assigned staff",
-                                expanded = assignedStaffExpanded,
-                                onToggle = { assignedStaffExpanded = !assignedStaffExpanded },
-                            )
-                            AnimatedVisibility(visible = assignedStaffExpanded) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    verticalAlignment = Alignment.Top,
-                                ) {
-                                    Column(
-                                        modifier = Modifier.weight(1f),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        Text(
-                                            text = "Officials",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.SemiBold,
-                                        )
-                                        EditableStaffCardList(
-                                            cards = officialStaffCards,
-                                            emptyText = "No officials selected yet.",
-                                            lazyListHeight = editableOfficialStaffListHeight,
-                                        ) { card ->
-                                            val assignedUserId = card.userId
-                                            val selectedPositionIds = assignedUserId
-                                                ?.let(eventOfficialRecordsByUserId::get)
-                                                ?.positionIds
-                                                .orEmpty()
-                                            StaffAssignmentCard(
-                                                card = card,
-                                                onRemoveAssigned = { userId, role ->
-                                                    if (role == EventStaffRole.OFFICIAL) {
-                                                        onRemoveOfficialId(userId)
-                                                    }
-                                                },
-                                                onRemoveDraft = onRemovePendingStaffInvite,
-                                                extraContent = if (assignedUserId != null && officialPositionOptions.isNotEmpty()) {
-                                                    {
-                                                        PlatformDropdown(
-                                                            selectedValue = "",
-                                                            onSelectionChange = {},
-                                                            options = officialPositionOptions,
-                                                            label = "Eligible positions",
-                                                            modifier = Modifier.fillMaxWidth(),
-                                                            multiSelect = true,
-                                                            selectedValues = selectedPositionIds,
-                                                            onMultiSelectionChange = { selectedIds ->
-                                                                onUpdateOfficialUserPositions(
-                                                                    assignedUserId,
-                                                                    selectedIds,
-                                                                )
-                                                            },
-                                                        )
-                                                    }
-                                                } else {
-                                                    null
-                                                },
-                                            )
-                                        }
-                                    }
-                                    Column(
-                                        modifier = Modifier.weight(1f),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        Text(
-                                            text = "Hosts",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.SemiBold,
-                                        )
-                                        EditableStaffCardList(
-                                            cards = hostStaffCards,
-                                            emptyText = "No host staff assigned yet.",
-                                            lazyListHeight = editableHostStaffListHeight,
-                                        ) { card ->
-                                            StaffAssignmentCard(
-                                                card = card,
-                                                onRemoveAssigned = { userId, role ->
-                                                    if (role == EventStaffRole.ASSISTANT_HOST) {
-                                                        onUpdateAssistantHostIds(
-                                                            assistantHostIds.filterNot { existingId ->
-                                                                existingId == userId
-                                                            },
-                                                        )
-                                                    }
-                                                },
-                                                onRemoveDraft = onRemovePendingStaffInvite,
-                                            )
-                                        }
-                                    }
+                                    staffInviteFirstName = ""
+                                    staffInviteLastName = ""
+                                    staffInviteEmail = ""
+                                    draftInviteOfficial = false
+                                    draftInviteAssistantHost = false
+                                }.onFailure { error ->
+                                    staffEditorError = error.userMessage("Unable to add staff invite.")
                                 }
                             }
                         },
-                    )
-                }
+                        onToggleAssignedStaffExpanded = {
+                            assignedStaffExpanded = !assignedStaffExpanded
+                        },
+                        onRemoveOfficialId = onRemoveOfficialId,
+                        onRemoveAssistantHostId = { userId ->
+                            onUpdateAssistantHostIds(
+                                assistantHostIds.filterNot { existingId ->
+                                    existingId == userId
+                                },
+                            )
+                        },
+                        onRemovePendingStaffInvite = onRemovePendingStaffInvite,
+                        onUpdateOfficialUserPositions = onUpdateOfficialUserPositions,
+                    ),
+                )
 
                 if (editView) {
                     // Specifics Card
