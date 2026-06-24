@@ -5,6 +5,7 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 import org.gradle.api.tasks.bundling.Zip
 import java.io.ByteArrayOutputStream
+import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URI
@@ -444,6 +445,31 @@ fun isPortOpen(host: String, port: Int, timeoutMs: Int = 250): Boolean {
     }
 }
 
+fun backendHealthUrl(port: Int): String =
+    "http://127.0.0.1:$port/api/app-version?platform=android"
+
+fun isBackendHttpReachable(port: Int, timeoutMs: Int = 2_000): Boolean {
+    return try {
+        val connection = URI(backendHealthUrl(port)).toURL().openConnection() as HttpURLConnection
+        connection.connectTimeout = timeoutMs
+        connection.readTimeout = timeoutMs
+        connection.requestMethod = "GET"
+        connection.useCaches = false
+        connection.responseCode in 200..499
+    } catch (_: Exception) {
+        false
+    }
+}
+
+fun waitForBackendHttp(port: Int, timeoutSeconds: Long): Boolean {
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds)
+    while (System.nanoTime() < deadline) {
+        if (isBackendHttpReachable(port)) return true
+        Thread.sleep(500)
+    }
+    return false
+}
+
 fun loadPropertiesIfExists(file: File): Properties {
     val props = Properties()
     if (!file.exists()) return props
@@ -691,34 +717,44 @@ val startLocalBackend = tasks.register("startLocalBackend") {
             ALTERNATE_BACKEND_PORT -> DEFAULT_BACKEND_PORT
             else -> ALTERNATE_BACKEND_PORT
         }
-        val backendPort = when {
-            isPortOpen("127.0.0.1", requestedBackendPort) -> requestedBackendPort
-            isPortOpen("127.0.0.1", alternateBackendPort) -> {
-                logger.lifecycle(
-                    "startLocalBackend: detected running backend on http://localhost:$alternateBackendPort; " +
-                        "using port $alternateBackendPort and skipping local launch."
-                )
-                alternateBackendPort
-            }
-
-            else -> requestedBackendPort
-        }
-        configureAdbReverse(logger, listOf(requestedBackendPort, alternateBackendPort))
-        if (isPortOpen("127.0.0.1", backendPort)) {
-            logger.lifecycle("startLocalBackend: already running on http://localhost:$backendPort")
-            return@doLast
-        }
-
-        val backendDir = resolveBackendDir(project)
-
         val logDir = layout.buildDirectory.dir("localBackend").get().asFile
         logDir.mkdirs()
         val outFile = File(logDir, "backend.out.log").also { it.writeText("") }
         val errFile = File(logDir, "backend.err.log").also { it.writeText("") }
         val pidFile = File(logDir, "backend.pid")
-        if (pidFile.exists() && !isPortOpen("127.0.0.1", backendPort)) {
+
+        val backendPort = requestedBackendPort
+        configureAdbReverse(logger, listOf(requestedBackendPort, alternateBackendPort))
+        if (isBackendHttpReachable(backendPort)) {
+            logger.lifecycle("startLocalBackend: already running on ${backendHealthUrl(backendPort)}")
+            return@doLast
+        }
+
+        if (isPortOpen("127.0.0.1", backendPort)) {
+            logger.lifecycle(
+                "startLocalBackend: port $backendPort is open but ${backendHealthUrl(backendPort)} is not responding; " +
+                    "waiting briefly before treating it as stale."
+            )
+            if (waitForBackendHttp(backendPort, timeoutSeconds = 8)) {
+                logger.lifecycle("startLocalBackend: backend became reachable on ${backendHealthUrl(backendPort)}")
+                return@doLast
+            }
+
+            val trackedPid = pidFile.takeIf { it.exists() }?.readText()?.trim()?.toLongOrNull()
+            if (trackedPid != null && stopProcessByPid(trackedPid)) {
+                logger.lifecycle("startLocalBackend: stopped stale tracked backend pid=$trackedPid")
+                pidFile.delete()
+            } else {
+                throw GradleException(
+                    "startLocalBackend: port $backendPort is occupied but ${backendHealthUrl(backendPort)} is not " +
+                        "responding. Stop the stale process on port $backendPort, then rerun the app."
+                )
+            }
+        } else if (pidFile.exists()) {
             pidFile.delete()
         }
+
+        val backendDir = resolveBackendDir(project)
         var startedBackendProcess: Process? = null
 
         if (backendDir == null) {
@@ -857,17 +893,16 @@ val startLocalBackend = tasks.register("startLocalBackend") {
             }
         }
 
-        // Give the server a moment to bind to its port so the app doesn't immediately fail on first launch.
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20)
-        while (System.nanoTime() < deadline) {
-            if (isPortOpen("127.0.0.1", backendPort)) {
-                logger.lifecycle("startLocalBackend: backend reachable on http://localhost:$backendPort")
-                return@doLast
-            }
-            Thread.sleep(500)
+        // Give the server a moment to serve the API origin the simulator will use.
+        if (waitForBackendHttp(backendPort, timeoutSeconds = 20)) {
+            logger.lifecycle("startLocalBackend: backend reachable on ${backendHealthUrl(backendPort)}")
+            return@doLast
         }
 
-        logger.lifecycle("startLocalBackend: backend still starting; continuing build.")
+        throw GradleException(
+            "startLocalBackend: backend started on port $backendPort but ${backendHealthUrl(backendPort)} did not " +
+                "return a successful response. Check ${outFile.absolutePath} and ${errFile.absolutePath}."
+        )
     }
 }
 
