@@ -2445,259 +2445,41 @@ fun EventDetails(
                     ),
                 )
 
-                animatedCardSection(
-                    sectionId = readOnlyUiModel.registration.sectionId,
-                    sectionExpansionStates = sectionExpansionStates,
-                    sectionTitle = readOnlyUiModel.registration.title,
-                    collapsibleInEditMode = true,
-                    collapsibleInViewMode = true,
-                    viewSummary = readOnlyUiModel.registration.summary,
-                    requiredMissingCount = editUiModel.registration.requiredMissingCount,
-                    enabled = sportRequiredSectionEnabled,
-                    onDisabledClick = ::showSelectSportMessage,
-                    isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
-                    lazyListState = lazyListState,
-                    stickyHeaderTopInset = stickyHeaderTopInset,
-                    animationDelay = 200,
-                    viewContent = {
-                        DetailKeyValueList(
-                            rows = buildEventDetailsRows(
-                                event = event,
-                                priceSummary = priceSummary,
-                                registrationSummary = registrationSummary,
-                                refundSummary = refundSummary,
-                            ),
-                        )
-                        ReadOnlyDivisionsList(
-                            event = event,
-                            divisionDetails = divisionDetailsForSettings,
-                        )
-                        EventRegistrationQuestionsSection(
-                            questions = eventRegistrationQuestions,
-                            answers = eventRegistrationQuestionAnswers,
-                            expanded = eventRegistrationQuestionsExpanded,
-                            onToggleExpanded = onToggleEventRegistrationQuestions,
-                            onAnswerChange = onEventRegistrationQuestionAnswerChange,
-                        )
-                    },
-                    editContent = {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.Top,
-                        ) {
-                            PlatformDropdown(
-                                selectedValue = editEvent.eventType.name,
-                                onSelectionChange = { selectedValue ->
-                                    val selectedEventType = EventType.entries.find { it.name == selectedValue }
-                                    selectedEventType?.let { onEventTypeSelected(it) }
-                                },
-                                options = EventType.entries
-                                    .filterNot { eventType ->
-                                        isNewEvent && rentalTimeLocked && eventType == EventType.WEEKLY_EVENT
-                                    }
-                                    .map { eventType ->
-                                        DropdownOption(
-                                            value = eventType.name,
-                                            label = eventType.name.toEnumTitleCase(),
-                                        )
-                                    },
-                                label = "Event Type",
-                                modifier = Modifier.weight(1f),
-                            )
-                            NumberInputField(
-                                modifier = Modifier.weight(1f),
-                                value = editEvent.teamSizeLimit.toString(),
-                                label = "Team Size Limit",
-                                onValueChange = { newValue ->
-                                    if (newValue.all { it.isDigit() }) {
-                                        if (newValue.isBlank()) {
-                                            onEditEvent { copy(teamSizeLimit = 0) }
-                                        } else {
-                                            onEditEvent { copy(teamSizeLimit = newValue.toInt()) }
-                                        }
-                                    }
-                                },
-                                isError = !isTeamSizeValid,
-                                supportingText = if (!isTeamSizeValid) {
-                                    "Team size must be at least 1."
-                                } else {
-                                    ""
-                                },
-                            )
-                        }
-                        val playoffsOrPoolsInput: @Composable () -> Unit = {
-                            if (editEvent.eventType == EventType.LEAGUE) {
-                                LabeledCheckboxRow(
-                                    checked = editEvent.includePlayoffs,
-                                    label = "Include Playoffs",
-                                    onCheckedChange = { checked ->
-                                        onEditEvent {
-                                            val nextDivisionDetails = mergeDivisionDetailsForDivisions(
-                                                divisions = divisions,
-                                                existingDetails = divisionDetails,
-                                                eventId = id,
-                                            ).map { detail ->
-                                                when {
-                                                    !checked -> detail.copy(playoffTeamCount = null)
-                                                    singleDivision -> detail.copy(
-                                                        playoffTeamCount = playoffTeamCount
-                                                            ?: detail.playoffTeamCount,
-                                                    )
-                                                    else -> detail
-                                                }
-                                            }
-                                            copy(
-                                                includePlayoffs = checked,
-                                                playoffTeamCount = when {
-                                                    !checked -> null
-                                                    singleDivision -> playoffTeamCount
-                                                        ?: nextDivisionDetails.firstOrNull()?.playoffTeamCount
-                                                    else -> playoffTeamCount
-                                                },
-                                                divisionDetails = nextDivisionDetails,
-                                            )
-                                        }
-                                    },
-                                )
-                            } else if (editEvent.eventType == EventType.TOURNAMENT) {
-                                LabeledCheckboxRow(
-                                    checked = editEvent.includePlayoffs,
-                                    label = "Include Pool Play",
-                                    onCheckedChange = { checked ->
-                                        onEditEvent {
-                                            val nextDivisionDetails = mergeDivisionDetailsForDivisions(
-                                                divisions = divisions,
-                                                existingDetails = divisionDetails,
-                                                eventId = id,
-                                            ).map { detail ->
-                                                if (checked) {
-                                                    detail.withDerivedTournamentPoolTeamCount(enabled = true)
-                                                } else {
-                                                    detail.copy(
-                                                        playoffTeamCount = null,
-                                                        poolCount = null,
-                                                        poolTeamCount = null,
-                                                    )
-                                                }
-                                            }
-                                            copy(
-                                                includePlayoffs = checked,
-                                                playoffTeamCount = if (checked) playoffTeamCount else null,
-                                                divisionDetails = nextDivisionDetails,
-                                            )
-                                        }
-                                    },
-                                )
-                            }
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.Top,
-                        ) {
-                            Box(modifier = Modifier.weight(1f)) {
-                                playoffsOrPoolsInput()
-                            }
-                            Box(modifier = Modifier.weight(1f)) {
-                                LabeledCheckboxRow(
-                                    checked = if (
-                                        editEvent.eventType == EventType.EVENT ||
-                                        editEvent.eventType == EventType.WEEKLY_EVENT
-                                    ) {
-                                        editEvent.teamSignup
-                                    } else {
-                                        true
-                                    },
-                                    label = "Team Event",
-                                    enabled = editEvent.eventType == EventType.EVENT ||
-                                        editEvent.eventType == EventType.WEEKLY_EVENT,
-                                    onCheckedChange = { checked ->
-                                        if (
-                                            editEvent.eventType == EventType.EVENT ||
-                                            editEvent.eventType == EventType.WEEKLY_EVENT
-                                        ) {
-                                            onEditEvent { copy(teamSignup = checked) }
-                                        }
-                                    },
-                                )
-                            }
-                        }
-                        FormSectionDivider()
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.Top,
-                        ) {
-                            NumberInputField(
-                                modifier = Modifier.weight(1f),
-                                value = editEvent.minAge?.toString().orEmpty(),
-                                label = "Min Age",
-                                onValueChange = { newValue ->
-                                    if (!newValue.all { it.isDigit() }) return@NumberInputField
-                                    onEditEvent {
-                                        copy(minAge = newValue.toIntOrNull())
-                                    }
-                                },
-                                isError = false,
-                            )
-                            NumberInputField(
-                                modifier = Modifier.weight(1f),
-                                value = editEvent.maxAge?.toString().orEmpty(),
-                                label = "Max Age",
-                                onValueChange = { newValue ->
-                                    if (!newValue.all { it.isDigit() }) return@NumberInputField
-                                    onEditEvent {
-                                        copy(maxAge = newValue.toIntOrNull())
-                                    }
-                                },
-                                isError = false,
-                            )
-                        }
-                        FormSectionDivider()
-
-                        val automaticRefundsEnabled = if (editEvent.singleDivision) {
-                            editEvent.priceCents > 0
-                        } else {
-                            divisionDetailsForSettings.any { detail -> (detail.price ?: 0) > 0 }
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.Top,
-                        ) {
-                            RegistrationOptions(
-                                cutoffHours = editEvent.registrationCutoffHours,
-                                onCutoffHoursChange = {
-                                    onEditEvent { copy(registrationCutoffHours = it) }
-                                },
-                                modifier = Modifier.weight(1f),
-                            )
-                            CancellationRefundOptions(
-                                refundHours = editEvent.cancellationRefundHours,
-                                onRefundHoursChange = {
-                                    onEditEvent { copy(cancellationRefundHours = it) }
-                                },
-                                modifier = Modifier.weight(1f),
-                                enabled = automaticRefundsEnabled,
-                                disabledMessage = "Add a paid division to enable automatic refunds.",
-                            )
-                        }
-                        RequiredDocumentsSection(
-                            isOrganizationEvent = isOrganizationEvent,
-                            rentalTimeLocked = rentalTimeLocked,
-                            organizationTemplatesLoading = organizationTemplatesLoading,
-                            organizationTemplatesError = organizationTemplatesError,
-                            requiredTemplateOptions = requiredTemplateOptions,
-                            selectedRequiredTemplateIds = selectedRequiredTemplateIds,
-                            selectedRequiredTemplateLabels = selectedRequiredTemplateLabels,
-                            onRequiredTemplateIdsChange = { normalizedTemplateIds ->
-                                onEditEvent { copy(requiredTemplateIds = normalizedTemplateIds) }
-                            },
-                        )
-
-                    },
+                eventDetailsRegistrationSection(
+                    state = EventDetailsRegistrationState(
+                        readOnlySection = readOnlyUiModel.registration,
+                        editSection = editUiModel.registration,
+                        sectionExpansionStates = sectionExpansionStates,
+                        eventDetailsMode = eventDetailsMode,
+                        lazyListState = lazyListState,
+                        stickyHeaderTopInset = stickyHeaderTopInset,
+                        enabled = sportRequiredSectionEnabled,
+                        isNewEvent = isNewEvent,
+                        rentalTimeLocked = rentalTimeLocked,
+                        event = event,
+                        editEvent = editEvent,
+                        divisionDetails = divisionDetailsForSettings,
+                        priceSummary = priceSummary,
+                        registrationSummary = registrationSummary,
+                        refundSummary = refundSummary,
+                        isTeamSizeValid = isTeamSizeValid,
+                        isOrganizationEvent = isOrganizationEvent,
+                        organizationTemplatesLoading = organizationTemplatesLoading,
+                        organizationTemplatesError = organizationTemplatesError,
+                        requiredTemplateOptions = requiredTemplateOptions,
+                        selectedRequiredTemplateIds = selectedRequiredTemplateIds,
+                        selectedRequiredTemplateLabels = selectedRequiredTemplateLabels,
+                        eventRegistrationQuestions = eventRegistrationQuestions,
+                        eventRegistrationQuestionAnswers = eventRegistrationQuestionAnswers,
+                        eventRegistrationQuestionsExpanded = eventRegistrationQuestionsExpanded,
+                    ),
+                    actions = EventDetailsRegistrationActions(
+                        onDisabledClick = ::showSelectSportMessage,
+                        onEditEvent = onEditEvent,
+                        onEventTypeSelected = onEventTypeSelected,
+                        onToggleEventRegistrationQuestions = onToggleEventRegistrationQuestions,
+                        onEventRegistrationQuestionAnswerChange = onEventRegistrationQuestionAnswerChange,
+                    ),
                 )
 
                 if (showMatchRulesSection) {
@@ -4908,78 +4690,6 @@ private fun PriceWithFeesPreviewSupportingText(
             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
             color = Color(localImageScheme.current.primary),
         )
-    }
-}
-
-@Composable
-private fun EventRegistrationQuestionsSection(
-    questions: List<TeamJoinQuestion>,
-    answers: Map<String, String>,
-    expanded: Boolean,
-    onToggleExpanded: () -> Unit,
-    onAnswerChange: (String, String) -> Unit,
-) {
-    if (questions.isEmpty()) return
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 12.dp),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        ),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onToggleExpanded),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Registration questions",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = "${questions.size} ${if (questions.size == 1) "question" else "questions"}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Icon(
-                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = if (expanded) "Collapse registration questions" else "Expand registration questions",
-                )
-            }
-            AnimatedVisibility(visible = expanded) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    questions.forEach { question ->
-                        StandardTextField(
-                            value = answers[question.id].orEmpty(),
-                            onValueChange = { value -> onAnswerChange(question.id, value) },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = if (question.required) "${question.prompt} *" else question.prompt,
-                            placeholder = "Answer",
-                            supportingText = if (question.answerType.equals("LONG_TEXT", ignoreCase = true)) {
-                                "A short paragraph is fine."
-                            } else {
-                                ""
-                            },
-                            height = if (question.answerType.equals("LONG_TEXT", ignoreCase = true)) 128.dp else null,
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 

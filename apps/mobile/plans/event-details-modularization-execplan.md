@@ -23,6 +23,7 @@ After this refactor, the app should behave the same, but the code will be organi
   - [x] (2026-06-24 01:07Z) Extracted the hero/header region into `EventDetailsHeroSection.kt` as a whole lazy-list section with explicit state/action containers.
   - [x] (2026-06-24 01:12Z) Extracted the Basic Information card into `EventDetailsBasicInfoSection.kt` as a whole read/edit section with explicit state/action containers.
   - [x] (2026-06-24 01:18Z) Extracted League Scoring and Schedule cards into `EventDetailsScheduleSections.kt`, including read-only schedule rows, editable resources, slots, rental selection, and lock/error messaging.
+  - [x] (2026-06-24 01:24Z) Extracted the Registration card into `EventDetailsRegistrationSection.kt`, including read-only price/registration/division/question content and edit-mode event type, team, age, refund, registration cutoff, and required-document controls.
 - [x] (2026-04-18) Run focused regression tests after extraction.
 - [ ] Run the full requested Gradle test suite. Android debug/release unit tests and Android JVM aggregation passed; `allTests` is blocked locally by missing macOS `xcrun`.
 - [x] (2026-04-18) Run Android debug build/install and emulator QA using the `test-android-apps` workflow.
@@ -35,6 +36,7 @@ After this refactor, the app should behave the same, but the code will be organi
 - The hero/header section can be cleanly extracted before deeper form sections because it mostly owns visual chrome and only needs a small state/action boundary for image selection, event-name editing, location-map reveal, registration-hold expiry, and the existing join button slot.
 - The Basic Information section is a clean follow-up extraction because its read-only host/details content and edit-mode description/sport/date controls share one existing card boundary.
 - League Scoring and Schedule can share a section file because scoring is small and schedule owns the adjacent resource/timeslot workflow; grouping them keeps the parent screen focused on composing state while the resource scheduler remains one cohesive UI area.
+- Registration is a useful standalone component because it owns both participant-facing registration summaries and edit-time registration/payment prerequisite controls without needing schedule, staff, or division editor state.
 
 ## Decision Log
 
@@ -246,6 +248,19 @@ League Scoring and Schedule extraction evidence:
      231 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailsScheduleSections.kt
 
 Validation after League Scoring and Schedule extraction:
+
+    git diff --check
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:compileCommonMainKotlinMetadata --console=plain
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailsMatchRulesTest*" --tests "*EventDetailsScheduleLockingTest*" --tests "*LeagueSlotValidationTest*" --tests "*EventDetailsDivisionEditorHelpersTest*" --console=plain
+
+All three commands passed on 2026-06-24. The focused test run reported adb reverse could not be configured because no device/emulator was attached, but the JVM tests completed successfully.
+
+Registration extraction evidence:
+
+    4814 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetails.kt
+     424 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailsRegistrationSection.kt
+
+Validation after Registration extraction:
 
     git diff --check
     PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:compileCommonMainKotlinMetadata --console=plain
