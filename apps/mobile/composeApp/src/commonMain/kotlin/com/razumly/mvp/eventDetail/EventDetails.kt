@@ -4587,136 +4587,74 @@ fun EventDetails(
                     )
                 }
 
-                if (editEvent.eventType == EventType.LEAGUE) {
-                    animatedCardSection(
-                        sectionId = readOnlyUiModel.leagueScoring.sectionId,
+                eventDetailsLeagueScoringSection(
+                    state = EventDetailsLeagueScoringState(
+                        readOnlySection = readOnlyUiModel.leagueScoring,
+                        editSection = editUiModel.leagueScoring,
                         sectionExpansionStates = sectionExpansionStates,
-                        sectionTitle = if (eventDetailsMode == EventDetailsMode.EDIT) {
-                            editUiModel.leagueScoring.title
-                        } else {
-                            readOnlyUiModel.leagueScoring.title
-                        },
-                        collapsibleInEditMode = true,
-                        collapsibleInViewMode = true,
-                        viewSummary = readOnlyUiModel.leagueScoring.summary,
-                        enabled = sportRequiredSectionEnabled,
-                        onDisabledClick = ::showSelectSportMessage,
-                        isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
+                        eventDetailsMode = eventDetailsMode,
                         lazyListState = lazyListState,
                         stickyHeaderTopInset = stickyHeaderTopInset,
-                        animationDelay = 440,
-                        viewContent = {
-                            DetailKeyValueList(
-                                rows = listOf(
-                                    DetailRowSpec(
-                                        "Scoring profile",
-                                        sports.firstOrNull { it.id == editEvent.sportId }?.name ?: "Default",
-                                    ),
-                                ),
-                            )
-                        },
-                        editContent = {
-                            val selectedSport = sports.firstOrNull { it.id == editEvent.sportId }
-                            LeagueScoringConfigFields(
-                                config = leagueScoringConfig,
-                                sport = selectedSport,
-                                onConfigChange = onLeagueScoringConfigChange,
-                            )
-                        },
-                    )
-                }
+                        enabled = sportRequiredSectionEnabled,
+                        editEvent = editEvent,
+                        sports = sports,
+                        leagueScoringConfig = leagueScoringConfig,
+                    ),
+                    actions = EventDetailsLeagueScoringActions(
+                        onDisabledClick = ::showSelectSportMessage,
+                        onConfigChange = onLeagueScoringConfigChange,
+                    ),
+                )
 
-                if (supportsScheduleConfig) {
-                    animatedCardSection(
-                        sectionId = readOnlyUiModel.schedule.sectionId,
+                eventDetailsScheduleSection(
+                    state = EventDetailsScheduleState(
+                        readOnlySection = readOnlyUiModel.schedule,
+                        editSection = editUiModel.schedule,
                         sectionExpansionStates = sectionExpansionStates,
-                        sectionTitle = if (eventDetailsMode == EventDetailsMode.EDIT) {
-                            editUiModel.schedule.title
-                        } else {
-                            readOnlyUiModel.schedule.title
-                        },
-                        collapsibleInEditMode = true,
-                        collapsibleInViewMode = true,
-                        viewSummary = readOnlyUiModel.schedule.summary,
-                        enabled = sportRequiredSectionEnabled,
-                        onDisabledClick = ::showSelectSportMessage,
-                        requiredMissingCount = editUiModel.schedule.requiredMissingCount,
-                        isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
+                        eventDetailsMode = eventDetailsMode,
                         lazyListState = lazyListState,
                         stickyHeaderTopInset = stickyHeaderTopInset,
-                        animationDelay = 450,
-                        viewContent = {
-                            DetailKeyValueList(
-                                rows = buildScheduleDetailsRows(
-                                    event = event,
-                                    fieldCount = readOnlyFieldCount,
-                                    slotCount = eventWithRelations.timeSlots.size,
-                                ),
-                            )
-                            ScheduleTimeslotsReadOnlyList(
-                                slots = eventWithRelations.timeSlots,
-                                fieldsById = fieldsById,
-                                divisionDetails = divisionDetailsForSettings,
-                                fallbackDivisionIds = normalizedEventDivisions,
-                            )
+                        enabled = sportRequiredSectionEnabled,
+                        supportsScheduleConfig = supportsScheduleConfig,
+                        event = event,
+                        editEvent = editEvent,
+                        readOnlyFieldCount = readOnlyFieldCount,
+                        timeSlots = eventWithRelations.timeSlots,
+                        fieldsById = fieldsById,
+                        divisionDetails = divisionDetailsForSettings,
+                        fallbackDivisionIds = normalizedEventDivisions,
+                        fieldCount = fieldCount,
+                        fields = editableFields,
+                        leagueTimeSlots = leagueTimeSlots,
+                        availableRentalResources = availableRentalResources,
+                        selectedRentalResourceIds = selectedRentalResourceIds,
+                        eventTimeZone = editEventTimeZone,
+                        slotErrors = leagueSlotErrors,
+                        slotEditorEnabled = slotEditorEnabled,
+                        showUseManualTimeSlotsToggle = supportsOptionalManualTimeSlots,
+                        useManualTimeSlots = useManualTimeSlots,
+                        slotDivisionOptions = slotDivisionOptions,
+                        showSlotDivisions = splitByDivisionScheduling,
+                        allowDivisionEditsWhenReadOnly = allowLockedSlotDivisionEdits,
+                        allowLocalResourceCreationWithRentalResources = allowLocalResourceCreationWithRentalResources,
+                        isFieldCountValid = isFieldCountValid,
+                        isLeagueSlotsValid = isLeagueSlotsValid,
+                        scheduleTimeLocked = scheduleTimeLocked,
+                    ),
+                    actions = EventDetailsScheduleActions(
+                        onDisabledClick = ::showSelectSportMessage,
+                        onRentalResourceSelectionChange = onRentalResourceSelectionChange,
+                        onFieldCountChange = { count ->
+                            fieldCount = count
+                            onSelectFieldCount(count)
                         },
-                        editContent = {
-                            LeagueScheduleFields(
-                                fieldCount = fieldCount,
-                                fields = editableFields,
-                                slots = leagueTimeSlots,
-                                availableRentalResources = availableRentalResources,
-                                selectedRentalResourceIds = selectedRentalResourceIds,
-                                onRentalResourceSelectionChange = onRentalResourceSelectionChange,
-                                eventStart = editEvent.start,
-                                eventEnd = if (editEvent.noFixedEndDateTime) {
-                                    null
-                                } else {
-                                    editEvent.end.takeIf { it > editEvent.start }
-                                },
-                                eventTimeZone = editEventTimeZone,
-                                onFieldCountChange = { count ->
-                                    fieldCount = count
-                                    onSelectFieldCount(count)
-                                },
-                                onFieldNameChange = onUpdateLocalFieldName,
-                                onAddSlot = onAddLeagueTimeSlot,
-                                onUpdateSlot = onUpdateLeagueTimeSlot,
-                                onRemoveSlot = onRemoveLeagueTimeSlot,
-                                slotErrors = leagueSlotErrors,
-                                showSlotEditor = slotEditorEnabled,
-                                showUseManualTimeSlotsToggle = supportsOptionalManualTimeSlots,
-                                useManualTimeSlots = useManualTimeSlots,
-                                onUseManualTimeSlotsChange = onUseManualTimeSlotsChange,
-                                slotDivisionOptions = slotDivisionOptions,
-                                showSlotDivisions = splitByDivisionScheduling,
-                                lockSlotDivisions = false,
-                                lockedDivisionIds = editEvent.divisions.normalizeDivisionIdentifiers(),
-                                allowDivisionEditsWhenReadOnly = allowLockedSlotDivisionEdits,
-                                allowLocalResourceCreationWithRentalResources = allowLocalResourceCreationWithRentalResources,
-                                fieldCountError = if (!isFieldCountValid) {
-                                    "Resource count must be at least 1."
-                                } else {
-                                    null
-                                },
-                                readOnly = scheduleTimeLocked,
-                            )
-                            if (
-                                !isLeagueSlotsValid &&
-                                (
-                                    editEvent.eventType == EventType.LEAGUE ||
-                                        editEvent.eventType == EventType.TOURNAMENT ||
-                                        editEvent.eventType == EventType.WEEKLY_EVENT
-                                    )
-                            ) {
-                                Text(
-                                    text = "Fix timeslot issues before continuing.",
-                                    color = MaterialTheme.colorScheme.error,
-                                )
-                            }
-                        },
-                    )
-                }
+                        onFieldNameChange = onUpdateLocalFieldName,
+                        onAddSlot = onAddLeagueTimeSlot,
+                        onUpdateSlot = onUpdateLeagueTimeSlot,
+                        onRemoveSlot = onRemoveLeagueTimeSlot,
+                        onUseManualTimeSlotsChange = onUseManualTimeSlotsChange,
+                    ),
+                )
 
             }
         }
