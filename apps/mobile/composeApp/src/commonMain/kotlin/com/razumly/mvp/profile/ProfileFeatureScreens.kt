@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -2441,6 +2442,7 @@ fun ProfileSectionScaffold(
     onRefresh: (() -> Unit)? = null,
     isRefreshing: Boolean = false,
     scrollContent: Boolean = true,
+    contentPadding: PaddingValues = PaddingValues(16.dp),
     content: @Composable () -> Unit,
 ) {
     val navPadding = LocalNavBarPadding.current
@@ -2477,6 +2479,7 @@ fun ProfileSectionScaffold(
                 ProfileSectionContent(
                     description = description,
                     scrollContent = scrollContent,
+                    contentPadding = contentPadding,
                     content = content,
                 )
             }
@@ -2484,6 +2487,7 @@ fun ProfileSectionScaffold(
             ProfileSectionContent(
                 description = description,
                 scrollContent = scrollContent,
+                contentPadding = contentPadding,
                 content = content,
                 modifier = contentModifier,
             )
@@ -2497,11 +2501,12 @@ fun ProfileSectionContent(
     content: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     scrollContent: Boolean = true,
+    contentPadding: PaddingValues = PaddingValues(16.dp),
 ) {
     if (scrollContent) {
         Column(
             modifier = modifier
-                .padding(16.dp)
+                .padding(contentPadding)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -2514,7 +2519,9 @@ fun ProfileSectionContent(
         }
     } else {
         Column(
-            modifier = modifier.padding(16.dp),
+            modifier = modifier
+                .fillMaxSize()
+                .padding(contentPadding),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
@@ -2523,7 +2530,9 @@ fun ProfileSectionContent(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Box(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
             ) {
                 content()
             }

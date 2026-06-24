@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -149,6 +150,7 @@ fun ScheduleView(
     showGroupingToggle: Boolean = true,
     matchGroupMode: ScheduleMatchGroupMode = ScheduleMatchGroupMode.FIELD,
     eventLabelsById: Map<String, String> = emptyMap(),
+    contentPadding: PaddingValues? = null,
     timeZone: TimeZone = TimeZone.currentSystemDefault(),
     onToggleLockAllMatches: ((Boolean, List<String>) -> Unit)? = null,
     onMatchClick: (MatchWithRelations) -> Unit,
@@ -177,7 +179,7 @@ fun ScheduleView(
         return
     }
 
-    val navPadding = LocalNavBarPadding.current
+    val listContentPadding = contentPadding ?: LocalNavBarPadding.current
     val sortedItems = remember(items, timeZone) {
         items.sortedBy { it.start }
     }
@@ -322,7 +324,7 @@ fun ScheduleView(
             modifier = Modifier.fillMaxSize(),
             state = lazyListState,
             verticalArrangement = Arrangement.spacedBy(0.dp),
-            contentPadding = navPadding
+            contentPadding = listContentPadding
         ) {
             if (topContentPadding > 0.dp) {
                 item(key = "division_pill_spacer") {

@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -145,6 +146,7 @@ fun ProfileMyScheduleScreen(component: ProfileComponent) {
         onRefresh = component::refreshMySchedule,
         isRefreshing = state.isLoading,
         scrollContent = false,
+        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 0.dp),
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -180,6 +182,7 @@ fun ProfileMyScheduleScreen(component: ProfileComponent) {
                         showGroupingToggle = false,
                         matchGroupMode = ScheduleMatchGroupMode.EVENT,
                         eventLabelsById = eventLabelsById,
+                        contentPadding = PaddingValues(),
                         onMatchClick = component::openScheduleMatch,
                         onEventClick = { event -> component.openScheduleEvent(event.id) },
                         matchCardContent = { match, onClick ->
