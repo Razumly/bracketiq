@@ -15,10 +15,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
@@ -59,6 +61,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.razumly.mvp.core.data.dataTypes.Event
@@ -104,6 +107,8 @@ import kotlin.time.Instant
 private const val WEB_LAYOUT_BREAKPOINT_DP = 600
 private const val FIELD_DISTANCE_WARNING_THRESHOLD_MILES = 0.01
 private const val EARTH_RADIUS_MILES = 3958.8
+private val MatchDetailBottomDockLift = 28.dp
+private val MatchDetailBottomDockContentReserve = 80.dp
 
 private fun matchLogTypeLabel(type: String): String = when (type.trim().uppercase()) {
     "POINT" -> "Point"
@@ -432,6 +437,9 @@ fun MatchDetailScreen(
     val showScoreControls = !isWebLayout
     val showOfficialScoreControls = showScoreControls && isOfficial
     val navBottomPadding = LocalNavBarPadding.current.calculateBottomPadding()
+    val density = LocalDensity.current
+    val safeBottomPadding = with(density) { WindowInsets.safeDrawing.getBottom(this).toDp() }
+    val bottomDockBottomPadding = maxOf(navBottomPadding, safeBottomPadding) + MatchDetailBottomDockLift
     val team1 = match.team1
     val team2 = match.team2
     val incidentDefinitionsByCode = remember(rules.incidentTypeDefinitions) {
@@ -878,7 +886,7 @@ fun MatchDetailScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = navBottomPadding + 92.dp),
+                .padding(bottom = bottomDockBottomPadding + MatchDetailBottomDockContentReserve),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceEvenly
         ) {
@@ -1122,7 +1130,7 @@ fun MatchDetailScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, bottom = navBottomPadding + 12.dp),
+                .padding(start = 16.dp, end = 16.dp, bottom = bottomDockBottomPadding),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
