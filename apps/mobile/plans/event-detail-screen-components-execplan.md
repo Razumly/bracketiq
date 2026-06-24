@@ -24,8 +24,8 @@ After this refactor, the app should behave the same, but a developer should be a
 - [x] (2026-06-24 00:34Z) Extracted `EventDetailDialogs.kt` for remaining route-level modal rendering that is not naturally owned by another component family.
 - [x] (2026-06-24 00:42Z) Introduced section-level immutable state and action containers for overview, join sheets, and standings, then updated extracted composables to receive those containers instead of long raw parameter lists.
 - [x] (2026-06-24 00:42Z) Evaluated which section containers should become true child components; no new Decompose child component is warranted in this screen-only pass.
-- [ ] Run focused event-detail regression tests, common metadata compilation, Android debug build/install, and emulator QA after the component extraction milestones.
-- [ ] Update the related plans if this work closes or changes any of their remaining unchecked items.
+- [x] (2026-06-24 00:52Z) Ran focused event-detail regression tests, common metadata compilation, Android debug build/install, and emulator QA after the component extraction milestones.
+- [x] (2026-06-24 00:52Z) Reviewed related plans and confirmed this screen-section work does not close or change their remaining unchecked items.
 
 ## Surprises & Discoveries
 
@@ -59,6 +59,12 @@ After this refactor, the app should behave the same, but a developer should be a
 - Observation: The join sheet only needs payment presentation capability from the event component, not the full component interface.
   Evidence: `EventDetailJoinSheetsState.paymentProcessor` is typed as `IPaymentProcessor`, and `JoinOptionsSheet` no longer receives `EventDetailComponent` directly.
 
+- Observation: The full debug unit suite currently has three failures outside the files changed by this screen-section refactor.
+  Evidence: `:composeApp:testDebugUnitTest` completed 832 tests and failed `EventLifecycleMobileApiIntegrationTest.event_lifecycle_matrix_creates_joins_schedules_and_updates_matches` with "normal should persist multiple officials", `LeaguePlayoffMobileApiIntegrationTest.league_playoff_mobile_api_flow_loads_staff_invites_periphery_join_and_schedule_data` with HTTP 400 for `/api/events/mobile_api_league_playoff_regression/schedule`, and `TeamInviteDialogUiTest.existing_team_read_only_view_uses_team_name_title_inline_jersey_and_expandable_details` with "No padding values provided".
+
+- Observation: Emulator QA reached the extracted event detail regions against the local debug app.
+  Evidence: `Pixel_9_Pro_API_35` booted as `emulator-5554`; `:composeApp:installDebug` installed `com.razumly.mvp`; the app launched `com.razumly.mvp/.MainActivity`; the event detail overview rendered "Mobile API League Playoff Regression"; the Participants, Schedule, Standings, and Bracket tabs rendered; schedule showed fields, matches, teams, and officials; crash buffers were empty for each capture.
+
 ## Decision Log
 
 - Decision: Extract whole screen regions first, not individual helper functions.
@@ -87,7 +93,7 @@ After this refactor, the app should behave the same, but a developer should be a
 
 ## Outcomes & Retrospective
 
-Implementation is in progress under this plan. `EventDetailScreen.kt` now routes state and callbacks into extracted section components, and the child-component decision has been documented. The related existing ExecPlans remain active until their unchecked items are completed or explicitly revised.
+Implementation under this plan is complete. `EventDetailScreen.kt` now routes state and callbacks into extracted section components, and the child-component decision has been documented. The related existing ExecPlans remain active because this work did not thin `DefaultEventDetailComponent` or `EventDetails.kt`.
 
 ## Related Plan Tracking
 
@@ -244,10 +250,56 @@ Validation after the state/action container milestone:
     PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --tests "*EventOverviewCapacityTest*" --tests "*EventDetailWeeklyBehaviorTest*" --tests "*EventDetailInviteDialogUiTest*" --tests "*EventDetailMobileJoinFlowTest*" --tests "*LeagueStandingsPresentationTest*" --tests "*EventLeagueStandingsCoordinatorTest*" --console=plain
 
 All three commands passed on 2026-06-24. The focused unit test run reported that adb reverse could not configure because no emulator/device was connected, but the JVM tests completed successfully.
+
+Final validation after all screen-section extraction milestones:
+
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --console=plain
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:compileDebugKotlinAndroid :composeApp:assembleDebug --console=plain
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:installDebug --console=plain
+
+`compileDebugKotlinAndroid`, `assembleDebug`, and `installDebug` passed on 2026-06-24. `installDebug` configured adb reverse for ports 3000 and 3010 and installed the debug APK on `Pixel_9_Pro_API_35`.
+
+The full `:composeApp:testDebugUnitTest` run was attempted on 2026-06-24. It completed 832 tests with three failures:
+
+    EventLifecycleMobileApiIntegrationTest > event_lifecycle_matrix_creates_joins_schedules_and_updates_matches
+      java.lang.AssertionError: normal should persist multiple officials
+    LeaguePlayoffMobileApiIntegrationTest > league_playoff_mobile_api_flow_loads_staff_invites_periphery_join_and_schedule_data
+      com.razumly.mvp.core.network.ApiException: HTTP 400 for http://127.0.0.1:3000/api/events/mobile_api_league_playoff_regression/schedule
+    TeamInviteDialogUiTest > existing_team_read_only_view_uses_team_name_title_inline_jersey_and_expandable_details
+      java.lang.IllegalStateException: No padding values provided
+
+Emulator QA evidence from `Pixel_9_Pro_API_35` / `emulator-5554`:
+
+    /tmp/mvp-app-launch.png
+    /tmp/mvp-app-event-detail.png
+    /tmp/mvp-app-event-tabs.png
+    /tmp/mvp-app-event-schedule.png
+    /tmp/mvp-app-event-standings.png
+    /tmp/mvp-app-event-bracket.png
+
+UI-tree summaries confirmed:
+
+    Overview: "Mobile API League Playoff Regression", capacity stats, team roster chips, and floating actions rendered.
+    Participants: tab strip and Team 1 through Team 4 rendered.
+    Schedule: June 1, 2026 showed 9 matches, "Integration Court", team names, and "Official: Team 2"/"Official: Team 4".
+    Standings: Team rows rendered with W/L/Pts columns.
+    Bracket: playoff matches M: 7, M: 8, and M: 9 rendered with field labels.
+
+Crash buffers captured after overview, participants, schedule, standings, and bracket were empty.
+
+Related plan review:
+
+    plans/event-detail-component-decomposition-execplan.md still has unchecked items for thinning `DefaultEventDetailComponent` and final component validation.
+    plans/event-details-modularization-execplan.md still has unchecked items for further `EventDetails.kt` thinning and the full requested Gradle test suite.
+
+This screen-section plan did not complete those remaining items, so those related plans were not changed.
+
+Original component-plan unchecked items from the opening audit remain:
+
     plans/event-detail-component-decomposition-execplan.md:58:- [ ] Thin `DefaultEventDetailComponent` so it owns Decompose lifecycle, public state exposure, and delegation, while helpers own domain-specific transformations.
     plans/event-detail-component-decomposition-execplan.md:93:- [ ] Run focused event-detail regression tests and final compile/build validation.
 
-Implementation evidence will be appended here after each milestone.
+Milestone evidence from implementation follows.
 
 Baseline focused event-detail tests passed:
 
