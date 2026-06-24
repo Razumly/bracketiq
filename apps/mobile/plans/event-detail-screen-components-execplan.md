@@ -20,7 +20,7 @@ After this refactor, the app should behave the same, but a developer should be a
 - [x] (2026-06-24 00:02Z) Extracted `EventDetailTabNavigation.kt` as one complete navigation/division-selector component family.
 - [x] (2026-06-24 00:02Z) Extracted `EventDetailSelectionModels.kt` for the shared tab/division option state and resolver helpers that were coupled to the selector.
 - [x] (2026-06-24 00:10Z) Extracted `EventDetailJoinAndInviteSheets.kt` as one complete registration, join, invite, and registration-question UI family.
-- [ ] Extract `EventDetailStandingsTab.kt` as one complete standings component family.
+- [x] (2026-06-24 00:27Z) Extracted `EventDetailStandingsTab.kt` as one complete standings component family and validated it.
 - [ ] Extract `EventDetailDialogs.kt` or `EventDetailDialogHost.kt` for remaining route-level modal rendering that is not naturally owned by another component family.
 - [ ] Introduce section-level immutable state and action containers for the largest extracted regions, then update extracted composables to receive those containers instead of long raw parameter lists.
 - [ ] Evaluate which section containers should become true child components and record the decision in this plan before creating any Decompose child component.
@@ -46,6 +46,9 @@ After this refactor, the app should behave the same, but a developer should be a
 
 - Observation: The join and invite extraction spans multiple route areas but is still one cohesive UI family.
   Evidence: `EventDetailJoinAndInviteSheets.kt` now owns `JoinOptionsSheet`, invite dialogs, child selection, registration hold timer rendering, and registration question dialogs, while `EventDetailScreen.kt` still owns when those surfaces are shown and which component actions they invoke.
+
+- Observation: The standings extraction was a clean presentational boundary around the existing standings presentation models.
+  Evidence: `EventDetailStandingsTab.kt` owns the tab, row animation state, confirmation message, row/cell rendering, and timestamp formatting while `LeagueStandingsPresentation.kt` remains the source for `TeamStanding`, columns, and standings calculations.
 
 ## Decision Log
 
@@ -300,6 +303,24 @@ Join and invite extraction validation passed:
 
     PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailInviteDialogUiTest*" --tests "*EventDetailMobileJoinFlowTest*" --tests "*EventRegistrationFlowCoordinatorTest*" --console=plain
     Result: BUILD SUCCESSFUL in 1m 46s
+    Notes: Existing warnings were reported during Kotlin compilation. `startLocalBackend` again reported adb reverse could not be configured because no device/emulator was attached; the JVM tests passed.
+
+Standings extraction file-size evidence:
+
+    4176 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt
+     343 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailStandingsTab.kt
+    4519 total
+
+Standings extraction validation passed:
+
+    git diff --check -- composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailStandingsTab.kt plans/event-detail-screen-components-execplan.md
+    Result: no whitespace errors
+
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:compileCommonMainKotlinMetadata --console=plain
+    Result: BUILD SUCCESSFUL in 28s before import cleanup, then BUILD SUCCESSFUL in 14s after removing standings-only imports from `EventDetailScreen.kt`
+
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --tests "*LeagueStandingsPresentationTest*" --tests "*EventLeagueStandingsCoordinatorTest*" --console=plain
+    Result: BUILD SUCCESSFUL in 1m 29s
     Notes: Existing warnings were reported during Kotlin compilation. `startLocalBackend` again reported adb reverse could not be configured because no device/emulator was attached; the JVM tests passed.
 
 ## Interfaces and Dependencies
