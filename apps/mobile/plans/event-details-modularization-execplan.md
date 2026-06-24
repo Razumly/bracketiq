@@ -20,6 +20,7 @@ After this refactor, the app should behave the same, but the code will be organi
 - [x] (2026-04-18) Extract read-only sections so they do not receive edit mutation callbacks.
 - [x] (2026-04-18) Extract edit/domain helpers for required documents, editable division cards, and staff cards so they do not contain read-only fallback branches controlled by `editView`.
 - [ ] Thin `EventDetails.kt` further toward orchestration only.
+  - [x] (2026-06-24 01:07Z) Extracted the hero/header region into `EventDetailsHeroSection.kt` as a whole lazy-list section with explicit state/action containers.
 - [x] (2026-04-18) Run focused regression tests after extraction.
 - [ ] Run the full requested Gradle test suite. Android debug/release unit tests and Android JVM aggregation passed; `allTests` is blocked locally by missing macOS `xcrun`.
 - [x] (2026-04-18) Run Android debug build/install and emulator QA using the `test-android-apps` workflow.
@@ -29,6 +30,7 @@ After this refactor, the app should behave the same, but the code will be organi
 - `.\gradlew :composeApp:allTests` invokes `:composeApp:bootIOSSimulator` and fails on this Windows host because `xcrun` is unavailable. This must be rerun on macOS or CI with iOS simulator tooling.
 - Android QA hit a transient emulator/System UI ANR after an emulator restart. The app process stayed alive, crash logcat was empty, and relaunching the activity resumed normal UI rendering.
 - The searched `test` event detail screens opened and rendered read-only content, but their options menus did not expose `Edit`; each visible result tested showed organization/admin actions such as `Create Template`, `Notify Players`, and `Delete`. The create-event tab did render the edit/create `EventDetails(...)` surface without crashing.
+- The hero/header section can be cleanly extracted before deeper form sections because it mostly owns visual chrome and only needs a small state/action boundary for image selection, event-name editing, location-map reveal, registration-hold expiry, and the existing join button slot.
 
 ## Decision Log
 
@@ -206,6 +208,19 @@ Android emulator QA evidence:
     Edit-mode reachability: searched for `test` and checked visible results; no tested event options menu exposed `Edit`. Opened the Create tab as an edit/create `EventDetails(...)` smoke test; it rendered without crash.
     Screenshots/UI dumps/logcat: `build/qa/event-details-modularization/`
     Key evidence files: `15-authenticated-events.png`, `16-event-detail.png`, `20-create-tab.png`, `21-search-test-results.png`, `22-first-test-event-detail.png`, `23-first-test-options.png`, `logcat-redacted.txt`
+
+Hero/header extraction evidence:
+
+    5320 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetails.kt
+     266 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailsHeroSection.kt
+
+Validation after hero/header extraction:
+
+    git diff --check
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:compileCommonMainKotlinMetadata --console=plain
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailsMatchRulesTest*" --tests "*EventDetailsScheduleLockingTest*" --tests "*LeagueSlotValidationTest*" --tests "*EventDetailsDivisionEditorHelpersTest*" --console=plain
+
+All three commands passed on 2026-06-24. The focused test run reported adb reverse could not be configured because no device/emulator was attached, but the JVM tests completed successfully.
 
 ## Interfaces and Dependencies
 

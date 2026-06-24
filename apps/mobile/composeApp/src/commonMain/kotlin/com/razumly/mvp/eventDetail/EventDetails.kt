@@ -289,19 +289,6 @@ private fun kotlin.time.Instant.asSystemLocalPickerInstant(timeZone: TimeZone): 
     return LocalDateTime(local.date, local.time).toInstant(TimeZone.currentSystemDefault())
 }
 
-@Composable
-private fun RegistrationHoldSummaryChip(
-    expiresAt: String?,
-    onExpired: () -> Unit,
-) {
-    val remainingLabel = rememberRegistrationHoldRemainingLabel(
-        expiresAt = expiresAt,
-        onExpired = onExpired,
-    ) ?: return
-
-    SummaryTagChip(label = "Held $remainingLabel")
-}
-
 @OptIn(ExperimentalHazeApi::class, ExperimentalTime::class)
 @Suppress("UNUSED_PARAMETER")
 @Composable
@@ -415,7 +402,6 @@ fun EventDetails(
     var divisionInstallmentDueDatePickerIndex by remember { mutableStateOf<Int?>(null) }
     var showImageSelector by rememberSaveable { mutableStateOf(false) }
     var showUploadImagePicker by rememberSaveable { mutableStateOf(false) }
-    var editLocationButtonCenter by remember { mutableStateOf(Offset.Zero) }
     // Validation states
     var isPriceValid by remember { mutableStateOf(editEvent.priceCents >= 0) }
     var isMaxParticipantsValid by remember { mutableStateOf(true) }
@@ -2402,178 +2388,31 @@ fun EventDetails(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
 
-                item {
-                    Box(modifier = Modifier.height(heroSpacerHeight)) {
-                        if (editView) {
-                            Button(
-                                onClick = { showImageSelector = true },
-                                modifier = Modifier.align(Alignment.Center).size(120.dp),
-                                shape = RoundedCornerShape(16.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color.Black,
-                                    contentColor = Color.White
-                                ),
-                                contentPadding = PaddingValues(16.dp),
-                                elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
-                            ) {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center
-                                ) {
-                                    Icon(
-                                        Icons.Default.Image,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(32.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        "Choose Image",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        textAlign = TextAlign.Center
-                                    )
-                                }
-                            }
-                            val imageErrorText = when {
-                                editEvent.imageId.isBlank() -> "Select an image for the event."
-                                !isColorLoaded -> "Image is still loading."
-                                else -> null
-                            }
-                            if (imageErrorText != null) {
-                                Text(
-                                    text = imageErrorText,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.align(Alignment.BottomCenter)
-                                        .padding(bottom = 16.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-                // First content card - overlapping the image
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(
-                            topStart = roundedCornerSize,
-                            topEnd = roundedCornerSize,
-                            bottomStart = 0.dp,
-                            bottomEnd = 0.dp
-                        ),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            horizontalAlignment = if (editView) Alignment.CenterHorizontally else Alignment.Start
-                        ) {
-                            if (editView && isNewEvent) {
-                                Card(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                    ),
-                                    border = BorderStroke(
-                                        width = 1.dp,
-                                        color = MaterialTheme.colorScheme.outlineVariant,
-                                    ),
-                                ) {
-                                    Text(
-                                        text = "For more complex events and billing use the web version.",
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    )
-                                }
-                            }
-
-                            // Event Title - Animated
-                            AnimatedContent(
-                                targetState = editView,
-                                transitionSpec = { transitionSpec(0) },
-                                label = "titleTransition"
-                            ) { editMode ->
-                                if (editMode) {
-                                    val hasNameError = eventNameInput.isBlank()
-                                    StandardTextField(
-                                        value = eventNameInput,
-                                        onValueChange = { eventNameInput = it },
-                                        label = "Event Name",
-                                        isError = hasNameError,
-                                        supportingText = if (hasNameError) {
-                                            stringResource(Res.string.enter_value)
-                                        } else {
-                                            ""
-                                        }
-                                    )
-                                } else {
-                                    Text(
-                                        text = event.name,
-                                        style = MaterialTheme.typography.headlineMedium,
-                                        fontWeight = FontWeight.Bold,
-                                    )
-                                }
-                            }
-
-                            if (editView) {
-                                Text(
-                                    text = editEvent.location,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                )
-                                Button(
-                                    onClick = {
-                                        onMapRevealCenterChange(editLocationButtonCenter)
-                                        onOpenLocationMap()
-                                    },
-                                    modifier = Modifier.onGloballyPositioned {
-                                        editLocationButtonCenter = it.boundsInWindow().center
-                                        onMapRevealCenterChange(editLocationButtonCenter)
-                                    },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color.Black, contentColor = Color.White
-                                    )
-                                ) {
-                                    Icon(Icons.Default.Place, contentDescription = null)
-                                    Text("Edit Location")
-                                }
-                                if (!isLocationValid) {
-                                    Text(
-                                        text = "Select a Location",
-                                        color = MaterialTheme.colorScheme.error
-                                    )
-                                }
-                            } else {
-                                Text(
-                                    text = eventMetaLine,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = Color(localImageScheme.current.onSurfaceVariant)
-                                )
-                                FlowRow(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    summaryTags.forEach { tag ->
-                                        SummaryTagChip(label = tag)
-                                    }
-                                    RegistrationHoldSummaryChip(
-                                        expiresAt = registrationHoldExpiresAt,
-                                        onExpired = onRegistrationHoldExpired,
-                                    )
-                                }
-                            }
-
-                            Box(
-                                Modifier.fillMaxWidth(),
-                                contentAlignment = if (editView) Alignment.Center else Alignment.CenterStart
-                            ) {
-                                joinButton(isValid)
-                            }
-                        }
-                    }
-                }
+                eventDetailsHeroSection(
+                    state = EventDetailsHeroState(
+                        editView = editView,
+                        isNewEvent = isNewEvent,
+                        event = event,
+                        editEvent = editEvent,
+                        eventNameInput = eventNameInput,
+                        isValid = isValid,
+                        isLocationValid = isLocationValid,
+                        isColorLoaded = isColorLoaded,
+                        heroSpacerHeight = heroSpacerHeight,
+                        roundedCornerSize = roundedCornerSize,
+                        eventMetaLine = eventMetaLine,
+                        summaryTags = summaryTags,
+                        registrationHoldExpiresAt = registrationHoldExpiresAt,
+                    ),
+                    actions = EventDetailsHeroActions(
+                        onShowImageSelector = { showImageSelector = true },
+                        onEventNameInputChange = { eventNameInput = it },
+                        onOpenLocationMap = onOpenLocationMap,
+                        onMapRevealCenterChange = onMapRevealCenterChange,
+                        onRegistrationHoldExpired = onRegistrationHoldExpired,
+                        joinButton = joinButton,
+                    ),
+                )
 
                 animatedCardSection(
                     sectionId = readOnlyUiModel.basics.sectionId,
