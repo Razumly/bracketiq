@@ -21,7 +21,7 @@ After this refactor, the app should behave the same, but a developer should be a
 - [x] (2026-06-24 00:02Z) Extracted `EventDetailSelectionModels.kt` for the shared tab/division option state and resolver helpers that were coupled to the selector.
 - [x] (2026-06-24 00:10Z) Extracted `EventDetailJoinAndInviteSheets.kt` as one complete registration, join, invite, and registration-question UI family.
 - [x] (2026-06-24 00:27Z) Extracted `EventDetailStandingsTab.kt` as one complete standings component family and validated it.
-- [ ] Extract `EventDetailDialogs.kt` or `EventDetailDialogHost.kt` for remaining route-level modal rendering that is not naturally owned by another component family.
+- [x] (2026-06-24 00:34Z) Extracted `EventDetailDialogs.kt` for remaining route-level modal rendering that is not naturally owned by another component family.
 - [ ] Introduce section-level immutable state and action containers for the largest extracted regions, then update extracted composables to receive those containers instead of long raw parameter lists.
 - [ ] Evaluate which section containers should become true child components and record the decision in this plan before creating any Decompose child component.
 - [ ] Run focused event-detail regression tests, common metadata compilation, Android debug build/install, and emulator QA after the component extraction milestones.
@@ -49,6 +49,9 @@ After this refactor, the app should behave the same, but a developer should be a
 
 - Observation: The standings extraction was a clean presentational boundary around the existing standings presentation models.
   Evidence: `EventDetailStandingsTab.kt` owns the tab, row animation state, confirmation message, row/cell rendering, and timestamp formatting while `LeagueStandingsPresentation.kt` remains the source for `TeamStanding`, columns, and standings calculations.
+
+- Observation: `TextSignatureDialog` has a cross-feature caller and should remain publicly importable after the dialog move.
+  Evidence: `composeApp/src/commonMain/kotlin/com/razumly/mvp/organizationDetail/OrganizationDetailScreen.kt` imports `com.razumly.mvp.eventDetail.TextSignatureDialog`, so `EventDetailDialogs.kt` keeps that function public while route-only dialogs are internal or private.
 
 ## Decision Log
 
@@ -320,6 +323,24 @@ Standings extraction validation passed:
     Result: BUILD SUCCESSFUL in 28s before import cleanup, then BUILD SUCCESSFUL in 14s after removing standings-only imports from `EventDetailScreen.kt`
 
     PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --tests "*LeagueStandingsPresentationTest*" --tests "*EventLeagueStandingsCoordinatorTest*" --console=plain
+    Result: BUILD SUCCESSFUL in 1m 29s
+    Notes: Existing warnings were reported during Kotlin compilation. `startLocalBackend` again reported adb reverse could not be configured because no device/emulator was attached; the JVM tests passed.
+
+Route-level dialogs extraction file-size evidence:
+
+    3688 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt
+     529 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailDialogs.kt
+    4217 total
+
+Route-level dialogs extraction validation passed:
+
+    git diff --check -- composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailDialogs.kt plans/event-detail-screen-components-execplan.md
+    Result: no whitespace errors
+
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:compileCommonMainKotlinMetadata --console=plain
+    Result: BUILD SUCCESSFUL in 23s before import cleanup, then BUILD SUCCESSFUL in 18s after removing dialog-only imports from `EventDetailScreen.kt`
+
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailMobileJoinFlowTest*" --tests "*EventRegistrationFlowCoordinatorTest*" --tests "*EventPaymentPlanHelpersTest*" --tests "*EventPurchaseIntentCoordinatorTest*" --console=plain
     Result: BUILD SUCCESSFUL in 1m 29s
     Notes: Existing warnings were reported during Kotlin compilation. `startLocalBackend` again reported adb reverse could not be configured because no device/emulator was attached; the JVM tests passed.
 
