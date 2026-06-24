@@ -28,6 +28,8 @@ After this refactor, the app should behave the same, but the code will be organi
   - [x] (2026-06-24 01:45Z) Extracted the Staff card into `EventDetailsStaffSection.kt`, including read-only staff summary, team-official settings, official scheduling, official positions, staff search, email invites, and assigned staff lists.
   - [x] (2026-06-24 02:03Z) Extracted the Divisions/Specifics card wrapper, read-only summary, division add/update controls, validation messages, and division list into `EventDetailsDivisionsSection.kt`.
   - [x] (2026-06-24 02:12Z) Extracted the remaining Divisions editor form into `EventDetailsDivisionEditorForm.kt`, including single-division defaults, division schedule configuration, division identity fields, pool-play fields, and division payment-plan rows.
+- [ ] Split `EventDetailComponent.kt` into contract, shared state, and implementation/coordinator files without changing public behavior.
+  - [x] (2026-06-24 02:32Z) Extracted the public component contract and shared dialog/flow state models into `EventDetailComponentContract.kt`, leaving `DefaultEventDetailComponent` and private implementation helpers in `EventDetailComponent.kt`.
 - [x] (2026-04-18) Run focused regression tests after extraction.
 - [ ] Run the full requested Gradle test suite. Android debug/release unit tests and Android JVM aggregation passed; `allTests` is blocked locally by missing macOS `xcrun`.
 - [x] (2026-04-18) Run Android debug build/install and emulator QA using the `test-android-apps` workflow.
@@ -45,6 +47,7 @@ After this refactor, the app should behave the same, but the code will be organi
 - Staff is a clean section boundary after the existing `staff` package helpers because the parent can keep transient search/invite state while the extracted section owns all visible staff layout.
 - The Divisions/Specifics card is the highest-risk remaining section because the middle editor form still mutates parent-owned division editor, payment plan, and date-picker state. The stable card/read-only/action/list boundaries can move first without changing public behavior.
 - The Divisions editor form can move as a large UI component by passing explicit state/action containers while the parent retains local coordinator helpers for event mutation, schedule slot synchronization, and installment date-picker state.
+- `EventDetailComponent.kt` should be split by ownership boundary, not by tiny helpers. The first safe component boundary is the public `EventDetailComponent` contract plus shared dialog/state models because external UI files depend on those declarations while the default implementation can continue to own private orchestration details.
 
 ## Decision Log
 
@@ -328,6 +331,19 @@ Validation after Divisions editor form extraction:
     PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailsMatchRulesTest*" --tests "*EventDetailsScheduleLockingTest*" --tests "*LeagueSlotValidationTest*" --tests "*EventDetailsDivisionEditorHelpersTest*" --console=plain
 
 All three commands passed on 2026-06-24. The focused test run reported adb reverse could not be configured because no device/emulator was attached, but the JVM tests completed successfully.
+
+EventDetailComponent contract extraction evidence:
+
+    3996 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+     391 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponentContract.kt
+
+Validation after EventDetailComponent contract extraction:
+
+    git diff --check
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:compileCommonMainKotlinMetadata --console=plain
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailsMatchRulesTest*" --tests "*EventDetailsScheduleLockingTest*" --tests "*LeagueSlotValidationTest*" --tests "*EventDetailsDivisionEditorHelpersTest*" --tests "*EventDetailMobileJoinFlowTest*" --tests "*EventRegistrationFlowCoordinatorTest*" --console=plain
+
+All three commands passed on 2026-06-24. The focused test run started the local backend and reported adb reverse could not be configured because no device/emulator was attached, but the JVM tests completed successfully.
 
 ## Interfaces and Dependencies
 
