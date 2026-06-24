@@ -17,7 +17,8 @@ After this refactor, the app should behave the same, but a developer should be a
 - [x] (2026-06-23 23:35Z) Ran the baseline focused event-detail tests and common metadata compilation; both passed.
 - [x] (2026-06-23 23:49Z) Extracted `EventDetailFloatingActions.kt` as one complete component family and validated it.
 - [x] (2026-06-23 23:56Z) Extracted `EventDetailOverviewSections.kt` as one complete overview/roster component family and validated it.
-- [ ] Extract `EventDetailTabNavigation.kt` as one complete navigation/division-selector component family.
+- [x] (2026-06-24 00:02Z) Extracted `EventDetailTabNavigation.kt` as one complete navigation/division-selector component family.
+- [x] (2026-06-24 00:02Z) Extracted `EventDetailSelectionModels.kt` for the shared tab/division option state and resolver helpers that were coupled to the selector.
 - [ ] Extract `EventDetailJoinAndInviteSheets.kt` as one complete registration, join, invite, and registration-question UI family.
 - [ ] Extract `EventDetailStandingsTab.kt` as one complete standings component family.
 - [ ] Extract `EventDetailDialogs.kt` or `EventDetailDialogHost.kt` for remaining route-level modal rendering that is not naturally owned by another component family.
@@ -39,6 +40,9 @@ After this refactor, the app should behave the same, but a developer should be a
 
 - Observation: The weekly occurrence fullness helpers moved with the overview section but still need package visibility because the join sheet displays the same fullness labels.
   Evidence: `EventDetailScreen.kt` still calls `formatWeeklyOccurrenceFullness(...)` and `WeeklyOccurrenceSummary.isFull()` from the join options UI after `EventDetailOverviewSections.kt` owns their implementation.
+
+- Observation: The tab selector extraction exposed a real mixed boundary: the route needs division resolver helpers in addition to visible tab composables.
+  Evidence: `EventDetailScreen.kt` still builds bracket, schedule, standings, and participant division selections, so `EventDetailSelectionModels.kt` now owns `BracketDivisionOption`, `SelectedDivisionSelectorState`, resolver extensions, and the all-pools sentinel while `EventDetailTabNavigation.kt` owns the visible controls.
 
 ## Decision Log
 
@@ -256,6 +260,25 @@ Overview extraction validation passed:
 
     PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --tests "*EventOverviewCapacityTest*" --tests "*EventDetailWeeklyBehaviorTest*" --console=plain
     Result: BUILD SUCCESSFUL in 1m 35s
+    Notes: Existing warnings were reported during Kotlin compilation. `startLocalBackend` again reported adb reverse could not be configured because no device/emulator was attached; the JVM tests passed.
+
+Tab navigation and selection-model extraction file-size evidence:
+
+    5318 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt
+     354 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailTabNavigation.kt
+     116 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailSelectionModels.kt
+    5788 total
+
+Tab navigation and selection-model extraction validation passed:
+
+    git diff --check -- composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailTabNavigation.kt composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailSelectionModels.kt plans/event-detail-screen-components-execplan.md
+    Result: no whitespace errors
+
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:compileCommonMainKotlinMetadata --console=plain
+    Result: BUILD SUCCESSFUL in 19s
+
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailDivisionOptionsTest*" --tests "*TournamentPoolPlayTest*" --tests "*EventDetailWeeklyBehaviorTest*" --console=plain
+    Result: BUILD SUCCESSFUL in 1m 38s
     Notes: Existing warnings were reported during Kotlin compilation. `startLocalBackend` again reported adb reverse could not be configured because no device/emulator was attached; the JVM tests passed.
 
 ## Interfaces and Dependencies

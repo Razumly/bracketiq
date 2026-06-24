@@ -17,9 +17,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -30,7 +28,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -93,10 +90,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -175,11 +170,6 @@ import com.razumly.mvp.eventDetail.composables.TeamSelectionDialog
 import com.razumly.mvp.eventDetail.composables.TournamentBracketView
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
-import com.razumly.mvp.icons.Groups
-import com.razumly.mvp.icons.MVPIcons
-import com.razumly.mvp.icons.ProfileActionEvents
-import com.razumly.mvp.icons.TournamentBracket
-import com.razumly.mvp.icons.Trophy
 import coil3.compose.AsyncImage
 import dev.icerock.moko.geo.LatLng
 import kotlin.math.round
@@ -204,16 +194,6 @@ import org.koin.mp.KoinPlatform.getKoin
 val LocalTournamentComponent =
     compositionLocalOf<EventDetailComponent> { error("No tournament provided") }
 
-private enum class DetailTab(
-    val label: String,
-    val icon: ImageVector,
-) {
-    PARTICIPANTS("Participants", MVPIcons.Groups),
-    BRACKET("Bracket", MVPIcons.TournamentBracket),
-    SCHEDULE("Schedule", MVPIcons.ProfileActionEvents),
-    LEAGUES("Standings", MVPIcons.Trophy),
-}
-
 internal data class JoinOption(
     val label: String,
     val requiresPayment: Boolean,
@@ -229,17 +209,6 @@ internal data class WeeklySessionOption(
     val label: String,
     val divisionLabel: String,
 )
-
-internal data class BracketDivisionOption(
-    val id: String,
-    val label: String,
-)
-
-internal fun List<BracketDivisionOption>.sortedAlphabetically(): List<BracketDivisionOption> =
-    sortedWith(
-        compareBy<BracketDivisionOption> { option -> option.label.trim().lowercase() }
-            .thenBy { option -> option.id.trim().lowercase() },
-    )
 
 internal fun DivisionDetail.isPlayoffDivisionKind(): Boolean =
     kind?.trim()?.equals("PLAYOFF", ignoreCase = true) == true
@@ -488,359 +457,6 @@ internal fun Event.preferredBracketStageDivisionId(
         }
     }
 
-private data class EventDetailTabVisuals(
-    val badgeContainer: Color,
-    val badgeContent: Color,
-    val labelColor: Color,
-    val borderColor: Color,
-)
-
-private data class EventDetailTabIconStyle(
-    val size: androidx.compose.ui.unit.Dp,
-    val xOffset: androidx.compose.ui.unit.Dp = 0.dp,
-    val yOffset: androidx.compose.ui.unit.Dp = 0.dp,
-)
-
-private val DivisionPillContentTopOffset = 40.dp
-private const val AllPoolsDivisionOptionId = "__all_pools__"
-
-@Composable
-private fun eventDetailTabVisuals(selected: Boolean): EventDetailTabVisuals {
-    val colorScheme = MaterialTheme.colorScheme
-    return if (selected) {
-        EventDetailTabVisuals(
-            badgeContainer = colorScheme.primary,
-            badgeContent = colorScheme.onPrimary,
-            labelColor = colorScheme.onSurface,
-            borderColor = colorScheme.primary.copy(alpha = 0.2f),
-        )
-    } else {
-        EventDetailTabVisuals(
-            badgeContainer = colorScheme.surfaceContainerHigh,
-            badgeContent = colorScheme.primary.copy(alpha = 0.88f),
-            labelColor = colorScheme.onSurfaceVariant,
-            borderColor = colorScheme.outlineVariant,
-        )
-    }
-}
-
-@Composable
-private fun eventDetailTabIconStyle(tab: DetailTab): EventDetailTabIconStyle =
-    when (tab) {
-        DetailTab.BRACKET -> EventDetailTabIconStyle(size = 20.dp)
-        DetailTab.PARTICIPANTS -> EventDetailTabIconStyle(size = 20.dp)
-        DetailTab.SCHEDULE -> EventDetailTabIconStyle(size = 20.dp)
-        DetailTab.LEAGUES -> EventDetailTabIconStyle(size = 20.dp)
-    }
-
-@Composable
-private fun EventDetailTabIcon(
-    tab: DetailTab,
-    selected: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    val visuals = eventDetailTabVisuals(selected)
-    val iconStyle = eventDetailTabIconStyle(tab)
-    Surface(
-        modifier = modifier,
-        shape = CircleShape,
-        color = visuals.badgeContainer,
-        contentColor = visuals.badgeContent,
-        shadowElevation = if (selected) 2.dp else 0.dp,
-        tonalElevation = if (selected) 2.dp else 0.dp,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .border(
-                    width = 1.dp,
-                    color = visuals.borderColor,
-                    shape = CircleShape,
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = tab.icon,
-                contentDescription = null,
-                modifier = Modifier
-                    .offset(x = iconStyle.xOffset, y = iconStyle.yOffset)
-                    .size(iconStyle.size),
-            )
-        }
-    }
-}
-
-@Composable
-private fun RowScope.EventDetailTabButton(
-    tab: DetailTab,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val visuals = eventDetailTabVisuals(selected)
-    Column(
-        modifier = Modifier
-            .weight(1f)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        EventDetailTabIcon(
-            tab = tab,
-            selected = selected,
-        )
-        Text(
-            text = tab.label,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            color = visuals.labelColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Box(
-            modifier = Modifier
-                .width(if (selected) 28.dp else 18.dp)
-                .height(3.dp)
-                .background(
-                    color = if (selected) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)
-                    },
-                    shape = RoundedCornerShape(999.dp),
-                )
-        )
-    }
-}
-
-@Composable
-private fun EventDetailTabStrip(
-    availableTabs: List<DetailTab>,
-    selectedTab: DetailTab,
-    onTabSelected: (DetailTab) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLowest,
-        tonalElevation = 1.dp,
-        shadowElevation = 4.dp,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            availableTabs.forEach { tab ->
-                EventDetailTabButton(
-                    tab = tab,
-                    selected = selectedTab == tab,
-                    onClick = { onTabSelected(tab) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun EventDetailSelectedDivisionPill(
-    prefix: String = "Division",
-    label: String,
-    selectedDivisionId: String?,
-    divisionOptions: List<BracketDivisionOption>,
-    onDivisionSelected: (String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val canOpen = divisionOptions.size > 1
-    val arrowRotation by animateFloatAsState(
-        targetValue = if (expanded) 180f else 0f,
-        animationSpec = tween(durationMillis = 180),
-        label = "divisionPillArrowRotation",
-    )
-
-    Box(modifier = modifier) {
-        Surface(
-            modifier = Modifier.clickable(
-                enabled = canOpen,
-                onClick = { expanded = !expanded },
-            ),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            tonalElevation = 1.dp,
-            shadowElevation = 1.dp,
-        ) {
-            Row(
-                modifier = Modifier.padding(
-                    start = 14.dp,
-                    end = if (canOpen) 8.dp else 14.dp,
-                    top = 7.dp,
-                    bottom = 7.dp,
-                ),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    text = "$prefix: $label",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (canOpen) {
-                    Icon(
-                        imageVector = Icons.Default.KeyboardArrowDown,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .size(18.dp)
-                            .rotate(arrowRotation),
-                    )
-                }
-            }
-        }
-        DropdownMenu(
-            expanded = canOpen && expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            divisionOptions.sortedAlphabetically().forEach { option ->
-                val selected = option.id.normalizeDivisionIdentifier() ==
-                    selectedDivisionId?.normalizeDivisionIdentifier().orEmpty()
-                DropdownMenuItem(
-                    text = { Text(option.label) },
-                    onClick = {
-                        expanded = false
-                        onDivisionSelected(option.id)
-                    },
-                    trailingIcon = if (selected) {
-                        {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                    } else {
-                        null
-                    },
-                    colors = MenuDefaults.itemColors(
-                        textColor = if (selected) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
-                    ),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun EventDetailDivisionSelectorBar(
-    divisionState: SelectedDivisionPillState?,
-    poolState: SelectedDivisionPillState?,
-    onDivisionSelected: (String) -> Unit,
-    onPoolSelected: (String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        divisionState?.let { state ->
-            EventDetailSelectedDivisionPill(
-                prefix = "Division",
-                label = state.label,
-                selectedDivisionId = state.selectedDivisionId,
-                divisionOptions = state.options,
-                onDivisionSelected = onDivisionSelected,
-                modifier = Modifier.widthIn(max = if (poolState == null) 280.dp else 240.dp),
-            )
-        }
-        if (divisionState != null && poolState != null) {
-            Spacer(modifier = Modifier.width(8.dp))
-        }
-        poolState?.let { state ->
-            EventDetailSelectedDivisionPill(
-                prefix = "Pool",
-                label = state.label,
-                selectedDivisionId = state.selectedDivisionId,
-                divisionOptions = state.options,
-                onDivisionSelected = onPoolSelected,
-                modifier = Modifier.widthIn(max = 180.dp),
-            )
-        }
-    }
-}
-
-private fun List<BracketDivisionOption>.selectedDivisionLabel(
-    divisionId: String?,
-    divisionDetails: List<DivisionDetail>,
-): String? =
-    resolveDivisionLabel(divisionId)
-        ?: divisionId
-            ?.normalizeDivisionIdentifier()
-            ?.takeIf(String::isNotBlank)
-            ?.toDivisionDisplayLabel(divisionDetails)
-
-private fun List<BracketDivisionOption>.selectedDivisionIdOrRaw(divisionId: String?): String? {
-    if (isEmpty()) {
-        return divisionId
-            ?.normalizeDivisionIdentifier()
-            ?.takeIf(String::isNotBlank)
-    }
-    return resolveSelectedDivisionId(divisionId)
-}
-
-private data class SelectedDivisionPillState(
-    val selectedDivisionId: String?,
-    val label: String,
-    val options: List<BracketDivisionOption>,
-)
-
-private data class SelectedDivisionSelectorState(
-    val divisionState: SelectedDivisionPillState?,
-    val poolState: SelectedDivisionPillState?,
-)
-
-private fun buildSelectedDivisionPillState(
-    selectedDivisionId: String?,
-    options: List<BracketDivisionOption>,
-    divisionDetails: List<DivisionDetail>,
-    singleDivision: Boolean,
-): SelectedDivisionPillState? {
-    if (singleDivision || options.size <= 1) return null
-    val resolvedDivisionId = options.selectedDivisionIdOrRaw(selectedDivisionId)
-    val label = options.selectedDivisionLabel(resolvedDivisionId, divisionDetails)
-        ?: return null
-    return SelectedDivisionPillState(
-        selectedDivisionId = resolvedDivisionId,
-        label = label,
-        options = options,
-    )
-}
-
-private fun List<BracketDivisionOption>.distinctById(): List<BracketDivisionOption> =
-    distinctBy { option -> option.id }
-        .sortedAlphabetically()
-
-private fun List<BracketDivisionOption>.resolveDivisionLabel(divisionId: String?): String? {
-    val normalizedDivisionId = divisionId
-        ?.normalizeDivisionIdentifier()
-        .orEmpty()
-    if (normalizedDivisionId.isBlank()) return null
-
-    return findBracketDivisionOption(normalizedDivisionId)
-        ?.label
-        ?.takeIf(String::isNotBlank)
-}
-
 internal fun canViewOfficialsPanel(
     currentUserId: String,
     event: Event,
@@ -876,40 +492,6 @@ internal fun isCurrentUserEventOfficial(
         event.officialIds.any { officialId -> officialId.trim() == normalizedCurrentUserId }
     }
 }
-
-private fun List<BracketDivisionOption>.resolveSelectedDivisionId(preferredId: String?): String? {
-    if (isEmpty()) return null
-    val normalizedPreferred = preferredId
-        ?.normalizeDivisionIdentifier()
-        .orEmpty()
-    return findBracketDivisionOption(normalizedPreferred)?.id
-        ?: first().id
-}
-
-private fun List<BracketDivisionOption>.findBracketDivisionOption(divisionId: String?): BracketDivisionOption? {
-    val normalizedDivisionId = divisionId
-        ?.normalizeDivisionIdentifier()
-        .orEmpty()
-    if (normalizedDivisionId.isBlank()) return null
-    firstOrNull { option ->
-        option.id.normalizeDivisionIdentifier() == normalizedDivisionId
-    }?.let { option -> return option }
-    return null
-}
-
-private fun List<EventDetailDivisionOption>.toJoinDivisionOptions(): List<BracketDivisionOption> =
-    map { option ->
-        BracketDivisionOption(
-            id = option.id,
-            label = option.label,
-        )
-    }
-
-private fun List<EventDetailDivisionOption>.sortedEventDivisionOptionsAlphabetically(): List<EventDetailDivisionOption> =
-    sortedWith(
-        compareBy<EventDetailDivisionOption> { option -> option.label.trim().lowercase() }
-            .thenBy { option -> option.id.trim().lowercase() },
-    )
 
 private fun DivisionDetail.referencesBracketDivision(bracketDivisionId: String?): Boolean {
     val normalizedBracketId = bracketDivisionId
