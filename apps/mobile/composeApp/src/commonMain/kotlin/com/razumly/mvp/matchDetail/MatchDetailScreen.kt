@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
@@ -62,6 +63,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.razumly.mvp.core.data.dataTypes.Event
@@ -109,6 +111,10 @@ private const val FIELD_DISTANCE_WARNING_THRESHOLD_MILES = 0.01
 private const val EARTH_RADIUS_MILES = 3958.8
 private val MatchDetailBottomDockLift = 28.dp
 private val MatchDetailBottomDockContentReserve = 80.dp
+private val MatchDetailActionButtonHeight = 56.dp
+private val MatchDetailDetailsButtonWidth = 156.dp
+private val MatchDetailCourtButtonMinWidth = 96.dp
+private val MatchDetailCourtButtonMaxWidth = 220.dp
 
 private fun matchLogTypeLabel(type: String): String = when (type.trim().uppercase()) {
     "POINT" -> "Point"
@@ -1254,15 +1260,27 @@ private fun MatchDetailBottomActions(
             ) {
                 Button(
                     onClick = onMapToggle,
-                    modifier = Modifier.onGloballyPositioned {
-                        onMapButtonCenterChanged(it.boundsInWindow().center)
-                    },
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .widthIn(
+                            min = MatchDetailCourtButtonMinWidth,
+                            max = MatchDetailCourtButtonMaxWidth,
+                        )
+                        .height(MatchDetailActionButtonHeight)
+                        .onGloballyPositioned {
+                            onMapButtonCenterChanged(it.boundsInWindow().center)
+                        },
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text(fieldLocationLabel)
+                        Text(
+                            text = fieldLocationLabel,
+                            modifier = Modifier.weight(1f, fill = false),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                         Icon(
                             imageVector = Icons.Default.Place,
                             contentDescription = "Show field on map",
@@ -1271,8 +1289,14 @@ private fun MatchDetailBottomActions(
                 }
                 Button(
                     onClick = onMatchDetailsToggle,
+                    modifier = Modifier
+                        .width(MatchDetailDetailsButtonWidth)
+                        .height(MatchDetailActionButtonHeight),
                 ) {
-                    Text(if (showMatchDetails) "Hide Details" else "Match Details")
+                    Text(
+                        text = if (showMatchDetails) "Hide Details" else "Match Details",
+                        maxLines = 1,
+                    )
                 }
             }
             warningDistanceMiles?.let { distance ->
