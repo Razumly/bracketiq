@@ -200,6 +200,16 @@ fun MatchCard(
                     CurrentUserMatchRole.OFFICIAL -> MaterialTheme.colorScheme.onSurface
                     null -> null
                 }
+                val currentUserHighlightBorderWidth = when (currentUserMatchRole) {
+                    CurrentUserMatchRole.OFFICIAL -> 4.dp
+                    CurrentUserMatchRole.PARTICIPANT -> 1.5.dp
+                    null -> 0.dp
+                }
+                val currentUserHighlightElevation = when (currentUserMatchRole) {
+                    CurrentUserMatchRole.OFFICIAL -> 18.dp
+                    CurrentUserMatchRole.PARTICIPANT -> 14.dp
+                    null -> 0.dp
+                }
                 FloatingBox(
                     modifier = Modifier.align(Alignment.TopCenter).offset(y = (-20).dp).zIndex(1f),
                     color = localColors.current.primaryContainer
@@ -218,14 +228,14 @@ fun MatchCard(
                             if (currentUserGlowColor != null) {
                                 Modifier
                                     .shadow(
-                                        elevation = 14.dp,
+                                        elevation = currentUserHighlightElevation,
                                         shape = MatchCardShape,
                                         ambientColor = currentUserGlowColor.copy(alpha = 0.7f),
                                         spotColor = currentUserGlowColor.copy(alpha = 0.85f),
                                     )
                                     .border(
-                                        width = 1.5.dp,
-                                        color = currentUserGlowColor.copy(alpha = 0.9f),
+                                        width = currentUserHighlightBorderWidth,
+                                        color = currentUserGlowColor,
                                         shape = MatchCardShape,
                                     )
                             } else {
