@@ -19,7 +19,7 @@ After this refactor, the app should behave the same, but a developer should be a
 - [x] (2026-06-23 23:56Z) Extracted `EventDetailOverviewSections.kt` as one complete overview/roster component family and validated it.
 - [x] (2026-06-24 00:02Z) Extracted `EventDetailTabNavigation.kt` as one complete navigation/division-selector component family.
 - [x] (2026-06-24 00:02Z) Extracted `EventDetailSelectionModels.kt` for the shared tab/division option state and resolver helpers that were coupled to the selector.
-- [ ] Extract `EventDetailJoinAndInviteSheets.kt` as one complete registration, join, invite, and registration-question UI family.
+- [x] (2026-06-24 00:10Z) Extracted `EventDetailJoinAndInviteSheets.kt` as one complete registration, join, invite, and registration-question UI family.
 - [ ] Extract `EventDetailStandingsTab.kt` as one complete standings component family.
 - [ ] Extract `EventDetailDialogs.kt` or `EventDetailDialogHost.kt` for remaining route-level modal rendering that is not naturally owned by another component family.
 - [ ] Introduce section-level immutable state and action containers for the largest extracted regions, then update extracted composables to receive those containers instead of long raw parameter lists.
@@ -43,6 +43,9 @@ After this refactor, the app should behave the same, but a developer should be a
 
 - Observation: The tab selector extraction exposed a real mixed boundary: the route needs division resolver helpers in addition to visible tab composables.
   Evidence: `EventDetailScreen.kt` still builds bracket, schedule, standings, and participant division selections, so `EventDetailSelectionModels.kt` now owns `BracketDivisionOption`, `SelectedDivisionSelectorState`, resolver extensions, and the all-pools sentinel while `EventDetailTabNavigation.kt` owns the visible controls.
+
+- Observation: The join and invite extraction spans multiple route areas but is still one cohesive UI family.
+  Evidence: `EventDetailJoinAndInviteSheets.kt` now owns `JoinOptionsSheet`, invite dialogs, child selection, registration hold timer rendering, and registration question dialogs, while `EventDetailScreen.kt` still owns when those surfaces are shown and which component actions they invoke.
 
 ## Decision Log
 
@@ -279,6 +282,24 @@ Tab navigation and selection-model extraction validation passed:
 
     PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailDivisionOptionsTest*" --tests "*TournamentPoolPlayTest*" --tests "*EventDetailWeeklyBehaviorTest*" --console=plain
     Result: BUILD SUCCESSFUL in 1m 38s
+    Notes: Existing warnings were reported during Kotlin compilation. `startLocalBackend` again reported adb reverse could not be configured because no device/emulator was attached; the JVM tests passed.
+
+Join and invite extraction file-size evidence:
+
+    4470 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt
+     895 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailJoinAndInviteSheets.kt
+    5365 total
+
+Join and invite extraction validation passed:
+
+    git diff --check -- composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailJoinAndInviteSheets.kt plans/event-detail-screen-components-execplan.md
+    Result: no whitespace errors
+
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:compileCommonMainKotlinMetadata --console=plain
+    Result: BUILD SUCCESSFUL in 18s before import cleanup, then BUILD SUCCESSFUL in 16s after removing join/invite-only imports from `EventDetailScreen.kt`
+
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailInviteDialogUiTest*" --tests "*EventDetailMobileJoinFlowTest*" --tests "*EventRegistrationFlowCoordinatorTest*" --console=plain
+    Result: BUILD SUCCESSFUL in 1m 46s
     Notes: Existing warnings were reported during Kotlin compilation. `startLocalBackend` again reported adb reverse could not be configured because no device/emulator was attached; the JVM tests passed.
 
 ## Interfaces and Dependencies
