@@ -2414,189 +2414,35 @@ fun EventDetails(
                     ),
                 )
 
-                animatedCardSection(
-                    sectionId = readOnlyUiModel.basics.sectionId,
-                    sectionExpansionStates = sectionExpansionStates,
-                    sectionTitle = readOnlyUiModel.basics.title,
-                    collapsibleInEditMode = true,
-                    collapsibleInViewMode = true,
-                    viewSummary = readOnlyUiModel.basics.summary,
-                    requiredMissingCount = editUiModel.basics.requiredMissingCount,
-                    isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
-                    lazyListState = lazyListState,
-                    stickyHeaderTopInset = stickyHeaderTopInset,
-                    animationDelay = 100,
-                    viewContent = {
-                        HostedByReadOnlyRow(
-                            host = host,
-                            organization = eventWithRelations.organization,
-                            isOrganizationEvent = isOrganizationEvent,
-                            fallbackHostDisplayName = hostDisplayName,
-                            currentUser = currentUserForHostActions,
-                            onMessageUser = readOnlyActions.onMessageUser,
-                            onSendFriendRequest = readOnlyActions.onSendFriendRequest,
-                            onFollowUser = readOnlyActions.onFollowUser,
-                            onUnfollowUser = readOnlyActions.onUnfollowUser,
-                            onBlockUser = readOnlyActions.onBlockUser,
-                            onUnblockUser = readOnlyActions.onUnblockUser,
-                            onFollowOrganization = readOnlyActions.onFollowOrganization,
-                        )
-                        HorizontalDivider(
-                            color = MaterialTheme.colorScheme.outlineVariant,
-                            thickness = 1.dp,
-                        )
-                        DetailKeyValueList(
-                            rows = readOnlyBasicsRows,
-                        )
-                        if (event.description.isNotBlank()) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "About",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                ),
-                            )
-                            Text(
-                                text = event.description,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                    },
-                    editContent = {
-                        TextInputField(
-                            value = editEvent.description,
-                            label = "Description",
-                            onValueChange = { onEditEvent { copy(description = it) } },
-                            isError = false,
-                            errorMessage = "",
-                            supportingText = "Add a description of the event",
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            PlatformDropdown(
-                                selectedValue = editEvent.sportId.orEmpty(),
-                                onSelectionChange = onSportSelected,
-                                options = sports.map { sport ->
-                                    DropdownOption(value = sport.id, label = sport.name)
-                                },
-                                label = "Sport",
-                                placeholder = if (sports.isEmpty()) "No sports available" else "Select a sport",
-                                isError = !isSportValid,
-                                supportingText = if (!isSportValid) "Select a sport to continue." else "",
-                                enabled = sports.isNotEmpty(),
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                        FormSectionDivider()
-
-                        val supportsNoFixedEndDateTime =
-                            editEvent.eventType == EventType.LEAGUE ||
-                                editEvent.eventType == EventType.TOURNAMENT ||
-                                editEvent.eventType == EventType.WEEKLY_EVENT
-
-                        if (editEvent.eventType == EventType.EVENT || supportsNoFixedEndDateTime) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                StandardTextField(
-                                    value = editEvent.start.toLocalDateTime(editEventTimeZone).format(dateTimeFormat),
-                                    onValueChange = {},
-                                    modifier = Modifier.weight(1f),
-                                    label = "Start Date & Time",
-                                    readOnly = true,
-                                    onTap = {
-                                        if (!scheduleTimeLocked) {
-                                            showStartPicker = true
-                                        }
-                                    },
-                                )
-                                StandardTextField(
-                                    value = editEvent.end.toLocalDateTime(editEventTimeZone).format(dateTimeFormat),
-                                    onValueChange = {},
-                                    modifier = Modifier.weight(1f),
-                                    label = "End Date & Time",
-                                    enabled = !scheduleTimeLocked &&
-                                        !(supportsNoFixedEndDateTime && editEvent.noFixedEndDateTime),
-                                    readOnly = true,
-                                    onTap = {
-                                        if (!scheduleTimeLocked && !(supportsNoFixedEndDateTime && editEvent.noFixedEndDateTime)) {
-                                            showEndPicker = true
-                                        }
-                                    },
-                                )
-                            }
-                        } else {
-                            StandardTextField(
-                                value = editEvent.start.toLocalDateTime(editEventTimeZone).format(dateTimeFormat),
-                                onValueChange = {},
-                                modifier = Modifier.fillMaxWidth(),
-                                label = "Start Date & Time",
-                                readOnly = true,
-                                onTap = {
-                                    if (!scheduleTimeLocked) {
-                                        showStartPicker = true
-                                    }
-                                },
-                            )
-                        }
-
-                        if (supportsNoFixedEndDateTime) {
-                            val minimumFixedEnd = kotlin.time.Instant.fromEpochMilliseconds(
-                                editEvent.start.toEpochMilliseconds() + 60L * 60L * 1000L
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Checkbox(
-                                    checked = editEvent.noFixedEndDateTime,
-                                    enabled = !scheduleTimeLocked,
-                                    onCheckedChange = { checked ->
-                                        onEditEvent {
-                                            copy(
-                                                noFixedEndDateTime = checked,
-                                                end = when {
-                                                    end <= start -> minimumFixedEnd
-                                                    else -> end
-                                                },
-                                            )
-                                        }
-                                    },
-                                )
-                                Text(
-                                    text = "No fixed end datetime scheduling",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = Color(localImageScheme.current.onSurface),
-                                )
-                            }
-                            if (editEvent.noFixedEndDateTime) {
-                                Text(
-                                    text = "Scheduling can extend past the displayed end date/time. Turn this off to enforce the end date/time.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color(localImageScheme.current.onSurface),
-                                )
-                            }
-                        }
-
-                        if (scheduleTimeLocked) {
-                            Text(
-                                text = if (rentalTimeLocked) {
-                                    "Rental-selected start and end times are fixed and cannot be changed."
-                                } else {
-                                    "Facility-managed timeslots lock the event time range in mobile edit mode."
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(localImageScheme.current.onSurface),
-                            )
-                        }
-                    },
+                eventDetailsBasicInfoSection(
+                    state = EventDetailsBasicInfoState(
+                        readOnlySection = readOnlyUiModel.basics,
+                        editSection = editUiModel.basics,
+                        sectionExpansionStates = sectionExpansionStates,
+                        eventDetailsMode = eventDetailsMode,
+                        lazyListState = lazyListState,
+                        stickyHeaderTopInset = stickyHeaderTopInset,
+                        host = host,
+                        organization = eventWithRelations.organization,
+                        isOrganizationEvent = isOrganizationEvent,
+                        fallbackHostDisplayName = hostDisplayName,
+                        currentUserForHostActions = currentUserForHostActions,
+                        readOnlyBasicsRows = readOnlyBasicsRows,
+                        event = event,
+                        editEvent = editEvent,
+                        editEventTimeZone = editEventTimeZone,
+                        sports = sports,
+                        isSportValid = isSportValid,
+                        scheduleTimeLocked = scheduleTimeLocked,
+                        rentalTimeLocked = rentalTimeLocked,
+                    ),
+                    actions = EventDetailsBasicInfoActions(
+                        readOnlyActions = readOnlyActions,
+                        onEditEvent = onEditEvent,
+                        onSportSelected = onSportSelected,
+                        onShowStartPicker = { showStartPicker = true },
+                        onShowEndPicker = { showEndPicker = true },
+                    ),
                 )
 
                 animatedCardSection(
