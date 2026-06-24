@@ -31,6 +31,7 @@ After this refactor, the app should behave the same, but the code will be organi
 - [ ] Split `EventDetailComponent.kt` into contract, shared state, and implementation/coordinator files without changing public behavior.
   - [x] (2026-06-24 02:32Z) Extracted the public component contract and shared dialog/flow state models into `EventDetailComponentContract.kt`, leaving `DefaultEventDetailComponent` and private implementation helpers in `EventDetailComponent.kt`.
   - [x] (2026-06-24 02:46Z) Promoted the contract/state declarations back to canonical `EventDetailComponent.kt` and moved the default implementation into `DefaultEventDetailComponent.kt`.
+  - [x] (2026-06-24 03:43Z) Extracted registration, join, team registration, payment preview, signature prompt, billing-address prompt, and withdrawal action orchestration into `EventRegistrationActionHandler.kt`; `DefaultEventDetailComponent.kt` still owns Decompose lifecycle, state-flow composition, hydration, membership refresh helpers, edit/save actions, participant management, match editing, sharing, and payment-result collection.
 - [x] (2026-04-18) Run focused regression tests after extraction.
 - [ ] Run the full requested Gradle test suite. Android debug/release unit tests and Android JVM aggregation passed; `allTests` is blocked locally by missing macOS `xcrun`.
 - [x] (2026-04-18) Run Android debug build/install and emulator QA using the `test-android-apps` workflow.
@@ -50,6 +51,7 @@ After this refactor, the app should behave the same, but the code will be organi
 - The Divisions editor form can move as a large UI component by passing explicit state/action containers while the parent retains local coordinator helpers for event mutation, schedule slot synchronization, and installment date-picker state.
 - `EventDetailComponent.kt` should be split by ownership boundary, not by tiny helpers. The first safe component boundary is the public `EventDetailComponent` contract plus shared dialog/state models because external UI files depend on those declarations while the default implementation can continue to own private orchestration details.
 - After the contract extraction, the canonical file names should reflect ownership: `EventDetailComponent.kt` owns the public component surface and shared state models, while `DefaultEventDetailComponent.kt` owns the remaining Decompose implementation and is the next large extraction target.
+- The registration action handler must not capture `loadingHandler` at construction time because `DefaultEventDetailComponent` still receives it through `setLoadingHandler`. The handler uses a lazy provider so construction remains safe and actions resolve the active loading handler when invoked.
 
 ## Decision Log
 
@@ -359,6 +361,20 @@ Validation after EventDetailComponent/default implementation rename:
     PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailsMatchRulesTest*" --tests "*EventDetailsScheduleLockingTest*" --tests "*LeagueSlotValidationTest*" --tests "*EventDetailsDivisionEditorHelpersTest*" --tests "*EventDetailMobileJoinFlowTest*" --tests "*EventRegistrationFlowCoordinatorTest*" --console=plain
 
 All three commands passed on 2026-06-24. The focused test run started the local backend and reported adb reverse could not be configured because no device/emulator was attached, but the JVM tests completed successfully.
+
+Registration action handler extraction evidence:
+
+    3097 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/DefaultEventDetailComponent.kt
+    1020 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRegistrationActionHandler.kt
+     392 composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailComponent.kt
+
+Validation after registration action handler extraction:
+
+    git diff --check
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:compileCommonMainKotlinMetadata --console=plain
+    PATH=/Users/elesesy/Library/Android/sdk/platform-tools:$PATH ./gradlew :composeApp:testDebugUnitTest --tests "*EventDetailsMatchRulesTest*" --tests "*EventDetailsScheduleLockingTest*" --tests "*LeagueSlotValidationTest*" --tests "*EventDetailsDivisionEditorHelpersTest*" --tests "*EventDetailMobileJoinFlowTest*" --tests "*EventRegistrationFlowCoordinatorTest*" --console=plain
+
+All three commands passed on 2026-06-24. The first focused test run failed with `UninitializedPropertyAccessException: lateinit property loadingHandler has not been initialized`; switching the handler constructor from an eager `LoadingHandler` capture to a lazy loading-handler provider fixed the initialization-order regression, and the rerun passed.
 
 ## Interfaces and Dependencies
 

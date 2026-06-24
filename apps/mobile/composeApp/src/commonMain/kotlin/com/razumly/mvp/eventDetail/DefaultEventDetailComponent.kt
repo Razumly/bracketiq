@@ -656,6 +656,50 @@ class DefaultEventDetailComponent(
     override val webSignaturePrompt = registrationFlowCoordinator.webSignaturePrompt
 
     private val shareServiceProvider = ShareServiceProvider()
+    private val registrationActionHandler = EventRegistrationActionHandler(
+        scope = scope,
+        userRepository = userRepository,
+        teamRepository = teamRepository,
+        eventRepository = eventRepository,
+        billingRepository = billingRepository,
+        registrationFlowCoordinator = registrationFlowCoordinator,
+        joinExecutionCoordinator = joinExecutionCoordinator,
+        withdrawalActionCoordinator = withdrawalActionCoordinator,
+        paymentPlanBillingCoordinator = paymentPlanBillingCoordinator,
+        purchaseIntentCoordinator = purchaseIntentCoordinator,
+        signatureExecutionCoordinator = signatureExecutionCoordinator,
+        membershipCoordinator = membershipCoordinator,
+        weeklyOccurrenceCoordinator = weeklyOccurrenceCoordinator,
+        loadingHandler = { loadingHandler },
+        selectedEvent = { selectedEvent.value },
+        selectedDivision = { selectedDivision.value },
+        currentUser = { currentUser.value },
+        currentAccountEmail = { _currentAccount.value.email },
+        isEventFull = { isEventFull.value },
+        currentWeeklyOccurrenceSelection = ::currentWeeklyOccurrenceSelection,
+        requireSelectedWeeklyOccurrence = ::requireSelectedWeeklyOccurrence,
+        loadJoinableChildren = ::loadJoinableChildren,
+        saveCurrentRegistrationProgress = { step, registrationId, holdExpiresAt ->
+            saveCurrentRegistrationProgress(
+                step = step,
+                registrationId = registrationId,
+                holdExpiresAt = holdExpiresAt,
+            )
+        },
+        clearCurrentRegistrationProgress = ::clearCurrentRegistrationProgress,
+        addCurrentUserToEventWithRegistrationAnswers = ::addCurrentUserToEventWithRegistrationAnswers,
+        addTeamToEventWithRegistrationAnswers = ::addTeamToEventWithRegistrationAnswers,
+        createPurchaseIntentWithRegistrationAnswers = ::createPurchaseIntentWithRegistrationAnswers,
+        refreshEventAfterParticipantMutation = ::refreshEventAfterParticipantMutation,
+        refreshCurrentUserMembershipState = ::refreshCurrentUserMembershipState,
+        refreshEventDetails = ::refreshEventDetails,
+        checkIsUserFreeAgent = ::checkIsUserFreeAgent,
+        resolveWithdrawTargetMembership = ::resolveWithdrawTargetMembership,
+        setPaymentIntent = { intent -> setPaymentIntent(intent) },
+        clearPaymentResult = ::clearPaymentResult,
+        presentPaymentSheet = ::presentPaymentSheet,
+        setError = { message -> _errorState.value = ErrorMessage(message) },
+    )
 
     private fun currentRegistrationProgressScope(): EventRegistrationProgressScope =
         EventRegistrationProgressScope(
@@ -1659,307 +1703,20 @@ class DefaultEventDetailComponent(
         )
     }
 
-    private fun ensureRegistrationOpen(): Boolean {
-        val event = selectedEvent.value
-        val selectedWeeklyOccurrenceStarted = weeklyOccurrenceCoordinator.hasSelectedOccurrenceStarted(Clock.System.now())
-        if (!isJoinBlockedByStart(event, selectedWeeklyOccurrenceStarted)) return true
-        _errorState.value = ErrorMessage(
-            if (
-                hasSelectedWeeklyOccurrenceStarted(
-                    isWeeklyParent = isWeeklyParentEvent(event),
-                    selectedWeeklyOccurrenceStarted = selectedWeeklyOccurrenceStarted,
-                )
-            ) {
-                "This weekly occurrence has already started. Joining is closed."
-            } else {
-                "This event has already started. Registration is closed."
-            }
-        )
-        return false
-    }
-
-    private fun ensureWeeklyOccurrenceSelectedForRegistration(): Boolean {
-        val event = selectedEvent.value
-        if (!isWeeklyParentEvent(event)) {
-            return true
-        }
-        return requireSelectedWeeklyOccurrence(
-            event = event,
-            errorMessage = "Select an occurrence before joining or managing registrations.",
-        ) != null
-    }
-
     override fun joinEvent() {
-        scope.launch {
-            if (!ensureRegistrationOpen()) return@launch
-            if (!ensureWeeklyOccurrenceSelectedForRegistration()) return@launch
-            if (resumePendingSignatureFlowIfNeeded()) {
-                return@launch
-            }
-            if (!selectedEvent.value.teamSignup) {
-                val children = loadJoinableChildren()
-                if (children.isNotEmpty()) {
-                    registrationFlowCoordinator.showJoinChoiceDialog(children)
-                    return@launch
-                }
-            }
-            runSelfJoinFlow()
-        }
+        registrationActionHandler.joinEvent()
     }
 
     override fun startTeamRegistration(team: TeamWithPlayers) {
-        scope.launch {
-            val teamId = registrationFlowCoordinator.registrationTargetTeamId(team.team)
-            if (teamId.isBlank() || registrationFlowCoordinator.startingTeamRegistrationId.value != null) return@launch
-
-            if (currentUser.value.id.isBlank()) {
-                _errorState.value = ErrorMessage("Please sign in to join this team.")
-                return@launch
-            }
-
-            if (!registrationFlowCoordinator.startTeamRegistration(teamId)) return@launch
-            try {
-                loadingHandler.showLoading("Preparing team registration...")
-                val registrationTeam = resolveTeamRegistrationTarget(team).getOrElse { throwable ->
-                    _errorState.value = ErrorMessage(
-                        throwable.userMessage("Unable to load team registration details."),
-                    )
-                    loadingHandler.hideLoading()
-                    return@launch
-                }
-
-                val context = teamRepository.getTeamJoinRequestContext(teamId).getOrElse { throwable ->
-                    _errorState.value = ErrorMessage(
-                        throwable.userMessage("Unable to load team registration questions."),
-                    )
-                    loadingHandler.hideLoading()
-                    return@launch
-                }
-
-                val joinPolicy = context.joinPolicy
-                val joinPolicyDecision = registrationFlowCoordinator.teamJoinPolicyDecision(joinPolicy)
-                if (!joinPolicyDecision.isAccepted) {
-                    _errorState.value = ErrorMessage(
-                        joinPolicyDecision.errorMessage ?: "This team is not accepting registrations.",
-                    )
-                    loadingHandler.hideLoading()
-                    return@launch
-                }
-
-                if (context.questions.isNotEmpty()) {
-                    registrationFlowCoordinator.showTeamJoinQuestionDialog(
-                        dialog = TeamJoinQuestionDialogState(
-                            teamId = context.teamId,
-                            teamName = registrationTeam.team.name.ifBlank { "this team" },
-                            joinPolicy = joinPolicy,
-                            questions = context.questions,
-                        ),
-                        team = registrationTeam,
-                    )
-                    loadingHandler.hideLoading()
-                    return@launch
-                }
-
-                submitTeamJoin(
-                    team = registrationTeam,
-                    joinPolicy = joinPolicy,
-                    answers = emptyMap(),
-                )
-                loadingHandler.hideLoading()
-            } finally {
-                registrationFlowCoordinator.clearStartingTeamRegistrationIfNoPendingTeam()
-            }
-        }
+        registrationActionHandler.startTeamRegistration(team)
     }
 
     override fun submitTeamJoinQuestionAnswers(answers: Map<String, String>) {
-        val result = registrationFlowCoordinator.submitTeamJoinQuestionAnswers(answers) ?: return
-        result.missingQuestion?.let { missingQuestion ->
-            _errorState.value = ErrorMessage("Answer \"${missingQuestion.prompt}\" before continuing.")
-            return
-        }
-        val team = result.team
-        if (team == null) {
-            _errorState.value = ErrorMessage("Unable to continue team registration.")
-            return
-        }
-
-        val dialog = result.dialog ?: return
-        scope.launch {
-            val teamId = dialog.teamId.trim().takeIf(String::isNotBlank)
-                ?: registrationFlowCoordinator.registrationTargetTeamId(team.team)
-            if (!registrationFlowCoordinator.startTeamRegistration(teamId)) return@launch
-            try {
-                loadingHandler.showLoading(
-                    registrationFlowCoordinator.teamJoinSubmitLoadingMessage(dialog.joinPolicy),
-                )
-                submitTeamJoin(
-                    team = team,
-                    joinPolicy = dialog.joinPolicy,
-                    answers = answers,
-                )
-                loadingHandler.hideLoading()
-            } finally {
-                registrationFlowCoordinator.clearStartingTeamRegistrationIfNoPendingTeam()
-            }
-        }
+        registrationActionHandler.submitTeamJoinQuestionAnswers(answers)
     }
 
     override fun dismissTeamJoinQuestionDialog() {
-        registrationFlowCoordinator.dismissTeamJoinQuestionDialog()
-    }
-
-    private suspend fun submitTeamJoin(
-        team: TeamWithPlayers,
-        joinPolicy: String,
-        answers: Map<String, String>,
-    ) {
-        val teamId = registrationFlowCoordinator.registrationTargetTeamId(team.team)
-        if (registrationFlowCoordinator.isRequestToJoinPolicy(joinPolicy)) {
-            teamRepository.submitTeamJoinRequest(teamId, answers)
-                .onSuccess {
-                    refreshEventDetails()
-                    _errorState.value = ErrorMessage("Request sent to ${team.team.name}.")
-                }.onFailure { throwable ->
-                    _errorState.value = ErrorMessage(
-                        throwable.userMessage("Unable to submit join request."),
-                    )
-                }
-            return
-        }
-
-        teamRepository.requestTeamRegistration(teamId, answers)
-            .onSuccess { result ->
-                handleTeamRegistrationResult(team, result, answers)
-            }.onFailure { throwable ->
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Unable to start team registration."),
-                )
-            }
-    }
-
-    private suspend fun resolveTeamRegistrationTarget(team: TeamWithPlayers): Result<TeamWithPlayers> = runCatching {
-        val targetTeamId = registrationFlowCoordinator.registrationTargetTeamId(team.team)
-        if (targetTeamId.isBlank()) {
-            error("Team id is missing.")
-        }
-        if (targetTeamId == team.team.id.trim()) {
-            team
-        } else {
-            teamRepository.getTeamWithPlayers(targetTeamId).getOrThrow()
-        }
-    }
-
-    private suspend fun handleTeamRegistrationResult(
-        team: TeamWithPlayers,
-        result: TeamRegistrationResult,
-        answers: Map<String, String> = emptyMap(),
-    ) {
-        val decision = registrationFlowCoordinator.teamRegistrationResultDecision(result)
-        when (decision.action) {
-            TeamRegistrationResultAction.WAIT_FOR_PARENT_APPROVAL -> {
-                _errorState.value = ErrorMessage(
-                    decision.message ?: result.userMessage(
-                        "A parent or guardian must approve this team request before registration can continue.",
-                    ),
-                )
-                refreshEventDetails()
-                return
-            }
-            TeamRegistrationResultAction.REQUIRE_CHILD_EMAIL -> {
-                _errorState.value = ErrorMessage(
-                    decision.message ?: result.userMessage("Add the child's email before continuing."),
-                )
-                return
-            }
-            TeamRegistrationResultAction.REQUIRE_ADDITIONAL_SIGNING -> {
-                runActionAfterRequiredSigning(teamId = team.team.id) {
-                    scope.launch {
-                        registrationFlowCoordinator.setStartingTeamRegistrationId(team.team.id)
-                        loadingHandler.showLoading("Refreshing team registration...")
-                        teamRepository.requestTeamRegistration(team.team.id, answers)
-                            .onSuccess { refreshedResult ->
-                                continueTeamRegistration(team, refreshedResult)
-                            }.onFailure { throwable ->
-                                _errorState.value = ErrorMessage(
-                                    throwable.userMessage("Unable to refresh team registration."),
-                                )
-                            }
-                        loadingHandler.hideLoading()
-                        registrationFlowCoordinator.clearStartingTeamRegistrationIfNoPendingTeam()
-                    }
-                }
-                return
-            }
-            TeamRegistrationResultAction.CONTINUE -> {
-                continueTeamRegistration(team, result)
-            }
-        }
-    }
-
-    private suspend fun continueTeamRegistration(
-        team: TeamWithPlayers,
-        result: TeamRegistrationResult,
-    ) {
-        val decision = registrationFlowCoordinator.teamRegistrationContinuationDecision(team.team, result)
-        if (decision.action == TeamRegistrationContinuationAction.MISSING_TEAM_ID) {
-            _errorState.value = ErrorMessage(decision.message ?: "This team is missing an id.")
-            return
-        }
-
-        val teamId = decision.teamId
-        registrationFlowCoordinator.setStartingTeamRegistrationId(teamId)
-        try {
-            if (decision.action == TeamRegistrationContinuationAction.START_CHECKOUT) {
-                if (!ensureBillingAddressOrPrompt { scope.launch { continueTeamRegistration(team, result) } }) {
-                    return
-                }
-
-                loadingHandler.showLoading("Preparing checkout...")
-                billingRepository.createTeamRegistrationPurchaseIntent(
-                    team = team.team,
-                    teamRegistration = result.registration,
-                ).onSuccess { intent ->
-                    intent.registrationHoldExpiresAt
-                        ?.trim()
-                        ?.takeIf(String::isNotBlank)
-                        ?.let { holdExpiresAt ->
-                            registrationFlowCoordinator.setRegistrationHoldExpiresAt(holdExpiresAt)
-                            saveCurrentRegistrationProgress(
-                                step = "checkout",
-                                registrationId = intent.registrationId,
-                                holdExpiresAt = holdExpiresAt,
-                            )
-                        }
-                    registrationFlowCoordinator.setPendingTeamRegistration(team)
-                    showPaymentSheet(intent)
-                }.onFailure { throwable ->
-                    _errorState.value = ErrorMessage(
-                        throwable.userMessage(result.userMessage("Unable to start team registration.")),
-                    )
-                    loadingHandler.hideLoading()
-                }
-                return
-            }
-
-            if (decision.action == TeamRegistrationContinuationAction.REJECT_INACTIVE) {
-                _errorState.value = ErrorMessage(
-                    decision.message ?: result.userMessage("Unable to join this team."),
-                )
-                return
-            }
-
-            membershipCoordinator.setUsersTeam(
-                teamRepository.getTeamWithPlayers(teamId).getOrNull() ?: team,
-                currentUser.value.id,
-            )
-            refreshCurrentUserMembershipState(selectedEvent.value)
-            refreshEventDetails()
-            clearCurrentRegistrationProgress()
-            _errorState.value = ErrorMessage("You joined ${team.team.name}.")
-        } finally {
-            registrationFlowCoordinator.clearStartingTeamRegistrationIfNoPendingTeam()
-        }
+        registrationActionHandler.dismissTeamJoinQuestionDialog()
     }
 
     override fun selectWeeklySession(
@@ -2007,166 +1764,28 @@ class DefaultEventDetailComponent(
         participantManagementCoordinator.clearParticipantManagementState()
     }
 
-    private suspend fun resumePendingSignatureFlowIfNeeded(): Boolean {
-        if (!registrationFlowCoordinator.hasPendingSignatureFlow()) {
-            return false
-        }
-
-        signatureExecutionCoordinator.loadSignatureStepsForCurrentContext(
-            eventId = selectedEvent.value.id,
-            getRequiredTeamSignLinks = { targetTeamId, context, childUserId, childUserEmail ->
-                billingRepository.getRequiredTeamSignLinks(
-                    teamId = targetTeamId,
-                    signerContext = context,
-                    childUserId = childUserId,
-                    childUserEmail = childUserEmail,
-                )
-            },
-            getRequiredSignLinks = { targetEventId, context, childUserId, childUserEmail ->
-                billingRepository.getRequiredSignLinks(
-                    eventId = targetEventId,
-                    signerContext = context,
-                    childUserId = childUserId,
-                    childUserEmail = childUserEmail,
-                )
-            },
-            pollBoldSignOperation = { operationId ->
-                billingRepository.pollBoldSignOperation(operationId).map { Unit }
-            },
-            startPolling = { block -> scope.launch { block() } },
-            setError = { message ->
-                _errorState.value = ErrorMessage(message)
-            },
-            logError = { message, throwable ->
-                Napier.e(message, throwable)
-            },
-        )
-        return true
-    }
-
     override fun joinEventAsTeam(team: TeamWithPlayers) {
-        scope.launch {
-            if (!ensureRegistrationOpen()) return@launch
-            if (!ensureEventRegistrationQuestionsAnswered { joinEventAsTeam(team) }) return@launch
-            membershipCoordinator.setUsersTeam(team, currentUser.value.id)
-            registrationFlowCoordinator.clearJoinDialogs()
-
-            buildPaymentPlanPreviewDialogState(
-                event = selectedEvent.value,
-                ownerLabel = team.team.name.trim().ifBlank { "Your team" },
-                forTeamJoin = true,
-                preferredDivisionId = selectedDivision.value,
-                currentUserIsMinor = currentUser.value.isMinor,
-                isEventFull = isEventFull.value,
-            )?.let { preview ->
-                showPaymentPlanPreviewDialog(preview) {
-                    scope.launch {
-                        runActionAfterRequiredSigning {
-                            executeJoinEventAsTeam(team)
-                        }
-                    }
-                }
-                return@launch
-            }
-
-            runActionAfterRequiredSigning {
-                executeJoinEventAsTeam(team)
-            }
-        }
+        registrationActionHandler.joinEventAsTeam(team)
     }
 
     override fun confirmJoinAsSelf() {
-        registrationFlowCoordinator.clearJoinDialogs()
-        scope.launch {
-            runSelfJoinFlow()
-        }
+        registrationActionHandler.confirmJoinAsSelf()
     }
 
     override fun showChildJoinSelection() {
-        val children = registrationFlowCoordinator.currentJoinableChildren()
-        registrationFlowCoordinator.dismissJoinChoiceDialog()
-        if (children.isEmpty()) {
-            _errorState.value = ErrorMessage("No linked children are available for registration.")
-            registrationFlowCoordinator.dismissChildJoinSelectionDialog()
-            return
-        }
-        registrationFlowCoordinator.showChildJoinSelectionDialog(children)
+        registrationActionHandler.showChildJoinSelection()
     }
 
     override fun selectChildForJoin(childUserId: String) {
-        if (!ensureRegistrationOpen()) {
-            registrationFlowCoordinator.clearJoinDialogs()
-            return
-        }
-        val selectedChild = registrationFlowCoordinator.findJoinableChild(childUserId)
-        if (selectedChild == null) {
-            _errorState.value = ErrorMessage("Unable to find that child profile.")
-            return
-        }
-
-        registrationFlowCoordinator.clearJoinDialogs()
-        if (!ensureEventRegistrationQuestionsAnswered { selectChildForJoin(childUserId) }) {
-            return
-        }
-        scope.launch {
-            runActionAfterRequiredSigning(
-                signerContext = SignerContext.PARENT_GUARDIAN,
-                child = selectedChild,
-            ) {
-                executeChildRegistration(selectedChild)
-            }
-        }
+        registrationActionHandler.selectChildForJoin(childUserId)
     }
 
     override fun dismissJoinChoiceDialog() {
-        registrationFlowCoordinator.dismissJoinChoiceDialog()
+        registrationActionHandler.dismissJoinChoiceDialog()
     }
 
     override fun dismissChildJoinSelectionDialog() {
-        registrationFlowCoordinator.dismissChildJoinSelectionDialog()
-    }
-
-    private suspend fun runSelfJoinFlow(skipPaymentPlanPreview: Boolean = false) {
-        if (!ensureRegistrationOpen()) return
-        if (!ensureEventRegistrationQuestionsAnswered {
-                scope.launch { runSelfJoinFlow(skipPaymentPlanPreview = skipPaymentPlanPreview) }
-            }
-        ) {
-            return
-        }
-        if (!skipPaymentPlanPreview) {
-            buildPaymentPlanPreviewDialogState(
-                event = selectedEvent.value,
-                ownerLabel = "You",
-                forTeamJoin = false,
-                preferredDivisionId = selectedDivision.value,
-                currentUserIsMinor = currentUser.value.isMinor,
-                isEventFull = isEventFull.value,
-            )?.let { preview ->
-                showPaymentPlanPreviewDialog(preview) {
-                    scope.launch {
-                        runSelfJoinFlow(skipPaymentPlanPreview = true)
-                    }
-                }
-                return
-            }
-        }
-        runActionAfterRequiredSigning(
-            signerContext = SignerContext.PARTICIPANT,
-            child = null,
-        ) {
-            executeJoinEvent()
-        }
-    }
-
-    private fun showPaymentPlanPreviewDialog(
-        dialogState: PaymentPlanPreviewDialogState,
-        onContinue: () -> Unit,
-    ) {
-        registrationFlowCoordinator.showPaymentPlanPreviewDialog(
-            dialogState = dialogState,
-            onContinue = onContinue,
-        )
+        registrationActionHandler.dismissChildJoinSelectionDialog()
     }
 
     private suspend fun loadJoinableChildren(
@@ -2199,472 +1818,16 @@ class DefaultEventDetailComponent(
         _scheduleTrackedUserIds.value = ids
     }
 
-    private suspend fun executeChildRegistration(child: JoinChildOption) {
-        if (!ensureRegistrationOpen()) return
-        val weeklyOccurrence = if (isWeeklyParentEvent(selectedEvent.value)) {
-            requireSelectedWeeklyOccurrence(
-                errorMessage = "Select an occurrence before registering a child.",
-            ) ?: return
-        } else {
-            null
-        }
-        joinExecutionCoordinator.executeChildRegistration(
-            event = selectedEvent.value,
-            child = child,
-            isEventFull = isEventFull.value,
-            weeklyOccurrence = weeklyOccurrence,
-            registerChildForEvent = eventRepository::registerChildForEvent,
-            refreshAfterParticipantMutation = { eventId, warningMessage ->
-                refreshEventAfterParticipantMutation(
-                    eventId = eventId,
-                    warningMessage = warningMessage,
-                )
-            },
-            showLoading = loadingHandler::showLoading,
-            hideLoading = loadingHandler::hideLoading,
-            setError = { message ->
-                _errorState.value = ErrorMessage(message)
-            },
-        )
-    }
-
-    private suspend fun createPaymentPlanBillForOwner(
-        ownerType: String,
-        ownerId: String,
-        allowSplit: Boolean,
-        preferredDivisionId: String?,
-    ): Result<PaymentPlanBillStatus> {
-        return paymentPlanBillingCoordinator.createPaymentPlanBillForOwner(
-            event = selectedEvent.value,
-            ownerType = ownerType,
-            ownerId = ownerId,
-            allowSplit = allowSplit,
-            preferredDivisionId = preferredDivisionId,
-            selectedWeeklyOccurrence = currentWeeklyOccurrenceSelection(),
-            createBill = billingRepository::createBill,
-        )
-    }
-
-    private suspend fun rollbackUserJoinAfterBillingFailure(event: Event) {
-        paymentPlanBillingCoordinator.rollbackUserJoinAfterBillingFailure(
-            event = event,
-            currentUserId = currentUser.value.id,
-            occurrence = currentWeeklyOccurrenceSelection(),
-            removeCurrentUserFromEvent = { targetEvent, targetUserId, occurrence ->
-                eventRepository.removeCurrentUserFromEvent(
-                    event = targetEvent,
-                    targetUserId = targetUserId,
-                    occurrence = occurrence,
-                )
-            },
-            logWarning = Napier::w,
-        )
-    }
-
-    private suspend fun rollbackTeamJoinAfterBillingFailure(event: Event, team: TeamWithPlayers) {
-        paymentPlanBillingCoordinator.rollbackTeamJoinAfterBillingFailure(
-            event = event,
-            team = team,
-            occurrence = currentWeeklyOccurrenceSelection(),
-            removeTeamFromEvent = { targetEvent, targetTeam, occurrence ->
-                eventRepository.removeTeamFromEvent(
-                    event = targetEvent,
-                    teamWithPlayers = targetTeam,
-                    occurrence = occurrence,
-                )
-            },
-            logWarning = Napier::w,
-        )
-    }
-
-    private suspend fun submitMinorJoinRequestForParentApproval() {
-        val weeklyOccurrence = if (isWeeklyParentEvent(selectedEvent.value)) {
-            requireSelectedWeeklyOccurrence(
-                errorMessage = "Select an occurrence before requesting to join.",
-            ) ?: return
-        } else {
-            null
-        }
-        joinExecutionCoordinator.submitMinorJoinRequestForParentApproval(
-            event = selectedEvent.value,
-            selectedDivisionId = selectedDivision.value,
-            weeklyOccurrence = weeklyOccurrence,
-            requestCurrentUserRegistration = eventRepository::requestCurrentUserRegistration,
-            refreshAfterParticipantMutation = { eventId, warningMessage ->
-                refreshEventAfterParticipantMutation(
-                    eventId = eventId,
-                    warningMessage = warningMessage,
-                )
-            },
-            showLoading = loadingHandler::showLoading,
-            setError = { message ->
-                _errorState.value = ErrorMessage(message)
-            },
-        )
-    }
-
-    private suspend fun executeJoinEvent() {
-        if (!ensureRegistrationOpen()) return
-        val weeklyOccurrence = if (isWeeklyParentEvent(selectedEvent.value)) {
-            requireSelectedWeeklyOccurrence(
-                errorMessage = "Select an occurrence before joining.",
-            ) ?: return
-        } else {
-            null
-        }
-        try {
-            joinExecutionCoordinator.executeSelfJoin(
-                event = selectedEvent.value,
-                currentUserId = currentUser.value.id,
-                currentUserIsMinor = currentUser.value.isMinor,
-                selectedDivisionId = selectedDivision.value,
-                isEventFull = isEventFull.value,
-                weeklyOccurrence = weeklyOccurrence,
-                submitMinorJoinRequest = {
-                    submitMinorJoinRequestForParentApproval()
-                },
-                addCurrentUserToEvent = { event, preferredDivisionId, occurrence ->
-                    addCurrentUserToEventWithRegistrationAnswers(
-                        event = event,
-                        preferredDivisionId = preferredDivisionId,
-                        occurrence = occurrence,
-                    )
-                },
-                createPaymentPlanBill = { ownerType, ownerId, allowSplit, preferredDivisionId ->
-                    createPaymentPlanBillForOwner(
-                        ownerType = ownerType,
-                        ownerId = ownerId,
-                        allowSplit = allowSplit,
-                        preferredDivisionId = preferredDivisionId,
-                    )
-                },
-                rollbackUserJoinAfterBillingFailure = { event ->
-                    rollbackUserJoinAfterBillingFailure(event)
-                },
-                ensureBillingAddressOrPrompt = { onReady ->
-                    ensureBillingAddressOrPrompt(onReady)
-                },
-                onBillingAddressReady = {
-                    scope.launch { executeJoinEvent() }
-                },
-                createPurchaseIntent = { event, priceCents, occurrence, divisionId ->
-                    createPurchaseIntentWithRegistrationAnswers(
-                        event = event,
-                        priceCents = priceCents,
-                        occurrence = occurrence,
-                        divisionId = divisionId,
-                    )
-                },
-                processPurchaseIntent = { purchaseIntent ->
-                    processPurchaseIntent(purchaseIntent)
-                },
-                refreshAfterParticipantMutation = { eventId, warningMessage ->
-                    refreshEventAfterParticipantMutation(
-                        eventId = eventId,
-                        warningMessage = warningMessage,
-                    )
-                },
-                clearRegistrationProgress = {
-                    clearCurrentRegistrationProgress()
-                },
-                setPendingJoinConfirmationTarget = { target ->
-                    registrationFlowCoordinator.setPendingJoinConfirmationTarget(target)
-                },
-                showLoading = loadingHandler::showLoading,
-                setError = { message ->
-                    _errorState.value = ErrorMessage(message)
-                },
-            )
-        } finally {
-            loadingHandler.hideLoading()
-        }
-    }
-
-    private suspend fun executeJoinEventAsTeam(team: TeamWithPlayers) {
-        if (!ensureRegistrationOpen()) return
-        val weeklyOccurrence = if (isWeeklyParentEvent(selectedEvent.value)) {
-            requireSelectedWeeklyOccurrence(
-                errorMessage = "Select an occurrence before joining with a team.",
-            ) ?: return
-        } else {
-            null
-        }
-        try {
-            joinExecutionCoordinator.executeTeamJoin(
-                event = selectedEvent.value,
-                team = team,
-                currentUserIsMinor = currentUser.value.isMinor,
-                selectedDivisionId = selectedDivision.value,
-                isEventFull = isEventFull.value,
-                weeklyOccurrence = weeklyOccurrence,
-                submitMinorJoinRequest = {
-                    submitMinorJoinRequestForParentApproval()
-                },
-                addTeamToEvent = { event, targetTeam, preferredDivisionId, occurrence ->
-                    addTeamToEventWithRegistrationAnswers(
-                        event = event,
-                        team = targetTeam,
-                        preferredDivisionId = preferredDivisionId,
-                        occurrence = occurrence,
-                    )
-                },
-                createPaymentPlanBill = { ownerType, ownerId, allowSplit, preferredDivisionId ->
-                    createPaymentPlanBillForOwner(
-                        ownerType = ownerType,
-                        ownerId = ownerId,
-                        allowSplit = allowSplit,
-                        preferredDivisionId = preferredDivisionId,
-                    )
-                },
-                rollbackTeamJoinAfterBillingFailure = { event, targetTeam ->
-                    rollbackTeamJoinAfterBillingFailure(event, targetTeam)
-                },
-                ensureBillingAddressOrPrompt = { onReady ->
-                    ensureBillingAddressOrPrompt(onReady)
-                },
-                onBillingAddressReady = {
-                    scope.launch { executeJoinEventAsTeam(team) }
-                },
-                createPurchaseIntent = { event, teamId, priceCents, occurrence, divisionId ->
-                    createPurchaseIntentWithRegistrationAnswers(
-                        event = event,
-                        teamId = teamId,
-                        priceCents = priceCents,
-                        occurrence = occurrence,
-                        divisionId = divisionId,
-                    )
-                },
-                processPurchaseIntent = { purchaseIntent ->
-                    processPurchaseIntent(purchaseIntent)
-                },
-                refreshAfterParticipantMutation = { eventId, warningMessage ->
-                    refreshEventAfterParticipantMutation(
-                        eventId = eventId,
-                        warningMessage = warningMessage,
-                    )
-                },
-                clearRegistrationProgress = {
-                    clearCurrentRegistrationProgress()
-                },
-                setPendingJoinConfirmationTarget = { target ->
-                    registrationFlowCoordinator.setPendingJoinConfirmationTarget(target)
-                },
-                showLoading = loadingHandler::showLoading,
-                setError = { message ->
-                    _errorState.value = ErrorMessage(message)
-                },
-            )
-        } finally {
-            loadingHandler.hideLoading()
-        }
-    }
-
-    private suspend fun runActionAfterRequiredSigning(
-        signerContext: SignerContext = SignerContext.PARTICIPANT,
-        child: JoinChildOption? = null,
-        teamId: String? = null,
-        onReady: suspend () -> Unit,
-    ) {
-        signatureExecutionCoordinator.runActionAfterRequiredSigning(
-            eventId = selectedEvent.value.id,
-            signerContext = signerContext,
-            child = child,
-            currentAccountEmail = userRepository.currentAccount.value.getOrNull()?.email,
-            teamId = teamId,
-            onReady = onReady,
-            getRequiredTeamSignLinks = { targetTeamId, context, childUserId, childUserEmail ->
-                billingRepository.getRequiredTeamSignLinks(
-                    teamId = targetTeamId,
-                    signerContext = context,
-                    childUserId = childUserId,
-                    childUserEmail = childUserEmail,
-                )
-            },
-            getRequiredSignLinks = { targetEventId, context, childUserId, childUserEmail ->
-                billingRepository.getRequiredSignLinks(
-                    eventId = targetEventId,
-                    signerContext = context,
-                    childUserId = childUserId,
-                    childUserEmail = childUserEmail,
-                )
-            },
-            pollBoldSignOperation = { operationId ->
-                billingRepository.pollBoldSignOperation(operationId).map { Unit }
-            },
-            startPolling = { block -> scope.launch { block() } },
-            setError = { message ->
-                _errorState.value = ErrorMessage(message)
-            },
-            logError = { message, throwable ->
-                Napier.e(message, throwable)
-            },
-        )
-    }
-
-    private fun clearPendingSignatureFlow() {
-        signatureExecutionCoordinator.clearPendingSignatureFlow()
-    }
-
-    private fun processPurchaseIntent(intent: PurchaseIntent) {
-        purchaseIntentCoordinator.processPurchaseIntent(
-            intent = intent,
-            saveRegistrationProgress = { registrationId, holdExpiresAt ->
-                scope.launch {
-                    saveCurrentRegistrationProgress(
-                        step = "checkout",
-                        registrationId = registrationId,
-                        holdExpiresAt = holdExpiresAt,
-                    )
-                }
-            },
-            launchPaymentSheet = { purchaseIntent ->
-                scope.launch { showPaymentSheet(purchaseIntent) }
-            },
-            launchPendingPaymentSheet = {
-                scope.launch { showPendingPaymentSheet() }
-            },
-            setError = { message ->
-                _errorState.value = ErrorMessage(message)
-            },
-            logWarning = { message ->
-                Napier.w(message)
-            },
-        )
-    }
-
-    private suspend fun showPaymentSheet(intent: PurchaseIntent) {
-        registrationFlowCoordinator.setPendingPaymentSheetIntent(intent)
-        showPendingPaymentSheet()
-    }
-
-    private suspend fun showPendingPaymentSheet() {
-        val intent = registrationFlowCoordinator.consumePendingPaymentSheetIntent() ?: return
-        clearPaymentResult()
-        setPaymentIntent(intent)
-        val billingAddress = loadSavedBillingAddress()
-        loadingHandler.showLoading("Waiting for Payment Completion ..")
-        presentPaymentSheet(
-            _currentAccount.value.email,
-            currentUser.value.fullName,
-            billingAddress,
-        )
-    }
-
-    private suspend fun ensureBillingAddressOrPrompt(onReady: () -> Unit): Boolean {
-        return purchaseIntentCoordinator.ensureBillingAddressOrPrompt(
-            getBillingAddress = billingRepository::getBillingAddress,
-            onReady = onReady,
-            setError = { message ->
-                _errorState.value = ErrorMessage(message)
-            },
-        )
-    }
-
-    private suspend fun loadSavedBillingAddress(): BillingAddressDraft? {
-        return purchaseIntentCoordinator.loadSavedBillingAddress(
-            getBillingAddress = billingRepository::getBillingAddress,
-        )
-    }
-
     override fun requestRefund(reason: String, targetUserId: String?) {
-        runWithdrawalAction(
-            action = EventWithdrawalExecutionAction.REQUEST_REFUND,
-            targetUserId = targetUserId,
-            refundReason = reason,
-        )
+        registrationActionHandler.requestRefund(reason, targetUserId)
     }
 
     override fun withdrawAndRefund(targetUserId: String?) {
-        runWithdrawalAction(
-            action = EventWithdrawalExecutionAction.WITHDRAW_AND_REFUND,
-            targetUserId = targetUserId,
-        )
+        registrationActionHandler.withdrawAndRefund(targetUserId)
     }
 
     override fun leaveEvent(targetUserId: String?) {
-        runWithdrawalAction(
-            action = EventWithdrawalExecutionAction.LEAVE,
-            targetUserId = targetUserId,
-        )
-    }
-
-    private fun runWithdrawalAction(
-        action: EventWithdrawalExecutionAction,
-        targetUserId: String?,
-        refundReason: String = "",
-    ) {
-        scope.launch {
-            val event = selectedEvent.value
-            val eventOrOccurrenceStarted = action != EventWithdrawalExecutionAction.REQUEST_REFUND &&
-                hasSelectedEventOrOccurrenceStarted(
-                    event = event,
-                    selectedWeeklyOccurrenceStarted = weeklyOccurrenceCoordinator.hasSelectedOccurrenceStarted(
-                        Clock.System.now(),
-                    ),
-                )
-
-            when (
-                val result = withdrawalActionCoordinator.runWithdrawalAction(
-                    action = action,
-                    event = event,
-                    targetUserId = targetUserId,
-                    currentUserId = currentUser.value.id,
-                    selectedWeeklyOccurrence = currentWeeklyOccurrenceSelection(),
-                    isWeeklyParentEvent = isWeeklyParentEvent(event),
-                    currentUserIsFreeAgent = checkIsUserFreeAgent(event),
-                    eventOrOccurrenceStarted = eventOrOccurrenceStarted,
-                    refundReason = refundReason,
-                    resolveMembership = { userId ->
-                        resolveWithdrawTargetMembership(
-                            event = event,
-                            userId = userId,
-                        )
-                    },
-                    usersTeam = {
-                        membershipCoordinator.usersTeam()
-                    },
-                    removeTeamFromEvent = { targetEvent, team, refundMode, reason, occurrence ->
-                        eventRepository.removeTeamFromEvent(
-                            event = targetEvent,
-                            teamWithPlayers = team,
-                            refundMode = refundMode,
-                            refundReason = reason,
-                            occurrence = occurrence,
-                        )
-                    },
-                    removeCurrentUserFromEvent = { targetEvent, userId, occurrence ->
-                        eventRepository.removeCurrentUserFromEvent(
-                            event = targetEvent,
-                            targetUserId = userId,
-                            occurrence = occurrence,
-                        )
-                    },
-                    leaveAndRefundEvent = { targetEvent, reason, userId ->
-                        billingRepository.leaveAndRefundEvent(
-                            event = targetEvent,
-                            reason = reason,
-                            targetUserId = userId,
-                        )
-                    },
-                    refreshAfterSuccess = { eventId, warningMessage ->
-                        refreshEventAfterParticipantMutation(
-                            eventId = eventId,
-                            warningMessage = warningMessage,
-                        )
-                    },
-                    showLoading = loadingHandler::showLoading,
-                    hideLoading = loadingHandler::hideLoading,
-                )
-            ) {
-                EventWithdrawalExecutionResult.Success -> Unit
-                is EventWithdrawalExecutionResult.Rejected -> {
-                    _errorState.value = ErrorMessage(result.message)
-                }
-                is EventWithdrawalExecutionResult.Failed -> {
-                    _errorState.value = ErrorMessage(result.message)
-                }
-            }
-        }
+        registrationActionHandler.leaveEvent(targetUserId)
     }
 
     override fun viewEvent() {
@@ -3694,108 +2857,46 @@ class DefaultEventDetailComponent(
     override fun showFeeBreakdown(
         feeBreakdown: FeeBreakdown, onConfirm: () -> Unit, onCancel: () -> Unit
     ) {
-        registrationFlowCoordinator.showFeeBreakdown(
+        registrationActionHandler.showFeeBreakdown(
             feeBreakdown = feeBreakdown,
             onConfirm = onConfirm,
         )
     }
 
     override fun dismissFeeBreakdown() {
-        registrationFlowCoordinator.dismissFeeBreakdown()
+        registrationActionHandler.dismissFeeBreakdown()
     }
 
     override fun confirmFeeBreakdown() {
-        registrationFlowCoordinator.confirmFeeBreakdown()?.invoke()
+        registrationActionHandler.confirmFeeBreakdown()
     }
 
     override fun dismissPaymentPlanPreviewDialog() {
-        registrationFlowCoordinator.dismissPaymentPlanPreviewDialog()
+        registrationActionHandler.dismissPaymentPlanPreviewDialog()
     }
 
     override fun confirmPaymentPlanPreviewDialog() {
-        registrationFlowCoordinator.confirmPaymentPlanPreviewDialog()?.invoke()
+        registrationActionHandler.confirmPaymentPlanPreviewDialog()
     }
 
     override fun confirmTextSignature() {
-        scope.launch {
-            signatureExecutionCoordinator.confirmTextSignature(
-                eventId = selectedEvent.value.id,
-                recordTeamSignature = { teamId, templateId, documentId, type, signerContext, childUserId ->
-                    billingRepository.recordTeamSignature(
-                        teamId = teamId,
-                        templateId = templateId,
-                        documentId = documentId,
-                        type = type,
-                        signerContext = signerContext,
-                        childUserId = childUserId,
-                    ).map { Unit }
-                },
-                recordSignature = { eventId, templateId, documentId, type ->
-                    billingRepository.recordSignature(
-                        eventId = eventId,
-                        templateId = templateId,
-                        documentId = documentId,
-                        type = type,
-                    ).map { Unit }
-                },
-                getRequiredTeamSignLinks = { targetTeamId, context, childUserId, childUserEmail ->
-                    billingRepository.getRequiredTeamSignLinks(
-                        teamId = targetTeamId,
-                        signerContext = context,
-                        childUserId = childUserId,
-                        childUserEmail = childUserEmail,
-                    )
-                },
-                getRequiredSignLinks = { targetEventId, context, childUserId, childUserEmail ->
-                    billingRepository.getRequiredSignLinks(
-                        eventId = targetEventId,
-                        signerContext = context,
-                        childUserId = childUserId,
-                        childUserEmail = childUserEmail,
-                    )
-                },
-                pollBoldSignOperation = { operationId ->
-                    billingRepository.pollBoldSignOperation(operationId).map { Unit }
-                },
-                startPolling = { block -> scope.launch { block() } },
-                showLoading = loadingHandler::showLoading,
-                hideLoading = loadingHandler::hideLoading,
-                setError = { message ->
-                    _errorState.value = ErrorMessage(message)
-                },
-                logError = { message, throwable ->
-                    Napier.e(message, throwable)
-                },
-            )
-        }
+        registrationActionHandler.confirmTextSignature()
     }
 
     override fun dismissTextSignature() {
-        clearPendingSignatureFlow()
-        _errorState.value = ErrorMessage("Document signing canceled.")
+        registrationActionHandler.dismissTextSignature()
     }
 
     override fun dismissWebSignaturePrompt() {
-        clearPendingSignatureFlow()
-        _errorState.value = ErrorMessage("Document signing canceled.")
+        registrationActionHandler.dismissWebSignaturePrompt()
     }
 
     override fun submitBillingAddress(address: BillingAddressDraft) {
-        scope.launch {
-            purchaseIntentCoordinator.submitBillingAddress(
-                address = address,
-                updateBillingAddress = billingRepository::updateBillingAddress,
-                showLoading = loadingHandler::showLoading,
-                hideLoading = loadingHandler::hideLoading,
-                setError = { message ->
-                    _errorState.value = ErrorMessage(message)
-                },
-            )
-        }
+        registrationActionHandler.submitBillingAddress(address)
     }
 
     override fun dismissBillingAddressPrompt() {
-        registrationFlowCoordinator.dismissBillingAddressPrompt()
+        registrationActionHandler.dismissBillingAddressPrompt()
     }
 
     private fun refreshEditableRounds() {
