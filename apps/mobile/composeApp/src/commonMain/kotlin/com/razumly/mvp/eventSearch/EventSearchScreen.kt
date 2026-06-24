@@ -92,6 +92,11 @@ import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.composables.SearchBox
 import com.razumly.mvp.core.presentation.composables.SearchOverlay
+import com.razumly.mvp.core.presentation.guides.AppGuide
+import com.razumly.mvp.core.presentation.guides.AppGuideStep
+import com.razumly.mvp.core.presentation.guides.AppGuideTargets
+import com.razumly.mvp.core.presentation.guides.LocalGuideController
+import com.razumly.mvp.core.presentation.guides.guideTarget
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
@@ -181,6 +186,16 @@ private val DISCOVER_FIRST_ITEM_EXTRA_TOP_GAP = 4.dp
 private val DISCOVER_PULL_INDICATOR_TOP_OFFSET = 64.dp
 private val DISCOVER_TAB_ROW_HEIGHT = 48.dp
 private const val DISCOVER_SEARCH_THIS_AREA_THRESHOLD_MILES = 0.25
+private const val DISCOVER_GUIDE_ID = "discover_onboarding_v1"
+private const val DISCOVER_GUIDE_TARGET_TABS = "discover.tabs"
+private const val DISCOVER_GUIDE_TARGET_SEARCH = "discover.search"
+private const val DISCOVER_GUIDE_TARGET_FILTERS = "discover.filters"
+private const val DISCOVER_GUIDE_TARGET_FIRST_RESULT = "discover.first_result"
+private const val DISCOVER_GUIDE_TARGET_MAP = "discover.map"
+private val DISCOVER_GUIDE_REQUIRED_TARGETS = setOf(
+    DISCOVER_GUIDE_TARGET_TABS,
+    DISCOVER_GUIDE_TARGET_SEARCH,
+)
 
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
@@ -230,6 +245,50 @@ fun EventSearchScreen(
     var lastMapSearchCenter by remember { mutableStateOf<LatLng?>(null) }
     var lastMapSearchRadiusMiles by remember { mutableStateOf<Double?>(null) }
     var loadedInitialMapArea by remember { mutableStateOf(false) }
+    val guideController = LocalGuideController.current
+    val discoverGuide = remember {
+        AppGuide(
+            id = DISCOVER_GUIDE_ID,
+            steps = listOf(
+                AppGuideStep(
+                    id = "tabs",
+                    targetId = DISCOVER_GUIDE_TARGET_TABS,
+                    title = "Browse by category",
+                    body = "Switch between events, organizations, and rentals from the Discover tabs.",
+                ),
+                AppGuideStep(
+                    id = "search",
+                    targetId = DISCOVER_GUIDE_TARGET_SEARCH,
+                    title = "Search Discover",
+                    body = "Search for events, venues, organizations, and rental locations from the active tab.",
+                ),
+                AppGuideStep(
+                    id = "filters",
+                    targetId = DISCOVER_GUIDE_TARGET_FILTERS,
+                    title = "Narrow event results",
+                    body = "Use filters when you need to narrow event results by type or details.",
+                ),
+                AppGuideStep(
+                    id = "first_result",
+                    targetId = DISCOVER_GUIDE_TARGET_FIRST_RESULT,
+                    title = "Open a result",
+                    body = "Tap a card to view details, register, manage available actions, or inspect rental options.",
+                ),
+                AppGuideStep(
+                    id = "map",
+                    targetId = DISCOVER_GUIDE_TARGET_MAP,
+                    title = "Use the map",
+                    body = "Open the map to compare nearby results by location.",
+                ),
+                AppGuideStep(
+                    id = "create",
+                    targetId = AppGuideTargets.BottomNavCenterAction,
+                    title = "Create from anywhere",
+                    body = "Use the center action to create an event or jump back into an active event shortcut.",
+                ),
+            ),
+        )
+    }
 
     val eventsScrollingUp by eventsListState.isScrollingUp()
     val organizationsScrollingUp by organizationsListState.isScrollingUp()
@@ -258,6 +317,11 @@ fun EventSearchScreen(
             organization.toMvpPlaceOrNull(MVPPlace.MARKER_KIND_RENTAL)
         }
     }
+    val hasDiscoverTabsTarget = guideController?.hasTarget(DISCOVER_GUIDE_TARGET_TABS) == true
+    val hasDiscoverSearchTarget = guideController?.hasTarget(DISCOVER_GUIDE_TARGET_SEARCH) == true
+    val hasDiscoverFirstResultTarget = guideController?.hasTarget(DISCOVER_GUIDE_TARGET_FIRST_RESULT) == true
+    val hasDiscoverMapTarget = guideController?.hasTarget(DISCOVER_GUIDE_TARGET_MAP) == true
+    val hasDiscoverCreateTarget = guideController?.hasTarget(AppGuideTargets.BottomNavCenterAction) == true
 
     val currentListScrollingUp = when (selectedTab) {
         DiscoverTab.EVENTS -> eventsScrollingUp
@@ -375,6 +439,29 @@ fun EventSearchScreen(
         }
     }
 
+    LaunchedEffect(
+        guideController,
+        selectedTab,
+        showSearchOverlay,
+        showingFilter,
+        isMapVisible,
+        searchQuery,
+        hasDiscoverTabsTarget,
+        hasDiscoverSearchTarget,
+        hasDiscoverFirstResultTarget,
+        hasDiscoverMapTarget,
+        hasDiscoverCreateTarget,
+    ) {
+        if (guideController == null) return@LaunchedEffect
+        if (selectedTab != DiscoverTab.EVENTS) return@LaunchedEffect
+        if (showSearchOverlay || showingFilter || isMapVisible || searchQuery.isNotEmpty()) return@LaunchedEffect
+
+        guideController.maybeStartGuide(
+            guide = discoverGuide,
+            requiredTargetIds = DISCOVER_GUIDE_REQUIRED_TARGETS,
+        )
+    }
+
     Box {
         BindLocationTrackerEffect(component.locationTracker)
         CircularRevealUnderlay(
@@ -451,7 +538,8 @@ fun EventSearchScreen(
                                     .onGloballyPositioned { layoutCoordinates ->
                                         val boundsInWindow = layoutCoordinates.boundsInWindow()
                                         fabOffset = boundsInWindow.center
-                                    },
+                                    }
+                                    .guideTarget(DISCOVER_GUIDE_TARGET_MAP),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = Color.Black,
                                     contentColor = Color.White
@@ -507,6 +595,7 @@ fun EventSearchScreen(
                                             component.viewEvent(event)
                                         },
                                         onCreateEventClick = component::startEventCreate,
+                                        firstItemGuideTargetId = DISCOVER_GUIDE_TARGET_FIRST_RESULT,
                                     )
                                 }
 
@@ -518,6 +607,7 @@ fun EventSearchScreen(
                                         firstElementPadding = firstElementPadding,
                                         lastElementPadding = offsetNavPadding,
                                         emptyMessage = "No organizations discovered yet.",
+                                        firstItemGuideTargetId = DISCOVER_GUIDE_TARGET_FIRST_RESULT,
                                         onOrganizationClick = { organization ->
                                             component.viewOrganization(organization)
                                         }
@@ -532,6 +622,7 @@ fun EventSearchScreen(
                                         firstElementPadding = firstElementPadding,
                                         lastElementPadding = offsetNavPadding,
                                         emptyMessage = "No rentals discovered nearby yet.",
+                                        firstItemGuideTargetId = DISCOVER_GUIDE_TARGET_FIRST_RESULT,
                                         onOrganizationClick = { organization ->
                                             component.viewOrganization(
                                                 organization,
@@ -559,7 +650,9 @@ fun EventSearchScreen(
         ) {
             PrimaryTabRow(
                 selectedTabIndex = selectedTab.ordinal,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .guideTarget(DISCOVER_GUIDE_TARGET_TABS)
             ) {
                 DiscoverTab.values().forEachIndexed { index, tab ->
                     Tab(
@@ -592,6 +685,8 @@ fun EventSearchScreen(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .guideTarget(DISCOVER_GUIDE_TARGET_SEARCH)
+                    .guideTarget(DISCOVER_GUIDE_TARGET_FILTERS)
                     .padding(horizontal = 12.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surface

@@ -38,6 +38,7 @@ class CurrentUserDataSource(private val dataStore: DataStore<Preferences>) {
     private val registrationSyncStartedAt = stringPreferencesKey("registration_sync_started_at")
     private val registrationSyncUserId = stringPreferencesKey("registration_sync_user_id")
     private val dismissedAppReleaseKey = stringPreferencesKey("dismissed_app_release_key")
+    private val completedGuideIds = stringPreferencesKey("completed_guide_ids")
 
     suspend fun saveUserId(userId: String) {
         dataStore.edit { dataStore ->
@@ -142,6 +143,21 @@ class CurrentUserDataSource(private val dataStore: DataStore<Preferences>) {
 
     suspend fun getDismissedAppReleaseKeyNow(): String =
         dataStore.data.first()[dismissedAppReleaseKey].orEmpty()
+
+    fun getCompletedGuideIds(): Flow<Set<String>> =
+        dataStore.data.map { preferences ->
+            parseIdSet(preferences[completedGuideIds])
+        }
+
+    suspend fun markGuideCompleted(guideId: String) {
+        val normalizedGuideId = guideId.trim()
+        if (normalizedGuideId.isBlank()) return
+        dataStore.edit { preferences ->
+            val existing = parseIdSet(preferences[completedGuideIds])
+            existing += normalizedGuideId
+            preferences[completedGuideIds] = serializeIdSet(existing)
+        }
+    }
 
     suspend fun saveRegistrationProgress(
         key: String,

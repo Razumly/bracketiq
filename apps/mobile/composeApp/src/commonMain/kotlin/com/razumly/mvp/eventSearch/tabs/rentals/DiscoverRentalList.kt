@@ -13,6 +13,7 @@ import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.eventSearch.composables.EmptyDiscoverListItem
 import com.razumly.mvp.eventSearch.tabs.rentals.composables.DiscoverRentalCard
 import com.razumly.mvp.eventSearch.tabs.rentals.composables.DiscoverRentalCardPlaceholder
+import com.razumly.mvp.core.presentation.guides.guideTarget
 
 private const val DISCOVER_RENTAL_PLACEHOLDER_COUNT = 4
 
@@ -24,6 +25,7 @@ fun DiscoverRentalList(
     firstElementPadding: PaddingValues,
     lastElementPadding: PaddingValues,
     emptyMessage: String,
+    firstItemGuideTargetId: String? = null,
     onOrganizationClick: (Organization) -> Unit,
 ) {
     LazyColumn(
@@ -72,6 +74,13 @@ fun DiscoverRentalList(
                     .padding(padding)
                     .padding(horizontal = 16.dp, vertical = 8.dp)
                     .fillMaxWidth()
+                    .then(
+                        if (index == 0 && firstItemGuideTargetId != null) {
+                            Modifier.guideTarget(firstItemGuideTargetId)
+                        } else {
+                            Modifier
+                        }
+                    )
             )
         }
     }

@@ -51,6 +51,8 @@ import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
 import com.razumly.mvp.core.presentation.AppConfig
 import com.razumly.mvp.core.presentation.CenterNavAction
+import com.razumly.mvp.core.presentation.guides.AppGuideTargets
+import com.razumly.mvp.core.presentation.guides.guideTarget
 import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.util.Platform
 
@@ -216,7 +218,8 @@ fun MVPBottomNavBar(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .offset(y = (-18).dp)
-                        .zIndex(2f),
+                        .zIndex(2f)
+                        .guideTarget(AppGuideTargets.BottomNavCenterAction),
                 )
             }
         }

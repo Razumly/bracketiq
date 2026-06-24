@@ -19,6 +19,7 @@ fun EventsTabContent(
     onMapClick: (Offset, Event) -> Unit,
     onEventClick: (Event) -> Unit,
     onCreateEventClick: () -> Unit,
+    firstItemGuideTargetId: String? = null,
 ) {
     EventList(
         events = events,
@@ -31,5 +32,6 @@ fun EventsTabContent(
         onMapClick = onMapClick,
         onEventClick = onEventClick,
         onCreateEventClick = onCreateEventClick,
+        firstItemGuideTargetId = firstItemGuideTargetId,
     )
 }

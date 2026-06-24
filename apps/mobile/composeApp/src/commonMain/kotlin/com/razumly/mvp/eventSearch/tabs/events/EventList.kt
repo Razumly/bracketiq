@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.presentation.composables.EventCard
 import com.razumly.mvp.core.presentation.composables.EventCardPlaceholder
+import com.razumly.mvp.core.presentation.guides.guideTarget
 
 private const val INITIAL_EVENT_PLACEHOLDER_COUNT = 4
 
@@ -52,6 +53,7 @@ fun EventList(
     onLoadMore: () -> Unit,
     onMapClick: (Offset, Event) -> Unit,
     onCreateEventClick: (() -> Unit)? = null,
+    firstItemGuideTargetId: String? = null,
     onEventClick: (Event) -> Unit,
 ) {
     var lastLoadRequestKey by remember { mutableStateOf<String?>(null) }
@@ -121,7 +123,14 @@ fun EventList(
                         .padding(padding)
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                         .clickable { onEventClick(event) }
-                        .fillMaxWidth(),
+                        .fillMaxWidth()
+                        .then(
+                            if (index == 0 && firstItemGuideTargetId != null) {
+                                Modifier.guideTarget(firstItemGuideTargetId)
+                            } else {
+                                Modifier
+                            }
+                        ),
                     elevation = CardDefaults.cardElevation(4.dp),
                     shape = RoundedCornerShape(12.dp),
                 ) {

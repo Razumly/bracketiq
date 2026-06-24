@@ -61,6 +61,9 @@ import com.razumly.mvp.chat.ChatListScreen
 import com.razumly.mvp.core.data.repositories.AppUpdatePrompt
 import com.razumly.mvp.core.presentation.composables.MVPBottomNavBar
 import com.razumly.mvp.core.presentation.composables.PlatformFocusManager
+import com.razumly.mvp.core.presentation.guides.GuideController
+import com.razumly.mvp.core.presentation.guides.GuideHost
+import com.razumly.mvp.core.presentation.guides.LocalGuideController
 import com.razumly.mvp.core.presentation.util.backAnimation
 import com.razumly.mvp.core.util.LoadingHandlerImpl
 import com.razumly.mvp.core.util.LocalLoadingHandler
@@ -97,6 +100,8 @@ fun App(root: RootComponent) {
     val pendingInviteCount by root.pendingInviteCount.collectAsState()
     val appUpdatePrompt by root.appUpdatePrompt.collectAsState()
     val centerNavAction by root.centerNavAction.collectAsState()
+    val completedGuideIds by root.completedGuideIds.collectAsState()
+    val completedGuideIdsLoaded by root.completedGuideIdsLoaded.collectAsState()
 
     val popupHandler = remember { PopupHandlerImpl() }
     val loadingHandler = remember { LoadingHandlerImpl() }
@@ -105,6 +110,9 @@ fun App(root: RootComponent) {
     val coroutineScope = rememberCoroutineScope()
     val composeFocusManager = LocalFocusManager.current
     val allFocusManagers = remember { MutableObjectList<PlatformFocusManager>() }
+    val guideController = remember(root) {
+        GuideController(onGuideCompleted = root::markGuideCompleted)
+    }
 
 
     LaunchedEffect(Unit) {
@@ -144,9 +152,18 @@ fun App(root: RootComponent) {
         }
     }
 
+    LaunchedEffect(completedGuideIds, completedGuideIdsLoaded) {
+        guideController.updateCompletedGuideIds(
+            ids = completedGuideIds,
+            loaded = completedGuideIdsLoaded,
+        )
+    }
+
     CompositionLocalProvider(localAllFocusManagers provides allFocusManagers) {
         CompositionLocalProvider(
-            LocalPopupHandler provides popupHandler, LocalLoadingHandler provides loadingHandler
+            LocalPopupHandler provides popupHandler,
+            LocalLoadingHandler provides loadingHandler,
+            LocalGuideController provides guideController,
         ) {
             Box(
                 modifier = Modifier
@@ -201,6 +218,13 @@ fun App(root: RootComponent) {
                         prompt = prompt,
                         onUpdateNow = root::openAppUpdate,
                         onDismiss = root::dismissAppUpdatePrompt,
+                    )
+                }
+
+                if (!loadingState.isLoading && appUpdatePrompt == null) {
+                    GuideHost(
+                        controller = guideController,
+                        modifier = Modifier.fillMaxSize(),
                     )
                 }
             }

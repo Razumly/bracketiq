@@ -18,6 +18,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.repositories.AppUpdatePrompt
 import com.razumly.mvp.core.data.repositories.IAppUpdateRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
@@ -73,6 +74,7 @@ class RootComponent(
     private val pushNotificationsRepository: IPushNotificationsRepository,
     private val chatGroupRepository: IChatGroupRepository,
     private val appUpdateRepository: IAppUpdateRepository,
+    private val currentUserDataSource: CurrentUserDataSource,
 ) : ComponentContext by componentContext, INavigationHandler {
     companion object {
         private const val STARTUP_AUTH_TIMEOUT_MS = 3_000L
@@ -140,6 +142,10 @@ class RootComponent(
     val appUpdatePrompt: StateFlow<AppUpdatePrompt?> = _appUpdatePrompt.asStateFlow()
     private val _centerNavAction = MutableStateFlow<CenterNavAction>(CenterNavAction.CreateEvent)
     val centerNavAction: StateFlow<CenterNavAction> = _centerNavAction.asStateFlow()
+    private val _completedGuideIds = MutableStateFlow<Set<String>>(emptySet())
+    val completedGuideIds: StateFlow<Set<String>> = _completedGuideIds.asStateFlow()
+    private val _completedGuideIdsLoaded = MutableStateFlow(false)
+    val completedGuideIdsLoaded: StateFlow<Boolean> = _completedGuideIdsLoaded.asStateFlow()
 
     val childStack: Value<ChildStack<AppConfig, Child>> = childStack(
         source = navigation,
@@ -279,6 +285,13 @@ class RootComponent(
                 }
             }
         }
+
+        scope.launch {
+            currentUserDataSource.getCompletedGuideIds().collect { guideIds ->
+                _completedGuideIds.value = guideIds
+                _completedGuideIdsLoaded.value = true
+            }
+        }
     }
 
     fun onStartupNoticeShown() {
@@ -303,6 +316,12 @@ class RootComponent(
                 Napier.w("Failed to open app update URL: ${throwable.message}")
                 _startupNotice.value = "Couldn't open the app store. Please update Bracket IQ from the store."
             }
+        }
+    }
+
+    fun markGuideCompleted(guideId: String) {
+        scope.launch(Dispatchers.Default) {
+            currentUserDataSource.markGuideCompleted(guideId)
         }
     }
 

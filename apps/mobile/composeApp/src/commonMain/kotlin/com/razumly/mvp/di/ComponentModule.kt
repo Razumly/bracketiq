@@ -54,6 +54,7 @@ val componentModule = module {
             pushNotificationsRepository = get(),
             chatGroupRepository = get(),
             appUpdateRepository = get(),
+            currentUserDataSource = get(),
         )
     }
 
