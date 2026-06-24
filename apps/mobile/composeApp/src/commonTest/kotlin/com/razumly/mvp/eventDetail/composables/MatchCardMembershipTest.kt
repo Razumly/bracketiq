@@ -5,6 +5,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -28,6 +29,10 @@ class MatchCardMembershipTest {
         )
 
         assertTrue(belongsToUser)
+        assertEquals(
+            CurrentUserMatchRole.OFFICIAL,
+            matchRoleForCurrentUser(match, emptyMap(), "official_user"),
+        )
     }
 
     @Test
@@ -54,6 +59,10 @@ class MatchCardMembershipTest {
         )
 
         assertTrue(belongsToUser)
+        assertEquals(
+            CurrentUserMatchRole.PARTICIPANT,
+            matchRoleForCurrentUser(match, mapOf(homeTeam.id to teamWithPlayers(homeTeam)), "current_user"),
+        )
     }
 
     @Test
@@ -80,6 +89,10 @@ class MatchCardMembershipTest {
         )
 
         assertTrue(belongsToUser)
+        assertEquals(
+            CurrentUserMatchRole.OFFICIAL,
+            matchRoleForCurrentUser(match, mapOf(officialTeam.id to teamWithPlayers(officialTeam)), "current_user"),
+        )
     }
 
     @Test
@@ -108,6 +121,17 @@ class MatchCardMembershipTest {
         )
 
         assertFalse(belongsToUser)
+        assertEquals(
+            null,
+            matchRoleForCurrentUser(
+                match = match,
+                teams = mapOf(
+                    homeTeam.id to teamWithPlayers(homeTeam),
+                    awayTeam.id to teamWithPlayers(awayTeam),
+                ),
+                currentUserId = "someone_else",
+            ),
+        )
     }
 }
 

@@ -1852,6 +1852,12 @@ internal fun canConfirmCurrentSegment(
 internal fun resolvePointsToVictory(match: MatchMVP, currentEvent: Event?, setIndex: Int): Int? {
     if (currentEvent == null || resolveActiveRules(match, currentEvent).scoringModel != "SETS") return null
 
+    val matchPointTarget = match.matchRulesSnapshot?.setPointTargets?.getOrNull(setIndex)
+        ?: match.resolvedMatchRules?.setPointTargets?.getOrNull(setIndex)
+    if (matchPointTarget != null && matchPointTarget > 0) {
+        return matchPointTarget
+    }
+
     val points = when {
         currentEvent.eventType == EventType.LEAGUE && !isBracketMatch(match) ->
             currentEvent.pointsToVictory.getOrNull(setIndex)
@@ -1921,6 +1927,7 @@ internal fun resolveActiveRules(match: MatchMVP, currentEvent: Event?): Resolved
             "POINTS_ONLY" -> "Total"
             else -> "Period"
         },
+        setPointTargets = source?.setPointTargets ?: emptyList(),
         supportsDraw = source?.supportsDraw == true && !supportsShootout,
         supportsOvertime = source?.supportsOvertime ?: false,
         supportsShootout = supportsShootout,

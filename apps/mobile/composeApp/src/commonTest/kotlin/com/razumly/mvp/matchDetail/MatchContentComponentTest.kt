@@ -1102,6 +1102,33 @@ class MatchContentComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun given_match_snapshot_has_point_targets_when_resolving_victory_then_snapshot_wins_over_event() {
+        val event = createEvent(teamIds = listOf("team-a", "team-b")).copy(
+            eventType = EventType.LEAGUE,
+            usesSets = true,
+            setsPerMatch = 3,
+            pointsToVictory = listOf(21, 21, 15),
+        )
+        val match = createMatch(
+            eventId = event.id,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-a",
+            officialCheckedIn = true,
+        ).copy(
+            matchRulesSnapshot = ResolvedMatchRulesMVP(
+                scoringModel = "SETS",
+                segmentCount = 3,
+                segmentLabel = "Set",
+                setPointTargets = listOf(25, 25, 15),
+            ),
+        )
+
+        assertEquals(25, resolvePointsToVictory(match, event, setIndex = 0))
+        assertEquals(15, resolvePointsToVictory(match, event, setIndex = 2))
+    }
+
+    @Test
     fun given_set_is_below_point_cap_when_evaluating_controls_then_confirmation_stays_disabled() {
         val event = createEvent(teamIds = listOf("team-a", "team-b")).copy(
             eventType = EventType.LEAGUE,

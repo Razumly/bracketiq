@@ -78,10 +78,7 @@ private val AlternateBracketPrimary = Color(0xFF0F5C5A)
 private val AlternateBracketOnPrimary = Color(0xFFFFFFFF)
 private val AlternateBracketContainer = Color(0xFFD9F4EF)
 private val AlternateBracketOnContainer = Color(0xFF123B39)
-private val CurrentUserMatchGlowColor = Color(0xFF2FCC71)
-private val CurrentUserMatchGlowAmbientColor = CurrentUserMatchGlowColor.copy(alpha = 0.7f)
-private val CurrentUserMatchGlowSpotColor = CurrentUserMatchGlowColor.copy(alpha = 0.85f)
-private val CurrentUserMatchGlowBorderColor = CurrentUserMatchGlowColor.copy(alpha = 0.9f)
+private val CurrentUserParticipantMatchGlowColor = Color(0xFF2FCC71)
 private val MatchCardShape = RoundedCornerShape(14.dp)
 
 internal const val MATCH_CARD_BASE_HEIGHT_DP = 90
@@ -191,12 +188,17 @@ fun MatchCard(
                 }
                 val showOfficial = !officialSummary.isNullOrBlank()
                 val showManageOfficials = manageMode && manageOfficialRows.isNotEmpty()
-                val highlightForCurrentUser = remember(match, teams, currentUser.id) {
-                    matchBelongsToUser(
+                val currentUserMatchRole = remember(match, teams, currentUser.id) {
+                    matchRoleForCurrentUser(
                         match = match,
                         teams = teams,
                         currentUserId = currentUser.id,
                     )
+                }
+                val currentUserGlowColor = when (currentUserMatchRole) {
+                    CurrentUserMatchRole.PARTICIPANT -> CurrentUserParticipantMatchGlowColor
+                    CurrentUserMatchRole.OFFICIAL -> MaterialTheme.colorScheme.onSurface
+                    null -> null
                 }
                 FloatingBox(
                     modifier = Modifier.align(Alignment.TopCenter).offset(y = (-20).dp).zIndex(1f),
@@ -213,17 +215,17 @@ fun MatchCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .then(
-                            if (highlightForCurrentUser) {
+                            if (currentUserGlowColor != null) {
                                 Modifier
                                     .shadow(
                                         elevation = 14.dp,
                                         shape = MatchCardShape,
-                                        ambientColor = CurrentUserMatchGlowAmbientColor,
-                                        spotColor = CurrentUserMatchGlowSpotColor,
+                                        ambientColor = currentUserGlowColor.copy(alpha = 0.7f),
+                                        spotColor = currentUserGlowColor.copy(alpha = 0.85f),
                                     )
                                     .border(
                                         width = 1.5.dp,
-                                        color = CurrentUserMatchGlowBorderColor,
+                                        color = currentUserGlowColor.copy(alpha = 0.9f),
                                         shape = MatchCardShape,
                                     )
                             } else {
@@ -233,7 +235,7 @@ fun MatchCard(
                         .clickable(onClick = onClick),
                     shape = MatchCardShape,
                     elevation = CardDefaults.cardElevation(
-                        defaultElevation = if (highlightForCurrentUser) 8.dp else 4.dp,
+                        defaultElevation = if (currentUserGlowColor != null) 8.dp else 4.dp,
                     ),
                     colors = CardDefaults.cardColors(
                         containerColor = localColors.current.primary,
@@ -303,29 +305,48 @@ fun MatchCard(
     }
 }
 
-internal fun matchBelongsToUser(
+internal enum class CurrentUserMatchRole {
+    PARTICIPANT,
+    OFFICIAL,
+}
+
+internal fun matchRoleForCurrentUser(
     match: MatchWithRelations,
     teams: Map<String, TeamWithPlayers>,
     currentUserId: String,
-): Boolean {
+): CurrentUserMatchRole? {
     val normalizedCurrentUserId = currentUserId.trim()
     if (normalizedCurrentUserId.isBlank()) {
-        return false
+        return null
     }
 
     if (match.match.assignedOfficialUserIds().any { assignedUserId ->
             assignedUserId == normalizedCurrentUserId
         }) {
-        return true
+        return CurrentUserMatchRole.OFFICIAL
     }
 
-    val candidateTeams = listOfNotNull(
+    val officialTeam = resolveMatchTeam(match.match.teamOfficialId, teams, match.teamOfficial)
+    if (officialTeam?.includesUser(normalizedCurrentUserId) == true) {
+        return CurrentUserMatchRole.OFFICIAL
+    }
+
+    val participantTeams = listOfNotNull(
         resolveMatchTeam(match.match.team1Id, teams, match.team1),
         resolveMatchTeam(match.match.team2Id, teams, match.team2),
-        resolveMatchTeam(match.match.teamOfficialId, teams, match.teamOfficial),
     )
-    return candidateTeams.any { team -> team.includesUser(normalizedCurrentUserId) }
+    if (participantTeams.any { team -> team.includesUser(normalizedCurrentUserId) }) {
+        return CurrentUserMatchRole.PARTICIPANT
+    }
+
+    return null
 }
+
+internal fun matchBelongsToUser(
+    match: MatchWithRelations,
+    teams: Map<String, TeamWithPlayers>,
+    currentUserId: String,
+): Boolean = matchRoleForCurrentUser(match, teams, currentUserId) != null
 
 private fun resolveMatchTeam(
     matchTeamId: String?,

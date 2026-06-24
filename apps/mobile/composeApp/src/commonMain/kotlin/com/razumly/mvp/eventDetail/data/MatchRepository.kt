@@ -768,6 +768,8 @@ class MatchRepository(
                     division = sanitizedMatch.division,
                     losersBracket = sanitizedMatch.losersBracket,
                     locked = sanitizedMatch.locked,
+                    matchRulesSnapshot = sanitizedMatch.matchRulesSnapshot,
+                    resolvedMatchRules = sanitizedMatch.resolvedMatchRules,
                 ),
             ).match ?: error("Update match response missing match")
             persistEmbeddedField(responseMatch)

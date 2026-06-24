@@ -283,6 +283,8 @@ data class MatchUpdateDto(
     val division: String? = null,
     val losersBracket: Boolean? = null,
     val locked: Boolean? = null,
+    val matchRulesSnapshot: ResolvedMatchRulesMVP? = null,
+    val resolvedMatchRules: ResolvedMatchRulesMVP? = null,
     val clientOperationId: String? = null,
     val clientDeviceId: String? = null,
     val clientCreatedAt: String? = null,
@@ -423,6 +425,8 @@ data class BulkMatchUpdateEntryDto(
     val division: String? = null,
     val losersBracket: Boolean? = null,
     val locked: Boolean? = null,
+    val matchRulesSnapshot: ResolvedMatchRulesMVP? = null,
+    val resolvedMatchRules: ResolvedMatchRulesMVP? = null,
 )
 
 @Serializable
@@ -460,6 +464,8 @@ data class BulkMatchCreateEntryDto(
     val division: String? = null,
     val losersBracket: Boolean? = null,
     val locked: Boolean? = null,
+    val matchRulesSnapshot: ResolvedMatchRulesMVP? = null,
+    val resolvedMatchRules: ResolvedMatchRulesMVP? = null,
 )
 
 @Serializable
@@ -494,6 +500,8 @@ fun MatchMVP.toBulkMatchUpdateEntryDto(): BulkMatchUpdateEntryDto = BulkMatchUpd
     division = division,
     losersBracket = losersBracket,
     locked = locked,
+    matchRulesSnapshot = matchRulesSnapshot,
+    resolvedMatchRules = resolvedMatchRules,
 )
 
 fun MatchMVP.toBulkMatchCreateEntryDto(
@@ -527,4 +535,6 @@ fun MatchMVP.toBulkMatchCreateEntryDto(
     division = division,
     losersBracket = losersBracket,
     locked = locked,
+    matchRulesSnapshot = matchRulesSnapshot,
+    resolvedMatchRules = resolvedMatchRules,
 )
