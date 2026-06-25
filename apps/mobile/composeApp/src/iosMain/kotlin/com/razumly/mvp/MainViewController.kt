@@ -30,6 +30,7 @@ import com.arkivanov.decompose.ExperimentalDecomposeApi
 import com.arkivanov.decompose.extensions.compose.stack.animation.predictiveback.PredictiveBackGestureIcon
 import com.arkivanov.decompose.extensions.compose.stack.animation.predictiveback.PredictiveBackGestureOverlay
 import com.arkivanov.essenty.backhandler.BackDispatcher
+import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
@@ -85,6 +86,7 @@ fun MainViewController(
                         pushNotificationsRepository = getKoin().get<IPushNotificationsRepository>(),
                         chatGroupRepository = getKoin().get<IChatGroupRepository>(),
                         appUpdateRepository = getKoin().get<IAppUpdateRepository>(),
+                        currentUserDataSource = getKoin().get<CurrentUserDataSource>(),
                     )
                 } catch (e: Exception) {
                     Napier.e(tag = "Root", throwable = e) { "Component creation failed" }

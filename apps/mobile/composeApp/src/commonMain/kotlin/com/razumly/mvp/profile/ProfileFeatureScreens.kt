@@ -686,10 +686,18 @@ private fun DiscountOfferCard(
             },
         )
     }
-    Column(
+    val cardContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
+    Card(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = cardContainerColor,
+        ),
     ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Text(discount.name, style = MaterialTheme.typography.titleMedium)
             discount.description?.let {
                 Text(
@@ -703,6 +711,28 @@ private fun DiscountOfferCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            StandardTextField(
+                value = codeInput,
+                onValueChange = onCodeChanged,
+                label = "New code",
+                supportingText = "Optional. Leave blank to generate one.",
+                containerColor = cardContainerColor,
+            )
+            StandardTextField(
+                value = usageLimitInput,
+                onValueChange = onUsageLimitChanged,
+                label = "Usage limit",
+                keyboardType = "number",
+                supportingText = "Optional",
+                containerColor = cardContainerColor,
+            )
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isGenerating,
+                onClick = onGenerate,
+            ) {
+                Text(if (isGenerating) "Generating..." else "Generate code")
+            }
             if (discount.codes.isEmpty()) {
                 Text(
                     text = "No codes generated yet.",
@@ -710,6 +740,7 @@ private fun DiscountOfferCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     discount.codes.forEachIndexed { index, code ->
                         if (index > 0) {
@@ -755,29 +786,8 @@ private fun DiscountOfferCard(
                     }
                 }
             }
-            StandardTextField(
-                value = codeInput,
-                onValueChange = onCodeChanged,
-                label = "New code",
-                supportingText = "Optional. Leave blank to generate one.",
-                containerColor = MaterialTheme.colorScheme.surface,
-            )
-            StandardTextField(
-                value = usageLimitInput,
-                onValueChange = onUsageLimitChanged,
-                label = "Usage limit",
-                keyboardType = "number",
-                supportingText = "Optional",
-                containerColor = MaterialTheme.colorScheme.surface,
-            )
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isGenerating,
-                onClick = onGenerate,
-            ) {
-                Text(if (isGenerating) "Generating..." else "Generate code")
-            }
         }
+    }
 }
 
 private fun String.displayDiscountTargetType(): String {
