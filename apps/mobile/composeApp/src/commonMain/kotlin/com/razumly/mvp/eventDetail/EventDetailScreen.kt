@@ -103,6 +103,7 @@ import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.canManageEventsForViewer
+import com.razumly.mvp.core.data.dataTypes.assignedOfficialUserIds
 import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
 import com.razumly.mvp.core.data.dataTypes.isDraftLikeState
 import com.razumly.mvp.core.data.dataTypes.isPrivateState
@@ -132,6 +133,15 @@ import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.composables.TeamCard
+import com.razumly.mvp.core.presentation.guides.EventGuideIds
+import com.razumly.mvp.core.presentation.guides.EventGuideTargets
+import com.razumly.mvp.core.presentation.guides.LocalGuideController
+import com.razumly.mvp.core.presentation.guides.eventBracketTabGuide
+import com.razumly.mvp.core.presentation.guides.eventOverviewGuide
+import com.razumly.mvp.core.presentation.guides.eventParticipantsTabGuide
+import com.razumly.mvp.core.presentation.guides.eventScheduleTabGuide
+import com.razumly.mvp.core.presentation.guides.eventStandingsTabGuide
+import com.razumly.mvp.core.presentation.guides.guideTarget
 import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.presentation.util.getEventQrCodeUrl
@@ -857,6 +867,62 @@ internal fun shouldUseViewSchedulePrimaryAction(
 
 internal fun shouldShowScheduleMatchManagement(eventType: EventType): Boolean =
     eventType == EventType.LEAGUE || eventType == EventType.TOURNAMENT
+
+internal fun isFirstMatchDayForTrackedUsers(
+    matches: List<MatchWithRelations>,
+    trackedUserIds: Set<String>,
+    currentUserTeamIds: Set<String>,
+    today: LocalDate,
+    timeZone: TimeZone,
+): Boolean {
+    val normalizedTrackedUserIds = trackedUserIds
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .toSet()
+    val normalizedTeamIds = currentUserTeamIds
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .toSet()
+    if (normalizedTrackedUserIds.isEmpty() && normalizedTeamIds.isEmpty()) {
+        return false
+    }
+
+    val trackedMatchDates = matches
+        .asSequence()
+        .filter { match -> match.isMatchForTrackedUserOrTeam(normalizedTrackedUserIds, normalizedTeamIds) }
+        .mapNotNull { match -> match.match.start ?: match.match.end }
+        .map { instant -> instant.toLocalDateTime(timeZone).date }
+        .distinct()
+        .sorted()
+        .toList()
+
+    return trackedMatchDates.firstOrNull() == today
+}
+
+private fun MatchWithRelations.isMatchForTrackedUserOrTeam(
+    trackedUserIds: Set<String>,
+    currentUserTeamIds: Set<String>,
+): Boolean {
+    val matchTeamIds = setOfNotNull(
+        match.team1Id?.trim()?.takeIf(String::isNotBlank),
+        match.team2Id?.trim()?.takeIf(String::isNotBlank),
+        match.teamOfficialId?.trim()?.takeIf(String::isNotBlank),
+    )
+    if (matchTeamIds.any(currentUserTeamIds::contains)) {
+        return true
+    }
+
+    if (match.assignedOfficialUserIds().any { userId -> trackedUserIds.contains(userId.trim()) }) {
+        return true
+    }
+
+    val teamUserIds = listOfNotNull(team1, team2)
+        .flatMap { team -> team.playerIds }
+        .map(String::trim)
+        .filter(String::isNotBlank)
+
+    return teamUserIds.any(trackedUserIds::contains)
+}
 
 private fun formatMinutesTo12Hour(totalMinutes: Int): String {
     val normalizedMinutes = ((totalMinutes % 1440) + 1440) % 1440
@@ -1786,6 +1852,87 @@ fun EventDetailScreen(
             }
         }
     }
+    val guideController = LocalGuideController.current
+    val guideEventId = selectedEvent.event.id.trim()
+    val overviewJoinedGuideId = remember(guideEventId) {
+        EventGuideIds.eventOverviewJoined(guideEventId)
+    }
+    val overviewMatchDayGuideId = remember(guideEventId) {
+        EventGuideIds.eventOverviewMatchDay(guideEventId)
+    }
+    val overviewJoinedGuide = remember(overviewJoinedGuideId) {
+        eventOverviewGuide(overviewJoinedGuideId)
+    }
+    val overviewMatchDayGuide = remember(overviewMatchDayGuideId) {
+        eventOverviewGuide(overviewMatchDayGuideId)
+    }
+    val currentUserEventTeamIds = remember(currentUser.teamIds, validTeams) {
+        (currentUser.teamIds + validTeams.map { team -> team.team.id })
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .toSet()
+    }
+    val eventTimeZone = selectedEvent.event.resolvedTimeZone()
+    val eventToday = remember(eventTimeZone) {
+        Clock.System.now().toLocalDateTime(eventTimeZone).date
+    }
+    val isFirstMatchDayForCurrentUser = remember(
+        selectedEvent.matches,
+        scheduleTrackedUserIds,
+        currentUserEventTeamIds,
+        eventToday,
+        eventTimeZone,
+    ) {
+        isFirstMatchDayForTrackedUsers(
+            matches = selectedEvent.matches,
+            trackedUserIds = scheduleTrackedUserIds,
+            currentUserTeamIds = currentUserEventTeamIds,
+            today = eventToday,
+            timeZone = eventTimeZone,
+        )
+    }
+    val completedGuideIds = guideController?.completedGuideIds.orEmpty()
+    val hasOverviewHeaderTarget = guideController?.hasTarget(EventGuideTargets.OverviewHeader) == true
+    val hasOverviewPrimaryActionTarget = guideController?.hasTarget(EventGuideTargets.OverviewPrimaryAction) == true
+    val hasOverviewFormatTarget = guideController?.hasTarget(EventGuideTargets.OverviewFormat) == true
+
+    LaunchedEffect(
+        guideController,
+        guideEventId,
+        showDetails,
+        isEditing,
+        showMap,
+        isUserInEvent,
+        showStickyActions,
+        isFirstMatchDayForCurrentUser,
+        completedGuideIds,
+        hasOverviewHeaderTarget,
+        hasOverviewPrimaryActionTarget,
+        hasOverviewFormatTarget,
+    ) {
+        val controller = guideController ?: return@LaunchedEffect
+        if (guideEventId.isBlank()) return@LaunchedEffect
+        if (showDetails || isEditing || showMap || !isUserInEvent || !showStickyActions) return@LaunchedEffect
+
+        val requiredTargets = setOf(
+            EventGuideTargets.OverviewHeader,
+            EventGuideTargets.OverviewPrimaryAction,
+        )
+        if (!controller.isGuideCompleted(overviewJoinedGuideId)) {
+            controller.maybeStartGuide(
+                guide = overviewJoinedGuide,
+                requiredTargetIds = requiredTargets,
+            )
+            return@LaunchedEffect
+        }
+
+        if (isFirstMatchDayForCurrentUser) {
+            controller.maybeStartGuide(
+                guide = overviewMatchDayGuide,
+                requiredTargetIds = requiredTargets,
+            )
+        }
+    }
 
     LaunchedEffect(Unit) {
         component.setLoadingHandler(loadingHandler)
@@ -1907,9 +2054,9 @@ fun EventDetailScreen(
                     exit = ExitTransition.None,
                 ) {
                     Box {
-                        EventDetails(
-                            paymentProcessor = component,
-                            mapComponent = mapComponent,
+                            EventDetails(
+                                paymentProcessor = component,
+                                mapComponent = mapComponent,
                             hostHasAccount = currentUser.hasStripeAccount == true,
                             eventWithRelations = selectedEvent,
                             editEvent = editedEvent,
@@ -2083,23 +2230,24 @@ fun EventDetailScreen(
                                     )
                                 }
                             },
-                            onAddOfficialId = { officialId ->
-                                component.editEventField {
-                                    addOfficialUser(
-                                        userId = officialId,
-                                        sport = selectedSport,
-                                    )
-                                }
-                            },
-                            onRemoveOfficialId = { officialId ->
-                                component.editEventField {
-                                    removeOfficialUser(
-                                        userId = officialId,
-                                        sport = selectedSport,
-                                    )
-                                }
-                            },
-                        ) { isValid ->
+                                onAddOfficialId = { officialId ->
+                                    component.editEventField {
+                                        addOfficialUser(
+                                            userId = officialId,
+                                            sport = selectedSport,
+                                        )
+                                    }
+                                },
+                                onRemoveOfficialId = { officialId ->
+                                    component.editEventField {
+                                        removeOfficialUser(
+                                            userId = officialId,
+                                            sport = selectedSport,
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.guideTarget(EventGuideTargets.OverviewHeader),
+                            ) { isValid ->
                             val buttonColors = ButtonColors(
                                 containerColor = Color(imageScheme.primary),
                                 contentColor = Color(imageScheme.onPrimary),
@@ -2233,8 +2381,8 @@ fun EventDetailScreen(
                                         }
                                     }
                                 } else {
-                                    EventOverviewSections(
-                                        state = EventDetailOverviewState(
+                                        EventOverviewSections(
+                                            state = EventDetailOverviewState(
                                             eventWithRelations = selectedEvent,
                                             teamsAndParticipantsLoading = eventTeamsAndParticipantsLoading,
                                             matchesLoading = eventMatchesLoading,
@@ -2245,10 +2393,11 @@ fun EventDetailScreen(
                                             overviewParticipantSummary = overviewParticipantSummary,
                                             showOpenDetailsAction = showOverviewOpenDetailsAction,
                                         ),
-                                        actions = EventDetailOverviewActions(
-                                            onOpenDetails = component::viewEvent,
-                                        ),
-                                    )
+                                            actions = EventDetailOverviewActions(
+                                                onOpenDetails = component::viewEvent,
+                                            ),
+                                            formatModifier = Modifier.guideTarget(EventGuideTargets.OverviewFormat),
+                                        )
                                 }
                             }
                         }
@@ -2663,47 +2812,113 @@ fun EventDetailScreen(
                                 )
                             }
                         }
-                        val tabContentTopOffset = if (selectedDivisionSelectorState != null) {
-                            DivisionPillContentTopOffset
-                        } else {
-                            0.dp
-                        }
-                        EventDetailTabStrip(
-                            availableTabs = availableTabs,
-                            selectedTab = selectedTab,
-                            onTabSelected = { selectedTab = it },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
-                        )
-                        Box(Modifier.fillMaxSize()) {
-                            when (selectedTab) {
-                                DetailTab.BRACKET -> {
-                                    TournamentBracketView(
-                                        showFab = { showFab = it },
-                                        topContentPadding = tabContentTopOffset,
-                                        onMatchClick = { match ->
-                                            if (!canEditMatches) {
-                                                component.matchSelected(match)
-                                            }
-                                        },
-                                        isEditingMatches = canEditMatches,
-                                        editableMatches = editableMatches,
-                                        onEditMatch = { match ->
-                                            if (canEditMatches) {
-                                                component.showMatchEditDialog(match)
-                                            } else {
-                                                component.matchSelected(match)
-                                            }
-                                        },
-                                        showEventOfficialNames = canEditMatches || isEventOfficial,
-                                        limitOfficialsToCurrentUser = isEventOfficial && !canEditMatches,
-                                    )
+                            val tabContentTopOffset = if (selectedDivisionSelectorState != null) {
+                                DivisionPillContentTopOffset
+                            } else {
+                                0.dp
+                            }
+                            val selectedTabContentTarget = when (selectedTab) {
+                                DetailTab.BRACKET -> EventGuideTargets.BracketContent
+                                DetailTab.SCHEDULE -> EventGuideTargets.ScheduleContent
+                                DetailTab.LEAGUES -> EventGuideTargets.StandingsContent
+                                DetailTab.PARTICIPANTS -> EventGuideTargets.ParticipantsContent
+                            }
+                            val selectedTabGuideId = remember(selectedTab, guideEventId) {
+                                when (selectedTab) {
+                                    DetailTab.BRACKET -> EventGuideIds.eventBracketTab(guideEventId)
+                                    DetailTab.SCHEDULE -> EventGuideIds.eventScheduleTab(guideEventId)
+                                    DetailTab.LEAGUES -> EventGuideIds.eventStandingsTab(guideEventId)
+                                    DetailTab.PARTICIPANTS -> EventGuideIds.eventParticipantsTab(guideEventId)
                                 }
+                            }
+                            val selectedTabGuide = remember(selectedTab, selectedTabGuideId) {
+                                when (selectedTab) {
+                                    DetailTab.BRACKET -> eventBracketTabGuide(selectedTabGuideId)
+                                    DetailTab.SCHEDULE -> eventScheduleTabGuide(selectedTabGuideId)
+                                    DetailTab.LEAGUES -> eventStandingsTabGuide(selectedTabGuideId)
+                                    DetailTab.PARTICIPANTS -> eventParticipantsTabGuide(selectedTabGuideId)
+                                }
+                            }
+                            val canStartEventTabGuide = isUserInEvent || isHost || isAssistantHost || isEventOfficial
+                            val hasDetailTabsTarget = guideController?.hasTarget(EventGuideTargets.DetailTabs) == true
+                            val hasSelectedTabContentTarget =
+                                guideController?.hasTarget(selectedTabContentTarget) == true
+                            val hasDivisionSelectorTarget =
+                                guideController?.hasTarget(EventGuideTargets.DetailDivisionSelector) == true
+                            LaunchedEffect(
+                                guideController,
+                                guideEventId,
+                                selectedTab,
+                                showDetails,
+                                isEditing,
+                                showMap,
+                                canStartEventTabGuide,
+                                selectedTabGuideId,
+                                completedGuideIds,
+                                hasDetailTabsTarget,
+                                hasSelectedTabContentTarget,
+                                hasDivisionSelectorTarget,
+                            ) {
+                                val controller = guideController ?: return@LaunchedEffect
+                                if (guideEventId.isBlank()) return@LaunchedEffect
+                                if (!showDetails || isEditing || showMap || !canStartEventTabGuide) return@LaunchedEffect
 
-                                DetailTab.SCHEDULE -> {
-                                    if (isWeeklyParentEvent) {
-                                        ScheduleView(
+                                controller.maybeStartGuide(
+                                    guide = selectedTabGuide,
+                                    requiredTargetIds = setOf(
+                                        EventGuideTargets.DetailTabs,
+                                        selectedTabContentTarget,
+                                    ),
+                                )
+                            }
+                            EventDetailTabStrip(
+                                availableTabs = availableTabs,
+                                selectedTab = selectedTab,
+                                onTabSelected = { selectedTab = it },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .guideTarget(EventGuideTargets.DetailTabs)
+                                    .padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
+                            )
+                        Box(Modifier.fillMaxSize()) {
+                                when (selectedTab) {
+                                    DetailTab.BRACKET -> {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .guideTarget(EventGuideTargets.BracketContent),
+                                        ) {
+                                            TournamentBracketView(
+                                                showFab = { showFab = it },
+                                                topContentPadding = tabContentTopOffset,
+                                                onMatchClick = { match ->
+                                                    if (!canEditMatches) {
+                                                        component.matchSelected(match)
+                                                    }
+                                                },
+                                                isEditingMatches = canEditMatches,
+                                                editableMatches = editableMatches,
+                                                onEditMatch = { match ->
+                                                    if (canEditMatches) {
+                                                        component.showMatchEditDialog(match)
+                                                    } else {
+                                                        component.matchSelected(match)
+                                                    }
+                                                },
+                                                showEventOfficialNames = canEditMatches || isEventOfficial,
+                                                limitOfficialsToCurrentUser = isEventOfficial && !canEditMatches,
+                                            )
+                                        }
+                                    }
+
+                                    DetailTab.SCHEDULE -> {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .guideTarget(EventGuideTargets.ScheduleContent),
+                                        ) {
+                                        if (isWeeklyParentEvent) {
+                                            ScheduleView(
                                             items = weeklyScheduleItems,
                                             fields = eventFields,
                                             showFab = { showFab = it },
@@ -2893,43 +3108,55 @@ fun EventDetailScreen(
                                                 } else {
                                                     component.matchSelected(match)
                                                 }
+                                                }
+                                            )
+                                        }
+                                        }
+                                    }
+                                    DetailTab.LEAGUES -> {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .guideTarget(EventGuideTargets.StandingsContent),
+                                        ) {
+                                            val selectedLeagueDivisionStandings = leagueDivisionStandings?.takeIf { standings ->
+                                                !selectedStandingsDataDivisionId.isNullOrBlank() &&
+                                                    standings.divisionId.normalizeDivisionIdentifier() ==
+                                                        selectedStandingsDataDivisionId.normalizeDivisionIdentifier()
                                             }
-                                        )
+                                            LeagueStandingsTab(
+                                                state = EventDetailStandingsState(
+                                                    standings = leagueStandings,
+                                                    standingsDivisionKey = selectedStandingsDataDivisionId
+                                                        ?.trim()
+                                                        ?.takeIf(String::isNotBlank)
+                                                        ?: selectedStandingsDivisionId
+                                                            ?.trim()
+                                                            ?.takeIf(String::isNotBlank)
+                                                        ?: "all",
+                                                    showDrawColumn = showStandingsDrawColumn,
+                                                    topContentPadding = tabContentTopOffset,
+                                                    standingsConfirmedAt = selectedLeagueDivisionStandings?.standingsConfirmedAt,
+                                                    validationMessages = selectedLeagueDivisionStandings?.validationMessages.orEmpty(),
+                                                    isLoading = false,
+                                                    isConfirming = leagueStandingsConfirming,
+                                                    canConfirmStandings = canManageLeagueStandings,
+                                                ),
+                                                actions = EventDetailStandingsActions(
+                                                    showFab = { showFab = it },
+                                                ),
+                                            )
+                                        }
                                     }
-                                }
-                                DetailTab.LEAGUES -> {
-                                    val selectedLeagueDivisionStandings = leagueDivisionStandings?.takeIf { standings ->
-                                        !selectedStandingsDataDivisionId.isNullOrBlank() &&
-                                            standings.divisionId.normalizeDivisionIdentifier() ==
-                                                selectedStandingsDataDivisionId.normalizeDivisionIdentifier()
-                                    }
-                                    LeagueStandingsTab(
-                                        state = EventDetailStandingsState(
-                                            standings = leagueStandings,
-                                            standingsDivisionKey = selectedStandingsDataDivisionId
-                                                ?.trim()
-                                                ?.takeIf(String::isNotBlank)
-                                                ?: selectedStandingsDivisionId
-                                                    ?.trim()
-                                                    ?.takeIf(String::isNotBlank)
-                                                ?: "all",
-                                            showDrawColumn = showStandingsDrawColumn,
-                                            topContentPadding = tabContentTopOffset,
-                                            standingsConfirmedAt = selectedLeagueDivisionStandings?.standingsConfirmedAt,
-                                            validationMessages = selectedLeagueDivisionStandings?.validationMessages.orEmpty(),
-                                            isLoading = false,
-                                            isConfirming = leagueStandingsConfirming,
-                                            canConfirmStandings = canManageLeagueStandings,
-                                        ),
-                                        actions = EventDetailStandingsActions(
-                                            showFab = { showFab = it },
-                                        ),
-                                    )
-                                }
 
-                                DetailTab.PARTICIPANTS -> {
-                                    if (eventTeamsAndParticipantsLoading) {
-                                        showFab = false
+                                    DetailTab.PARTICIPANTS -> {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .guideTarget(EventGuideTargets.ParticipantsContent),
+                                        ) {
+                                        if (eventTeamsAndParticipantsLoading) {
+                                            showFab = false
                                         DetailTabLoadingState("Loading teams and participants...")
                                     } else if (isWeeklyParentEvent && selectedWeeklyOccurrence == null) {
                                         showFab = true
@@ -2958,18 +3185,20 @@ fun EventDetailScreen(
                                                 ?: selectedDivision,
                                             divisionOptions = registrationDivisionOptions,
                                             divisionWarnings = participantDivisionWarnings,
-                                            onTeamDivisionSelected = component::moveTeamParticipantDivision,
-                                        )
+                                                onTeamDivisionSelected = component::moveTeamParticipantDivision,
+                                            )
+                                        }
+                                        }
                                     }
                                 }
-                            }
                             @Suppress("RedundantQualifierName")
                             androidx.compose.animation.AnimatedVisibility(
                                 visible = selectedDivisionSelectorState != null,
-                                modifier = Modifier
-                                    .align(Alignment.TopCenter)
-                                    .padding(top = 4.dp)
-                                    .zIndex(2f),
+                                    modifier = Modifier
+                                        .align(Alignment.TopCenter)
+                                        .padding(top = 4.dp)
+                                        .guideTarget(EventGuideTargets.DetailDivisionSelector)
+                                        .zIndex(2f),
                                 enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
                                 exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
                             ) {
@@ -3215,7 +3444,7 @@ fun EventDetailScreen(
                 enter = slideInVertically(initialOffsetY = { fullHeight -> fullHeight / 2 }) + fadeIn(),
                 exit = slideOutVertically(targetOffsetY = { fullHeight -> fullHeight / 2 }) + fadeOut(),
             ) {
-                StickyActionBar(
+                    StickyActionBar(
                     primaryLabel = when {
                         isRegistrationPaymentPending -> "Payment pending"
                         isRegistrationPaymentFailed && !joinBlockedByStart -> "Complete payment"
@@ -3253,12 +3482,13 @@ fun EventDetailScreen(
                     },
                     onShareClick = component::shareEvent,
                     selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
-                    onClearSelectedWeeklyOccurrence = if (isWeeklyParentEvent) {
-                        component::clearSelectedWeeklySession
-                    } else {
-                        null
-                    },
-                )
+                        onClearSelectedWeeklyOccurrence = if (isWeeklyParentEvent) {
+                            component::clearSelectedWeeklySession
+                        } else {
+                            null
+                        },
+                        modifier = Modifier.guideTarget(EventGuideTargets.OverviewPrimaryAction),
+                    )
             }
             }
                 }

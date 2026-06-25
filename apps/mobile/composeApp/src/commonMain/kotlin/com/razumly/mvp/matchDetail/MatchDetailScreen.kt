@@ -80,6 +80,11 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
 import com.razumly.mvp.core.data.dataTypes.normalizedOfficialAssignments
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.guides.EventGuideIds
+import com.razumly.mvp.core.presentation.guides.EventGuideTargets
+import com.razumly.mvp.core.presentation.guides.LocalGuideController
+import com.razumly.mvp.core.presentation.guides.guideTarget
+import com.razumly.mvp.core.presentation.guides.matchOfficialPreCheckInGuide
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.presentation.util.playMatchTimerAlert
@@ -436,6 +441,7 @@ fun MatchDetailScreen(
     val showOfficialCheckInDialog by component.showOfficialCheckInDialog.collectAsState()
     val currentSet by component.currentSet.collectAsState()
     val matchFinished by component.matchFinished.collectAsState()
+    val assignedTeamOfficialPendingCheckIn by component.assignedTeamOfficialPendingCheckIn.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
     val currentLocation by mapComponent.currentLocation.collectAsState()
     val isWebLayout = getScreenWidth() >= WEB_LAYOUT_BREAKPOINT_DP
@@ -702,6 +708,50 @@ fun MatchDetailScreen(
             MaterialTheme.colorScheme.primaryContainer,
         )
     )
+    val guideController = LocalGuideController.current
+    val officialGuideId = remember(event?.id, match.match.eventId, match.match.id) {
+        EventGuideIds.matchOfficialPreCheckIn(
+            eventId = event?.id ?: match.match.eventId,
+            matchId = match.match.id,
+        )
+    }
+    val officialGuide = remember(officialGuideId) {
+        matchOfficialPreCheckInGuide(officialGuideId)
+    }
+    val officialGuideCompleted = guideController?.isGuideCompleted(officialGuideId) == true
+    val shouldGateOfficialCheckInDialog =
+        assignedTeamOfficialPendingCheckIn &&
+            !officialGuideCompleted
+    val hasMatchIdentityTarget = guideController?.hasTarget(EventGuideTargets.MatchIdentity) == true
+    val hasOfficialAssignmentTarget =
+        guideController?.hasTarget(EventGuideTargets.MatchOfficialAssignment) == true
+    val hasMatchScoreControlsTarget =
+        guideController?.hasTarget(EventGuideTargets.MatchScoreControls) == true
+    val hasMatchResultControlsTarget =
+        guideController?.hasTarget(EventGuideTargets.MatchResultControls) == true
+
+    LaunchedEffect(
+        guideController,
+        officialGuideId,
+        assignedTeamOfficialPendingCheckIn,
+        officialGuideCompleted,
+        showMap,
+        hasMatchIdentityTarget,
+        hasOfficialAssignmentTarget,
+        hasMatchScoreControlsTarget,
+        hasMatchResultControlsTarget,
+    ) {
+        val controller = guideController ?: return@LaunchedEffect
+        if (!assignedTeamOfficialPendingCheckIn || officialGuideCompleted || showMap) return@LaunchedEffect
+
+        controller.maybeStartGuide(
+            guide = officialGuide,
+            requiredTargetIds = setOf(
+                EventGuideTargets.MatchIdentity,
+                EventGuideTargets.MatchOfficialAssignment,
+            ),
+        )
+    }
 
     fun openIncidentDialog(teamId: String?) {
         val resolvedTeamId = teamId?.trim()?.takeIf(String::isNotBlank)
@@ -742,7 +792,7 @@ fun MatchDetailScreen(
         }
     }.value
 
-    if (showOfficialCheckInDialog) {
+    if (showOfficialCheckInDialog && !shouldGateOfficialCheckInDialog) {
         val message = if (isOfficial) {
             stringResource(Res.string.official_checkin_message)
         } else {
@@ -896,9 +946,9 @@ fun MatchDetailScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceEvenly
         ) {
-            ScoreCard(
-                title = team1Text,
-                score = team1Score.toString(),
+                ScoreCard(
+                    title = team1Text,
+                    score = team1Score.toString(),
                 increase = {
                     if (promptScoringIncident) {
                         openIncidentDialog(match.match.team1Id)
@@ -920,14 +970,17 @@ fun MatchDetailScreen(
                     null
                 },
                 onAddIncident = { openIncidentDialog(match.match.team1Id) },
-                modifier = Modifier.weight(1f),
-            )
+                    modifier = Modifier
+                        .weight(1f)
+                        .guideTarget(EventGuideTargets.MatchScoreControls),
+                )
 
-            Row(
-                modifier = Modifier
-                    .background(
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
-                        shape = RoundedCornerShape(20.dp)
+                Row(
+                    modifier = Modifier
+                        .guideTarget(EventGuideTargets.MatchIdentity)
+                        .background(
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(20.dp)
                     )
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
@@ -995,11 +1048,14 @@ fun MatchDetailScreen(
                 )
             }
 
-            if (showOfficialScoreControls) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                if (showOfficialScoreControls) {
+                    Row(
+                        modifier = Modifier
+                            .guideTarget(EventGuideTargets.MatchOfficialAssignment)
+                            .guideTarget(EventGuideTargets.MatchResultControls),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                     if (canStartMatch) {
                         Button(
                             onClick = { component.startMatch() },

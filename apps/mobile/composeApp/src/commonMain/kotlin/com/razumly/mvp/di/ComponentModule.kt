@@ -163,6 +163,7 @@ val componentModule = module {
             eventRepository = get(),
             teamRepository = get(),
             pushNotificationsRepository = get(),
+            currentUserDataSource = get(),
             navigationHandler = navHandler,
             initialDestination = startDestination,
         )

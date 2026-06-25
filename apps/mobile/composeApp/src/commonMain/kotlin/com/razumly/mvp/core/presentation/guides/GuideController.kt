@@ -40,6 +40,9 @@ class GuideController(
     val activeTargetBounds: Rect?
         get() = activeStep?.targetId?.let { targetId -> targetBounds[targetId] }
 
+    val hasActiveGuide: Boolean
+        get() = activeGuide != null
+
     fun updateCompletedGuideIds(
         ids: Set<String>,
         loaded: Boolean,
@@ -61,6 +64,8 @@ class GuideController(
     }
 
     fun hasTarget(targetId: String): Boolean = targetBounds.containsKey(targetId)
+
+    fun isGuideCompleted(guideId: String): Boolean = guideId in completedGuideIds
 
     fun maybeStartGuide(
         guide: AppGuide,

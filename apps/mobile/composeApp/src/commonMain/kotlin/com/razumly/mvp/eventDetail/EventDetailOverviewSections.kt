@@ -110,6 +110,9 @@ internal fun formatTeamsNeedingPlayersSummary(teamsNeedingPlayers: List<Int>): S
 internal fun EventOverviewSections(
     state: EventDetailOverviewState,
     actions: EventDetailOverviewActions,
+    modifier: Modifier = Modifier,
+    formatModifier: Modifier = Modifier,
+    openDetailsActionModifier: Modifier = Modifier,
 ) {
     val eventWithRelations = state.eventWithRelations
     val teamsAndParticipantsLoading = state.teamsAndParticipantsLoading
@@ -196,7 +199,7 @@ internal fun EventOverviewSections(
     }
 
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         openDetailsLoadingMessage?.let { loadingMessage ->
@@ -223,7 +226,7 @@ internal fun EventOverviewSections(
         if (showFullnessSummary) {
             HorizontalDivider()
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = formatModifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
             ) {
@@ -434,7 +437,7 @@ internal fun EventOverviewSections(
         if (showOpenDetailsAction) {
             TextButton(
                 onClick = onOpenDetails,
-                modifier = Modifier.align(Alignment.End),
+                modifier = openDetailsActionModifier.align(Alignment.End),
             ) {
                 Text("View Schedule and Participants")
             }

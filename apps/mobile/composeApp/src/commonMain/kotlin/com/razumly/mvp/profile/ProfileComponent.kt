@@ -11,6 +11,7 @@ import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.push
 import com.arkivanov.decompose.value.Value
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
+import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.dataTypes.Bill
 import com.razumly.mvp.core.data.dataTypes.BillPayment
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
@@ -56,6 +57,7 @@ import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.core.presentation.PaymentProcessor
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
+import com.razumly.mvp.core.util.Platform
 import com.razumly.mvp.eventDetail.DiscountCodePromptState
 import io.github.aakira.napier.Napier
 import com.razumly.mvp.profile.profileDetails.ProfileDetailsComponent
@@ -370,6 +372,7 @@ interface ProfileComponent : IPaymentProcessor {
     fun manageEvents()
     fun manageRefunds()
     fun refreshPushTargetDebugStatus(syncBeforeCheck: Boolean = false)
+    fun resetOnboardingForDebug()
     fun setNotificationSetting(type: String, channel: String, enabled: Boolean)
     fun saveNotificationSettings()
     fun refreshEventTemplates()
@@ -519,6 +522,7 @@ class DefaultProfileComponent(
     private val eventRepository: IEventRepository,
     private val teamRepository: ITeamRepository,
     private val pushNotificationsRepository: IPushNotificationsRepository,
+    private val currentUserDataSource: CurrentUserDataSource,
     private val navigationHandler: INavigationHandler,
     initialDestination: ProfileStartDestination = ProfileStartDestination.HOME,
 ) : ProfileComponent, PaymentProcessor(), ComponentContext by componentContext {
@@ -815,6 +819,15 @@ class DefaultProfileComponent(
                         lastCheckedAt = Clock.System.now().toString(),
                     )
             }
+        }
+    }
+
+    override fun resetOnboardingForDebug() {
+        if (!Platform.isDebugBuild) return
+
+        scope.launch {
+            currentUserDataSource.clearCompletedGuideIds()
+            navigationHandler.navigateToSearch()
         }
     }
 

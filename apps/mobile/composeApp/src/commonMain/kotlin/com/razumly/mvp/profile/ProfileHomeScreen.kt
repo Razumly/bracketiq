@@ -278,6 +278,14 @@ fun ProfileHomeScreen(component: ProfileComponent) {
                 ProfileActionCard(action = action)
             }
 
+            if (Platform.isDebugBuild) {
+                item(span = { GridItemSpan(2) }) {
+                    OnboardingDebugCard(
+                        onResetOnboarding = component::resetOnboardingForDebug,
+                    )
+                }
+            }
+
             if (Platform.isNonReleaseBuild) {
                 item(span = { GridItemSpan(2) }) {
                     PushTargetDebugCard(
@@ -370,6 +378,46 @@ private fun ProfileActionCard(action: ProfileAction) {
                 minLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+    }
+}
+
+@Composable
+private fun OnboardingDebugCard(
+    onResetOnboarding: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "Onboarding Debug",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = "Reset completed guide state and open Discover to replay onboarding.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onResetOnboarding,
+            ) {
+                Text(
+                    text = "Reset Onboarding",
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
     }
 }

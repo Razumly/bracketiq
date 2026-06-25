@@ -15,6 +15,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.isCaptainOrManager
 import com.razumly.mvp.core.data.dataTypes.isUserAssignedToOfficialSlot
 import com.razumly.mvp.core.data.dataTypes.isUserCheckedInForOfficialSlot
 import com.razumly.mvp.core.data.dataTypes.normalizedOfficialAssignments
@@ -79,6 +80,7 @@ interface MatchContentComponent {
     val segmentConfirmSaving: StateFlow<Boolean>
     val currentSet: StateFlow<Int>
     val isOfficial: StateFlow<Boolean>
+    val assignedTeamOfficialPendingCheckIn: StateFlow<Boolean>
     val showOfficialCheckInDialog: StateFlow<Boolean>
     val showSetConfirmDialog: StateFlow<Boolean>
     val errorState: StateFlow<String?>
@@ -141,6 +143,17 @@ fun MatchWithRelations.toMatchWithTeams(
     team2 = team2,
     teamOfficial = teamOfficial
 )
+
+private fun TeamWithRelations.isCurrentUserTeam(userId: String): Boolean {
+    val normalizedUserId = userId.trim()
+    if (normalizedUserId.isBlank()) return false
+
+    return team.isCaptainOrManager(normalizedUserId) ||
+        team.playerIds.any { playerId -> playerId.trim() == normalizedUserId } ||
+        team.coachIds.any { coachId -> coachId.trim() == normalizedUserId } ||
+        team.headCoachId?.trim() == normalizedUserId ||
+        players.any { player -> player.id.trim() == normalizedUserId }
+}
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DefaultMatchContentComponent(
@@ -252,6 +265,9 @@ class DefaultMatchContentComponent(
 
     private val _isOfficial = MutableStateFlow(false)
     override val isOfficial = _isOfficial.asStateFlow()
+
+    private val _assignedTeamOfficialPendingCheckIn = MutableStateFlow(false)
+    override val assignedTeamOfficialPendingCheckIn = _assignedTeamOfficialPendingCheckIn.asStateFlow()
 
     private val _showOfficialCheckInDialog = MutableStateFlow(false)
     override val showOfficialCheckInDialog = _showOfficialCheckInDialog.asStateFlow()
@@ -370,7 +386,10 @@ class DefaultMatchContentComponent(
         val currentMatch = matchWithTeams.value.match
         val teamOfficialId = normalizeOptionalId(currentMatch.teamOfficialId)
         val teamIds = currentUserTeamIds().toSet()
-        val isAssignedTeamOfficial = teamOfficialId != null && teamIds.contains(teamOfficialId)
+        val isAssignedTeamOfficial = teamOfficialId != null && (
+            teamIds.contains(teamOfficialId) ||
+                matchWithTeams.value.teamOfficial?.isCurrentUserTeam(currentUser.id) == true
+            )
         val isAssignedUserOfficial = currentMatch.isUserAssignedToOfficialSlot(currentUser.id)
         val canCheckIn = canCheckIntoMatch(currentMatch)
         val rawCheckedIn = when {
@@ -395,6 +414,7 @@ class DefaultMatchContentComponent(
 
         _isOfficial.value = isOfficial
         _officialCheckedIn.value = checkedIn
+        _assignedTeamOfficialPendingCheckIn.value = canCheckIn && !checkedIn && isAssignedTeamOfficial
         if (!shouldShowPrompt) {
             _showOfficialCheckInDialog.value = false
             return
@@ -455,7 +475,10 @@ class DefaultMatchContentComponent(
 
     private fun markOfficialCheckInConfirmed(match: MatchMVP) {
         val teamOfficialId = normalizeOptionalId(match.teamOfficialId)
-        val isAssignedTeamOfficial = teamOfficialId != null && currentUserTeamIds().contains(teamOfficialId)
+        val isAssignedTeamOfficial = teamOfficialId != null && (
+            currentUserTeamIds().contains(teamOfficialId) ||
+                matchWithTeams.value.teamOfficial?.isCurrentUserTeam(currentUser.id) == true
+            )
         val isAssignedUserOfficial = match.isUserAssignedToOfficialSlot(currentUser.id)
         if (!isAssignedTeamOfficial && !isAssignedUserOfficial) {
             return
@@ -478,7 +501,10 @@ class DefaultMatchContentComponent(
                 val teamIds = currentUserTeamIds().toSet()
                 val currentTeamOfficialId = normalizeOptionalId(currentMatch.teamOfficialId)
                 val isAssignedTeamOfficial =
-                    currentTeamOfficialId != null && teamIds.contains(currentTeamOfficialId)
+                    currentTeamOfficialId != null && (
+                        teamIds.contains(currentTeamOfficialId) ||
+                            matchWithTeams.value.teamOfficial?.isCurrentUserTeam(currentUser.id) == true
+                    )
                 val isAssignedUserOfficial = currentMatch.isUserAssignedToOfficialSlot(currentUser.id)
                 val canSwap = canCurrentUserSwapIntoOfficial(currentMatch)
                 if (!canCheckIntoMatch(currentMatch)) {
@@ -494,6 +520,7 @@ class DefaultMatchContentComponent(
                 if (checkedIn) {
                     dismissOfficialDialog()
                     _officialCheckedIn.value = true
+                    _assignedTeamOfficialPendingCheckIn.value = false
                     return@launch
                 }
 
@@ -518,6 +545,7 @@ class DefaultMatchContentComponent(
                         markOfficialCheckInConfirmed(currentMatch)
                         dismissOfficialDialog()
                         _officialCheckedIn.value = true
+                        _assignedTeamOfficialPendingCheckIn.value = false
                         _isOfficial.value = true
                     }.onFailure {
                         _errorState.value = it.userMessage()
@@ -540,6 +568,7 @@ class DefaultMatchContentComponent(
                 matchRepository.updateMatch(updatedMatch.match).onSuccess {
                     _isOfficial.value = true
                     _officialCheckedIn.value = false
+                    _assignedTeamOfficialPendingCheckIn.value = true
                     _showOfficialCheckInDialog.value = true
                 }.onFailure {
                     _errorState.value = it.userMessage()

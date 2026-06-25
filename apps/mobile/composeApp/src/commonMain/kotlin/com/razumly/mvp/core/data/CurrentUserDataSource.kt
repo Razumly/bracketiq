@@ -159,6 +159,12 @@ class CurrentUserDataSource(private val dataStore: DataStore<Preferences>) {
         }
     }
 
+    suspend fun clearCompletedGuideIds() {
+        dataStore.edit { preferences ->
+            preferences.remove(completedGuideIds)
+        }
+    }
+
     suspend fun saveRegistrationProgress(
         key: String,
         draft: RegistrationProgressDraft,
