@@ -170,17 +170,22 @@ private fun MatchEditDialogContent(
         }
     }
     val initialPolicyRules = match.match.matchRulesSnapshot ?: match.match.resolvedMatchRules
-    var policySetCountText by remember(match.match.id, initialPolicyRules) {
-        mutableStateOf((initialPolicyRules?.segmentCount?.takeIf { it > 0 } ?: 1).toString())
-    }
+    val policyScoringModel = initialPolicyRules?.scoringModel
+        ?.trim()
+        ?.uppercase()
+        ?.takeIf { it in setOf("SETS", "PERIODS", "INNINGS", "POINTS_ONLY") }
+        ?: "SETS"
+    val isSetBasedPolicy = policyScoringModel == "SETS"
+    val isTimedPolicy = !isSetBasedPolicy &&
+        initialPolicyRules?.timekeeping?.timerMode
+            ?.trim()
+            ?.uppercase()
+            ?.takeIf { it != "NONE" } != null
     var policyTargetsText by remember(match.match.id, initialPolicyRules) {
         mutableStateOf(initialPolicyRules?.setPointTargets?.joinToString(", ") ?: "")
     }
     var policyMatchMinutesText by remember(match.match.id, initialDuration) {
         mutableStateOf(initialDuration?.inWholeMinutes?.takeIf { it > 0 }?.toString() ?: "")
-    }
-    var policySetMinutesText by remember(match.match.id, initialPolicyRules) {
-        mutableStateOf(initialPolicyRules?.timekeeping?.segmentDurationMinutes?.takeIf { it > 0 }?.toString() ?: "")
     }
     var policyTouched by remember(match.match.id) { mutableStateOf(false) }
     val allMatchLabels = remember(allMatches, match) {
@@ -474,68 +479,42 @@ private fun MatchEditDialogContent(
                     })
             }
 
-            item {
-                Text(
-                    text = "Match Rules",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Medium
-                )
-            }
+            if (isSetBasedPolicy || isTimedPolicy) {
+                item {
+                    Text(
+                        text = "Match Rules",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
 
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Set count", style = MaterialTheme.typography.bodySmall)
-                            StandardTextField(
-                                value = policySetCountText,
-                                onValueChange = { value ->
-                                    policySetCountText = value.filter(Char::isDigit)
-                                    policyTouched = true
-                                },
-                                placeholder = "3",
-                            )
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (isSetBasedPolicy) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Text("Score limits", style = MaterialTheme.typography.bodySmall)
+                                StandardTextField(
+                                    value = policyTargetsText,
+                                    onValueChange = { value ->
+                                        policyTargetsText = value.filter { char -> char.isDigit() || char == ',' || char == ' ' }
+                                        policyTouched = true
+                                    },
+                                    placeholder = "25, 25, 15",
+                                )
+                            }
                         }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Score limits", style = MaterialTheme.typography.bodySmall)
-                            StandardTextField(
-                                value = policyTargetsText,
-                                onValueChange = { value ->
-                                    policyTargetsText = value.filter { char -> char.isDigit() || char == ',' || char == ' ' }
-                                    policyTouched = true
-                                },
-                                placeholder = "25, 25, 15",
-                            )
-                        }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Match minutes", style = MaterialTheme.typography.bodySmall)
-                            StandardTextField(
-                                value = policyMatchMinutesText,
-                                onValueChange = { value ->
-                                    policyMatchMinutesText = value.filter(Char::isDigit)
-                                    policyTouched = true
-                                },
-                                placeholder = "60",
-                            )
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Set minutes", style = MaterialTheme.typography.bodySmall)
-                            StandardTextField(
-                                value = policySetMinutesText,
-                                onValueChange = { value ->
-                                    policySetMinutesText = value.filter(Char::isDigit)
-                                    policyTouched = true
-                                },
-                                placeholder = "20",
-                            )
+                        if (isTimedPolicy) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Text("Match minutes", style = MaterialTheme.typography.bodySmall)
+                                StandardTextField(
+                                    value = policyMatchMinutesText,
+                                    onValueChange = { value ->
+                                        policyMatchMinutesText = value.filter(Char::isDigit)
+                                        policyTouched = true
+                                    },
+                                    placeholder = "60",
+                                )
+                            }
                         }
                     }
                 }
@@ -811,32 +790,43 @@ private fun MatchEditDialogContent(
                         ?: editedMatch.match.resolvedMatchRules
                         ?: ResolvedMatchRulesMVP(scoringModel = "SETS", segmentLabel = "Set")
                     val policySnapshot = if (policyTouched || editedMatch.match.matchRulesSnapshot != null) {
-                        val setCount = policySetCountText.toIntOrNull()?.takeIf { it > 0 }
-                            ?: basePolicyRules.segmentCount.coerceAtLeast(1)
                         val scoringModel = basePolicyRules.scoringModel
                             .trim()
                             .uppercase()
                             .takeIf { it in setOf("SETS", "PERIODS", "INNINGS", "POINTS_ONLY") }
                             ?: "SETS"
+                        val segmentCount = when (scoringModel) {
+                            "SETS" -> actualSetCount(
+                                editedMatch.match.team1Points,
+                                editedMatch.match.team2Points,
+                                editedMatch.match.setResults,
+                                editedMatch.match.segments.size,
+                            )
+                            "POINTS_ONLY" -> 1
+                            else -> basePolicyRules.segmentCount.coerceAtLeast(1)
+                        }
                         val targets = resizePolicyTargets(
                             targets = parsePositiveIntList(policyTargetsText),
-                            count = setCount,
+                            count = segmentCount,
                             fallback = basePolicyRules.setPointTargets.firstOrNull { it > 0 } ?: 21,
                         )
-                        val setMinutes = policySetMinutesText.toIntOrNull()?.takeIf { it > 0 }
-                            ?: policyMatchMinutesText.toIntOrNull()?.takeIf { it > 0 }?.let { minutes ->
-                                (minutes / setCount.coerceAtLeast(1)).coerceAtLeast(1)
-                            }
-                            ?: basePolicyRules.timekeeping.segmentDurationMinutes
+                        val matchMinutes = policyMatchMinutesText.toIntOrNull()?.takeIf { it > 0 }
+                        val segmentMinutes = if (scoringModel == "SETS") {
+                            null
+                        } else {
+                            matchMinutes?.let { minutes ->
+                                (minutes / segmentCount.coerceAtLeast(1)).coerceAtLeast(1)
+                            } ?: basePolicyRules.timekeeping.segmentDurationMinutes
+                        }
                         basePolicyRules.copy(
                             scoringModel = scoringModel,
-                            segmentCount = if (scoringModel == "POINTS_ONLY") 1 else setCount,
+                            segmentCount = segmentCount,
                             segmentLabel = basePolicyRules.segmentLabel.ifBlank {
                                 if (scoringModel == "SETS") "Set" else "Total"
                             },
                             setPointTargets = if (scoringModel == "SETS") targets else emptyList(),
                             timekeeping = basePolicyRules.timekeeping.copy(
-                                segmentDurationMinutes = setMinutes,
+                                segmentDurationMinutes = segmentMinutes,
                             ),
                         )
                     } else {
@@ -1130,6 +1120,13 @@ private fun resizePolicyTargets(targets: List<Int>, count: Int, fallback: Int): 
     }
     return next
 }
+
+private fun actualSetCount(
+    team1Points: List<Int>,
+    team2Points: List<Int>,
+    setResults: List<Int>,
+    segmentCount: Int,
+): Int = maxOf(team1Points.size, team2Points.size, setResults.size, segmentCount, 1)
 
 private fun parseInstantToken(value: String?): Instant? =
     normalizeToken(value)?.let { token -> runCatching { Instant.parse(token) }.getOrNull() }
