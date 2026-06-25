@@ -1,6 +1,7 @@
 package com.razumly.mvp.profile
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -11,19 +12,28 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FabPosition
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,7 +51,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupProperties
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.NotificationSettings
@@ -53,9 +66,11 @@ import com.razumly.mvp.core.data.dataTypes.normalizeNotificationSettings
 import com.razumly.mvp.core.data.dataTypes.notificationChannels
 import com.razumly.mvp.core.data.dataTypes.notificationSettingOptions
 import com.razumly.mvp.core.data.dataTypes.staffInviteRoleLabel
+import com.razumly.mvp.core.data.repositories.DiscountCode
+import com.razumly.mvp.core.data.repositories.DiscountOffer
+import com.razumly.mvp.core.data.repositories.DiscountTarget
 import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
 import com.razumly.mvp.core.data.repositories.ProfileDocumentType
-import com.razumly.mvp.core.data.repositories.DiscountOffer
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
@@ -69,6 +84,11 @@ import com.razumly.mvp.core.presentation.util.MoneyInputUtils
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
+
+private enum class DiscountValueMode {
+    PERCENT,
+    FLAT,
+}
 
 @Composable
 fun ProfilePaymentsScreen(component: ProfileComponent) {
@@ -96,17 +116,209 @@ fun ProfilePaymentsScreen(component: ProfileComponent) {
 @Composable
 fun ProfileDiscountsScreen(component: ProfileComponent) {
     val state by component.discountsState.collectAsState()
-    var priceText by remember(state.selectedTargetId) {
+    val navPadding = LocalNavBarPadding.current
+    var showCreateDialog by rememberSaveable { mutableStateOf(false) }
+    var pendingCreateDismiss by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(component) {
+        component.refreshDiscounts()
+    }
+    LaunchedEffect(state.isCreating, state.error, state.selectedTargetId) {
+        if (pendingCreateDismiss && !state.isCreating && state.error == null && state.selectedTargetId == null) {
+            showCreateDialog = false
+            pendingCreateDismiss = false
+        }
+        if (pendingCreateDismiss && !state.isCreating && state.error != null) {
+            pendingCreateDismiss = false
+        }
+    }
+    fun dismissCreateDialog() {
+        showCreateDialog = false
+        pendingCreateDismiss = false
+        component.setDiscountTargetSearch("")
+        component.selectDiscountTarget(null)
+        component.updateDiscountName("")
+        component.updateDiscountDescription("")
+        component.updateDiscountedPriceCents(0)
+    }
+
+    ProfileSectionScaffold(
+        title = "Discounts",
+        onBack = component::onBackClicked,
+        onRefresh = component::refreshDiscounts,
+        isRefreshing = state.isLoading,
+        scrollContent = false,
+        contentPadding = PaddingValues(0.dp),
+        floatingActionButton = {
+            if (state.discounts.isNotEmpty()) {
+                FloatingActionButton(
+                    onClick = { showCreateDialog = true },
+                    modifier = Modifier.padding(navPadding),
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Create discount")
+                }
+            }
+        },
+    ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                top = 16.dp,
+                end = 16.dp,
+                bottom = 16.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item(key = "discounts-intro") {
+                Text(
+                    text = "Create user-owned discounts and generate codes for your paid events and team registrations.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            state.error?.let { message ->
+                item(key = "discounts-error") {
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+            when {
+                state.isLoading && state.discounts.isEmpty() -> {
+                    item(key = "discounts-loading") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 72.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("Loading discounts...")
+                        }
+                    }
+                }
+
+                state.discounts.isEmpty() -> {
+                    item(key = "discounts-empty") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 72.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(24.dp),
+                            ) {
+                                Text("Create your first discount", style = MaterialTheme.typography.headlineSmall)
+                                FloatingActionButton(
+                                    onClick = { showCreateDialog = true },
+                                    modifier = Modifier.size(112.dp),
+                                    shape = MaterialTheme.shapes.extraLarge,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "Create discount",
+                                        modifier = Modifier.size(52.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                else -> {
+                    item(key = "discounts-title") {
+                        Text("Your discounts", style = MaterialTheme.typography.titleMedium)
+                    }
+                    items(
+                        items = state.discounts,
+                        key = { discount -> discount.id },
+                    ) { discount ->
+                        DiscountOfferCard(
+                            discount = discount,
+                            codeInput = state.codeInputs[discount.id].orEmpty(),
+                            usageLimitInput = state.usageLimitInputs[discount.id].orEmpty(),
+                            isGenerating = state.generatingCodeDiscountId == discount.id,
+                            activeCodeActionId = state.activeCodeActionId,
+                            onCodeChanged = { component.updateDiscountCodeInput(discount.id, it) },
+                            onUsageLimitChanged = { component.updateDiscountUsageLimitInput(discount.id, it) },
+                            onGenerate = { component.generateDiscountCode(discount) },
+                            onDeactivateCode = { code -> component.deactivateDiscountCode(discount, code) },
+                            onActivateCode = { code -> component.activateDiscountCode(discount, code) },
+                            onDeleteCode = { code -> component.deleteDiscountCode(discount, code) },
+                        )
+                    }
+                }
+        }
+    }
+    }
+
+    if (showCreateDialog) {
+        CreateDiscountDialog(
+            state = state,
+            onItemTypeChanged = component::setDiscountItemType,
+            onTargetSearchChanged = component::setDiscountTargetSearch,
+            onTargetSelected = component::selectDiscountTarget,
+            onNameChanged = component::updateDiscountName,
+            onDescriptionChanged = component::updateDiscountDescription,
+            onPriceChanged = component::updateDiscountedPriceCents,
+            onCreate = {
+                pendingCreateDismiss = true
+                component.createUserDiscount()
+            },
+            onDismiss = ::dismissCreateDialog,
+        )
+    }
+}
+
+@Composable
+private fun CreateDiscountDialog(
+    state: ProfileDiscountsState,
+    onItemTypeChanged: (String) -> Unit,
+    onTargetSearchChanged: (String) -> Unit,
+    onTargetSelected: (String?) -> Unit,
+    onNameChanged: (String) -> Unit,
+    onDescriptionChanged: (String) -> Unit,
+    onPriceChanged: (Int) -> Unit,
+    onCreate: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val selectedTarget = remember(state.allTargets, state.selectedTargetId) {
+        state.allTargets.firstOrNull { it.id == state.selectedTargetId }
+    }
+    var discountModeName by rememberSaveable { mutableStateOf(DiscountValueMode.PERCENT.name) }
+    val discountMode = remember(discountModeName) {
+        runCatching { DiscountValueMode.valueOf(discountModeName) }.getOrDefault(DiscountValueMode.PERCENT)
+    }
+    var finalPriceText by remember(state.selectedTargetId, state.discountedPriceCents) {
         mutableStateOf(
-            if (state.discountedPriceCents > 0) {
-                MoneyInputUtils.centsToDisplayValue(state.discountedPriceCents)
+            if (selectedTarget != null) {
+                state.discountedPriceCents.toString()
             } else {
                 ""
             },
         )
     }
-    val selectedTarget = remember(state.targets, state.selectedTargetId) {
-        state.targets.firstOrNull { it.id == state.selectedTargetId }
+    var discountValueText by remember(state.selectedTargetId, state.discountedPriceCents, discountModeName) {
+        mutableStateOf(
+            selectedTarget?.let { target ->
+                when (discountMode) {
+                    DiscountValueMode.PERCENT -> formatDiscountPercentInput(
+                        discountPercentForFinalPrice(
+                            originalPriceCents = target.priceCents,
+                            finalPriceCents = state.discountedPriceCents,
+                        ),
+                    )
+                    DiscountValueMode.FLAT -> discountAmountCentsForFinalPrice(
+                        originalPriceCents = target.priceCents,
+                        finalPriceCents = state.discountedPriceCents,
+                    ).toString()
+                }
+            }.orEmpty(),
+        )
     }
     val itemTypeOptions = remember {
         listOf(
@@ -114,64 +326,36 @@ fun ProfileDiscountsScreen(component: ProfileComponent) {
             DropdownOption("TEAM_REGISTRATION", "Team registration"),
         )
     }
-    val targetOptions = remember(state.targets) {
-        state.targets.map { target ->
-            DropdownOption(
-                value = target.id,
-                label = "${target.label} (${formatCurrency(target.priceCents)})",
-            )
-        }
-    }
+    val dialogContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh
 
-    LaunchedEffect(component) {
-        component.refreshDiscounts()
-    }
-
-    ProfileSectionScaffold(
-        title = "Discounts",
-        description = "Create user-owned discounts and generate codes for your paid events and team registrations.",
-        onBack = component::onBackClicked,
-        onRefresh = component::refreshDiscounts,
-        isRefreshing = state.isLoading,
-    ) {
-        state.error?.let { message ->
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            ),
-        ) {
-            Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text("Create discount", style = MaterialTheme.typography.titleMedium)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = dialogContainerColor,
+        title = { Text("Create discount") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                state.error?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 PlatformDropdown(
                     selectedValue = state.itemType,
-                    onSelectionChange = component::setDiscountItemType,
+                    onSelectionChange = onItemTypeChanged,
                     options = itemTypeOptions,
                     label = "Item type",
+                    containerColor = dialogContainerColor,
                 )
-                StandardTextField(
-                    value = state.targetSearch,
-                    onValueChange = component::setDiscountTargetSearch,
-                    label = "Search items",
-                )
-                PlatformDropdown(
-                    selectedValue = state.selectedTargetId.orEmpty(),
-                    onSelectionChange = component::selectDiscountTarget,
-                    options = targetOptions,
-                    label = "Item",
-                    placeholder = if (state.targetLoading) "Loading..." else "Select item",
-                    enabled = !state.targetLoading,
+                DiscountTargetAutocomplete(
+                    query = state.targetSearch,
+                    targets = state.targets,
+                    selectedTargetId = state.selectedTargetId,
+                    isLoading = state.targetLoading,
+                    containerColor = dialogContainerColor,
+                    onQueryChanged = onTargetSearchChanged,
+                    onTargetSelected = onTargetSelected,
                 )
                 selectedTarget?.let { target ->
                     Text(
@@ -182,54 +366,283 @@ fun ProfileDiscountsScreen(component: ProfileComponent) {
                 }
                 StandardTextField(
                     value = state.name,
-                    onValueChange = component::updateDiscountName,
+                    onValueChange = onNameChanged,
                     label = "Discount name",
+                    containerColor = dialogContainerColor,
                 )
                 StandardTextField(
                     value = state.description,
-                    onValueChange = component::updateDiscountDescription,
+                    onValueChange = onDescriptionChanged,
                     label = "Description",
                     supportingText = "Optional",
+                    containerColor = dialogContainerColor,
                 )
-                StandardTextField(
-                    value = priceText,
-                    onValueChange = { value ->
-                        priceText = MoneyInputUtils.moneyInputFilter(value)
-                        component.updateDiscountedPriceCents(MoneyInputUtils.displayValueToCents(priceText))
-                    },
-                    label = "New price",
-                    keyboardType = "money",
-                    supportingText = "Stored as the discounted final price.",
+                Text(
+                    text = "Discount type",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
-                Button(
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !state.isCreating && selectedTarget != null,
-                    onClick = component::createUserDiscount,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(if (state.isCreating) "Creating..." else "Create discount")
+                    DiscountModeButton(
+                        text = "Percent",
+                        selected = discountMode == DiscountValueMode.PERCENT,
+                        onClick = { discountModeName = DiscountValueMode.PERCENT.name },
+                        modifier = Modifier.weight(1f),
+                    )
+                    DiscountModeButton(
+                        text = "Flat amount",
+                        selected = discountMode == DiscountValueMode.FLAT,
+                        onClick = { discountModeName = DiscountValueMode.FLAT.name },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (discountMode == DiscountValueMode.PERCENT) {
+                        StandardTextField(
+                            value = discountValueText,
+                            onValueChange = { value ->
+                                val filtered = discountPercentInputFilter(value)
+                                discountValueText = filtered
+                                onPriceChanged(
+                                    finalPriceCentsFromPercentDiscount(
+                                        originalPriceCents = selectedTarget?.priceCents ?: 0,
+                                        discountPercent = filtered.toDoubleOrNull() ?: 0.0,
+                                    ),
+                                )
+                            },
+                            modifier = Modifier.weight(1f),
+                            label = "Discount %",
+                            keyboardType = "number",
+                            enabled = selectedTarget != null,
+                            inputFilter = ::discountPercentInputFilter,
+                            containerColor = dialogContainerColor,
+                        )
+                    } else {
+                        StandardTextField(
+                            value = discountValueText,
+                            onValueChange = { value ->
+                                val filtered = MoneyInputUtils.moneyInputFilter(value)
+                                discountValueText = filtered
+                                onPriceChanged(
+                                    finalPriceCentsFromFlatDiscount(
+                                        originalPriceCents = selectedTarget?.priceCents ?: 0,
+                                        discountAmountCents = filtered.toIntOrNull() ?: 0,
+                                    ),
+                                )
+                            },
+                            modifier = Modifier.weight(1f),
+                            label = "Discount",
+                            keyboardType = "money",
+                            enabled = selectedTarget != null,
+                            inputFilter = MoneyInputUtils::moneyInputFilter,
+                            containerColor = dialogContainerColor,
+                        )
+                    }
+                    StandardTextField(
+                        value = finalPriceText,
+                        onValueChange = { value ->
+                            val filtered = MoneyInputUtils.moneyInputFilter(value)
+                            finalPriceText = filtered
+                            onPriceChanged(filtered.toIntOrNull() ?: 0)
+                        },
+                        modifier = Modifier.weight(1f),
+                        label = "Final price",
+                        keyboardType = "money",
+                        enabled = selectedTarget != null,
+                        inputFilter = MoneyInputUtils::moneyInputFilter,
+                        containerColor = dialogContainerColor,
+                    )
+                }
+                Text(
+                    text = "Stored as the discounted final price.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = !state.isCreating && selectedTarget != null,
+                onClick = onCreate,
+            ) {
+                Text(if (state.isCreating) "Creating..." else "Create")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+private fun DiscountModeButton(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (selected) {
+        Button(
+            modifier = modifier,
+            onClick = onClick,
+        ) {
+            Text(text)
+        }
+    } else {
+        OutlinedButton(
+            modifier = modifier,
+            onClick = onClick,
+        ) {
+            Text(text)
+        }
+    }
+}
+
+private fun discountPercentInputFilter(input: String): String {
+    val sanitized = buildString {
+        var hasDecimal = false
+        input.forEach { character ->
+            when {
+                character.isDigit() -> append(character)
+                character == '.' && !hasDecimal -> {
+                    append(character)
+                    hasDecimal = true
                 }
             }
         }
+    }
+    val bounded = sanitized.toDoubleOrNull()?.coerceIn(0.0, 100.0) ?: return sanitized.take(4)
+    if (sanitized.endsWith(".") && bounded < 100.0) {
+        return "${bounded.toInt()}."
+    }
+    return formatDiscountPercentInput(bounded)
+}
 
-        Text("Your discounts", style = MaterialTheme.typography.titleMedium)
-        when {
-            state.isLoading -> Text("Loading discounts...")
-            state.discounts.isEmpty() -> Text(
-                text = "No discounts yet.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            else -> state.discounts.forEach { discount ->
-                DiscountOfferCard(
-                    discount = discount,
-                    codeInput = state.codeInputs[discount.id].orEmpty(),
-                    usageLimitInput = state.usageLimitInputs[discount.id].orEmpty(),
-                    isGenerating = state.generatingCodeDiscountId == discount.id,
-                    onCodeChanged = { component.updateDiscountCodeInput(discount.id, it) },
-                    onUsageLimitChanged = { component.updateDiscountUsageLimitInput(discount.id, it) },
-                    onGenerate = { component.generateDiscountCode(discount) },
-                )
+private fun formatDiscountPercentInput(value: Double): String {
+    val hundredths = (value.coerceIn(0.0, 100.0) * 100).toInt()
+    val whole = hundredths / 100
+    val fraction = hundredths % 100
+    return when {
+        fraction == 0 -> whole.toString()
+        fraction % 10 == 0 -> "$whole.${fraction / 10}"
+        else -> "$whole.${fraction.toString().padStart(2, '0')}"
+    }
+}
+
+@Composable
+private fun DiscountTargetAutocomplete(
+    query: String,
+    targets: List<DiscountTarget>,
+    selectedTargetId: String?,
+    isLoading: Boolean,
+    containerColor: androidx.compose.ui.graphics.Color,
+    onQueryChanged: (String) -> Unit,
+    onTargetSelected: (String?) -> Unit,
+) {
+    val density = LocalDensity.current
+    var suggestionsExpanded by remember { mutableStateOf(false) }
+    var isFieldFocused by remember { mutableStateOf(false) }
+    var fieldWidth by remember { mutableStateOf(0.dp) }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        StandardTextField(
+            value = query,
+            onValueChange = {
+                onQueryChanged(it)
+                onTargetSelected(null)
+                if (isFieldFocused) {
+                    suggestionsExpanded = true
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .onGloballyPositioned { coordinates ->
+                    fieldWidth = with(density) { coordinates.size.width.toDp() }
+                },
+            onFocusChanged = { isFocused ->
+                isFieldFocused = isFocused
+                suggestionsExpanded = isFocused
+            },
+            label = "Item",
+            placeholder = if (isLoading) "Loading..." else "Search or select an item",
+            enabled = !isLoading,
+            containerColor = containerColor,
+        )
+
+        DropdownMenu(
+            expanded = suggestionsExpanded && isFieldFocused && !isLoading,
+            onDismissRequest = { suggestionsExpanded = false },
+            properties = PopupProperties(focusable = false),
+            modifier = Modifier
+                .then(if (fieldWidth > 0.dp) Modifier.width(fieldWidth) else Modifier.fillMaxWidth())
+                .heightIn(max = 240.dp),
+        ) {
+            when {
+                targets.isEmpty() -> {
+                    Text(
+                        text = if (query.isBlank()) "No eligible items found." else "No matching items.",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                else -> {
+                    targets.forEach { target ->
+                        DiscountTargetSuggestionRow(
+                            target = target,
+                            selected = target.id == selectedTargetId,
+                            onClick = {
+                                onTargetSelected(target.id)
+                                suggestionsExpanded = false
+                            },
+                        )
+                    }
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun DiscountTargetSuggestionRow(
+    target: DiscountTarget,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val containerColor = if (selected) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 8.dp, horizontal = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = target.label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = "${target.targetType.displayDiscountTargetType()} • ${formatCurrency(target.priceCents)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -240,21 +653,43 @@ private fun DiscountOfferCard(
     codeInput: String,
     usageLimitInput: String,
     isGenerating: Boolean,
+    activeCodeActionId: String?,
     onCodeChanged: (String) -> Unit,
     onUsageLimitChanged: (String) -> Unit,
     onGenerate: () -> Unit,
+    onDeactivateCode: (DiscountCode) -> Unit,
+    onActivateCode: (DiscountCode) -> Unit,
+    onDeleteCode: (DiscountCode) -> Unit,
 ) {
-    Card(
+    var pendingDeleteCode by remember { mutableStateOf<DiscountCode?>(null) }
+    pendingDeleteCode?.let { code ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteCode = null },
+            title = { Text("Delete code") },
+            text = {
+                Text("Delete discount code ${code.code}? This cannot be undone.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pendingDeleteCode = null
+                        onDeleteCode(code)
+                    },
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { pendingDeleteCode = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
             Text(discount.name, style = MaterialTheme.typography.titleMedium)
             discount.description?.let {
                 Text(
@@ -275,13 +710,48 @@ private fun DiscountOfferCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    discount.codes.forEach { code ->
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    discount.codes.forEachIndexed { index, code ->
+                        if (index > 0) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        }
                         val limitLabel = code.usageLimit?.let { limit -> " / $limit" } ?: ""
-                        Text(
-                            text = "${code.code} • ${code.usedCount}$limitLabel used • ${code.status}",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "${code.code} • ${code.usedCount}$limitLabel used • ${code.status}",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                val isBusy = activeCodeActionId == code.id
+                                if (code.status.equals("ACTIVE", ignoreCase = true)) {
+                                    OutlinedButton(
+                                        modifier = Modifier.weight(1f),
+                                        enabled = !isBusy,
+                                        onClick = { onDeactivateCode(code) },
+                                    ) {
+                                        Text(if (isBusy) "Updating..." else "Deactivate")
+                                    }
+                                } else {
+                                    OutlinedButton(
+                                        modifier = Modifier.weight(1f),
+                                        enabled = !isBusy,
+                                        onClick = { onActivateCode(code) },
+                                    ) {
+                                        Text(if (isBusy) "Updating..." else "Activate")
+                                    }
+                                    OutlinedButton(
+                                        modifier = Modifier.weight(1f),
+                                        enabled = !isBusy,
+                                        onClick = { pendingDeleteCode = code },
+                                    ) {
+                                        Text(if (isBusy) "Deleting..." else "Delete")
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -290,6 +760,7 @@ private fun DiscountOfferCard(
                 onValueChange = onCodeChanged,
                 label = "New code",
                 supportingText = "Optional. Leave blank to generate one.",
+                containerColor = MaterialTheme.colorScheme.surface,
             )
             StandardTextField(
                 value = usageLimitInput,
@@ -297,6 +768,7 @@ private fun DiscountOfferCard(
                 label = "Usage limit",
                 keyboardType = "number",
                 supportingText = "Optional",
+                containerColor = MaterialTheme.colorScheme.surface,
             )
             Button(
                 modifier = Modifier.fillMaxWidth(),
@@ -306,7 +778,6 @@ private fun DiscountOfferCard(
                 Text(if (isGenerating) "Generating..." else "Generate code")
             }
         }
-    }
 }
 
 private fun String.displayDiscountTargetType(): String {
@@ -2436,13 +2907,15 @@ private val DATE_INPUT_REGEX = Regex("""\d{4}-\d{2}-\d{2}""")
 @Composable
 fun ProfileSectionScaffold(
     title: String,
-    description: String,
+    description: String? = null,
     onBack: () -> Unit,
     showBackButton: Boolean = true,
     onRefresh: (() -> Unit)? = null,
     isRefreshing: Boolean = false,
     scrollContent: Boolean = true,
     contentPadding: PaddingValues = PaddingValues(16.dp),
+    floatingActionButton: @Composable () -> Unit = {},
+    floatingActionButtonPosition: FabPosition = FabPosition.End,
     content: @Composable () -> Unit,
 ) {
     val navPadding = LocalNavBarPadding.current
@@ -2464,6 +2937,8 @@ fun ProfileSectionScaffold(
                 },
             )
         },
+        floatingActionButton = floatingActionButton,
+        floatingActionButtonPosition = floatingActionButtonPosition,
     ) { innerPadding ->
         val contentModifier = Modifier
             .fillMaxSize()
@@ -2497,7 +2972,7 @@ fun ProfileSectionScaffold(
 
 @Composable
 fun ProfileSectionContent(
-    description: String,
+    description: String?,
     content: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     scrollContent: Boolean = true,
@@ -2510,11 +2985,13 @@ fun ProfileSectionContent(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            description?.takeIf(String::isNotBlank)?.let { text ->
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             content()
         }
     } else {
@@ -2524,11 +3001,13 @@ fun ProfileSectionContent(
                 .padding(contentPadding),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            description?.takeIf(String::isNotBlank)?.let { text ->
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()

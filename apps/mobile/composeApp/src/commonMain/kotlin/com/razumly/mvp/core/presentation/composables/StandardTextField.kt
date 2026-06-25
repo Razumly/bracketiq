@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -57,6 +58,7 @@ fun StandardTextField(
     leadingIcon: @Composable (() -> Unit)? = null,
     textStyle: TextStyle? = null,
     fontSize: TextUnit? = null,
+    containerColor: Color? = null,
     height: Dp? = null,
     contentPadding: PaddingValues? = null,
     inputFilter: ((String) -> String)? = null,
@@ -65,6 +67,7 @@ fun StandardTextField(
     style: PlatformTextFieldStyle = PlatformTextFieldStyle.Default,
     externalFocusManager: PlatformFocusManager? = null,
     onImeAction: (() -> Unit)? = null,
+    onFocusChanged: ((Boolean) -> Unit)? = null,
 ) {
     val focusManager = LocalFocusManager.current
     val glassStyle = style == PlatformTextFieldStyle.GlassPill
@@ -120,6 +123,13 @@ fun StandardTextField(
         .then(if (height != null) Modifier.height(height) else Modifier)
         .then(if (contentPadding != null) Modifier.padding(contentPadding) else Modifier)
         .then(
+            if (onFocusChanged != null) {
+                Modifier.onFocusChanged { state -> onFocusChanged(state.isFocused) }
+            } else {
+                Modifier
+            }
+        )
+        .then(
             if (enabled && !readOnly) {
                 Modifier.onPreviewKeyEvent { event ->
                     event.key == Key.Enter &&
@@ -163,18 +173,19 @@ fun StandardTextField(
             null
         }
 
+    val resolvedContainerColor = containerColor ?: MaterialTheme.colorScheme.surface
     val defaultColors = OutlinedTextFieldDefaults.colors(
         focusedTextColor = MaterialTheme.colorScheme.onSurface,
         unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
         disabledTextColor = if (interactiveReadOnly) MaterialTheme.colorScheme.onSurface else readableDisabled,
-        focusedContainerColor = MaterialTheme.colorScheme.surface,
-        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+        focusedContainerColor = resolvedContainerColor,
+        unfocusedContainerColor = resolvedContainerColor,
         disabledContainerColor = if (interactiveReadOnly) {
-            MaterialTheme.colorScheme.surface
+            resolvedContainerColor
         } else {
             MaterialTheme.colorScheme.surfaceContainerLow
         },
-        errorContainerColor = MaterialTheme.colorScheme.surface,
+        errorContainerColor = resolvedContainerColor,
         focusedBorderColor = MaterialTheme.colorScheme.primary,
         unfocusedBorderColor = MaterialTheme.colorScheme.outline,
         disabledBorderColor = when {

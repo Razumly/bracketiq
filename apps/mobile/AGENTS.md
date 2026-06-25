@@ -9,6 +9,9 @@ When writing complex features or significant refactors, use an ExecPlan (as desc
 ## Backend & Data Contract Source of Truth
 The backend and database definitions live in `mvp-site`. On Windows for this workspace, use `C:\Users\samue\Documents\Code\mvp-site\`. From WSL, use `/mnt/c/Users/samue/Documents/Code/mvp-site/`. On macOS, use `/Users/elesesy/StudioProjects/mvp-site/`. For all API endpoint usage and request/response data types in this repo, reference that project as the source of truth. Do not invent or drift endpoint paths, payloads, or shared data models without first aligning with `mvp-site`.
 
+## Local Data Flow
+Room is the mobile app's local source of truth for fetched API data. Repository methods that refresh remote data should write API results into Room first, and screens/components should observe Room flows for rendered state instead of rendering directly from one-off network responses. Keep this pattern for new list/detail fetches unless a feature is explicitly transient and documented as such.
+
 ## Batch & Atomic API Standards
 Any feature that loads collections of entities must expose and consume batch retrieval APIs (typically `ids` query params with chunking) instead of N per-item requests. This applies to users, organizations, events, teams, fields, and timeslots, especially on event load paths.
 When adding or editing list-fetching code, ensure both backend route support and client repository/service usage are updated together so the runtime path actually uses batching.

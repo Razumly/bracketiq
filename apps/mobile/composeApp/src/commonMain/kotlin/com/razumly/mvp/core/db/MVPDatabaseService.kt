@@ -6,6 +6,9 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
+import com.razumly.mvp.core.data.dataTypes.DiscountCodeCacheEntry
+import com.razumly.mvp.core.data.dataTypes.DiscountOfferCacheEntry
+import com.razumly.mvp.core.data.dataTypes.DiscountTargetCacheEntry
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventParticipantManagementCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventRegistrationCacheEntry
@@ -24,6 +27,7 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPendingPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
+import com.razumly.mvp.core.data.dataTypes.daos.DiscountDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventComplianceDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventParticipantManagementDao
@@ -37,7 +41,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.data.util.Converters
 
-const val MVP_DATABASE_VERSION = 24
+const val MVP_DATABASE_VERSION = 25
 
 @Database(
     entities = [
@@ -59,6 +63,9 @@ const val MVP_DATABASE_VERSION = 24
         TeamPendingPlayerCrossRef::class,
         ChatUserCrossRef::class,
         RefundRequest::class,
+        DiscountOfferCacheEntry::class,
+        DiscountCodeCacheEntry::class,
+        DiscountTargetCacheEntry::class,
     ],
     version = MVP_DATABASE_VERSION,
 )
@@ -77,4 +84,5 @@ abstract class MVPDatabaseService : RoomDatabase(), DatabaseService {
     abstract override val getChatGroupDao: ChatGroupDao
     abstract override val getMessageDao: MessageDao
     abstract override val getRefundRequestDao: RefundRequestDao
+    abstract override val getDiscountDao: DiscountDao
 }

@@ -3,6 +3,7 @@ package com.razumly.mvp.core.presentation.composables
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 
 @Composable
@@ -21,7 +22,8 @@ expect fun PlatformDropdown(
     onMultiSelectionChange: (List<String>) -> Unit = {},
     leadingIcon: @Composable (() -> Unit)? = null,
     height: Dp? = null,
-    contentPadding: PaddingValues? = null
+    contentPadding: PaddingValues? = null,
+    containerColor: Color? = null,
 )
 
 data class DropdownOption(

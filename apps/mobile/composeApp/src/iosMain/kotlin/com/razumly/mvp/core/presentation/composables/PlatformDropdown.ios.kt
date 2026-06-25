@@ -58,7 +58,8 @@ actual fun PlatformDropdown(
     onMultiSelectionChange: (List<String>) -> Unit,
     leadingIcon: @Composable (() -> Unit)?,
     height: Dp?,
-    contentPadding: PaddingValues?
+    contentPadding: PaddingValues?,
+    containerColor: Color?,
 ) {
     val platformTextFieldVisible = LocalPlatformTextFieldVisible.current
     val fieldHeight = height ?: 44.dp
@@ -72,7 +73,7 @@ actual fun PlatformDropdown(
     } else {
         LightReadableDisabled
     }
-    val fillColor = MaterialTheme.colorScheme.surface
+    val fillColor = containerColor ?: MaterialTheme.colorScheme.surface
     val disabledFillColor = MaterialTheme.colorScheme.surfaceContainerLow
     val borderColor = if (isError) {
         MaterialTheme.colorScheme.error

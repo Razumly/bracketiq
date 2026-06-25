@@ -5,6 +5,9 @@ import com.razumly.mvp.core.data.dataTypes.Bill
 import com.razumly.mvp.core.data.dataTypes.BillPayment
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.BillingAddressProfile
+import com.razumly.mvp.core.data.dataTypes.DiscountCodeCacheEntry
+import com.razumly.mvp.core.data.dataTypes.DiscountOfferCacheEntry
+import com.razumly.mvp.core.data.dataTypes.DiscountTargetCacheEntry
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Facility
 import com.razumly.mvp.core.data.dataTypes.Field
@@ -41,6 +44,10 @@ import io.ktor.client.plugins.ClientRequestException
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlin.time.ExperimentalTime
@@ -352,6 +359,79 @@ data class DiscountTarget(
     val targetType: String,
 )
 
+private fun DiscountOffer.toCacheEntry(): DiscountOfferCacheEntry = DiscountOfferCacheEntry(
+    id = id,
+    ownerType = ownerType,
+    ownerId = ownerId,
+    name = name,
+    description = description,
+    status = status,
+    targetType = targetType,
+    targetId = targetId,
+    originalPriceCents = originalPriceCents,
+    discountedPriceCents = discountedPriceCents,
+)
+
+private fun DiscountOfferCacheEntry.toDiscountOffer(codes: List<DiscountCodeCacheEntry>): DiscountOffer =
+    DiscountOffer(
+        id = id,
+        ownerType = ownerType,
+        ownerId = ownerId,
+        name = name,
+        description = description,
+        status = status,
+        targetType = targetType,
+        targetId = targetId,
+        originalPriceCents = originalPriceCents,
+        discountedPriceCents = discountedPriceCents,
+        codes = codes.map(DiscountCodeCacheEntry::toDiscountCode),
+    )
+
+private fun DiscountCode.toCacheEntry(): DiscountCodeCacheEntry = DiscountCodeCacheEntry(
+    id = id,
+    discountId = discountId,
+    code = code,
+    usageLimit = usageLimit,
+    usedCount = usedCount,
+    status = status,
+)
+
+private fun DiscountCodeCacheEntry.toDiscountCode(): DiscountCode = DiscountCode(
+    id = id,
+    discountId = discountId,
+    code = code,
+    usageLimit = usageLimit,
+    usedCount = usedCount,
+    status = status,
+)
+
+private fun DiscountTarget.toCacheEntry(ownerType: String, ownerIdKey: String): DiscountTargetCacheEntry =
+    DiscountTargetCacheEntry(
+        cacheKey = discountTargetCacheKey(ownerType, ownerIdKey, itemType, id),
+        ownerType = ownerType,
+        ownerIdKey = ownerIdKey,
+        itemType = itemType.trim().uppercase().ifBlank { "EVENT" },
+        id = id,
+        label = label,
+        description = description,
+        priceCents = priceCents,
+        targetType = targetType,
+    )
+
+private fun DiscountTargetCacheEntry.toDiscountTarget(): DiscountTarget = DiscountTarget(
+    id = id,
+    label = label,
+    description = description,
+    priceCents = priceCents,
+    itemType = itemType,
+    targetType = targetType,
+)
+
+private fun String?.ownerIdKey(): String = this?.trim()?.takeIf(String::isNotBlank).orEmpty()
+
+private fun discountTargetCacheKey(ownerType: String, ownerIdKey: String, itemType: String, targetId: String): String =
+    listOf(ownerType.trim().uppercase(), ownerIdKey, itemType.trim().uppercase(), targetId).joinToString("|")
+
 interface IBillingRepository : IMVPRepository {
     suspend fun createPurchaseIntent(
         event: Event,
@@ -480,7 +560,14 @@ interface IBillingRepository : IMVPRepository {
     suspend fun createProductSubscriptionIntent(productId: String): Result<PurchaseIntent>
     suspend fun createProductSubscriptionIntent(productId: String, discountCode: String?): Result<PurchaseIntent> =
         createProductSubscriptionIntent(productId)
+    fun observeDiscounts(ownerType: String = "USER", ownerId: String? = null): Flow<List<DiscountOffer>> =
+        flowOf(emptyList())
     suspend fun listDiscounts(ownerType: String = "USER", ownerId: String? = null): Result<List<DiscountOffer>>
+    fun observeDiscountTargets(
+        ownerType: String = "USER",
+        ownerId: String? = null,
+        itemType: String,
+    ): Flow<List<DiscountTarget>> = flowOf(emptyList())
     suspend fun listDiscountTargets(
         ownerType: String = "USER",
         ownerId: String? = null,
@@ -501,6 +588,15 @@ interface IBillingRepository : IMVPRepository {
         code: String? = null,
         usageLimit: Int? = null,
     ): Result<DiscountCode>
+    suspend fun updateDiscountCodeStatus(
+        discountId: String,
+        codeId: String,
+        status: String,
+    ): Result<DiscountCode>
+    suspend fun deleteDiscountCode(
+        discountId: String,
+        codeId: String,
+    ): Result<Unit>
     suspend fun createProductSubscription(
         productId: String,
         organizationId: String? = null,
@@ -1452,6 +1548,21 @@ class BillingRepository(
         response.toSubscriptionOrNull() ?: error("Create subscription response missing subscription")
     }
 
+    override fun observeDiscounts(ownerType: String, ownerId: String?): Flow<List<DiscountOffer>> {
+        val normalizedOwnerType = ownerType.trim().uppercase().ifBlank { "USER" }
+        val normalizedOwnerId = ownerId?.trim()?.takeIf(String::isNotBlank)
+        return databaseService.getDiscountDao
+            .getDiscountOffersFlow(normalizedOwnerType)
+            .combine(databaseService.getDiscountDao.getDiscountCodesFlow()) { discounts, codes ->
+                val codesByDiscountId = codes.groupBy { it.discountId }
+                discounts
+                    .asSequence()
+                    .filter { discount -> normalizedOwnerId?.let { discount.ownerId == it } ?: true }
+                    .map { discount -> discount.toDiscountOffer(codesByDiscountId[discount.id].orEmpty()) }
+                    .toList()
+            }
+    }
+
     override suspend fun listDiscounts(ownerType: String, ownerId: String?): Result<List<DiscountOffer>> = runCatching {
         val normalizedOwnerType = ownerType.trim().uppercase().ifBlank { "USER" }
         val params = buildList {
@@ -1464,7 +1575,29 @@ class BillingRepository(
         if (!response.error.isNullOrBlank()) {
             throw Exception(response.error)
         }
-        response.discounts.map { it.toDiscountOffer() }
+        val discounts = response.discounts.map { it.toDiscountOffer() }
+        databaseService.getDiscountDao.replaceDiscountOffers(
+            ownerType = normalizedOwnerType,
+            discounts = discounts.map(DiscountOffer::toCacheEntry),
+            codes = discounts.flatMap { discount -> discount.codes.map(DiscountCode::toCacheEntry) },
+        )
+        discounts
+    }
+
+    override fun observeDiscountTargets(
+        ownerType: String,
+        ownerId: String?,
+        itemType: String,
+    ): Flow<List<DiscountTarget>> {
+        val normalizedOwnerType = ownerType.trim().uppercase().ifBlank { "USER" }
+        val normalizedItemType = itemType.trim().uppercase().ifBlank { "EVENT" }
+        return databaseService.getDiscountDao
+            .getDiscountTargetsFlow(
+                ownerType = normalizedOwnerType,
+                ownerIdKey = ownerId.ownerIdKey(),
+                itemType = normalizedItemType,
+            )
+            .map { targets -> targets.map(DiscountTargetCacheEntry::toDiscountTarget) }
     }
 
     override suspend fun listDiscountTargets(
@@ -1489,7 +1622,22 @@ class BillingRepository(
         if (!response.error.isNullOrBlank()) {
             throw Exception(response.error)
         }
-        response.targets.map { it.toDiscountTarget() }
+        val targets = response.targets.map { it.toDiscountTarget() }
+        if (query.isNullOrBlank()) {
+            val ownerIdKey = ownerId.ownerIdKey()
+            databaseService.getDiscountDao.replaceDiscountTargets(
+                ownerType = normalizedOwnerType,
+                ownerIdKey = ownerIdKey,
+                itemType = normalizedItemType,
+                targets = targets.map { target ->
+                    target.toCacheEntry(
+                        ownerType = normalizedOwnerType,
+                        ownerIdKey = ownerIdKey,
+                    )
+                },
+            )
+        }
+        targets
     }
 
     override suspend fun createDiscount(
@@ -1516,8 +1664,11 @@ class BillingRepository(
         if (!response.error.isNullOrBlank()) {
             throw Exception(response.error)
         }
-        response.discount?.toDiscountOffer()
+        val discount = response.discount?.toDiscountOffer()
             ?: throw Exception("Discount response was invalid.")
+        databaseService.getDiscountDao.upsertDiscountOffers(listOf(discount.toCacheEntry()))
+        databaseService.getDiscountDao.upsertDiscountCodes(discount.codes.map(DiscountCode::toCacheEntry))
+        discount
     }
 
     override suspend fun generateDiscountCode(
@@ -1539,8 +1690,49 @@ class BillingRepository(
         if (!response.error.isNullOrBlank()) {
             throw Exception(response.error)
         }
-        response.code?.toDiscountCode()
+        val discountCode = response.code?.toDiscountCode()
             ?: throw Exception("Discount code response was invalid.")
+        databaseService.getDiscountDao.upsertDiscountCodes(listOf(discountCode.toCacheEntry()))
+        discountCode
+    }
+
+    override suspend fun updateDiscountCodeStatus(
+        discountId: String,
+        codeId: String,
+        status: String,
+    ): Result<DiscountCode> = runCatching {
+        val normalizedDiscountId = discountId.trim()
+        val normalizedCodeId = codeId.trim()
+        val normalizedStatus = status.trim().uppercase()
+        if (normalizedDiscountId.isEmpty() || normalizedCodeId.isEmpty()) {
+            throw Exception("Discount code id is required.")
+        }
+        val response = api.patch<UpdateDiscountCodeRequestDto, DiscountCodeResponseDto>(
+            path = "api/discounts/${normalizedDiscountId.encodeURLQueryComponent()}/codes/${normalizedCodeId.encodeURLQueryComponent()}",
+            body = UpdateDiscountCodeRequestDto(status = normalizedStatus),
+        )
+        if (!response.error.isNullOrBlank()) {
+            throw Exception(response.error)
+        }
+        val discountCode = response.code?.toDiscountCode()
+            ?: throw Exception("Discount code response was invalid.")
+        databaseService.getDiscountDao.upsertDiscountCodes(listOf(discountCode.toCacheEntry()))
+        discountCode
+    }
+
+    override suspend fun deleteDiscountCode(
+        discountId: String,
+        codeId: String,
+    ): Result<Unit> = runCatching {
+        val normalizedDiscountId = discountId.trim()
+        val normalizedCodeId = codeId.trim()
+        if (normalizedDiscountId.isEmpty() || normalizedCodeId.isEmpty()) {
+            throw Exception("Discount code id is required.")
+        }
+        api.deleteNoResponse(
+            "api/discounts/${normalizedDiscountId.encodeURLQueryComponent()}/codes/${normalizedCodeId.encodeURLQueryComponent()}",
+        )
+        databaseService.getDiscountDao.deleteDiscountCodeById(normalizedCodeId)
     }
 
     override suspend fun listOrganizations(limit: Int): Result<List<Organization>> = runCatching {
@@ -1913,6 +2105,7 @@ private data class DiscountOfferDto(
     val targetType: String? = null,
     val targetId: String? = null,
     val originalPriceCents: Int? = null,
+    val originalPriceCentsSnapshot: Int? = null,
     val discountedPriceCents: Int? = null,
     val codes: List<DiscountCodeDto> = emptyList(),
 ) {
@@ -1925,7 +2118,7 @@ private data class DiscountOfferDto(
         status = status?.trim()?.takeIf(String::isNotBlank) ?: "ACTIVE",
         targetType = targetType?.trim()?.takeIf(String::isNotBlank) ?: "EVENT",
         targetId = targetId.orEmpty(),
-        originalPriceCents = (originalPriceCents ?: 0).coerceAtLeast(0),
+        originalPriceCents = (originalPriceCents ?: originalPriceCentsSnapshot ?: 0).coerceAtLeast(0),
         discountedPriceCents = (discountedPriceCents ?: 0).coerceAtLeast(0),
         codes = codes.map { it.toDiscountCode() },
     )
@@ -1996,6 +2189,11 @@ private data class CreateDiscountRequestDto(
 private data class GenerateDiscountCodeRequestDto(
     val code: String? = null,
     val usageLimit: Int? = null,
+)
+
+@Serializable
+private data class UpdateDiscountCodeRequestDto(
+    val status: String,
 )
 
 @Serializable

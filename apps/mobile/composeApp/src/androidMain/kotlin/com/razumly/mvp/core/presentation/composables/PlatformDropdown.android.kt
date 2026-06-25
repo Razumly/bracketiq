@@ -19,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -40,6 +41,7 @@ actual fun PlatformDropdown(
     leadingIcon: @Composable (() -> Unit)?,
     height: Dp?,
     contentPadding: PaddingValues?,
+    containerColor: Color?,
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -81,7 +83,8 @@ actual fun PlatformDropdown(
             },
             leadingIcon = leadingIcon,
             height = height,
-            contentPadding = contentPadding
+            contentPadding = contentPadding,
+            containerColor = containerColor,
         )
 
         DropdownMenu(

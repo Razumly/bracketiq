@@ -37,6 +37,7 @@ import com.razumly.mvp.core.data.repositories.FamilyChild
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequest
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequestAction
 import com.razumly.mvp.core.data.repositories.IBillingRepository
+import com.razumly.mvp.core.data.repositories.DiscountCode
 import com.razumly.mvp.core.data.repositories.DiscountOffer
 import com.razumly.mvp.core.data.repositories.DiscountTarget
 import com.razumly.mvp.core.data.repositories.IEventRepository
@@ -68,6 +69,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -236,6 +238,7 @@ data class ProfileDiscountsState(
     val discounts: List<DiscountOffer> = emptyList(),
     val itemType: String = "EVENT",
     val targetSearch: String = "",
+    val allTargets: List<DiscountTarget> = emptyList(),
     val targets: List<DiscountTarget> = emptyList(),
     val selectedTargetId: String? = null,
     val targetLoading: Boolean = false,
@@ -246,8 +249,108 @@ data class ProfileDiscountsState(
     val codeInputs: Map<String, String> = emptyMap(),
     val usageLimitInputs: Map<String, String> = emptyMap(),
     val generatingCodeDiscountId: String? = null,
+    val activeCodeActionId: String? = null,
     val error: String? = null,
 )
+
+internal fun rankDiscountTargets(
+    targets: List<DiscountTarget>,
+    query: String,
+    limit: Int = 25,
+): List<DiscountTarget> {
+    val normalizedQuery = query.normalizedDiscountSearchText()
+    if (normalizedQuery.isBlank()) {
+        return targets
+            .sortedWith(
+                compareBy<DiscountTarget> { it.label.lowercase() }
+                    .thenBy { it.id },
+            )
+            .take(limit)
+    }
+
+    val terms = normalizedQuery
+        .split(Regex("\\s+"))
+        .filter(String::isNotBlank)
+
+    return targets
+        .mapNotNull { target ->
+            val label = target.label.normalizedDiscountSearchText()
+            val description = target.description.orEmpty().normalizedDiscountSearchText()
+            val haystack = listOf(label, description, target.itemType.normalizedDiscountSearchText())
+                .filter(String::isNotBlank)
+                .joinToString(" ")
+            if (terms.any { term -> !haystack.contains(term) }) {
+                return@mapNotNull null
+            }
+
+            val labelWords = label.split(Regex("\\s+")).filter(String::isNotBlank)
+            val score = when {
+                label == normalizedQuery -> 1000
+                label.startsWith(normalizedQuery) -> 850
+                label.contains(normalizedQuery) -> 700
+                terms.all { term -> labelWords.any { word -> word.startsWith(term) } } -> 560
+                terms.all { term -> label.contains(term) } -> 430
+                else -> 250
+            }
+
+            target to score
+        }
+        .sortedWith(
+            compareByDescending<Pair<DiscountTarget, Int>> { it.second }
+                .thenBy { it.first.label.lowercase() }
+                .thenBy { it.first.id },
+        )
+        .map { it.first }
+        .take(limit)
+}
+
+private fun String.normalizedDiscountSearchText(): String =
+    trim()
+        .lowercase()
+        .replace(Regex("[^a-z0-9]+"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+
+internal fun clampDiscountFinalPriceCents(
+    finalPriceCents: Int,
+    originalPriceCents: Int,
+): Int = finalPriceCents.coerceIn(0, originalPriceCents.coerceAtLeast(0))
+
+internal fun discountAmountCentsForFinalPrice(
+    originalPriceCents: Int,
+    finalPriceCents: Int,
+): Int = (originalPriceCents.coerceAtLeast(0) - clampDiscountFinalPriceCents(finalPriceCents, originalPriceCents))
+    .coerceAtLeast(0)
+
+internal fun finalPriceCentsFromFlatDiscount(
+    originalPriceCents: Int,
+    discountAmountCents: Int,
+): Int = clampDiscountFinalPriceCents(
+    originalPriceCents.coerceAtLeast(0) - discountAmountCents.coerceAtLeast(0),
+    originalPriceCents,
+)
+
+internal fun finalPriceCentsFromPercentDiscount(
+    originalPriceCents: Int,
+    discountPercent: Double,
+): Int {
+    val original = originalPriceCents.coerceAtLeast(0)
+    val percent = discountPercent.coerceIn(0.0, 100.0)
+    return clampDiscountFinalPriceCents(
+        (original - (original * percent / 100.0)).roundToInt(),
+        original,
+    )
+}
+
+internal fun discountPercentForFinalPrice(
+    originalPriceCents: Int,
+    finalPriceCents: Int,
+): Double {
+    val original = originalPriceCents.coerceAtLeast(0)
+    if (original == 0) return 0.0
+    val discountAmount = discountAmountCentsForFinalPrice(original, finalPriceCents)
+    return (discountAmount * 100.0 / original).coerceIn(0.0, 100.0)
+}
 
 data class ProfileMyScheduleState(
     val isLoading: Boolean = false,
@@ -411,6 +514,9 @@ interface ProfileComponent : IPaymentProcessor {
     fun updateDiscountCodeInput(discountId: String, value: String)
     fun updateDiscountUsageLimitInput(discountId: String, value: String)
     fun generateDiscountCode(discount: DiscountOffer)
+    fun deactivateDiscountCode(discount: DiscountOffer, code: DiscountCode)
+    fun activateDiscountCode(discount: DiscountOffer, code: DiscountCode)
+    fun deleteDiscountCode(discount: DiscountOffer, code: DiscountCode)
     fun refreshMySchedule()
     fun refreshInvites()
     fun acceptInvite(invite: Invite)
@@ -598,6 +704,7 @@ class DefaultProfileComponent(
 
     private var loadingHandler: LoadingHandler? = null
     private var eventTemplatesJob: Job? = null
+    private var discountTargetsJob: Job? = null
     private var childrenTabVisibilityUserId: String? = null
     private var pendingDocumentSyncJob: Job? = null
     private var pendingBillingAddressAction: (() -> Unit)? = null
@@ -613,6 +720,13 @@ class DefaultProfileComponent(
     )
 
     init {
+        scope.launch {
+            billingRepository.observeDiscounts(ownerType = "USER").collect { discounts ->
+                _discountsState.value = _discountsState.value.copy(discounts = discounts)
+            }
+        }
+        startDiscountTargetsObserver(_discountsState.value.itemType)
+
         scope.launch {
             userRepository.currentUser.collect { userResult ->
                 val currentUser = userResult.getOrNull()
@@ -1938,45 +2052,54 @@ class DefaultProfileComponent(
         scope.launch {
             _discountsState.value = _discountsState.value.copy(
                 isLoading = true,
+                targetLoading = true,
                 error = null,
             )
-            billingRepository.listDiscounts(ownerType = "USER")
-                .onSuccess { discounts ->
-                    _discountsState.value = _discountsState.value.copy(
-                        isLoading = false,
-                        discounts = discounts,
-                        error = null,
-                    )
+            val discountFailure = billingRepository.listDiscounts(ownerType = "USER").exceptionOrNull()
+            val targetFailure = listOf("EVENT", "TEAM_REGISTRATION")
+                .firstNotNullOfOrNull { itemType ->
+                    billingRepository.listDiscountTargets(
+                        ownerType = "USER",
+                        itemType = itemType,
+                        query = null,
+                    ).exceptionOrNull()
                 }
-                .onFailure { throwable ->
-                    _discountsState.value = _discountsState.value.copy(
-                        isLoading = false,
-                        error = throwable.userMessage("Failed to load discounts."),
-                    )
-                }
-            refreshDiscountTargets()
+
+            val failure = discountFailure ?: targetFailure
+            _discountsState.value = _discountsState.value.copy(
+                isLoading = false,
+                targetLoading = false,
+                error = failure?.userMessage("Failed to load discounts."),
+            )
         }
     }
 
     override fun setDiscountItemType(itemType: String) {
+        val normalizedItemType = itemType.trim().uppercase().ifBlank { "EVENT" }
         _discountsState.value = _discountsState.value.copy(
-            itemType = itemType.trim().uppercase().ifBlank { "EVENT" },
+            itemType = normalizedItemType,
+            targetSearch = "",
             selectedTargetId = null,
+            allTargets = emptyList(),
             targets = emptyList(),
             error = null,
         )
-        refreshDiscountTargets()
+        startDiscountTargetsObserver(normalizedItemType)
     }
 
     override fun setDiscountTargetSearch(query: String) {
-        _discountsState.value = _discountsState.value.copy(targetSearch = query)
-        refreshDiscountTargets()
+        val state = _discountsState.value
+        _discountsState.value = state.copy(
+            targetSearch = query,
+            targets = rankDiscountTargets(state.allTargets, query),
+        )
     }
 
     override fun selectDiscountTarget(targetId: String?) {
-        val selected = _discountsState.value.targets.firstOrNull { it.id == targetId }
+        val selected = _discountsState.value.allTargets.firstOrNull { it.id == targetId }
         _discountsState.value = _discountsState.value.copy(
             selectedTargetId = selected?.id,
+            targetSearch = selected?.label ?: _discountsState.value.targetSearch,
             discountedPriceCents = selected?.priceCents ?: 0,
             name = selected?.let { "${it.label} discount" } ?: _discountsState.value.name,
             error = null,
@@ -2023,7 +2146,9 @@ class DefaultProfileComponent(
                     isCreating = false,
                     name = "",
                     description = "",
+                    targetSearch = "",
                     selectedTargetId = null,
+                    targets = rankDiscountTargets(_discountsState.value.allTargets, ""),
                     discountedPriceCents = 0,
                     error = null,
                 )
@@ -2076,34 +2201,90 @@ class DefaultProfileComponent(
         }
     }
 
-    private fun refreshDiscountTargets() {
+    override fun deactivateDiscountCode(discount: DiscountOffer, code: DiscountCode) {
+        updateDiscountCodeStatus(discount = discount, code = code, status = "INACTIVE")
+    }
+
+    override fun activateDiscountCode(discount: DiscountOffer, code: DiscountCode) {
+        updateDiscountCodeStatus(discount = discount, code = code, status = "ACTIVE")
+    }
+
+    override fun deleteDiscountCode(discount: DiscountOffer, code: DiscountCode) {
+        val discountId = discount.id.trim()
+        val codeId = code.id.trim()
+        if (discountId.isEmpty() || codeId.isEmpty()) return
+        if (code.status.equals("ACTIVE", ignoreCase = true)) {
+            _discountsState.value = _discountsState.value.copy(error = "Deactivate this code before deleting it.")
+            return
+        }
         scope.launch {
-            val state = _discountsState.value
-            _discountsState.value = state.copy(targetLoading = true, error = null)
-            billingRepository.listDiscountTargets(
-                ownerType = "USER",
-                itemType = state.itemType,
-                query = state.targetSearch,
-            ).onSuccess { targets ->
+            _discountsState.value = _discountsState.value.copy(activeCodeActionId = codeId, error = null)
+            billingRepository.deleteDiscountCode(
+                discountId = discountId,
+                codeId = codeId,
+            ).onSuccess {
                 _discountsState.value = _discountsState.value.copy(
-                    targetLoading = false,
-                    targets = targets,
-                    selectedTargetId = _discountsState.value.selectedTargetId
-                        ?.takeIf { selected -> targets.any { it.id == selected } },
+                    activeCodeActionId = null,
                     error = null,
                 )
+                refreshDiscounts()
             }.onFailure { throwable ->
                 _discountsState.value = _discountsState.value.copy(
-                    targetLoading = false,
-                    error = throwable.userMessage("Failed to load discount targets."),
+                    activeCodeActionId = null,
+                    error = throwable.userMessage("Failed to delete code."),
                 )
             }
         }
     }
 
+    private fun updateDiscountCodeStatus(
+        discount: DiscountOffer,
+        code: DiscountCode,
+        status: String,
+    ) {
+        val discountId = discount.id.trim()
+        val codeId = code.id.trim()
+        if (discountId.isEmpty() || codeId.isEmpty()) return
+        scope.launch {
+            _discountsState.value = _discountsState.value.copy(activeCodeActionId = codeId, error = null)
+            billingRepository.updateDiscountCodeStatus(
+                discountId = discountId,
+                codeId = codeId,
+                status = status,
+            ).onSuccess {
+                _discountsState.value = _discountsState.value.copy(
+                    activeCodeActionId = null,
+                    error = null,
+                )
+                refreshDiscounts()
+            }.onFailure { throwable ->
+                _discountsState.value = _discountsState.value.copy(
+                    activeCodeActionId = null,
+                    error = throwable.userMessage("Failed to update code."),
+                )
+            }
+        }
+    }
+
+    private fun startDiscountTargetsObserver(itemType: String) {
+        discountTargetsJob?.cancel()
+        discountTargetsJob = scope.launch {
+            billingRepository.observeDiscountTargets(ownerType = "USER", itemType = itemType)
+                .collect { targets ->
+                    val state = _discountsState.value
+                    _discountsState.value = state.copy(
+                        allTargets = targets,
+                        targets = rankDiscountTargets(targets, state.targetSearch),
+                        selectedTargetId = state.selectedTargetId
+                            ?.takeIf { selected -> targets.any { it.id == selected } },
+                    )
+                }
+        }
+    }
+
     private fun selectedDiscountTarget(): DiscountTarget? {
         val state = _discountsState.value
-        return state.targets.firstOrNull { it.id == state.selectedTargetId }
+        return state.allTargets.firstOrNull { it.id == state.selectedTargetId }
     }
 
     override fun signDocument(document: ProfileDocumentCard) {

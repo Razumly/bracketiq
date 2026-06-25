@@ -724,6 +724,17 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
         usageLimit: Int?,
     ): Result<DiscountCode> = Result.failure(UnsupportedOperationException("Discounts are not supported."))
 
+    override suspend fun updateDiscountCodeStatus(
+        discountId: String,
+        codeId: String,
+        status: String,
+    ): Result<DiscountCode> = Result.failure(UnsupportedOperationException("Discounts are not supported."))
+
+    override suspend fun deleteDiscountCode(
+        discountId: String,
+        codeId: String,
+    ): Result<Unit> = Result.failure(UnsupportedOperationException("Discounts are not supported."))
+
     override suspend fun createBill(request: CreateBillRequest): Result<Bill> = Result.success(
         Bill(
             ownerType = request.ownerType,

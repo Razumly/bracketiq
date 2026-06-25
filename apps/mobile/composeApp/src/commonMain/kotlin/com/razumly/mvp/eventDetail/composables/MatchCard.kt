@@ -81,6 +81,7 @@ private val AlternateBracketOnPrimary = Color(0xFFFFFFFF)
 private val AlternateBracketContainer = Color(0xFFD9F4EF)
 private val AlternateBracketOnContainer = Color(0xFF123B39)
 private val CurrentUserParticipantMatchGlowColor = Color(0xFF2FCC71)
+private val CurrentUserOfficialMatchGlowColor = Color(0xFFD97706)
 private val MatchCardShape = RoundedCornerShape(14.dp)
 
 internal const val MATCH_CARD_BASE_HEIGHT_DP = 90
@@ -199,7 +200,7 @@ fun MatchCard(
                 }
                 val currentUserGlowColor = when (currentUserMatchRole) {
                     CurrentUserMatchRole.PARTICIPANT -> CurrentUserParticipantMatchGlowColor
-                    CurrentUserMatchRole.OFFICIAL -> MaterialTheme.colorScheme.onSurface
+                    CurrentUserMatchRole.OFFICIAL -> CurrentUserOfficialMatchGlowColor
                     null -> null
                 }
                 val officialGlowOnDarkSurface = MaterialTheme.colorScheme.surface.luminance() < 0.5f
@@ -217,12 +218,12 @@ fun MatchCard(
                 Box(modifier = Modifier.fillMaxWidth()) {
                     if (currentUserGlowColor != null) {
                         val outerGlowAlpha = when (currentUserMatchRole) {
-                            CurrentUserMatchRole.OFFICIAL -> if (officialGlowOnDarkSurface) 0.82f else 0.42f
+                            CurrentUserMatchRole.OFFICIAL -> if (officialGlowOnDarkSurface) 0.9f else 0.52f
                             CurrentUserMatchRole.PARTICIPANT -> 0.74f
                             null -> 0f
                         }
                         val innerGlowAlpha = when (currentUserMatchRole) {
-                            CurrentUserMatchRole.OFFICIAL -> if (officialGlowOnDarkSurface) 0.58f else 0.32f
+                            CurrentUserMatchRole.OFFICIAL -> if (officialGlowOnDarkSurface) 0.68f else 0.42f
                             CurrentUserMatchRole.PARTICIPANT -> 0.52f
                             null -> 0f
                         }
