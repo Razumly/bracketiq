@@ -255,6 +255,8 @@ class DefaultMatchContentComponent(
 
     private val _showOfficialCheckInDialog = MutableStateFlow(false)
     override val showOfficialCheckInDialog = _showOfficialCheckInDialog.asStateFlow()
+    private val shownOfficialCheckInPromptKeys = mutableSetOf<String>()
+    private val confirmedOfficialCheckInPromptKeys = mutableSetOf<String>()
 
     private val _showSetConfirmDialog = MutableStateFlow(false)
     override val showSetConfirmDialog = _showSetConfirmDialog.asStateFlow()
@@ -371,15 +373,100 @@ class DefaultMatchContentComponent(
         val isAssignedTeamOfficial = teamOfficialId != null && teamIds.contains(teamOfficialId)
         val isAssignedUserOfficial = currentMatch.isUserAssignedToOfficialSlot(currentUser.id)
         val canCheckIn = canCheckIntoMatch(currentMatch)
-        val checkedIn = when {
+        val rawCheckedIn = when {
             isAssignedUserOfficial -> currentMatch.isUserCheckedInForOfficialSlot(currentUser.id)
             else -> currentMatch.officialCheckedIn == true
         }
+        val assignedPromptKey = if (isAssignedTeamOfficial || isAssignedUserOfficial) {
+            officialCheckInPromptKey(
+                match = currentMatch,
+                teamOfficialId = teamOfficialId,
+                isAssignedTeamOfficial = isAssignedTeamOfficial,
+                isAssignedUserOfficial = isAssignedUserOfficial,
+                canSwapIntoOfficial = false,
+            )
+        } else {
+            null
+        }
+        val checkedIn = rawCheckedIn || (assignedPromptKey != null && assignedPromptKey in confirmedOfficialCheckInPromptKeys)
         val canSwapIntoOfficial = !checkedIn && canCurrentUserSwapIntoOfficial(currentMatch)
+        val isOfficial = isAssignedTeamOfficial || isAssignedUserOfficial
+        val shouldShowPrompt = canCheckIn && !checkedIn && (isOfficial || canSwapIntoOfficial)
 
-        _isOfficial.value = isAssignedTeamOfficial || isAssignedUserOfficial
+        _isOfficial.value = isOfficial
         _officialCheckedIn.value = checkedIn
-        _showOfficialCheckInDialog.value = canCheckIn && !checkedIn && (_isOfficial.value || canSwapIntoOfficial)
+        if (!shouldShowPrompt) {
+            _showOfficialCheckInDialog.value = false
+            return
+        }
+
+        val promptKey = officialCheckInPromptKey(
+            match = currentMatch,
+            teamOfficialId = teamOfficialId,
+            isAssignedTeamOfficial = isAssignedTeamOfficial,
+            isAssignedUserOfficial = isAssignedUserOfficial,
+            canSwapIntoOfficial = canSwapIntoOfficial,
+        )
+        val isNewPrompt = shownOfficialCheckInPromptKeys.add(promptKey)
+        if (_showOfficialCheckInDialog.value || isNewPrompt) {
+            _showOfficialCheckInDialog.value = true
+        }
+    }
+
+    private fun officialCheckInPromptKey(
+        match: MatchMVP,
+        teamOfficialId: String?,
+        isAssignedTeamOfficial: Boolean,
+        isAssignedUserOfficial: Boolean,
+        canSwapIntoOfficial: Boolean,
+    ): String {
+        val currentUserId = currentUser.id.trim()
+        val roleKey = when {
+            isAssignedUserOfficial -> "assigned-user"
+            isAssignedTeamOfficial -> "assigned-team"
+            canSwapIntoOfficial -> "swap-team"
+            else -> "unknown"
+        }
+        val currentUserEventTeamId = when {
+            isAssignedTeamOfficial -> teamOfficialId
+            canSwapIntoOfficial -> resolveCurrentUserEventTeamId(match)
+            else -> null
+        }
+        val assignmentKey = if (isAssignedUserOfficial) {
+            match.normalizedOfficialAssignments()
+                .filter { assignment -> assignment.userId == currentUserId }
+                .joinToString("|") { assignment ->
+                    "${assignment.positionId}:${assignment.slotIndex}:${assignment.holderType}:${assignment.eventOfficialId.orEmpty()}"
+                }
+                .ifBlank { "legacy:${match.officialId?.trim().orEmpty()}" }
+        } else {
+            ""
+        }
+
+        return listOf(
+            match.id,
+            currentUserId,
+            roleKey,
+            teamOfficialId.orEmpty(),
+            currentUserEventTeamId.orEmpty(),
+            assignmentKey,
+        ).joinToString("::")
+    }
+
+    private fun markOfficialCheckInConfirmed(match: MatchMVP) {
+        val teamOfficialId = normalizeOptionalId(match.teamOfficialId)
+        val isAssignedTeamOfficial = teamOfficialId != null && currentUserTeamIds().contains(teamOfficialId)
+        val isAssignedUserOfficial = match.isUserAssignedToOfficialSlot(currentUser.id)
+        if (!isAssignedTeamOfficial && !isAssignedUserOfficial) {
+            return
+        }
+        confirmedOfficialCheckInPromptKeys += officialCheckInPromptKey(
+            match = match,
+            teamOfficialId = teamOfficialId,
+            isAssignedTeamOfficial = isAssignedTeamOfficial,
+            isAssignedUserOfficial = isAssignedUserOfficial,
+            canSwapIntoOfficial = false,
+        )
     }
 
     override fun confirmOfficialCheckIn() {
@@ -428,6 +515,7 @@ class DefaultMatchContentComponent(
                         },
                     )
                     matchRepository.updateMatch(updatedMatch.match).onSuccess {
+                        markOfficialCheckInConfirmed(currentMatch)
                         dismissOfficialDialog()
                         _officialCheckedIn.value = true
                         _isOfficial.value = true

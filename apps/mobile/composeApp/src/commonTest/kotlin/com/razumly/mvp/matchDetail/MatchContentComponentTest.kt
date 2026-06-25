@@ -590,6 +590,81 @@ class MatchContentComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun given_check_in_prompt_dismissed_when_match_refreshes_then_prompt_stays_hidden() = runTest(testDispatcher) {
+        val user = createUser(id = "user-1", teamIds = listOf("team-c"))
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c"))
+        val match = createMatch(
+            eventId = event.id,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = false,
+        )
+        val harness = MatchDetailHarness(
+            event = event,
+            initialMatch = match,
+            currentUser = user,
+            teams = listOf(
+                createTeam(id = "team-a", captainId = "captain-a"),
+                createTeam(id = "team-b", captainId = "captain-b"),
+                createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
+            ),
+        )
+
+        advance()
+        assertTrue(harness.component.showOfficialCheckInDialog.value)
+
+        harness.component.dismissOfficialDialog()
+        assertFalse(harness.component.showOfficialCheckInDialog.value)
+
+        harness.matchRepository.emitRemoteMatch(match.copy(status = "SCHEDULED"))
+        advance()
+
+        assertTrue(harness.component.isOfficial.value)
+        assertFalse(harness.component.officialCheckedIn.value)
+        assertFalse(harness.component.showOfficialCheckInDialog.value)
+    }
+
+    @Test
+    fun given_checked_in_official_when_stale_unchecked_match_refreshes_then_prompt_stays_hidden() = runTest(testDispatcher) {
+        val user = createUser(id = "user-1", teamIds = listOf("team-c"))
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c"))
+        val match = createMatch(
+            eventId = event.id,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = false,
+        )
+        val harness = MatchDetailHarness(
+            event = event,
+            initialMatch = match,
+            currentUser = user,
+            teams = listOf(
+                createTeam(id = "team-a", captainId = "captain-a"),
+                createTeam(id = "team-b", captainId = "captain-b"),
+                createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
+            ),
+        )
+
+        advance()
+        assertTrue(harness.component.showOfficialCheckInDialog.value)
+
+        harness.component.confirmOfficialCheckIn()
+        advance()
+
+        assertTrue(harness.component.officialCheckedIn.value)
+        assertFalse(harness.component.showOfficialCheckInDialog.value)
+
+        harness.matchRepository.emitRemoteMatch(match.copy(status = "SCHEDULED"))
+        advance()
+
+        assertTrue(harness.component.isOfficial.value)
+        assertTrue(harness.component.officialCheckedIn.value)
+        assertFalse(harness.component.showOfficialCheckInDialog.value)
+    }
+
+    @Test
     fun given_match_missing_one_team_when_user_is_assigned_official_then_check_in_prompt_is_hidden() = runTest(testDispatcher) {
         val user = createUser(id = "user-1", teamIds = listOf("team-c"))
         val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c"))

@@ -52,6 +52,9 @@ import com.razumly.mvp.core.data.repositories.RecordSignatureResult
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.CreateBillRequest
+import com.razumly.mvp.core.data.repositories.DiscountCode
+import com.razumly.mvp.core.data.repositories.DiscountOffer
+import com.razumly.mvp.core.data.repositories.DiscountTarget
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
@@ -673,6 +676,7 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
         timeSlotContext: PurchaseIntentTimeSlotContext?,
         occurrence: EventOccurrenceSelection?,
         divisionId: String?,
+        discountCode: String?,
     ): Result<PurchaseIntent> {
         purchaseIntentCalls += PurchaseIntentCall(
             event = event,
@@ -682,16 +686,43 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
     }
 
     suspend fun createTeamRegistrationPurchaseIntent(team: Team): Result<PurchaseIntent> =
-        createTeamRegistrationPurchaseIntent(team, null)
+        createTeamRegistrationPurchaseIntent(team, null, null)
 
     override suspend fun createTeamRegistrationPurchaseIntent(
         team: Team,
         teamRegistration: com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration?,
+        discountCode: String?,
     ): Result<PurchaseIntent> {
         teamRegistrationPurchaseIntentCalls += team.id
         teamRegistrationPurchaseTargets += teamRegistration
         return Result.success(PurchaseIntent(paymentIntent = "pi_team_registration", publishableKey = "pk_test"))
     }
+
+    override suspend fun listDiscounts(ownerType: String, ownerId: String?): Result<List<DiscountOffer>> =
+        Result.success(emptyList())
+
+    override suspend fun listDiscountTargets(
+        ownerType: String,
+        ownerId: String?,
+        itemType: String,
+        query: String?,
+    ): Result<List<DiscountTarget>> = Result.success(emptyList())
+
+    override suspend fun createDiscount(
+        ownerType: String,
+        ownerId: String?,
+        name: String,
+        description: String?,
+        targetType: String,
+        targetId: String,
+        discountedPriceCents: Int,
+    ): Result<DiscountOffer> = Result.failure(UnsupportedOperationException("Discounts are not supported."))
+
+    override suspend fun generateDiscountCode(
+        discountId: String,
+        code: String?,
+        usageLimit: Int?,
+    ): Result<DiscountCode> = Result.failure(UnsupportedOperationException("Discounts are not supported."))
 
     override suspend fun createBill(request: CreateBillRequest): Result<Bill> = Result.success(
         Bill(
