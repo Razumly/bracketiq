@@ -291,10 +291,9 @@ fun FeeBreakdownDialog(
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    val totalBeforeStripeFees = feeBreakdown.eventPrice +
-        feeBreakdown.processingFee +
-        (feeBreakdown.taxAmount ?: 0)
-    val totalDisplayValue = "$${totalBeforeStripeFees.centsToDollars()} + Stripe fees"
+    val visibleTaxAmount = feeBreakdown.taxAmount?.takeIf { it > 0 }
+    val visibleTotal = feeBreakdown.eventPrice + (visibleTaxAmount ?: 0)
+    val totalDisplayValue = "$${visibleTotal.centsToDollars()}"
 
     AlertDialog(onDismissRequest = onCancel, title = { Text("Payment Breakdown") }, text = {
         Column(
@@ -306,29 +305,15 @@ fun FeeBreakdownDialog(
 
             HorizontalDivider()
 
-            FeeRow("Event Price", "$${feeBreakdown.eventPrice.centsToDollars()}")
-            FeeRow("BracketIQ Fee", "$${feeBreakdown.processingFee.centsToDollars()}")
-            FeeRow("Stripe Fees", "Vary by payment method")
-            feeBreakdown.taxAmount?.let { taxAmount ->
+            FeeRow("Price", "$${feeBreakdown.eventPrice.centsToDollars()}")
+            visibleTaxAmount?.let { taxAmount ->
                 FeeRow("Tax", "$${taxAmount.centsToDollars()}")
             }
 
             HorizontalDivider()
 
             FeeRow(
-                "Total Charge", totalDisplayValue, isTotal = true
-            )
-
-            Text(
-                "Exact Stripe fees and total update after you choose a payment method.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Text(
-                "Host receives: $${feeBreakdown.hostReceives.centsToDollars()}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                "Total", totalDisplayValue, isTotal = true
             )
         }
     }, confirmButton = {

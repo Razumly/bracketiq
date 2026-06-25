@@ -17,7 +17,9 @@ import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
+import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.repositories.PurchaseIntentTimeSlotContext
+import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.RentalOrderItem
 import com.razumly.mvp.core.data.repositories.RentalOrderSelectionRequest
 import com.razumly.mvp.core.data.repositories.SignStep
@@ -99,6 +101,7 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     val textSignaturePrompt: StateFlow<TextSignaturePromptState?>
     val webSignaturePrompt: StateFlow<WebSignaturePromptState?>
     val discountCodePrompt: StateFlow<DiscountCodePromptState?>
+    val currentFeeBreakdown: StateFlow<FeeBreakdown?>
     val isReservingRental: StateFlow<Boolean>
     val completedRentalReservation: StateFlow<RentalReservationComplete?>
 
@@ -120,6 +123,8 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     fun dismissWebSignaturePrompt()
     fun continueFromDiscountCodePrompt(code: String?)
     fun dismissDiscountCodePrompt()
+    fun confirmFeeBreakdown()
+    fun dismissFeeBreakdown()
     fun startRentalReservation(context: RentalCreateContext, selections: List<RentalOrderSelectionRequest>)
     fun createEventFromCompletedRentalReservation()
     fun dismissCompletedRentalReservation()
@@ -195,6 +200,8 @@ class DefaultOrganizationDetailComponent(
     override val webSignaturePrompt: StateFlow<WebSignaturePromptState?> = _webSignaturePrompt.asStateFlow()
     private val _discountCodePrompt = MutableStateFlow<DiscountCodePromptState?>(null)
     override val discountCodePrompt: StateFlow<DiscountCodePromptState?> = _discountCodePrompt.asStateFlow()
+    private val _currentFeeBreakdown = MutableStateFlow<FeeBreakdown?>(null)
+    override val currentFeeBreakdown: StateFlow<FeeBreakdown?> = _currentFeeBreakdown.asStateFlow()
     private val _isReservingRental = MutableStateFlow(false)
     override val isReservingRental: StateFlow<Boolean> = _isReservingRental.asStateFlow()
     private val _completedRentalReservation = MutableStateFlow<RentalReservationComplete?>(null)
@@ -219,6 +226,7 @@ class DefaultOrganizationDetailComponent(
     private var pendingTeamRegistration: TeamWithPlayers? = null
     private var pendingBillingAddressAction: (() -> Unit)? = null
     private var pendingDiscountCodeAction: ((String?) -> Unit)? = null
+    private var pendingFeeBreakdownAction: (() -> Unit)? = null
     private var pendingTeamSignatureSteps: List<SignStep> = emptyList()
     private var pendingTeamSignatureStepIndex = 0
     private var pendingTeamSignatureTeamId: String? = null
@@ -239,6 +247,7 @@ class DefaultOrganizationDetailComponent(
                         _errorState.value = ErrorMessage("Payment canceled.")
                         _startingProductCheckoutId.value = null
                         _startingTeamRegistrationId.value = null
+                        clearPendingFeeBreakdown()
                         pendingProductPurchase = null
                         pendingTeamRegistration = null
                         pendingRentalReservation = null
@@ -249,6 +258,7 @@ class DefaultOrganizationDetailComponent(
                         _errorState.value = ErrorMessage(result.error)
                         _startingProductCheckoutId.value = null
                         _startingTeamRegistrationId.value = null
+                        clearPendingFeeBreakdown()
                         pendingProductPurchase = null
                         pendingTeamRegistration = null
                         pendingRentalReservation = null
@@ -479,7 +489,7 @@ class DefaultOrganizationDetailComponent(
                 purchaseIntentResult
                     .onSuccess { intent ->
                         pendingProductPurchase = product
-                        showPaymentSheet(intent, account?.email.orEmpty(), user.fullName)
+                        showFeeBreakdownOrPaymentSheet(intent, account?.email.orEmpty(), user.fullName)
                     }
                     .onFailure { error ->
                         _errorState.value = ErrorMessage("Unable to start checkout: ${error.userMessage()}")
@@ -720,7 +730,7 @@ class DefaultOrganizationDetailComponent(
                     discountCode = discountCode,
                 ).onSuccess { intent ->
                     pendingTeamRegistration = team
-                    showPaymentSheet(intent, accountEmail, payerName)
+                    showFeeBreakdownOrPaymentSheet(intent, accountEmail, payerName)
                 }.onFailure { error ->
                     _errorState.value = ErrorMessage(
                         "Unable to start registration: ${error.userMessage(result.userMessage("Unable to start registration."))}",
@@ -804,6 +814,23 @@ class DefaultOrganizationDetailComponent(
         continueFromDiscountCodePrompt(null)
     }
 
+    override fun confirmFeeBreakdown() {
+        val action = pendingFeeBreakdownAction
+        clearPendingFeeBreakdown()
+        action?.invoke()
+    }
+
+    override fun dismissFeeBreakdown() {
+        clearPendingFeeBreakdown()
+        pendingProductPurchase = null
+        pendingTeamRegistration = null
+        _startingProductCheckoutId.value = null
+        _startingTeamRegistrationId.value = null
+        if (::loadingHandler.isInitialized) {
+            loadingHandler.hideLoading()
+        }
+    }
+
     override fun confirmTextSignature() {
         val prompt = _textSignaturePrompt.value ?: return
         val teamId = pendingTeamSignatureTeamId?.trim().orEmpty()
@@ -856,8 +883,33 @@ class DefaultOrganizationDetailComponent(
         navigationHandler.navigateBack()
     }
 
+    private fun showFeeBreakdownOrPaymentSheet(
+        intent: PurchaseIntent,
+        email: String,
+        name: String,
+    ) {
+        val feeBreakdown = intent.feeBreakdown
+        if (feeBreakdown == null) {
+            scope.launch { showPaymentSheet(intent, email, name) }
+            return
+        }
+
+        pendingFeeBreakdownAction = {
+            scope.launch { showPaymentSheet(intent, email, name) }
+        }
+        _currentFeeBreakdown.value = feeBreakdown
+        if (::loadingHandler.isInitialized) {
+            loadingHandler.hideLoading()
+        }
+    }
+
+    private fun clearPendingFeeBreakdown() {
+        _currentFeeBreakdown.value = null
+        pendingFeeBreakdownAction = null
+    }
+
     private suspend fun showPaymentSheet(
-        intent: com.razumly.mvp.core.data.repositories.PurchaseIntent,
+        intent: PurchaseIntent,
         email: String,
         name: String,
     ) {

@@ -26,6 +26,7 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.presentation.composables.DropdownOption
+import com.razumly.mvp.core.presentation.composables.InclusivePriceInput
 import com.razumly.mvp.core.presentation.composables.MoneyInputField
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.StandardTextField
@@ -404,17 +405,12 @@ private fun DivisionSingleDivisionDefaults(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                MoneyInputField(
-                    value = editEvent.priceCents.coerceAtLeast(0).toString(),
-                    onValueChange = { value ->
+                InclusivePriceInput(
+                    totalPriceCents = editEvent.priceCents.coerceAtLeast(0),
+                    onTotalPriceChange = { parsedPrice ->
                         if (!state.hostHasAccount) {
-                            return@MoneyInputField
+                            return@InclusivePriceInput
                         }
-                        val parsedPrice = value
-                            .filter(Char::isDigit)
-                            .toIntOrNull()
-                            ?.coerceAtLeast(0)
-                            ?: 0
                         actions.onDivisionEditorDefaultsChange(
                             divisionEditorDefaults.copy(priceCents = parsedPrice),
                         )
@@ -444,17 +440,9 @@ private fun DivisionSingleDivisionDefaults(
                             )
                         }
                     },
-                    modifier = Modifier.fillMaxWidth(0.48f),
-                    label = "Price",
+                    modifier = Modifier.fillMaxWidth(),
+                    totalLabel = "Price",
                     enabled = state.hostHasAccount,
-                    supportingContent = {
-                        PriceWithFeesPreviewSupportingText(
-                            amountCents = editEvent.priceCents,
-                            eventType = editEvent.eventType,
-                            baseLabel = "Price",
-                            onShowBreakdown = actions.onShowPriceBreakdown,
-                        )
-                    },
                 )
                 NumberInputField(
                     modifier = Modifier.fillMaxWidth(0.48f),
@@ -752,30 +740,22 @@ private fun DivisionInfoFields(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.Top,
             ) {
-                MoneyInputField(
-                    value = divisionEditor.priceCents.coerceAtLeast(0).toString(),
-                    onValueChange = { value ->
+                InclusivePriceInput(
+                    totalPriceCents = divisionEditor.priceCents.coerceAtLeast(0),
+                    onTotalPriceChange = { priceCents ->
                         if (!state.divisionEditorReady || !state.hostHasAccount) {
-                            return@MoneyInputField
+                            return@InclusivePriceInput
                         }
                         actions.onDivisionEditorChange(
                             divisionEditor.copy(
-                                priceCents = value.filter(Char::isDigit).toIntOrNull()?.coerceAtLeast(0) ?: 0,
+                                priceCents = priceCents.coerceAtLeast(0),
                                 error = null,
                             ),
                         )
                     },
                     modifier = Modifier.weight(1f),
-                    label = "Division Price",
+                    totalLabel = "Division price",
                     enabled = state.hostHasAccount && state.divisionEditorReady,
-                    supportingContent = {
-                        PriceWithFeesPreviewSupportingText(
-                            amountCents = divisionEditor.priceCents,
-                            eventType = editEvent.eventType,
-                            baseLabel = "Division price",
-                            onShowBreakdown = actions.onShowPriceBreakdown,
-                        )
-                    },
                 )
                 NumberInputField(
                     modifier = Modifier.weight(1f),

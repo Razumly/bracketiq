@@ -91,6 +91,7 @@ import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
+import com.razumly.mvp.core.presentation.composables.calculateIncludedFeesFromTotalPrice
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.core.presentation.util.getImageUrl
@@ -131,7 +132,6 @@ import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
-import kotlin.math.roundToInt
 
 private val SectionExpansionStatesSaver = mapSaver(
     save = { stateMap: SnapshotStateMap<String, Boolean> ->
@@ -148,9 +148,6 @@ private val SectionExpansionStatesSaver = mapSaver(
 private const val MAX_READ_ONLY_NAME_LIST_ITEMS = 5
 private const val STAFF_LAZY_LIST_THRESHOLD = 4
 private const val STAFF_LAZY_LIST_VISIBLE_COUNT = 4
-private const val DEFAULT_MVP_FEE_PERCENTAGE = 0.01
-private const val LEAGUE_OR_TOURNAMENT_MVP_FEE_PERCENTAGE = 0.03
-
 private val readOnlyNameListItemHeight = 28.dp
 private val readOnlyNameListSpacing = 4.dp
 private val editableOfficialStaffListHeight = 160.dp * STAFF_LAZY_LIST_VISIBLE_COUNT
@@ -265,6 +262,7 @@ fun EventDetails(
     onMapRevealCenterChange: (Offset) -> Unit = {},
     onFloatingDockVisibilityChange: (Boolean) -> Unit = {},
     onValidationChange: (Boolean, List<String>) -> Unit = { _, _ -> },
+    modifier: Modifier = Modifier,
     joinButton: @Composable (isValid: Boolean) -> Unit
 ) {
     val popupHandler = LocalPopupHandler.current
@@ -2220,7 +2218,7 @@ fun EventDetails(
     }
 
     CompositionLocalProvider(localImageScheme provides imageScheme) {
-        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+        Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
             BackgroundImage(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2818,18 +2816,18 @@ fun EventDetails(
 internal data class PricePreviewBreakdown(
     val baseLabel: String,
     val amountCents: Int,
+    val hostReceivesCents: Int,
+    val processingFeeCents: Int,
     val mvpFeeCents: Int,
-    val subtotalBeforeStripeFeesCents: Int,
-    val mvpFeePercentage: Double,
     val taxable: Boolean,
 ) {
     val totalDisplayValue: String
         get() = if (amountCents <= 0) {
-            subtotalBeforeStripeFeesCents.formatCents()
+            amountCents.formatCents()
         } else if (taxable) {
-            "${subtotalBeforeStripeFeesCents.formatCents()} + Taxes + Stripe fees"
+            "${amountCents.formatCents()} + Taxes"
         } else {
-            "${subtotalBeforeStripeFeesCents.formatCents()} + Stripe fees"
+            amountCents.formatCents()
         }
 }
 
@@ -2885,18 +2883,11 @@ private fun PriceWithFeesPreviewDialog(
                 )
                 HorizontalDivider()
                 FeePreviewRow(breakdown.baseLabel, breakdown.amountCents.formatCents())
-                FeePreviewRow(
-                    "BracketIQ fee (${breakdown.mvpFeePercentage.formatFeePercentage()})",
-                    breakdown.mvpFeeCents.formatCents(),
-                )
                 if (breakdown.taxable) {
-                    FeePreviewRow("Taxes", "Calculated at checkout")
-                }
-                if (breakdown.amountCents > 0) {
-                    FeePreviewRow("Stripe fees", "Vary by payment method")
+                    FeePreviewRow("Tax", "Calculated at checkout")
                 }
                 HorizontalDivider()
-                FeePreviewRow("Total charged", breakdown.totalDisplayValue, isTotal = true)
+                FeePreviewRow("Total", breakdown.totalDisplayValue, isTotal = true)
             }
         },
         confirmButton = {
@@ -2941,50 +2932,27 @@ private fun calculatePricePreviewBreakdown(
     taxable: Boolean,
 ): PricePreviewBreakdown {
     val normalizedAmountCents = amountCents.coerceAtLeast(0)
-    val mvpFeePercentage = resolveMvpFeePercentage(eventType)
+    val feeBreakdown = calculateIncludedFeesFromTotalPrice(normalizedAmountCents)
 
     if (normalizedAmountCents == 0) {
         return PricePreviewBreakdown(
             baseLabel = baseLabel,
             amountCents = 0,
+            hostReceivesCents = 0,
+            processingFeeCents = 0,
             mvpFeeCents = 0,
-            subtotalBeforeStripeFeesCents = 0,
-            mvpFeePercentage = mvpFeePercentage,
             taxable = taxable,
         )
     }
 
-    val mvpFeeCents = (normalizedAmountCents * mvpFeePercentage).roundToInt()
-
     return PricePreviewBreakdown(
         baseLabel = baseLabel,
-        amountCents = normalizedAmountCents,
-        mvpFeeCents = mvpFeeCents,
-        subtotalBeforeStripeFeesCents = normalizedAmountCents + mvpFeeCents,
-        mvpFeePercentage = mvpFeePercentage,
+        amountCents = feeBreakdown.totalPriceCents,
+        hostReceivesCents = feeBreakdown.hostReceivesCents,
+        processingFeeCents = feeBreakdown.processingFeeCents,
+        mvpFeeCents = feeBreakdown.platformFeeCents,
         taxable = taxable,
     )
 }
 
-private fun resolveMvpFeePercentage(eventType: EventType): Double {
-    return if (eventType == EventType.LEAGUE || eventType == EventType.TOURNAMENT) {
-        LEAGUE_OR_TOURNAMENT_MVP_FEE_PERCENTAGE
-    } else {
-        DEFAULT_MVP_FEE_PERCENTAGE
-    }
-}
-
 private fun Int.formatCents(): String = (this / 100.0).moneyFormat()
-
-private fun Double.formatFeePercentage(): String {
-    val percentageValue = this * 100
-    return if (percentageValue % 1.0 == 0.0) {
-        "${percentageValue.toInt()}%"
-    } else {
-        "${percentageValue.formatOneDecimal()}%"
-    }
-}
-
-private fun Double.formatOneDecimal(): String {
-    return ((this * 10).roundToInt() / 10.0).toString()
-}

@@ -92,6 +92,7 @@ import com.razumly.mvp.core.network.userMessage
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.composables.DropdownOption
+import com.razumly.mvp.core.presentation.composables.InclusivePriceInput
 import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
@@ -1032,25 +1033,32 @@ fun CreateOrEditTeamScreen(
                     modifier = Modifier.padding(top = 4.dp),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                StandardTextField(
-                    value = registrationCostInput,
-                    onValueChange = {
+                InclusivePriceInput(
+                    totalPriceCents = registrationPriceCentsInput,
+                    onTotalPriceChange = { nextCents ->
                         registrationSettingsEdited = true
-                        registrationCostInput = it
+                        registrationCostInput = nextCents
+                            .coerceAtLeast(0)
+                            .takeIf { it > 0 }
+                            ?.toString()
+                            .orEmpty()
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    label = "Registration cost",
-                    keyboardType = "money",
-                    inputFilter = { value -> value.filter(Char::isDigit).take(7) },
-                    readOnly = !canEditFields ||
-                        !joinPolicyInput.allowsRegistrationCostLabel() ||
-                        (isOpenRegistrationInput && !canChargeRegistration),
-                    supportingText = when {
+                    totalLabel = "Registration price",
+                    enabled = canEditFields &&
+                        joinPolicyInput.allowsRegistrationCostLabel() &&
+                        !(isOpenRegistrationInput && !canChargeRegistration),
+                )
+                Text(
+                    text = when {
                         isRequestToJoinInput -> "Request-only prices are labels. Players are not prompted for payment until you send a bill."
                         !joinPolicyInput.allowsRegistrationCostLabel() -> "Choose open registration or request to join to set a price."
                         canChargeRegistration -> "Leave blank for free registration."
                         else -> "Connect Stripe to charge for open registration. Free registration is still available."
                     },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
                 )
             } else {
                 ReadOnlyLabeledValue(
