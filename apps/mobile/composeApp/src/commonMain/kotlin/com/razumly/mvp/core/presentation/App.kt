@@ -83,6 +83,7 @@ import com.razumly.mvp.teamManagement.TeamManagementScreen
 import com.razumly.mvp.userAuth.AuthScreen
 import com.razumly.mvp.userAuth.DefaultAuthComponent
 import io.github.aakira.napier.Napier
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 val LocalNavBarPadding = compositionLocalOf<PaddingValues> {
@@ -133,6 +134,8 @@ fun App(root: RootComponent) {
                         if (result == SnackbarResult.ActionPerformed) {
                             errorMessage.action?.invoke()
                         }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
                     } catch (e: Exception) {
                         Napier.e("Failed to show error: ${e.message}")
                     } finally {
