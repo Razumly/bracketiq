@@ -3,7 +3,6 @@ package com.razumly.mvp.eventMap
 import android.location.Geocoder
 import android.os.Build
 import android.location.Location
-import androidx.compose.foundation.clickable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -20,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
@@ -56,6 +57,8 @@ import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.util.toGoogle
 import com.razumly.mvp.eventMap.composables.MapEventCard
+import com.razumly.mvp.eventMap.composables.MapEventCardCarousel
+import com.razumly.mvp.eventMap.composables.MapEventClusterMarker
 import com.razumly.mvp.eventMap.composables.MapEventMarker
 import com.razumly.mvp.eventMap.composables.MapInitialsMarker
 import com.razumly.mvp.eventMap.composables.MapPOICard
@@ -76,9 +79,24 @@ private val DISCOVER_RENTAL_MARKER_COLOR = Color(0xFFF97316)
 private val MAP_SELECTED_MARKER_COLOR = Color(0xFF2563EB)
 private val MAP_ORIGINAL_MARKER_COLOR = Color(0xFFDC2626)
 private val MAP_PLACE_MARKER_COLOR = Color(0xFF64748B)
+private val MAP_EVENT_CLUSTER_TOUCH_DISTANCE = 54.dp
 private const val MAP_MARKER_IMAGE_SIZE_PX = 96
 private const val MAP_EVENT_CARD_IMAGE_WIDTH_PX = 560
 private const val MAP_EVENT_CARD_IMAGE_HEIGHT_PX = 220
+
+private data class EventMarkerGroup(
+    val key: String,
+    val events: List<Event>,
+    val position: LatLng,
+)
+
+private data class PendingEventMarkerGroup(
+    val events: MutableList<Event>,
+    var centerX: Float,
+    var centerY: Float,
+    var latitude: Double,
+    var longitude: Double,
+)
 
 private data class MarkerImage(
     val painter: Painter?,
@@ -162,6 +180,9 @@ actual fun EventMap(
     val trackedLocation by component.currentLocation.collectAsState()
     val events by component.events.collectAsState()
     val places by component.places.collectAsState()
+    val clusterTouchDistancePx = with(LocalDensity.current) {
+        MAP_EVENT_CLUSTER_TOUCH_DISTANCE.toPx()
+    }
     val closeButtonBottomPadding =
         LocalNavBarPadding.current.calculateBottomPadding() + MAP_CLOSE_BUTTON_EXTRA_BOTTOM_PADDING
     var searchedPlaces by remember { mutableStateOf<List<Place>>(emptyList()) }
@@ -183,7 +204,9 @@ actual fun EventMap(
     val originalPlaceMarkerState = remember { MarkerState() }
     val selectedPlaceMarkerState = remember { MarkerState() }
     var selectedPOI by remember { mutableStateOf<PointOfInterest?>(null) }
-    var selectedMapEvent by remember { mutableStateOf<Event?>(null) }
+    var selectedMapEvents by remember { mutableStateOf<List<Event>>(emptyList()) }
+    var selectedMapEventIndex by remember { mutableIntStateOf(0) }
+    var mapCameraTick by remember { mutableIntStateOf(0) }
     var isAnimating by remember { mutableStateOf(false) }
     val poiMarkerState = remember { MarkerState() }
     var armedPlaceId by remember { mutableStateOf<String?>(null) }
@@ -282,10 +305,88 @@ actual fun EventMap(
             .takeIf(String::isNotBlank)
             ?: eventFallbackImageId(event)
 
+    fun eventLatLng(event: Event): LatLng = LatLng(event.latitude, event.longitude)
+
+    fun uniqueMapEvents(): List<Event> =
+        (events + listOfNotNull(focusedEvent))
+            .distinctBy { it.id }
+
+    fun buildEventMarkerGroups(sourceEvents: List<Event>): List<EventMarkerGroup> {
+        val projection = cameraPositionState.projection
+        if (projection == null) {
+            return sourceEvents.map { event ->
+                EventMarkerGroup(
+                    key = "event:${event.id}",
+                    events = listOf(event),
+                    position = eventLatLng(event),
+                )
+            }
+        }
+
+        val thresholdSquared = clusterTouchDistancePx * clusterTouchDistancePx
+        val pendingGroups = mutableListOf<PendingEventMarkerGroup>()
+        sourceEvents
+            .sortedWith(compareBy<Event> { it.id }.thenBy { it.name })
+            .forEach { event ->
+                val coordinate = eventLatLng(event)
+                val point = projection.toScreenLocation(coordinate)
+                var closestGroup: PendingEventMarkerGroup? = null
+                var closestDistanceSquared = Float.MAX_VALUE
+
+                pendingGroups.forEach { group ->
+                    val dx = point.x.toFloat() - group.centerX
+                    val dy = point.y.toFloat() - group.centerY
+                    val distanceSquared = dx * dx + dy * dy
+                    if (distanceSquared <= thresholdSquared && distanceSquared < closestDistanceSquared) {
+                        closestGroup = group
+                        closestDistanceSquared = distanceSquared
+                    }
+                }
+
+                val group = closestGroup
+                if (group == null) {
+                    pendingGroups += PendingEventMarkerGroup(
+                        events = mutableListOf(event),
+                        centerX = point.x.toFloat(),
+                        centerY = point.y.toFloat(),
+                        latitude = event.latitude,
+                        longitude = event.longitude,
+                    )
+                } else {
+                    val nextSize = group.events.size + 1
+                    group.events += event
+                    group.centerX = ((group.centerX * (nextSize - 1)) + point.x.toFloat()) / nextSize
+                    group.centerY = ((group.centerY * (nextSize - 1)) + point.y.toFloat()) / nextSize
+                    group.latitude = ((group.latitude * (nextSize - 1)) + event.latitude) / nextSize
+                    group.longitude = ((group.longitude * (nextSize - 1)) + event.longitude) / nextSize
+                }
+            }
+
+        return pendingGroups.map { group ->
+            val groupedEvents = group.events.sortedWith(
+                compareBy<Event> { it.name.lowercase(Locale.getDefault()) }.thenBy { it.id },
+            )
+            val key = if (groupedEvents.size == 1) {
+                "event:${groupedEvents.first().id}"
+            } else {
+                "cluster:${groupedEvents.map { it.id }.sorted().joinToString("|")}"
+            }
+            EventMarkerGroup(
+                key = key,
+                events = groupedEvents,
+                position = LatLng(group.latitude, group.longitude),
+            )
+        }
+    }
+
     val distinctSelectedPlace = selectedPlace?.takeIf { !sameLocation(it, originalPlace) }
     val focusedIsCurrentUserLocation = trackedLatLng?.let { tracked ->
         distanceBetweenMeters(tracked, initCameraState) <= userLocationMatchThresholdMeters
     } == true && focusedEvent == null
+    val mapEvents = remember(events, focusedEvent) { uniqueMapEvents() }
+    val eventMarkerGroups = remember(mapEvents, mapCameraTick, clusterTouchDistancePx) {
+        buildEventMarkerGroups(mapEvents)
+    }
 
     val clearPendingSelection: () -> Unit = {
         selectedPOI = null
@@ -385,26 +486,34 @@ actual fun EventMap(
 
     LaunchedEffect(cameraPositionState) {
         snapshotFlow { cameraPositionState.position }.collect { cameraPosition ->
+            mapCameraTick += 1
             cameraPositionState.projection?.visibleRegion?.latLngBounds?.let { bounds ->
                 component.updateCameraBounds(cameraPosition.target, bounds)
             }
         }
     }
 
-    LaunchedEffect(events) {
-        val currentEventIds = events.map { it.id }.toSet()
-        eventMarkerStates.keys.removeAll { it !in currentEventIds }
-        events.forEach { event ->
-            val existingState = eventMarkerStates[event.id]
+    LaunchedEffect(eventMarkerGroups) {
+        val currentGroupKeys = eventMarkerGroups.map { it.key }.toSet()
+        eventMarkerStates.keys.removeAll { it !in currentGroupKeys }
+        eventMarkerGroups.forEach { group ->
+            val existingState = eventMarkerStates[group.key]
             if (existingState == null) {
-                eventMarkerStates[event.id] = MarkerState(position = LatLng(event.latitude, event.longitude))
-            } else {
-                val newPosition = LatLng(event.latitude, event.longitude)
-                if (existingState.position != newPosition) {
-                    existingState.position = newPosition
-                }
+                eventMarkerStates[group.key] = MarkerState(position = group.position)
+            } else if (existingState.position != group.position) {
+                existingState.position = group.position
             }
         }
+    }
+
+    LaunchedEffect(mapEvents) {
+        if (selectedMapEvents.isEmpty()) return@LaunchedEffect
+        val currentEventIds = mapEvents.map { it.id }.toSet()
+        val retainedSelection = selectedMapEvents.filter { it.id in currentEventIds }
+        selectedMapEvents = retainedSelection
+        selectedMapEventIndex = selectedMapEventIndex.coerceAtMost(
+            (retainedSelection.size - 1).coerceAtLeast(0),
+        )
     }
 
     LaunchedEffect(places) {
@@ -510,7 +619,8 @@ actual fun EventMap(
                 myLocationButtonEnabled = false,
             ),
             onPOIClick = { poi ->
-                selectedMapEvent = null
+                selectedMapEvents = emptyList()
+                selectedMapEventIndex = 0
                 if (canClickPOI && !isAnimating) {
                     selectedPOI = poi
                     armedPlaceId = null
@@ -537,13 +647,21 @@ actual fun EventMap(
                 }
             },
             onMapClick = {
-                selectedMapEvent = null
+                selectedMapEvents = emptyList()
+                selectedMapEventIndex = 0
             },
         ) {
             if (!canClickPOI) {
-                events.forEach { event ->
-                    val markerState = eventMarkerStates[event.id]
-                    markerState?.let {
+                eventMarkerGroups.forEach { group ->
+                    val markerState = eventMarkerStates.getOrPut(group.key) {
+                        MarkerState(position = group.position)
+                    }
+                    if (markerState.position != group.position) {
+                        markerState.position = group.position
+                    }
+
+                    if (group.events.size == 1) {
+                        val event = group.events.first()
                         val fallbackImageId = remember(event.organizationId, organizationLogoIdsById) {
                             eventFallbackImageId(event)
                         }
@@ -564,17 +682,19 @@ actual fun EventMap(
                         }
                         val cardImage = rememberMarkerImage(cardImageUrl)
                         MarkerInfoWindowComposable(
-                            event.id,
+                            group.key,
                             event.name,
                             event.imageId,
                             markerImage.renderKey,
                             cardImage.renderKey,
-                            state = it,
+                            state = markerState,
                             anchor = Offset(0.5f, 0.5f),
                             infoWindowAnchor = Offset(0.5f, 0.0f),
                             onClick = {
                                 eventMarkerStates.values.forEach(MarkerState::hideInfoWindow)
-                                selectedMapEvent = event
+                                selectedPOI = null
+                                selectedMapEvents = group.events
+                                selectedMapEventIndex = 0
                                 true
                             },
                             onInfoWindowClick = { onEventSelected(event) },
@@ -592,6 +712,30 @@ actual fun EventMap(
                                 event = event,
                                 backgroundColor = DISCOVER_EVENT_MARKER_COLOR,
                                 imagePainter = markerImage.painter,
+                            )
+                        }
+                    } else {
+                        MarkerInfoWindowComposable(
+                            group.key,
+                            group.events.size,
+                            state = markerState,
+                            anchor = Offset(0.5f, 0.5f),
+                            infoWindowAnchor = Offset(0.5f, 0.0f),
+                            onClick = {
+                                eventMarkerStates.values.forEach(MarkerState::hideInfoWindow)
+                                selectedPOI = null
+                                selectedMapEvents = group.events
+                                selectedMapEventIndex = 0
+                                true
+                            },
+                            onInfoWindowClick = {
+                                group.events.firstOrNull()?.let(onEventSelected)
+                            },
+                            infoContent = {},
+                        ) {
+                            MapEventClusterMarker(
+                                count = group.events.size,
+                                backgroundColor = DISCOVER_EVENT_MARKER_COLOR,
                             )
                         }
                     }
@@ -915,72 +1059,18 @@ actual fun EventMap(
                     }
                 }
             }
-
-            focusedEvent?.let { event ->
-                val focusedMarkerState = remember(event.id) {
-                    MarkerState(position = LatLng(event.latitude, event.longitude))
-                }
-                val fallbackImageId = remember(event.organizationId, organizationLogoIdsById) {
-                    eventFallbackImageId(event)
-                }
-                val markerImageRef = remember(event.imageId, fallbackImageId) {
-                    eventMarkerImageRef(event)
-                }
-                val markerImageUrl = remember(markerImageRef) {
-                    resolveMarkerImageUrl(markerImageRef)
-                }
-                val markerImage = rememberMarkerImage(markerImageUrl)
-                val cardImageRef = event.imageId.trim().takeIf(String::isNotBlank) ?: fallbackImageId
-                val cardImageUrl = remember(cardImageRef) {
-                    resolveMarkerImageUrl(
-                        imageRef = cardImageRef,
-                        width = MAP_EVENT_CARD_IMAGE_WIDTH_PX,
-                        height = MAP_EVENT_CARD_IMAGE_HEIGHT_PX,
-                    )
-                }
-                val cardImage = rememberMarkerImage(cardImageUrl)
-                MarkerInfoWindowComposable(
-                    event.id,
-                    event.name,
-                    event.imageId,
-                    markerImage.renderKey,
-                    cardImage.renderKey,
-                    state = focusedMarkerState,
-                    anchor = Offset(0.5f, 0.5f),
-                    infoWindowAnchor = Offset(0.5f, 0.0f),
-                    onClick = {
-                        eventMarkerStates.values.forEach(MarkerState::hideInfoWindow)
-                        selectedMapEvent = event
-                        true
-                    },
-                    onInfoWindowClick = { onEventSelected(event) },
-                    infoContent = {
-                        MapEventCard(
-                            event = event,
-                            imagePainter = cardImage.painter,
-                            loadImageInternally = false,
-                            fallbackImageId = fallbackImageId,
-                            modifier = Modifier.wrapContentSize(),
-                        )
-                    },
-                ) {
-                    MapEventMarker(
-                        event = event,
-                        backgroundColor = DISCOVER_EVENT_MARKER_COLOR,
-                        imagePainter = markerImage.painter,
-                    )
-                }
-            }
         }
 
-        selectedMapEvent?.let { event ->
-            MapEventCard(
-                event = event,
-                fallbackImageId = eventFallbackImageId(event),
+        if (selectedMapEvents.isNotEmpty()) {
+            MapEventCardCarousel(
+                events = selectedMapEvents,
+                selectedIndex = selectedMapEventIndex,
+                onSelectedIndexChange = { selectedMapEventIndex = it },
+                onEventSelected = onEventSelected,
+                fallbackImageIdForEvent = ::eventFallbackImageId,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = closeButtonBottomPadding + 72.dp)
-                    .clickable { onEventSelected(event) },
+                    .padding(bottom = closeButtonBottomPadding + 72.dp),
             )
         }
 

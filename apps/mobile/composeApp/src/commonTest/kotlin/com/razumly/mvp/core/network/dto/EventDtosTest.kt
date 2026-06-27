@@ -6,6 +6,8 @@ import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
+import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_CASH_APP
+import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_PAYPAL
 import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_VENMO
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
@@ -1133,7 +1135,19 @@ class EventDtosTest {
                     id = "venmo",
                     provider = "venmo",
                     label = "Venmo",
-                    url = "https://venmo.com/bracketiq",
+                    url = "@bracketiq",
+                ),
+                ManualPaymentLink(
+                    id = "cash",
+                    provider = "cashapp",
+                    label = "Cash App",
+                    url = "\$bracketiq",
+                ),
+                ManualPaymentLink(
+                    id = "paypal",
+                    provider = "paypal",
+                    label = "PayPal",
+                    url = "bracketiq",
                 ),
                 ManualPaymentLink(
                     id = "bad",
@@ -1150,8 +1164,12 @@ class EventDtosTest {
         assertNotNull(event)
         assertEquals(REGISTRATION_PAYMENT_MODE_MANUAL, event.registrationPaymentMode)
         assertEquals("Send a screenshot after paying.", event.manualPaymentInstructions)
-        assertEquals(1, event.manualPaymentLinks.size)
-        assertEquals(MANUAL_PAYMENT_PROVIDER_VENMO, event.manualPaymentLinks.single().provider)
-        assertEquals("https://venmo.com/bracketiq", event.manualPaymentLinks.single().url)
+        assertEquals(3, event.manualPaymentLinks.size)
+        assertEquals(MANUAL_PAYMENT_PROVIDER_VENMO, event.manualPaymentLinks[0].provider)
+        assertEquals("https://venmo.com/u/bracketiq", event.manualPaymentLinks[0].url)
+        assertEquals(MANUAL_PAYMENT_PROVIDER_CASH_APP, event.manualPaymentLinks[1].provider)
+        assertEquals("https://cash.app/\$bracketiq", event.manualPaymentLinks[1].url)
+        assertEquals(MANUAL_PAYMENT_PROVIDER_PAYPAL, event.manualPaymentLinks[2].provider)
+        assertEquals("https://paypal.me/bracketiq", event.manualPaymentLinks[2].url)
     }
 }

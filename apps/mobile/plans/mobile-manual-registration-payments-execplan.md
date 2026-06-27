@@ -21,6 +21,7 @@ For a visible end-to-end check, create or edit an event with manual registration
 - [x] (2026-06-27) Suppressed refund request and auto-refund actions for manual-payment registrations.
 - [x] (2026-06-27) Added provider image resources and rendered them in manual-payment link rows.
 - [x] (2026-06-27) Added focused tests and ran Android compile/test validation.
+- [x] (2026-06-27) Added provider username input support and validated manual-payment setup on an Android emulator.
 
 ## Surprises & Discoveries
 
@@ -41,6 +42,12 @@ For a visible end-to-end check, create or edit an event with manual registration
 
 - Observation: Expanding `IBillingRepository` required updating shared test fakes outside the focused manual-payment tests.
   Evidence: `CreateEvent_FakeBillingRepository` needed `submitManualPaymentProof` and `reviewManualPaymentProof` implementations before `compileDebugUnitTestKotlinAndroid` could compile the test source set.
+
+- Observation: The first emulator save failure was not an Android crash. It was a stale local web backend rejecting new manual-payment fields.
+  Evidence: With the old `node server.mjs` process on port 3000, logcat showed `PATCH http://10.0.2.2:3000/api/events/... -> HTTP 400` with `unknownKeys:["registrationPaymentMode","manualPaymentLinks"]`. Restarting with direct `npx next dev -H 0.0.0.0 -p 3000` served current source and the same emulator save produced backend `PATCH /api/events/... 200`.
+
+- Observation: The custom `npm run dev:plain` server path currently fails API routes in this checkout because `.next/dev/required-server-files.json` is missing.
+  Evidence: `node server.mjs --dev` returned 500 for `/api/events/...` and `/api/chat/groups` with `ENOENT: no such file or directory, open '.next/dev/required-server-files.json'`.
 
 ## Decision Log
 
@@ -66,6 +73,9 @@ Validation so far:
 - `./gradlew :composeApp:compileDebugKotlinAndroid` passed after the UI/resource/registration/profile/host-review changes.
 - `./gradlew --no-daemon :composeApp:compileDebugKotlinAndroid` passed after clearing `composeApp/build`.
 - `./gradlew --no-daemon :composeApp:testDebugUnitTest --tests com.razumly.mvp.eventDetail.EventRegistrationFlowCoordinatorTest --tests com.razumly.mvp.core.network.dto.EventDtosTest` passed after updating the shared billing fake.
+- `./gradlew --no-daemon :composeApp:testDebugUnitTest --tests com.razumly.mvp.core.network.dto.EventDtosTest --tests com.razumly.mvp.eventDetail.EventRegistrationFlowCoordinatorTest` passed after adding provider username URL coverage.
+- `./gradlew :composeApp:installDebug --console=plain` installed successfully on `emulator-5554`.
+- Android emulator QA on `emulator-5554` verified opening event edit, expanding Event Details, toggling manual payments on, adding a Venmo link, rendering the Venmo provider image, typing username `bracketiq`, and saving successfully against current `mvp-site` source. Crash log stayed empty.
 - `git diff --check` and `git diff --cached --check` passed.
 
 ## Context and Orientation

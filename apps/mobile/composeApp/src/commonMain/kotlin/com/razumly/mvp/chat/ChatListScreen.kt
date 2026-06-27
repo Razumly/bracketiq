@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -43,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.chat.composables.ChatListItem
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
@@ -59,8 +61,10 @@ fun ChatListScreen(component: ChatListComponent) {
     val showChatTermsPrompt by component.showChatTermsPrompt.collectAsState()
     var showNewChatDialog by remember { mutableStateOf(false) }
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+    val navBottomPadding = LocalNavBarPadding.current.calculateBottomPadding()
 
     Scaffold(
+        contentWindowInsets = NoScaffoldContentInsets,
         topBar = {
             TopAppBar(
                 title = { Text("Chats") },
@@ -71,12 +75,12 @@ fun ChatListScreen(component: ChatListComponent) {
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.padding(LocalNavBarPadding.current)
-            .nestedScroll(scrollBehavior.nestedScrollConnection),
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         floatingActionButton = {
             if (!showNewChatDialog) {
                 FloatingActionButton(
                     onClick = { showNewChatDialog = true },
+                    modifier = Modifier.padding(bottom = navBottomPadding),
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                 ) {
@@ -87,7 +91,15 @@ fun ChatListScreen(component: ChatListComponent) {
         floatingActionButtonPosition = FabPosition.End
     ) { padding ->
         LazyColumn(
-            modifier = Modifier.padding(padding).padding(16.dp).fillMaxSize(),
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                top = 16.dp,
+                end = 16.dp,
+                bottom = 16.dp + navBottomPadding,
+            ),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {

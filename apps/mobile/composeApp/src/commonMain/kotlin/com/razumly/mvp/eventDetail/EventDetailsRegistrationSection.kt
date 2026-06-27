@@ -5,17 +5,24 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -27,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -42,6 +50,8 @@ import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_MANUAL
 import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_ONLINE
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.manualPaymentProviderInputLabel
+import com.razumly.mvp.core.data.dataTypes.manualPaymentProviderInputPlaceholder
 import com.razumly.mvp.core.data.dataTypes.manualPaymentProviderLabel
 import com.razumly.mvp.core.data.dataTypes.normalizeManualPaymentProvider
 import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
@@ -61,10 +71,12 @@ import com.razumly.mvp.eventDetail.shared.DetailKeyValueList
 import com.razumly.mvp.eventDetail.shared.FormSectionDivider
 import com.razumly.mvp.eventDetail.shared.LabeledCheckboxRow
 import com.razumly.mvp.eventDetail.shared.animatedCardSection
+import com.razumly.mvp.icons.MVPIcons
+import com.razumly.mvp.icons.PaymentProviderCashApp
+import com.razumly.mvp.icons.PaymentProviderStripe
+import com.razumly.mvp.icons.PaymentProviderZelle
 import mvp.composeapp.generated.resources.Res
-import mvp.composeapp.generated.resources.payment_provider_cash_app
 import mvp.composeapp.generated.resources.payment_provider_paypal
-import mvp.composeapp.generated.resources.payment_provider_stripe
 import mvp.composeapp.generated.resources.payment_provider_venmo
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
@@ -103,6 +115,15 @@ internal data class EventDetailsRegistrationActions(
     val onEventTypeSelected: (EventType) -> Unit,
     val onToggleEventRegistrationQuestions: () -> Unit,
     val onEventRegistrationQuestionAnswerChange: (String, String) -> Unit,
+)
+
+private val manualPaymentProviderOptions = listOf(
+    MANUAL_PAYMENT_PROVIDER_CASH_APP,
+    MANUAL_PAYMENT_PROVIDER_VENMO,
+    MANUAL_PAYMENT_PROVIDER_PAYPAL,
+    MANUAL_PAYMENT_PROVIDER_STRIPE,
+    MANUAL_PAYMENT_PROVIDER_ZELLE,
+    MANUAL_PAYMENT_PROVIDER_OTHER,
 )
 
 internal fun LazyListScope.eventDetailsRegistrationSection(
@@ -494,38 +515,29 @@ private fun ManualPaymentLinkEditor(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.Top,
         ) {
-            PlatformDropdown(
+            ManualPaymentProviderSelector(
                 selectedValue = normalizeManualPaymentProvider(link.provider),
                 onSelectionChange = { provider ->
+                    val currentProvider = normalizeManualPaymentProvider(link.provider)
                     val normalizedProvider = normalizeManualPaymentProvider(provider)
+                    val providerChanged = normalizedProvider != currentProvider
+                    val nextLabel = if (
+                        link.label.isBlank() ||
+                        link.label == manualPaymentProviderLabel(currentProvider)
+                    ) {
+                        manualPaymentProviderLabel(normalizedProvider)
+                    } else {
+                        link.label
+                    }
                     onChange(
                         link.copy(
                             provider = normalizedProvider,
-                            label = link.label.ifBlank { manualPaymentProviderLabel(normalizedProvider) },
+                            label = nextLabel,
+                            url = if (providerChanged) "" else link.url,
                         )
                     )
                 },
-                options = listOf(
-                    MANUAL_PAYMENT_PROVIDER_CASH_APP,
-                    MANUAL_PAYMENT_PROVIDER_VENMO,
-                    MANUAL_PAYMENT_PROVIDER_PAYPAL,
-                    MANUAL_PAYMENT_PROVIDER_STRIPE,
-                    MANUAL_PAYMENT_PROVIDER_ZELLE,
-                    MANUAL_PAYMENT_PROVIDER_OTHER,
-                ).map { provider ->
-                    DropdownOption(
-                        value = provider,
-                        label = manualPaymentProviderLabel(provider),
-                    )
-                },
-                label = "Provider",
                 modifier = Modifier.weight(1f),
-            )
-            ProviderMark(
-                provider = link.provider,
-                modifier = Modifier
-                    .padding(top = 30.dp)
-                    .size(42.dp),
             )
             Button(
                 onClick = onRemove,
@@ -550,9 +562,66 @@ private fun ManualPaymentLinkEditor(
                 value = link.url,
                 onValueChange = { value -> onChange(link.copy(url = value)) },
                 modifier = Modifier.weight(1f),
-                label = "HTTPS link",
-                placeholder = "https://...",
+                label = manualPaymentProviderInputLabel(link.provider),
+                placeholder = manualPaymentProviderInputPlaceholder(link.provider),
             )
+        }
+    }
+}
+
+@Composable
+private fun ManualPaymentProviderSelector(
+    selectedValue: String,
+    onSelectionChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = "Provider",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            manualPaymentProviderOptions.forEach { provider ->
+                val normalizedProvider = normalizeManualPaymentProvider(provider)
+                val selected = normalizeManualPaymentProvider(selectedValue) == normalizedProvider
+                OutlinedButton(
+                    onClick = { onSelectionChange(normalizedProvider) },
+                    modifier = Modifier
+                        .width(76.dp)
+                        .height(44.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                    border = BorderStroke(
+                        width = if (selected) 2.dp else 1.dp,
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.outline
+                        },
+                    ),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (selected) {
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                        } else {
+                            MaterialTheme.colorScheme.surface
+                        },
+                    ),
+                ) {
+                    ProviderMark(
+                        provider = normalizedProvider,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(24.dp),
+                    )
+                }
+            }
         }
     }
 }
@@ -562,6 +631,36 @@ private fun ProviderMark(
     provider: String,
     modifier: Modifier = Modifier,
 ) {
+    when (normalizeManualPaymentProvider(provider)) {
+        MANUAL_PAYMENT_PROVIDER_CASH_APP -> {
+            Icon(
+                imageVector = MVPIcons.PaymentProviderCashApp,
+                contentDescription = manualPaymentProviderLabel(provider),
+                modifier = modifier,
+                tint = Color.Unspecified,
+            )
+            return
+        }
+        MANUAL_PAYMENT_PROVIDER_STRIPE -> {
+            Icon(
+                imageVector = MVPIcons.PaymentProviderStripe,
+                contentDescription = manualPaymentProviderLabel(provider),
+                modifier = modifier,
+                tint = Color.Unspecified,
+            )
+            return
+        }
+        MANUAL_PAYMENT_PROVIDER_ZELLE -> {
+            Icon(
+                imageVector = MVPIcons.PaymentProviderZelle,
+                contentDescription = manualPaymentProviderLabel(provider),
+                modifier = modifier,
+                tint = Color.Unspecified,
+            )
+            return
+        }
+    }
+
     val drawable = manualPaymentProviderDrawable(provider)
     if (drawable != null) {
         Image(
@@ -570,21 +669,19 @@ private fun ProviderMark(
             modifier = modifier,
         )
     } else {
-        Text(
-            text = manualPaymentProviderLabel(provider),
+        Icon(
+            imageVector = Icons.Default.Link,
+            contentDescription = manualPaymentProviderLabel(provider),
             modifier = modifier,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
 
 private fun manualPaymentProviderDrawable(provider: String): DrawableResource? {
     return when (normalizeManualPaymentProvider(provider)) {
-        MANUAL_PAYMENT_PROVIDER_CASH_APP -> Res.drawable.payment_provider_cash_app
         MANUAL_PAYMENT_PROVIDER_VENMO -> Res.drawable.payment_provider_venmo
         MANUAL_PAYMENT_PROVIDER_PAYPAL -> Res.drawable.payment_provider_paypal
-        MANUAL_PAYMENT_PROVIDER_STRIPE -> Res.drawable.payment_provider_stripe
         else -> null
     }
 }

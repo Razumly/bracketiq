@@ -60,6 +60,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.officialAssignmentLabels
 import com.razumly.mvp.core.presentation.composables.PlatformLoadingIndicator
+import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.timeFormat
 import com.razumly.mvp.eventDetail.composables.ScheduleItem
@@ -143,62 +144,65 @@ fun ProfileMyScheduleScreen(component: ProfileComponent) {
         description = "Shared schedule view for your events and matches.",
         onBack = component::onBackClicked,
         showBackButton = canNavigateBack,
-        onRefresh = component::refreshMySchedule,
-        isRefreshing = state.isLoading,
         scrollContent = false,
         contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 0.dp),
     ) {
-        Column(
+        PullToRefreshContainer(
+            isRefreshing = state.isLoading,
+            onRefresh = component::refreshMySchedule,
             modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            state.error?.let { error ->
-                Text(
-                    text = error,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-
-            if (!state.isLoading || scheduleItems.isNotEmpty()) {
-                ScheduleEntryFilterSelector(
-                    selected = selectedFilter,
-                    onSelected = { selectedFilter = it },
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (state.isLoading && scheduleItems.isEmpty()) {
-                    MyScheduleLoadingState()
-                } else {
-                    ScheduleView(
-                        items = filteredScheduleItems,
-                        fields = scheduleFields,
-                        showFab = {},
-                        showGroupingToggle = false,
-                        matchGroupMode = ScheduleMatchGroupMode.EVENT,
-                        eventLabelsById = eventLabelsById,
-                        contentPadding = PaddingValues(),
-                        onMatchClick = component::openScheduleMatch,
-                        onEventClick = { event -> component.openScheduleEvent(event.id) },
-                        matchCardContent = { match, onClick ->
-                            ProfileScheduleMatchCard(
-                                match = match,
-                                event = eventsById[match.match.eventId],
-                                onClick = onClick,
-                            )
-                        },
+                state.error?.let { error ->
+                    Text(
+                        text = error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
                     )
+                }
+
+                if (!state.isLoading || scheduleItems.isNotEmpty()) {
+                    ScheduleEntryFilterSelector(
+                        selected = selectedFilter,
+                        onSelected = { selectedFilter = it },
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                ) {
+                    if (state.isLoading && scheduleItems.isEmpty()) {
+                        MyScheduleLoadingState()
+                    } else {
+                        ScheduleView(
+                            items = filteredScheduleItems,
+                            fields = scheduleFields,
+                            showFab = {},
+                            showGroupingToggle = false,
+                            matchGroupMode = ScheduleMatchGroupMode.EVENT,
+                            eventLabelsById = eventLabelsById,
+                            contentPadding = PaddingValues(),
+                            onMatchClick = component::openScheduleMatch,
+                            onEventClick = { event -> component.openScheduleEvent(event.id) },
+                            matchCardContent = { match, onClick ->
+                                ProfileScheduleMatchCard(
+                                    match = match,
+                                    event = eventsById[match.match.eventId],
+                                    onClick = onClick,
+                                )
+                            },
+                        )
+                    }
                 }
             }
         }
     }
 }
-
 @Composable
 private fun ScheduleEntryFilterSelector(
     selected: ScheduleEntryFilter,

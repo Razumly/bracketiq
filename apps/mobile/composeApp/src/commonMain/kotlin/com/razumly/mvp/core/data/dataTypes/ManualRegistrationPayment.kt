@@ -57,20 +57,58 @@ fun manualPaymentProviderLabel(provider: String?): String {
     }
 }
 
+fun manualPaymentProviderInputLabel(provider: String?): String {
+    return when (normalizeManualPaymentProvider(provider)) {
+        MANUAL_PAYMENT_PROVIDER_CASH_APP -> "Cash App username"
+        MANUAL_PAYMENT_PROVIDER_VENMO -> "Venmo username"
+        MANUAL_PAYMENT_PROVIDER_PAYPAL -> "PayPal.Me username"
+        else -> "HTTPS link"
+    }
+}
+
+fun manualPaymentProviderInputPlaceholder(provider: String?): String {
+    return when (normalizeManualPaymentProvider(provider)) {
+        MANUAL_PAYMENT_PROVIDER_CASH_APP -> "\$bracketiq"
+        MANUAL_PAYMENT_PROVIDER_VENMO -> "@bracketiq"
+        MANUAL_PAYMENT_PROVIDER_PAYPAL -> "bracketiq"
+        else -> "https://..."
+    }
+}
+
 private fun normalizeIdPart(value: String): String =
     value.trim()
         .lowercase()
         .replace(Regex("[^a-z0-9]+"), "_")
         .trim('_')
 
+private fun normalizeHandlePart(value: String): String =
+    value.trim()
+        .removePrefix("@")
+        .removePrefix("$")
+        .trim()
+        .trim('/')
+
+fun normalizeManualPaymentUrl(provider: String?, value: String): String? {
+    val input = value.trim()
+    if (input.isBlank() || input.contains(Regex("\\s"))) return null
+    if (input.startsWith("https://", ignoreCase = true)) return input
+    if (input.startsWith("http://", ignoreCase = true)) return null
+
+    val handle = normalizeHandlePart(input).takeIf(String::isNotBlank) ?: return null
+    return when (normalizeManualPaymentProvider(provider)) {
+        MANUAL_PAYMENT_PROVIDER_CASH_APP -> "https://cash.app/\$$handle"
+        MANUAL_PAYMENT_PROVIDER_VENMO -> "https://venmo.com/u/$handle"
+        MANUAL_PAYMENT_PROVIDER_PAYPAL -> "https://paypal.me/$handle"
+        else -> null
+    }
+}
+
 fun normalizeManualPaymentLinks(value: List<ManualPaymentLink>?): List<ManualPaymentLink> {
     return value.orEmpty()
         .mapIndexedNotNull { index, link ->
-            val url = link.url.trim()
-            if (!url.startsWith("https://", ignoreCase = true)) {
-                return@mapIndexedNotNull null
-            }
             val provider = normalizeManualPaymentProvider(link.provider)
+            val url = normalizeManualPaymentUrl(provider, link.url)
+                ?: return@mapIndexedNotNull null
             val label = link.label.trim()
                 .takeIf(String::isNotBlank)
                 ?.take(80)

@@ -20,6 +20,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -44,6 +46,8 @@ actual fun PlatformDropdown(
     containerColor: Color?,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    var fieldWidthPx by remember { mutableStateOf(0) }
+    val density = LocalDensity.current
 
     val displayValue = when {
         multiSelect -> {
@@ -66,7 +70,8 @@ actual fun PlatformDropdown(
             value = displayValue,
             onValueChange = { },
             modifier = Modifier
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .onSizeChanged { size -> fieldWidthPx = size.width },
             label = label,
             placeholder = placeholder,
             isError = isError,
@@ -90,7 +95,11 @@ actual fun PlatformDropdown(
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
-            modifier = Modifier.fillMaxWidth()
+            modifier = if (fieldWidthPx > 0) {
+                Modifier.width(with(density) { fieldWidthPx.toDp() })
+            } else {
+                Modifier.fillMaxWidth()
+            },
         ) {
             if (multiSelect) {
                 // Multi-select dropdown items

@@ -10,6 +10,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -23,8 +24,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -77,6 +83,76 @@ fun MapEventCard(
             loadImageInternally = loadImageInternally,
             fallbackImageId = fallbackImageId,
         )
+    }
+}
+
+@Composable
+fun MapEventCardCarousel(
+    events: List<Event>,
+    selectedIndex: Int,
+    onSelectedIndexChange: (Int) -> Unit,
+    onEventSelected: (Event) -> Unit,
+    fallbackImageIdForEvent: (Event) -> String?,
+    modifier: Modifier = Modifier,
+) {
+    if (events.isEmpty()) return
+
+    val boundedIndex = selectedIndex.coerceIn(0, events.lastIndex)
+    val event = events[boundedIndex]
+
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        MapEventCard(
+            event = event,
+            fallbackImageId = fallbackImageIdForEvent(event),
+            modifier = Modifier.clickable { onEventSelected(event) },
+        )
+
+        if (events.size > 1) {
+            Row(
+                modifier = Modifier
+                    .width(280.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.95f))
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(
+                    onClick = {
+                        val nextIndex = if (boundedIndex == 0) events.lastIndex else boundedIndex - 1
+                        onSelectedIndexChange(nextIndex)
+                    },
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                        contentDescription = "Previous event",
+                    )
+                }
+
+                Text(
+                    text = "${boundedIndex + 1} / ${events.size}",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.SemiBold,
+                )
+
+                IconButton(
+                    onClick = {
+                        val nextIndex = if (boundedIndex == events.lastIndex) 0 else boundedIndex + 1
+                        onSelectedIndexChange(nextIndex)
+                    },
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Next event",
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -240,17 +316,9 @@ fun MapEventMarker(
             modifier = Modifier
                 .size(40.dp)
                 .clip(CircleShape)
-                .background(backgroundColor),
+                .background(Color.Black),
             contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = remember(event.name) { mapMarkerInitials(event.name) },
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-            )
-        }
+        ) {}
         Image(
             painter = imagePainter,
             contentDescription = "${event.name} marker",
@@ -258,6 +326,31 @@ fun MapEventMarker(
                 .size(40.dp)
                 .clip(CircleShape),
             contentScale = ContentScale.Crop,
+        )
+    }
+}
+
+@Composable
+fun MapEventClusterMarker(
+    count: Int,
+    backgroundColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .size(54.dp)
+            .shadow(8.dp, CircleShape)
+            .clip(CircleShape)
+            .background(backgroundColor)
+            .border(4.dp, Color.White, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = count.coerceAtLeast(2).toString(),
+            color = Color.White,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
         )
     }
 }
