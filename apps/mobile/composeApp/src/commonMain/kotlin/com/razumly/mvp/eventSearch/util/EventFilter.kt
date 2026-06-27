@@ -11,9 +11,14 @@ data class EventFilter(
     val eventType: EventType? = null,
     val price: Pair<Double, Double>? = null,
     val date: Pair<Instant, Instant?> = Pair(Clock.System.now(), null),
+    val sportIds: Set<String> = emptySet(),
 ) {
     fun filter(event: Event, includePastEvents: Boolean = false): Boolean {
         if (eventType != null && event.eventType != eventType) return false
+        if (sportIds.isNotEmpty()) {
+            val eventSportId = event.sportId?.trim()?.takeIf(String::isNotBlank) ?: return false
+            if (eventSportId !in sportIds) return false
+        }
         if (price != null && (event.price < price.first || event.price > price.second)) return false
         val usesWeeklyEndFiltering = event.eventType == EventType.WEEKLY_EVENT
         val effectiveWeeklyEnd = if (usesWeeklyEndFiltering && event.noFixedEndDateTime && event.end <= event.start) {

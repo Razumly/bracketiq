@@ -11,11 +11,13 @@ import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
+import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
@@ -51,6 +53,7 @@ interface EventSearchComponent {
     val suggestedTeams: StateFlow<List<Team>>
     val currentLocation: StateFlow<LatLng?>
     val selectedSearchLocationLabel: StateFlow<String?>
+    val sports: StateFlow<List<Sport>>
     val isLoadingMore: StateFlow<Boolean>
     val hasMoreEvents: StateFlow<Boolean>
     val filter: StateFlow<EventFilter>
@@ -114,6 +117,7 @@ class DefaultEventSearchComponent(
     private val billingRepository: IBillingRepository,
     private val fieldRepository: IFieldRepository,
     private val teamRepository: ITeamRepository,
+    private val sportsRepository: ISportsRepository,
     eventId: String?,
     override val locationTracker: LocationTracker,
     private val navigationHandler: INavigationHandler
@@ -158,6 +162,8 @@ class DefaultEventSearchComponent(
     override val suggestedOrganizations: StateFlow<List<Organization>> = _suggestedOrganizations.asStateFlow()
     private val _suggestedTeams = MutableStateFlow<List<Team>>(emptyList())
     override val suggestedTeams: StateFlow<List<Team>> = _suggestedTeams.asStateFlow()
+    private val _sports = MutableStateFlow<List<Sport>>(emptyList())
+    override val sports: StateFlow<List<Sport>> = _sports.asStateFlow()
 
     private val _isLoadingMore = MutableStateFlow(false)
     override val isLoadingMore: StateFlow<Boolean> = _isLoadingMore.asStateFlow()
@@ -278,6 +284,7 @@ class DefaultEventSearchComponent(
         }
 
         observeCachedEvents()
+        loadSports()
         refreshEvents(force = true)
         refreshOrganizations(force = false)
         refreshRentals(force = false)
@@ -424,6 +431,7 @@ class DefaultEventSearchComponent(
                     bounds = currentBounds,
                     dateFrom = activeFilter.date.first,
                     dateTo = activeFilter.date.second,
+                    sports = selectedSportNames(activeFilter),
                     limit = EVENTS_PAGE_SIZE,
                     offset = eventOffset,
                     includeDistanceFilter = includeDistanceFilter,
@@ -469,7 +477,8 @@ class DefaultEventSearchComponent(
         _filter.value = updated
 
         val dateRangeChanged = previous.date != updated.date
-        if (dateRangeChanged) {
+        val sportsChanged = previous.sportIds != updated.sportIds
+        if (dateRangeChanged || sportsChanged) {
             refreshEvents(force = true)
         } else {
             _events.value = applyEventFilter(_rawEvents.value, updated)
@@ -567,6 +576,27 @@ class DefaultEventSearchComponent(
 
     private fun applyEventFilter(source: List<Event>, filter: EventFilter): List<Event> {
         return source.filter { event -> filter.filter(event) }
+    }
+
+    private fun loadSports() {
+        scope.launch {
+            sportsRepository.getSports()
+                .onSuccess { sports ->
+                    _sports.value = sports
+                }
+                .onFailure { e ->
+                    _errorState.value = ErrorMessage("Failed to load sports: ${e.userMessage()}")
+                }
+        }
+    }
+
+    private fun selectedSportNames(filter: EventFilter): List<String> {
+        if (filter.sportIds.isEmpty()) return emptyList()
+        val sportsById = _sports.value.associateBy { sport -> sport.id }
+        return filter.sportIds.mapNotNull { sportId ->
+            sportsById[sportId]?.name?.trim()?.takeIf(String::isNotBlank)
+                ?: sportId.trim().takeIf(String::isNotBlank)
+        }
     }
 
     private fun mergeEvents(existing: List<Event>, incoming: List<Event>): List<Event> {

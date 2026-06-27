@@ -127,6 +127,7 @@ interface IEventRepository : IMVPRepository {
         bounds: Bounds,
         dateFrom: Instant? = null,
         dateTo: Instant? = null,
+        sports: List<String> = emptyList(),
         limit: Int = 50,
         offset: Int = 0,
         includeDistanceFilter: Boolean = true,
@@ -1849,6 +1850,7 @@ class EventRepository(
             bounds = bounds,
             dateFrom = null,
             dateTo = null,
+            sports = emptyList(),
             limit = eventPageSize,
             offset = 0,
             includeDistanceFilter = true,
@@ -1859,6 +1861,7 @@ class EventRepository(
         bounds: Bounds,
         dateFrom: Instant?,
         dateTo: Instant?,
+        sports: List<String>,
         limit: Int,
         offset: Int,
         includeDistanceFilter: Boolean,
@@ -1878,6 +1881,9 @@ class EventRepository(
                 },
                 dateFrom = dateFrom?.toString(),
                 dateTo = dateTo?.toString(),
+                sports = sports
+                    .mapNotNull { sport -> sport.trim().takeIf(String::isNotBlank) }
+                    .takeIf { it.isNotEmpty() },
             )
             val res = api.post<EventSearchRequestDto, EventsResponseDto>(
                 path = "api/events/search",

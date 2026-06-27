@@ -198,6 +198,7 @@ fun SearchBox(
 private fun isFilterActive(filter: EventFilter, currentRadiusMiles: Double? = null): Boolean {
     return filter.eventType != null ||
         filter.price != null ||
+        filter.sportIds.isNotEmpty() ||
         filter.date.second != null ||
         ((currentRadiusMiles ?: 0.0) > 0.0)
 }

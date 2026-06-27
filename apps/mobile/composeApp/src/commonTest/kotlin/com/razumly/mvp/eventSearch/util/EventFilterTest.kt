@@ -37,10 +37,30 @@ class EventFilterTest {
         assertFalse(filter.filter(event, includePastEvents = true))
     }
 
-    private fun eventAt(start: Instant): Event = Event(
+    @Test
+    fun givenSportFilter_whenEventSportMatches_thenFilterReturnsTrue() {
+        val filter = EventFilter(date = now to null, sportIds = setOf("volleyball"))
+        val event = eventAt(now + 1.days, sportId = "volleyball")
+
+        assertTrue(filter.filter(event))
+    }
+
+    @Test
+    fun givenSportFilter_whenEventSportDiffers_thenFilterReturnsFalse() {
+        val filter = EventFilter(date = now to null, sportIds = setOf("volleyball"))
+        val event = eventAt(now + 1.days, sportId = "soccer")
+
+        assertFalse(filter.filter(event))
+    }
+
+    private fun eventAt(
+        start: Instant,
+        sportId: String? = null,
+    ): Event = Event(
         name = "Test League",
         start = start,
         end = start,
+        sportId = sportId,
         state = "PUBLISHED",
     )
 }

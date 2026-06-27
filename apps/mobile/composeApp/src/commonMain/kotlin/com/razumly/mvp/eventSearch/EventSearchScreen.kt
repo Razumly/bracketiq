@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -49,6 +50,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.FabPosition
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBarDefaults
@@ -89,6 +91,7 @@ import com.kizitonwose.calendar.core.WeekDayPosition
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateUrl
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
@@ -212,6 +215,44 @@ private val DISCOVER_GUIDE_REQUIRED_TARGETS = setOf(
     DISCOVER_GUIDE_TARGET_TABS,
     DISCOVER_GUIDE_TARGET_SEARCH,
 )
+
+@Composable
+private fun DiscoverFilterSportSection(
+    sports: List<Sport>,
+    selectedSportIds: Set<String>,
+    onSportToggled: (Sport) -> Unit,
+) {
+    if (sports.isEmpty()) return
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = "Sports",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            sports.forEach { sport ->
+                FilterChip(
+                    selected = sport.id in selectedSportIds,
+                    onClick = { onSportToggled(sport) },
+                    label = {
+                        Text(
+                            text = sport.name,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun DiscoverFilterLocationSection(
@@ -400,6 +441,7 @@ fun EventSearchScreen(
     val currentFilter by component.filter.collectAsState()
     val currentRadius by component.currentRadius.collectAsState()
     val selectedSearchLocationLabel by component.selectedSearchLocationLabel.collectAsState()
+    val sports by component.sports.collectAsState()
 
     var selectedTab by rememberSaveable { mutableStateOf(DiscoverTab.EVENTS) }
     var searchQuery by remember { mutableStateOf("") }
@@ -1020,6 +1062,20 @@ fun EventSearchScreen(
                     filterMaxHeight = filterDropdownMaxHeight,
                     filterExtraContent = if (selectedTab == DiscoverTab.EVENTS) {
                         {
+                            DiscoverFilterSportSection(
+                                sports = sports,
+                                selectedSportIds = currentFilter.sportIds,
+                                onSportToggled = { sport ->
+                                    component.updateFilter {
+                                        val nextSportIds = if (sport.id in sportIds) {
+                                            sportIds - sport.id
+                                        } else {
+                                            sportIds + sport.id
+                                        }
+                                        copy(sportIds = nextSportIds)
+                                    }
+                                },
+                            )
                             DiscoverFilterLocationSection(
                                 locationLabel = selectedSearchLocationLabel ?: if (currentLocation != null) {
                                     "My location"

@@ -418,6 +418,7 @@ internal class CreateEvent_FakeEventRepository(
         bounds: Bounds,
         dateFrom: Instant?,
         dateTo: Instant?,
+        sports: List<String>,
         limit: Int,
         offset: Int,
         includeDistanceFilter: Boolean,

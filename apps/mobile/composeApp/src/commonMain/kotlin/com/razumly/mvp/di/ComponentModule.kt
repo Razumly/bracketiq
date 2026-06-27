@@ -119,6 +119,7 @@ val componentModule = module {
             billingRepository = get(),
             fieldRepository = get(),
             teamRepository = get(),
+            sportsRepository = get(),
             eventId = eventId,
             navigationHandler = navHandler
         )
