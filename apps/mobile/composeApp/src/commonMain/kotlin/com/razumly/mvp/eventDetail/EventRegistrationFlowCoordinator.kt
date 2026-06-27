@@ -105,6 +105,7 @@ internal enum class JoinExecutionAction {
     REQUEST_PARENT_APPROVAL,
     REQUIRE_PRICE,
     START_PAYMENT_PLAN,
+    START_MANUAL_PAYMENT,
     JOIN_DIRECTLY,
     CREATE_PURCHASE_INTENT,
 }
@@ -772,7 +773,23 @@ internal class EventRegistrationFlowCoordinator {
     fun paymentPlanBillSuccessMessage(
         status: PaymentPlanBillStatus,
         forTeamJoin: Boolean,
+        manualPayment: Boolean = false,
     ): String {
+        if (manualPayment) {
+            return if (forTeamJoin) {
+                if (status == PaymentPlanBillStatus.ALREADY_EXISTS) {
+                    "Team joined. Manual payment bill already exists. Upload proof from your Profile."
+                } else {
+                    "Team joined. Manual payment bill created. Upload proof from your Profile."
+                }
+            } else {
+                if (status == PaymentPlanBillStatus.ALREADY_EXISTS) {
+                    "Joined. Manual payment bill already exists. Upload proof from your Profile."
+                } else {
+                    "Joined. Manual payment bill created. Upload proof from your Profile."
+                }
+            }
+        }
         return if (forTeamJoin) {
             if (status == PaymentPlanBillStatus.ALREADY_EXISTS) {
                 "Team joined. Payment plan already exists. Manage installments from your Profile."
@@ -794,6 +811,7 @@ internal class EventRegistrationFlowCoordinator {
         isEventFull: Boolean,
         isTeamSignup: Boolean,
         forTeamJoin: Boolean,
+        manualPayment: Boolean = false,
     ): JoinExecutionAction {
         if (currentUserIsMinor) {
             return JoinExecutionAction.REQUEST_PARENT_APPROVAL
@@ -808,6 +826,14 @@ internal class EventRegistrationFlowCoordinator {
             (forTeamJoin || !isTeamSignup)
         ) {
             return JoinExecutionAction.START_PAYMENT_PLAN
+        }
+        if (
+            manualPayment &&
+            paymentPlan.configuredPriceCents > 0 &&
+            !isEventFull &&
+            (forTeamJoin || !isTeamSignup)
+        ) {
+            return JoinExecutionAction.START_MANUAL_PAYMENT
         }
         if (paymentPlan.configuredPriceCents <= 0 || isEventFull || (!forTeamJoin && isTeamSignup)) {
             return JoinExecutionAction.JOIN_DIRECTLY

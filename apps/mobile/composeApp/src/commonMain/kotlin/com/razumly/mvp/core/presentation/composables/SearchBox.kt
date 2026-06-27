@@ -17,11 +17,15 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Menu
@@ -29,12 +33,14 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.RangeSlider
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -53,6 +59,8 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
@@ -61,6 +69,7 @@ import com.razumly.mvp.eventSearch.util.EventFilter
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
+import kotlin.math.roundToInt
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
@@ -71,6 +80,8 @@ fun SearchBox(
     placeholder: String,
     filter: Boolean,
     currentFilter: EventFilter? = null,
+    currentRadiusMiles: Double? = null,
+    onRadiusChange: ((Double) -> Unit)? = null,
     onFilterChange: (EventFilter.() -> EventFilter) -> Unit,
     onChange: (String) -> Unit,
     onSearch: (String) -> Unit,
@@ -79,6 +90,8 @@ fun SearchBox(
     onToggleFilter: (Boolean) -> Unit,
     trailingAction: (@Composable (() -> Unit))? = null,
     rowAction: (@Composable RowScope.() -> Unit)? = null,
+    filterExtraContent: (@Composable (() -> Unit))? = null,
+    filterMaxHeight: Dp? = null,
 ) {
     var searchInput by remember { mutableStateOf("") }
     var isSearchFieldFocused by remember { mutableStateOf(false) }
@@ -115,16 +128,42 @@ fun SearchBox(
                     )
                 },
                 trailingIcon = trailingAction ?: {
-                    if (searchInput.isNotEmpty()) {
-                        IconButton(onClick = {
-                            searchInput = ""
-                            onChange("")
-                            focusManager.clearFocus()
-                        }) {
-                            Icon(
-                                imageVector = Icons.Default.Clear,
-                                contentDescription = "Clear"
-                            )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (searchInput.isNotEmpty()) {
+                            IconButton(onClick = {
+                                searchInput = ""
+                                onChange("")
+                                focusManager.clearFocus()
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Default.Clear,
+                                    contentDescription = "Clear"
+                                )
+                            }
+                        }
+
+                        if (filter && currentFilter != null) {
+                            Box {
+                                IconButton(onClick = { showFilterDropdown = !showFilterDropdown }) {
+                                    Icon(
+                                        Icons.Default.Menu,
+                                        contentDescription = "Filter",
+                                        tint = if (isFilterActive(currentFilter, currentRadiusMiles)) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
+                                    )
+                                }
+
+                                if (isFilterActive(currentFilter, currentRadiusMiles)) {
+                                    Box(
+                                        modifier = Modifier.size(8.dp).background(
+                                            MaterialTheme.colorScheme.primary, CircleShape
+                                        ).align(Alignment.TopEnd)
+                                    )
+                                }
+                            }
                         }
                     }
                 },
@@ -134,31 +173,6 @@ fun SearchBox(
                         isSearchFieldFocused = focusState.isFocused
                     },
             )
-
-            if (filter && currentFilter != null) {
-                Spacer(modifier = Modifier.width(8.dp))
-
-                // Filter Button with Badge
-                Box {
-                    IconButton(onClick = { showFilterDropdown = !showFilterDropdown }) {
-                        Icon(
-                            Icons.Default.Menu,
-                            contentDescription = "Filter",
-                            tint = if (isFilterActive(currentFilter)) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    // Active filter indicator
-                    if (isFilterActive(currentFilter)) {
-                        Box(
-                            modifier = Modifier.size(8.dp).background(
-                                MaterialTheme.colorScheme.primary, CircleShape
-                            ).align(Alignment.TopEnd)
-                        )
-                    }
-                }
-            }
 
             if (rowAction != null) {
                 Spacer(modifier = Modifier.width(8.dp))
@@ -170,6 +184,10 @@ fun SearchBox(
         if (filter && currentFilter != null) {
             FilterDropdown(visible = showFilterDropdown,
                 currentFilter = currentFilter,
+                currentRadiusMiles = currentRadiusMiles,
+                onRadiusChange = onRadiusChange,
+                maxHeight = filterMaxHeight,
+                extraContent = filterExtraContent,
                 onFilterChange = onFilterChange,
                 onDismiss = { showFilterDropdown = false })
         }
@@ -177,8 +195,11 @@ fun SearchBox(
 }
 
 @OptIn(ExperimentalTime::class)
-private fun isFilterActive(filter: EventFilter): Boolean {
-    return filter.eventType != null || filter.price != null || filter.date.second != null
+private fun isFilterActive(filter: EventFilter, currentRadiusMiles: Double? = null): Boolean {
+    return filter.eventType != null ||
+        filter.price != null ||
+        filter.date.second != null ||
+        ((currentRadiusMiles ?: 0.0) > 0.0)
 }
 
 @Composable
@@ -186,6 +207,10 @@ private fun isFilterActive(filter: EventFilter): Boolean {
 private fun FilterDropdown(
     visible: Boolean,
     currentFilter: EventFilter,
+    currentRadiusMiles: Double? = null,
+    onRadiusChange: ((Double) -> Unit)? = null,
+    maxHeight: Dp? = null,
+    extraContent: (@Composable (() -> Unit))? = null,
     onFilterChange: (EventFilter.() -> EventFilter) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -198,15 +223,20 @@ private fun FilterDropdown(
         exit = shrinkVertically(animationSpec = tween(300)) + fadeOut()
     ) {
         Surface(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .then(if (maxHeight != null) Modifier.heightIn(max = maxHeight) else Modifier),
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             tonalElevation = 0.dp,
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(20.dp)
         ) {
             Box {
                 Column(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier
+                        .then(if (maxHeight != null) Modifier.verticalScroll(rememberScrollState()) else Modifier)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -215,12 +245,13 @@ private fun FilterDropdown(
                     ) {
                         Text(
                             text = "Filter Events",
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
 
                         TextButton(onClick = {
                             onFilterChange { EventFilter() }
+                            onRadiusChange?.invoke(0.0)
                             onDismiss()
                         }) {
                             Text("Clear All")
@@ -240,6 +271,15 @@ private fun FilterDropdown(
                         { showStartPicker = true },
                         { showEndPicker = true }
                     )
+
+                    extraContent?.invoke()
+
+                    if (onRadiusChange != null) {
+                        DistanceFilterSection(
+                            currentRadiusMiles = currentRadiusMiles ?: 0.0,
+                            onRadiusChange = onRadiusChange,
+                        )
+                    }
 
                     Button(
                         onClick = onDismiss, modifier = Modifier.fillMaxWidth()
@@ -281,6 +321,86 @@ private fun FilterDropdown(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun DistanceFilterSection(
+    currentRadiusMiles: Double,
+    onRadiusChange: (Double) -> Unit,
+) {
+    var enabled by remember(currentRadiusMiles) {
+        mutableStateOf(currentRadiusMiles > 0.0)
+    }
+    var radiusMiles by remember(currentRadiusMiles) {
+        mutableStateOf(
+            currentRadiusMiles
+                .takeIf { it > 0.0 }
+                ?.roundToInt()
+                ?.coerceIn(DISTANCE_SLIDER_MIN_MILES, DISTANCE_SLIDER_MAX_MILES)
+                ?: DEFAULT_DISTANCE_FILTER_MILES
+        )
+    }
+
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Distance",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = if (enabled) "Within $radiusMiles mi" else "Any distance",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = enabled, onCheckedChange = { nextEnabled ->
+                enabled = nextEnabled
+                onRadiusChange(if (nextEnabled) radiusMiles.toDouble() else 0.0)
+            })
+        }
+
+        if (enabled) {
+            Slider(
+                value = radiusMiles.toFloat(),
+                onValueChange = { value ->
+                    radiusMiles = value.roundToInt()
+                },
+                onValueChangeFinished = {
+                    onRadiusChange(radiusMiles.toDouble())
+                },
+                valueRange = DISTANCE_SLIDER_MIN_MILES.toFloat()..DISTANCE_SLIDER_MAX_MILES.toFloat(),
+                track = { sliderState ->
+                    SliderDefaults.Track(
+                        sliderState = sliderState,
+                        drawStopIndicator = null,
+                    )
+                },
+                modifier = Modifier.padding(top = 4.dp)
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = "${DISTANCE_SLIDER_MIN_MILES} mi",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "${DISTANCE_SLIDER_MAX_MILES} mi",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 @OptIn(ExperimentalTime::class)
 private fun EventTypeFilterSection(
     currentFilter: EventFilter, onFilterChange: (EventFilter.() -> EventFilter) -> Unit
@@ -295,7 +415,7 @@ private fun EventTypeFilterSection(
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+            modifier = Modifier.fillMaxWidth().padding(top = 3.dp)
         ) {
             EventTypeFilterChip(
                 selected = currentFilter.eventType == null,
@@ -323,6 +443,10 @@ private fun EventTypeFilterSection(
         }
     }
 }
+
+private const val DEFAULT_DISTANCE_FILTER_MILES = 50
+private const val DISTANCE_SLIDER_MIN_MILES = 10
+private const val DISTANCE_SLIDER_MAX_MILES = 100
 
 @Composable
 private fun EventTypeFilterChip(
@@ -360,6 +484,21 @@ private fun PriceFilterSection(
     var priceRange by remember(currentFilter.price) {
         mutableStateOf(currentFilter.price ?: (0.0 to 100.0))
     }
+    var minPriceInput by remember(currentFilter.price) {
+        mutableStateOf(priceRange.first.toInt().toString())
+    }
+    var maxPriceInput by remember(currentFilter.price) {
+        mutableStateOf(priceRange.second.toInt().toString())
+    }
+
+    fun updatePriceFilter(minInput: String, maxInput: String) {
+        val minPrice = minInput.toDoubleOrNull() ?: return
+        val maxPrice = maxInput.toDoubleOrNull() ?: return
+        if (minPrice > maxPrice) return
+        val nextRange = minPrice to maxPrice
+        priceRange = nextRange
+        onFilterChange { copy(price = nextRange) }
+    }
 
     Column {
         Row(
@@ -381,24 +520,60 @@ private fun PriceFilterSection(
         }
 
         if (enablePriceFilter) {
-            Text(
-                text = "$${priceRange.first.toInt()} - $${priceRange.second.toInt()}",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 8.dp)
-            )
-
-            RangeSlider(
-                value = priceRange.first.toFloat()..priceRange.second.toFloat(),
-                onValueChange = { range ->
-                    priceRange = range.start.toDouble() to range.endInclusive.toDouble()
-                    onFilterChange { copy(price = priceRange) }
-                },
-                valueRange = 0f..200f,
-                steps = 19,
-                modifier = Modifier.padding(top = 8.dp)
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                PriceTextField(
+                    value = minPriceInput,
+                    label = "Min",
+                    onValueChange = { nextValue ->
+                        minPriceInput = nextValue
+                        updatePriceFilter(nextValue, maxPriceInput)
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                PriceTextField(
+                    value = maxPriceInput,
+                    label = "Max",
+                    onValueChange = { nextValue ->
+                        maxPriceInput = nextValue
+                        updatePriceFilter(minPriceInput, nextValue)
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun PriceTextField(
+    value: String,
+    label: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { input ->
+            val normalized = input.filter(Char::isDigit)
+            onValueChange(normalized)
+        },
+        modifier = modifier,
+        singleLine = true,
+        label = { Text(label) },
+        leadingIcon = { Text("$") },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = MaterialTheme.colorScheme.primary,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+            focusedLabelColor = MaterialTheme.colorScheme.primary,
+            unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
+    )
 }
 
 @Composable

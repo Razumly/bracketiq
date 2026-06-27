@@ -45,6 +45,7 @@ private const val INITIAL_EVENT_PLACEHOLDER_COUNT = 4
 @Composable
 fun EventList(
     events: List<Event>,
+    organizationLogoIdsById: Map<String, String> = emptyMap(),
     firstElementPadding: PaddingValues,
     lastElementPadding: PaddingValues,
     lazyListState: LazyListState = rememberLazyListState(),
@@ -138,6 +139,10 @@ fun EventList(
                         event,
                         navPadding = PaddingValues(bottom = 16.dp),
                         showLoadingPlaceholder = true,
+                        fallbackImageId = event.organizationId
+                            ?.trim()
+                            ?.takeIf(String::isNotBlank)
+                            ?.let(organizationLogoIdsById::get),
                         onMapClick = { offset ->
                             onMapClick(offset, event)
                         },

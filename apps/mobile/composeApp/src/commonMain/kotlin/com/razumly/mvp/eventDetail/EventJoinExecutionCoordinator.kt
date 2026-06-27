@@ -3,6 +3,7 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
@@ -132,6 +133,7 @@ internal class EventJoinExecutionCoordinator(
                 isEventFull = isEventFull,
                 isTeamSignup = event.teamSignup,
                 forTeamJoin = false,
+                manualPayment = event.usesManualRegistrationPayments(),
             )
         ) {
             JoinExecutionAction.REQUEST_PARENT_APPROVAL -> {
@@ -149,6 +151,18 @@ internal class EventJoinExecutionCoordinator(
                     addCurrentUserToEvent = addCurrentUserToEvent,
                     createPaymentPlanBill = createPaymentPlanBill,
                     rollbackUserJoinAfterBillingFailure = rollbackUserJoinAfterBillingFailure,
+                    refreshAfterParticipantMutation = refreshAfterParticipantMutation,
+                    clearRegistrationProgress = clearRegistrationProgress,
+                    showLoading = showLoading,
+                    setError = setError,
+                )
+            }
+            JoinExecutionAction.START_MANUAL_PAYMENT -> {
+                executeSelfManualPaymentJoin(
+                    event = event,
+                    selectedDivisionId = selectedDivisionId,
+                    weeklyOccurrence = weeklyOccurrence,
+                    addCurrentUserToEvent = addCurrentUserToEvent,
                     refreshAfterParticipantMutation = refreshAfterParticipantMutation,
                     clearRegistrationProgress = clearRegistrationProgress,
                     showLoading = showLoading,
@@ -245,6 +259,7 @@ internal class EventJoinExecutionCoordinator(
                 isEventFull = isEventFull,
                 isTeamSignup = event.teamSignup,
                 forTeamJoin = true,
+                manualPayment = event.usesManualRegistrationPayments(),
             )
         ) {
             JoinExecutionAction.REQUEST_PARENT_APPROVAL -> {
@@ -262,6 +277,19 @@ internal class EventJoinExecutionCoordinator(
                     addTeamToEvent = addTeamToEvent,
                     createPaymentPlanBill = createPaymentPlanBill,
                     rollbackTeamJoinAfterBillingFailure = rollbackTeamJoinAfterBillingFailure,
+                    refreshAfterParticipantMutation = refreshAfterParticipantMutation,
+                    clearRegistrationProgress = clearRegistrationProgress,
+                    showLoading = showLoading,
+                    setError = setError,
+                )
+            }
+            JoinExecutionAction.START_MANUAL_PAYMENT -> {
+                executeTeamManualPaymentJoin(
+                    event = event,
+                    team = team,
+                    selectedDivisionId = selectedDivisionId,
+                    weeklyOccurrence = weeklyOccurrence,
+                    addTeamToEvent = addTeamToEvent,
                     refreshAfterParticipantMutation = refreshAfterParticipantMutation,
                     clearRegistrationProgress = clearRegistrationProgress,
                     showLoading = showLoading,
@@ -308,6 +336,68 @@ internal class EventJoinExecutionCoordinator(
                 }
             }
         }
+    }
+
+    private suspend fun executeSelfManualPaymentJoin(
+        event: Event,
+        selectedDivisionId: String?,
+        weeklyOccurrence: EventOccurrenceSelection?,
+        addCurrentUserToEvent: suspend (
+            event: Event,
+            preferredDivisionId: String?,
+            occurrence: EventOccurrenceSelection?,
+        ) -> Result<SelfRegistrationResult>,
+        refreshAfterParticipantMutation: suspend (eventId: String, warningMessage: String) -> Unit,
+        clearRegistrationProgress: suspend () -> Unit,
+        showLoading: (String) -> Unit,
+        setError: (String) -> Unit,
+    ) {
+        showLoading("Joining Event ...")
+        addCurrentUserToEvent(event, selectedDivisionId, weeklyOccurrence)
+            .onSuccess { registration ->
+                showLoading("Reloading Event")
+                refreshAfterParticipantMutation(
+                    event.id,
+                    "Failed to refresh event after joining.",
+                )
+                clearRegistrationProgress()
+                registrationFlowCoordinator.selfRegistrationResultMessage(registration)
+                    ?.let(setError)
+                    ?: setError("Joined. Manual payment bill created. Upload proof from your Profile.")
+            }.onFailure { throwable ->
+                setError(throwable.userMessage())
+            }
+    }
+
+    private suspend fun executeTeamManualPaymentJoin(
+        event: Event,
+        team: TeamWithPlayers,
+        selectedDivisionId: String?,
+        weeklyOccurrence: EventOccurrenceSelection?,
+        addTeamToEvent: suspend (
+            event: Event,
+            team: Team,
+            preferredDivisionId: String?,
+            occurrence: EventOccurrenceSelection?,
+        ) -> Result<Unit>,
+        refreshAfterParticipantMutation: suspend (eventId: String, warningMessage: String) -> Unit,
+        clearRegistrationProgress: suspend () -> Unit,
+        showLoading: (String) -> Unit,
+        setError: (String) -> Unit,
+    ) {
+        showLoading("Joining Event ...")
+        addTeamToEvent(event, team.team, selectedDivisionId, weeklyOccurrence)
+            .onSuccess {
+                showLoading("Reloading Event")
+                refreshAfterParticipantMutation(
+                    event.id,
+                    "Failed to refresh event after team join.",
+                )
+                clearRegistrationProgress()
+                setError("Team joined. Manual payment bill created. Upload proof from your Profile.")
+            }.onFailure { throwable ->
+                setError(throwable.userMessage())
+            }
     }
 
     private suspend fun executeSelfPaymentPlanJoin(
@@ -368,6 +458,7 @@ internal class EventJoinExecutionCoordinator(
                     registrationFlowCoordinator.paymentPlanBillSuccessMessage(
                         status = status,
                         forTeamJoin = false,
+                        manualPayment = event.usesManualRegistrationPayments(),
                     )
                 )
             }.onFailure { throwable ->
@@ -431,6 +522,7 @@ internal class EventJoinExecutionCoordinator(
                 registrationFlowCoordinator.paymentPlanBillSuccessMessage(
                     status = status,
                     forTeamJoin = true,
+                    manualPayment = event.usesManualRegistrationPayments(),
                 )
             )
         }.onFailure { throwable ->

@@ -13,5 +13,6 @@ expect class MapComponent {
     val places: StateFlow<List<MVPPlace>>
     fun setEvents(events: List<Event>)
     fun setPlaces(places: List<MVPPlace>)
+    suspend fun searchLocationPlaces(query: String): List<MVPPlace>
     fun toggleMap()
 }

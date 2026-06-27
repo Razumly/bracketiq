@@ -89,6 +89,7 @@ interface MatchContentComponent {
     fun dismissOfficialDialog()
     fun checkOfficialStatus()
     fun confirmOfficialCheckIn()
+    fun markMatchDelayed()
     fun startMatch()
     fun resetMatchTimer()
     fun updateActualTimes(actualStart: Instant?, actualEnd: Instant?)
@@ -575,6 +576,37 @@ class DefaultMatchContentComponent(
                 }
             } finally {
                 _officialCheckInSaving.value = false
+            }
+        }
+    }
+
+    override fun markMatchDelayed() {
+        if (_matchTimeSaving.value) return
+        if (!isOfficial.value || officialCheckedIn.value != true || _matchFinished.value) {
+            return
+        }
+
+        _matchTimeSaving.value = true
+        scope.launch {
+            try {
+                val currentMatchWithTeams = matchWithTeams.value
+                val currentMatch = currentMatchWithTeams.match
+                if (currentMatch.status.equals("DELAYED", ignoreCase = true)) {
+                    return@launch
+                }
+                val updatedMatch = currentMatch.copy(status = "DELAYED")
+                matchRepository.updateMatchOperations(
+                    match = updatedMatch,
+                    lifecycle = MatchLifecycleOperationDto(status = "DELAYED"),
+                ).onSuccess { remoteMatch ->
+                    val syncedMatch = remoteMatch.copy(status = updatedMatch.status)
+                    _optimisticMatch.value = currentMatchWithTeams.copy(match = syncedMatch)
+                    persistMatchLocally(syncedMatch, clearOptimisticOnSuccess = true)
+                }.onFailure { error ->
+                    _errorState.value = "Failed to mark match delayed: ${error.userMessage()}"
+                }
+            } finally {
+                _matchTimeSaving.value = false
             }
         }
     }

@@ -19,8 +19,23 @@ class EventDetailWeeklyBehaviorTest {
         assertFalse(
             shouldUseViewSchedulePrimaryAction(
                 isWeeklyParentEvent = true,
+                isAffiliateEvent = false,
                 isUserInEvent = true,
                 isHost = false,
+                isAssistantHost = false,
+                isEventOfficial = false,
+            ),
+        )
+    }
+
+    @Test
+    fun affiliate_events_do_not_switch_primary_action_to_view_schedule() {
+        assertFalse(
+            shouldUseViewSchedulePrimaryAction(
+                isWeeklyParentEvent = false,
+                isAffiliateEvent = true,
+                isUserInEvent = true,
+                isHost = true,
                 isAssistantHost = false,
                 isEventOfficial = false,
             ),

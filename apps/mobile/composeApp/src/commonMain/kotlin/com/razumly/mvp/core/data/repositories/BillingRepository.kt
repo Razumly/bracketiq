@@ -12,6 +12,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Facility
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.data.dataTypes.ManualPaymentProof
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.OrganizationStaffMember
@@ -172,11 +173,13 @@ data class EventTeamBillingPaymentSnapshot(
     val sequence: Int,
     val status: String? = null,
     val amountCents: Int,
+    val paidAmountCents: Int? = null,
     val refundedAmountCents: Int,
     val refundableAmountCents: Int,
     val paidAt: String? = null,
     val paymentIntentId: String? = null,
     val isRefundable: Boolean,
+    val manualPaymentProofs: List<ManualPaymentProof> = emptyList(),
 )
 
 data class EventTeamBillingBillSnapshot(
@@ -547,6 +550,19 @@ interface IBillingRepository : IMVPRepository {
         paymentIntent: String,
     ): Result<Bill>
     suspend fun cancelBillPayment(billId: String, billPaymentId: String): Result<Bill>
+    suspend fun submitManualPaymentProof(
+        billId: String,
+        billPaymentId: String,
+        fileId: String,
+    ): Result<ManualPaymentProof>
+    suspend fun reviewManualPaymentProof(
+        billId: String,
+        billPaymentId: String,
+        proofId: String,
+        decision: String,
+        amountAcceptedCents: Int? = null,
+        reviewNote: String? = null,
+    ): Result<Bill>
     suspend fun getBillingAddress(): Result<BillingAddressProfile>
     suspend fun updateBillingAddress(address: BillingAddressDraft): Result<BillingAddressProfile>
     suspend fun listSubscriptions(userId: String, limit: Int = 100): Result<List<Subscription>>
@@ -1377,6 +1393,61 @@ class BillingRepository(
         )
         response.error?.takeIf(String::isNotBlank)?.let { throw Exception(it) }
         response.bill?.toBillOrNull() ?: throw Exception("Cancel response is missing bill.")
+    }
+
+    override suspend fun submitManualPaymentProof(
+        billId: String,
+        billPaymentId: String,
+        fileId: String,
+    ): Result<ManualPaymentProof> = runCatching {
+        val normalizedBillId = billId.trim()
+        val normalizedPaymentId = billPaymentId.trim()
+        val normalizedFileId = fileId.trim()
+        require(normalizedBillId.isNotBlank()) { "Bill id is required." }
+        require(normalizedPaymentId.isNotBlank()) { "Bill payment id is required." }
+        require(normalizedFileId.isNotBlank()) { "Proof image is required." }
+
+        val response = api.post<ManualPaymentProofSubmitRequestDto, ManualPaymentProofResponseDto>(
+            path = "api/billing/bills/${normalizedBillId.encodeURLQueryComponent()}/payments/${normalizedPaymentId.encodeURLQueryComponent()}/proof",
+            body = ManualPaymentProofSubmitRequestDto(fileId = normalizedFileId),
+        )
+        response.error?.takeIf(String::isNotBlank)?.let { throw Exception(it) }
+        response.proof?.toManualPaymentProofOrNull()
+            ?: throw Exception("Proof upload response is missing proof.")
+    }
+
+    override suspend fun reviewManualPaymentProof(
+        billId: String,
+        billPaymentId: String,
+        proofId: String,
+        decision: String,
+        amountAcceptedCents: Int?,
+        reviewNote: String?,
+    ): Result<Bill> = runCatching {
+        val normalizedBillId = billId.trim()
+        val normalizedPaymentId = billPaymentId.trim()
+        val normalizedProofId = proofId.trim()
+        val normalizedDecision = decision.trim().uppercase()
+        require(normalizedBillId.isNotBlank()) { "Bill id is required." }
+        require(normalizedPaymentId.isNotBlank()) { "Bill payment id is required." }
+        require(normalizedProofId.isNotBlank()) { "Proof id is required." }
+        require(normalizedDecision == "ACCEPT" || normalizedDecision == "REJECT") {
+            "Proof decision must be ACCEPT or REJECT."
+        }
+        if (normalizedDecision == "ACCEPT") {
+            require((amountAcceptedCents ?: 0) > 0) { "Accepted amount must be greater than 0." }
+        }
+
+        val response = api.post<ManualPaymentProofReviewRequestDto, CreateBillResponseDto>(
+            path = "api/billing/bills/${normalizedBillId.encodeURLQueryComponent()}/payments/${normalizedPaymentId.encodeURLQueryComponent()}/proofs/${normalizedProofId.encodeURLQueryComponent()}/review",
+            body = ManualPaymentProofReviewRequestDto(
+                decision = normalizedDecision,
+                amountAcceptedCents = amountAcceptedCents?.coerceAtLeast(0),
+                reviewNote = reviewNote?.trim()?.takeIf(String::isNotBlank),
+            ),
+        )
+        response.error?.takeIf(String::isNotBlank)?.let { throw Exception(it) }
+        response.bill?.toBillOrNull() ?: throw Exception("Proof review response is missing bill.")
     }
 
     override suspend fun getBillingAddress(): Result<BillingAddressProfile> = runCatching {
@@ -2352,6 +2423,24 @@ private data class MarkBillPaymentProcessingRequestDto(
 )
 
 @Serializable
+private data class ManualPaymentProofSubmitRequestDto(
+    val fileId: String,
+)
+
+@Serializable
+private data class ManualPaymentProofReviewRequestDto(
+    val decision: String,
+    val amountAcceptedCents: Int? = null,
+    val reviewNote: String? = null,
+)
+
+@Serializable
+private data class ManualPaymentProofResponseDto(
+    val proof: ManualPaymentProofApiDto? = null,
+    val error: String? = null,
+)
+
+@Serializable
 private data class UpdateBillingAddressRequestDto(
     val billingAddress: BillingAddressDto,
 )
@@ -2468,6 +2557,30 @@ private data class EventTeamBillingLineItemDto(
 )
 
 @Serializable
+private data class ManualPaymentProofApiDto(
+    val id: String? = null,
+    @SerialName("\$id") val legacyId: String? = null,
+    val status: String? = null,
+    val fileId: String? = null,
+    val fileUrl: String? = null,
+    val amountAcceptedCents: Int? = null,
+) {
+    fun toManualPaymentProofOrNull(): ManualPaymentProof? {
+        val resolvedId = id?.trim()?.takeIf(String::isNotBlank)
+            ?: legacyId?.trim()?.takeIf(String::isNotBlank)
+            ?: return null
+        val resolvedFileId = fileId?.trim()?.takeIf(String::isNotBlank) ?: return null
+        return ManualPaymentProof(
+            id = resolvedId,
+            status = status?.trim()?.takeIf(String::isNotBlank),
+            fileId = resolvedFileId,
+            fileUrl = fileUrl?.trim()?.takeIf(String::isNotBlank),
+            amountAcceptedCents = amountAcceptedCents,
+        )
+    }
+}
+
+@Serializable
 private data class EventTeamBillingPaymentDto(
     val id: String? = null,
     @SerialName("\$id") val legacyId: String? = null,
@@ -2475,11 +2588,13 @@ private data class EventTeamBillingPaymentDto(
     val sequence: Int? = null,
     val status: String? = null,
     val amountCents: Int? = null,
+    val paidAmountCents: Int? = null,
     val refundedAmountCents: Int? = null,
     val refundableAmountCents: Int? = null,
     val paidAt: String? = null,
     val paymentIntentId: String? = null,
     val isRefundable: Boolean? = null,
+    val manualPaymentProofs: List<ManualPaymentProofApiDto> = emptyList(),
 )
 
 @Serializable
@@ -2799,11 +2914,13 @@ private fun EventTeamBillingPaymentDto.toPaymentOrNull(): EventTeamBillingPaymen
         sequence = resolvedSequence,
         status = status?.trim()?.takeIf(String::isNotBlank),
         amountCents = resolvedAmountCents,
+        paidAmountCents = paidAmountCents,
         refundedAmountCents = resolvedRefunded,
         refundableAmountCents = resolvedRefundable,
         paidAt = paidAt?.trim()?.takeIf(String::isNotBlank),
         paymentIntentId = paymentIntentId?.trim()?.takeIf(String::isNotBlank),
         isRefundable = isRefundable ?: false,
+        manualPaymentProofs = manualPaymentProofs.mapNotNull { proof -> proof.toManualPaymentProofOrNull() },
     )
 }
 
@@ -2815,10 +2932,12 @@ private data class BillPaymentApiDto(
     val sequence: Int? = null,
     val dueDate: String? = null,
     val amountCents: Int? = null,
+    val paidAmountCents: Int? = null,
     val status: String? = null,
     val paidAt: String? = null,
     val paymentIntentId: String? = null,
     val payerUserId: String? = null,
+    val manualPaymentProofs: List<ManualPaymentProofApiDto> = emptyList(),
 ) {
     fun toBillPaymentOrNull(): BillPayment? {
         val resolvedId = id ?: legacyId
@@ -2842,10 +2961,12 @@ private data class BillPaymentApiDto(
             sequence = resolvedSequence,
             dueDate = resolvedDueDate,
             amountCents = resolvedAmount,
+            paidAmountCents = paidAmountCents,
             status = status,
             paidAt = paidAt,
             paymentIntentId = paymentIntentId,
             payerUserId = payerUserId,
+            manualPaymentProofs = manualPaymentProofs.mapNotNull { proof -> proof.toManualPaymentProofOrNull() },
         )
     }
 }

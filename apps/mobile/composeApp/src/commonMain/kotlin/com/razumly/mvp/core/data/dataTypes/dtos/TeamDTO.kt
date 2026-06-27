@@ -32,6 +32,7 @@ data class TeamDTO (
     val joinPolicy: String = "CLOSED",
     val openRegistration: Boolean = false,
     val registrationPriceCents: Int = 0,
+    val affiliateUrl: String? = null,
     val requiredTemplateIds: List<String> = emptyList(),
     @Transient
     val id: String = ""
@@ -63,6 +64,7 @@ fun TeamDTO.toTeam(id: String): Team {
         joinPolicy = joinPolicy,
         openRegistration = openRegistration,
         registrationPriceCents = registrationPriceCents.coerceAtLeast(0),
+        affiliateUrl = affiliateUrl?.trim()?.takeIf(String::isNotBlank),
         requiredTemplateIds = requiredTemplateIds,
     ).withSynchronizedMembership()
 }

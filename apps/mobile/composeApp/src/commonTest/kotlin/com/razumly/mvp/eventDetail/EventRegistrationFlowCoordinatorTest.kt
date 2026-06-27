@@ -791,6 +791,28 @@ class EventRegistrationFlowCoordinatorTest {
     }
 
     @Test
+    fun payment_plan_bill_success_message_uses_manual_payment_copy() {
+        val coordinator = EventRegistrationFlowCoordinator()
+
+        assertEquals(
+            "Joined. Manual payment bill created. Upload proof from your Profile.",
+            coordinator.paymentPlanBillSuccessMessage(
+                status = PaymentPlanBillStatus.CREATED,
+                forTeamJoin = false,
+                manualPayment = true,
+            ),
+        )
+        assertEquals(
+            "Team joined. Manual payment bill already exists. Upload proof from your Profile.",
+            coordinator.paymentPlanBillSuccessMessage(
+                status = PaymentPlanBillStatus.ALREADY_EXISTS,
+                forTeamJoin = true,
+                manualPayment = true,
+            ),
+        )
+    }
+
+    @Test
     fun join_execution_action_preserves_self_join_branching() {
         val coordinator = EventRegistrationFlowCoordinator()
 
@@ -844,6 +866,17 @@ class EventRegistrationFlowCoordinatorTest {
                 forTeamJoin = false,
             ),
         )
+        assertEquals(
+            JoinExecutionAction.START_MANUAL_PAYMENT,
+            coordinator.determineJoinExecutionAction(
+                paymentPlan = effectivePaymentPlan(priceCents = 4500, allowPaymentPlans = false),
+                currentUserIsMinor = false,
+                isEventFull = false,
+                isTeamSignup = false,
+                forTeamJoin = false,
+                manualPayment = true,
+            ),
+        )
     }
 
     @Test
@@ -888,6 +921,17 @@ class EventRegistrationFlowCoordinatorTest {
                 isEventFull = false,
                 isTeamSignup = false,
                 forTeamJoin = true,
+            ),
+        )
+        assertEquals(
+            JoinExecutionAction.START_MANUAL_PAYMENT,
+            coordinator.determineJoinExecutionAction(
+                paymentPlan = effectivePaymentPlan(priceCents = 4500, allowPaymentPlans = false),
+                currentUserIsMinor = false,
+                isEventFull = false,
+                isTeamSignup = false,
+                forTeamJoin = true,
+                manualPayment = true,
             ),
         )
     }

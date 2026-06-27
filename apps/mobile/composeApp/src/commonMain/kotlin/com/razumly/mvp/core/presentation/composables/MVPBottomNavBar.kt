@@ -4,12 +4,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -45,16 +45,14 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.isSpecified
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
 import com.razumly.mvp.core.presentation.AppConfig
 import com.razumly.mvp.core.presentation.CenterNavAction
 import com.razumly.mvp.core.presentation.guides.AppGuideTargets
+import com.razumly.mvp.core.presentation.guides.GuideHighlightShape
 import com.razumly.mvp.core.presentation.guides.guideTarget
 import com.razumly.mvp.core.presentation.util.getImageUrl
-import com.razumly.mvp.core.util.Platform
 
 data class NavigationItem(
     val page: AppConfig,
@@ -73,7 +71,6 @@ fun MVPBottomNavBar(
     showNavBar: Boolean = true,
     content: @Composable (PaddingValues) -> Unit
 ) {
-    val isIos = Platform.isIOS
     val items = listOf(
         NavigationItem(AppConfig.Search(), "search", "Discover"),
         NavigationItem(AppConfig.ChatList, "messages", "Messages"),
@@ -85,31 +82,13 @@ fun MVPBottomNavBar(
     val localDensity = LocalDensity.current
     val unreadBadgeText = if (unreadChatMessageCount > 99) "99+" else unreadChatMessageCount.toString()
     val inviteBadgeText = if (pendingInviteCount > 99) "99+" else pendingInviteCount.toString()
-    val iconSize = if (isIos) 22.dp else 24.dp
-    val labelStyle = if (isIos) {
-        MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp)
-    } else {
-        MaterialTheme.typography.labelMedium
+    val iconSize = 22.dp
+    val navBarHeightDp = 52.dp
+    val bottomSafeAreaPadding = with(localDensity) {
+        WindowInsets.safeDrawing.getBottom(this).toDp()
     }
-    val labelTextHeightDp = with(localDensity) {
-        val labelTextUnit = if (labelStyle.lineHeight.isSpecified) {
-            labelStyle.lineHeight
-        } else {
-            labelStyle.fontSize
-        }
-        labelTextUnit.toDp()
-    }
-    val iconContainerHeight = if (iconSize > 32.dp) iconSize else 32.dp
-    // Math: icon container + icon/label spacing + label text + vertical breathing room.
-    val minContentHeight = iconContainerHeight + 4.dp + labelTextHeightDp + 10.dp
-    val navBarMinHeight = if (minContentHeight > 72.dp) minContentHeight else 72.dp
-    val navBarInsets = if (isIos) {
-        // iOS does not need additional bottom lift for system controls; keep only side safe-area.
-        WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)
-    } else {
-        // Android devices may have gesture/3-button controls; respect the nav bar bottom inset.
-        WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
-    }
+    val navBarInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)
+    val navBarContainerColor = MaterialTheme.colorScheme.surfaceContainer
     val navItemColors = NavigationBarItemDefaults.colors(
         selectedIconColor = MaterialTheme.colorScheme.primary,
         selectedTextColor = MaterialTheme.colorScheme.primary,
@@ -127,6 +106,9 @@ fun MVPBottomNavBar(
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(navBarHeightDp + bottomSafeAreaPadding)
+                    .background(navBarContainerColor)
                     .onGloballyPositioned { layoutCoordinates ->
                         navBarHeight = with(localDensity) {
                             layoutCoordinates.size.height.toDp()
@@ -135,9 +117,11 @@ fun MVPBottomNavBar(
             ) {
                 NavigationBar(
                     modifier = Modifier
+                        .align(Alignment.TopCenter)
                         .zIndex(1f)
-                        .heightIn(min = navBarMinHeight),
+                        .height(navBarHeightDp),
                     windowInsets = navBarInsets,
+                    containerColor = navBarContainerColor,
                 ) {
                     items.forEachIndexed { index, item ->
                         NavigationBarItem(
@@ -191,14 +175,7 @@ fun MVPBottomNavBar(
                                     }
                                 }
                             },
-                            label = {
-                                Text(
-                                    text = item.titleResId,
-                                    style = labelStyle,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                )
-                            },
+                            label = null,
                             selected = isNavigationItemSelected(
                                 selectedPage = selectedPage,
                                 itemPage = item.page,
@@ -217,9 +194,12 @@ fun MVPBottomNavBar(
                     onClick = onCenterActionClick,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .offset(y = (-18).dp)
+                        .offset(y = (-14).dp)
                         .zIndex(2f)
-                        .guideTarget(AppGuideTargets.BottomNavCenterAction),
+                        .guideTarget(
+                            targetId = AppGuideTargets.BottomNavCenterAction,
+                            highlightShape = GuideHighlightShape.Circle,
+                        ),
                 )
             }
         }
@@ -244,14 +224,14 @@ private fun CenterNavButton(
 ) {
     Box(
         modifier = modifier
-            .size(78.dp)
+            .size(64.dp)
             .shadow(
                 elevation = 12.dp,
                 shape = CircleShape,
                 clip = false,
             )
             .background(MaterialTheme.colorScheme.surface, CircleShape)
-            .padding(8.dp),
+            .padding(6.dp),
         contentAlignment = Alignment.Center,
     ) {
         Surface(
@@ -277,7 +257,7 @@ private fun CenterNavButton(
                         Icon(
                             Icons.Default.Add,
                             contentDescription = "Create event",
-                            modifier = Modifier.size(34.dp),
+                            modifier = Modifier.size(28.dp),
                         )
                     }
                 }

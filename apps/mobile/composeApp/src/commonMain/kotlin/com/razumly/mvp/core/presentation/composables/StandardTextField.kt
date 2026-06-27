@@ -57,6 +57,7 @@ fun StandardTextField(
     trailingIcon: @Composable (() -> Unit)? = null,
     leadingIcon: @Composable (() -> Unit)? = null,
     textStyle: TextStyle? = null,
+    placeholderTextStyle: TextStyle? = null,
     fontSize: TextUnit? = null,
     containerColor: Color? = null,
     height: Dp? = null,
@@ -300,7 +301,11 @@ fun StandardTextField(
                 onValueChange = {},
                 modifier = Modifier.fillMaxWidth(),
                 label = if (label.isNotEmpty()) ({ Text(label) }) else null,
-                placeholder = if (placeholder.isNotEmpty()) ({ Text(placeholder) }) else null,
+                placeholder = if (placeholder.isNotEmpty()) {
+                    { Text(placeholder, style = placeholderTextStyle ?: TextStyle.Default) }
+                } else {
+                    null
+                },
                 enabled = false,
                 readOnly = true,
                 textStyle = finalTextStyle,
@@ -333,7 +338,11 @@ fun StandardTextField(
         },
         modifier = finalModifier,
         label = if (label.isNotEmpty()) ({ Text(label) }) else null,
-        placeholder = if (placeholder.isNotEmpty()) ({ Text(placeholder) }) else null,
+        placeholder = if (placeholder.isNotEmpty()) {
+            { Text(placeholder, style = placeholderTextStyle ?: TextStyle.Default) }
+        } else {
+            null
+        },
         enabled = enabled,
         readOnly = readOnly,
         textStyle = finalTextStyle,

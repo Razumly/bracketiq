@@ -76,6 +76,10 @@ interface ITeamRepository : IMVPRepository {
         excludeTeamIds: Set<String> = emptySet(),
         limit: Int = 200,
     ): Result<List<Team>> = Result.failure(NotImplementedError("Team invite search is not implemented."))
+    suspend fun searchOpenRegistrationTeams(
+        query: String = "",
+        limit: Int = 100,
+    ): Result<List<Team>> = Result.failure(NotImplementedError("Open team registration search is not implemented."))
     suspend fun addPlayerToTeam(team: Team, player: UserData): Result<Unit>
     suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit>
     suspend fun createTeam(newTeam: Team): Result<Team>
@@ -638,6 +642,27 @@ class TeamRepository(
             databaseService.getTeamDao.upsertTeamsWithRelations(filteredTeams)
         }
         filteredTeams
+    }
+
+    override suspend fun searchOpenRegistrationTeams(
+        query: String,
+        limit: Int,
+    ): Result<List<Team>> = runCatching {
+        val safeLimit = limit.coerceIn(1, 200)
+        val normalizedQuery = query.trim()
+        val queryParam = normalizedQuery
+            .takeIf(String::isNotBlank)
+            ?.let { "&query=${it.encodeURLQueryComponent()}" }
+            .orEmpty()
+        val res = api.get<TeamsResponseDto>("api/teams?openRegistration=true&limit=$safeLimit$queryParam")
+        val teams = res.teams
+            .mapNotNull { it.toTeamOrNull() }
+            .filter { team -> team.openRegistration }
+        if (teams.isNotEmpty()) {
+            databaseService.getTeamDao.upsertTeamsWithRelations(teams)
+        }
+        ensureUsersCachedForTeams(teams)
+        teams
     }
 
     override suspend fun addPlayerToTeam(team: Team, player: UserData): Result<Unit> {

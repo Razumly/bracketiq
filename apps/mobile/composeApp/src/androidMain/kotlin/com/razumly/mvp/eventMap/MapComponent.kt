@@ -327,6 +327,36 @@ actual class MapComponent(
             }
         }
 
+    actual suspend fun searchLocationPlaces(query: String): List<MVPPlace> =
+        suspendCancellableCoroutine { cont ->
+            val fields = listOf(
+                Place.Field.ID,
+                Place.Field.DISPLAY_NAME,
+                Place.Field.LOCATION,
+                Place.Field.FORMATTED_ADDRESS,
+            )
+            val requestBuilder = SearchByTextRequest.builder(query, fields)
+            _currentBounds.value?.let { bounds ->
+                requestBuilder.setLocationBias(RectangularBounds.newInstance(bounds))
+            }
+
+            placesClient.searchByText(requestBuilder.build()).addOnSuccessListener { response ->
+                scope.launch {
+                    val results = response.places
+                        .map { place -> place.toMVPPlace(placesClient) }
+                        .filter { place -> place.latitude != 0.0 || place.longitude != 0.0 }
+                    cont.resume(results) { cause, _, _ ->
+                        Napier.d { "Cancelled location search: $cause" }
+                    }
+                }
+            }.addOnFailureListener { exception ->
+                logPlacesFailure("searchLocationPlaces", exception)
+                cont.resume(emptyList()) { cause, _, _ ->
+                    Napier.d { "Cancelled location search after failure: $cause" }
+                }
+            }
+        }
+
     private fun logMapsDiagnostics(context: Context) {
         val apiKey = BuildConfig.MAPS_API_KEY
         val keyState = when {

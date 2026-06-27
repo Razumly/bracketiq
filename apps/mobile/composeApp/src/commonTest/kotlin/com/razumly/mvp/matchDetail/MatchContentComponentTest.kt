@@ -278,6 +278,39 @@ class MatchContentComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun given_checked_in_official_when_marking_match_delayed_then_delayed_status_is_saved_locally() = runTest(testDispatcher) {
+        val user = createUser(id = "user-1", teamIds = listOf("team-c"))
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c"))
+        val match = createMatch(
+            eventId = event.id,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = true,
+        )
+        val harness = MatchDetailHarness(
+            event = event,
+            initialMatch = match,
+            currentUser = user,
+            teams = listOf(
+                createTeam(id = "team-a", captainId = "captain-a"),
+                createTeam(id = "team-b", captainId = "captain-b"),
+                createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
+            ),
+        )
+
+        advance()
+        harness.component.markMatchDelayed()
+        advance()
+
+        val operation = harness.matchRepository.operationCalls.single()
+        assertEquals("DELAYED", operation.lifecycle?.status)
+        val savedMatch = harness.matchRepository.savedMatches.last()
+        assertEquals("DELAYED", savedMatch.status)
+        assertEquals("DELAYED", harness.component.matchWithTeams.value.match.status)
+    }
+
+    @Test
     fun given_single_segment_points_only_match_when_evaluating_segment_breakdown_then_it_is_hidden() {
         val rules = ResolvedMatchRulesMVP(
             scoringModel = "POINTS_ONLY",

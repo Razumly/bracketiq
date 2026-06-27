@@ -40,6 +40,7 @@ data class Team(
     val joinPolicy: String = "CLOSED",
     val openRegistration: Boolean = false,
     val registrationPriceCents: Int = 0,
+    val affiliateUrl: String? = null,
     val requiredTemplateIds: List<String> = emptyList(),
     val playerRegistrations: List<TeamPlayerRegistration> = emptyList(),
     val staffAssignments: List<TeamStaffAssignment> = emptyList(),
@@ -83,6 +84,7 @@ data class Team(
                 joinPolicy = "CLOSED",
                 openRegistration = false,
                 registrationPriceCents = 0,
+                affiliateUrl = null,
                 requiredTemplateIds = emptyList(),
                 playerRegistrations = emptyList(),
                 staffAssignments = emptyList(),
@@ -118,7 +120,11 @@ data class Team(
             joinPolicy = synced.joinPolicy,
             openRegistration = synced.openRegistration,
             registrationPriceCents = synced.registrationPriceCents,
+            affiliateUrl = synced.affiliateUrl,
             requiredTemplateIds = synced.requiredTemplateIds,
         )
     }
 }
+
+fun Team.normalizedAffiliateUrl(): String? =
+    affiliateUrl?.trim()?.takeIf(String::isNotBlank)

@@ -1576,6 +1576,55 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    fun getEventsInBounds_converts_mile_radius_to_search_api_kilometers() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/search", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """{ "events": [] }""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        repo.getEventsInBounds(
+            bounds = Bounds(
+                north = 0.0,
+                east = 0.0,
+                south = 0.0,
+                west = 0.0,
+                center = LatLng(45.5, -122.6),
+                radiusMiles = 50.0,
+            ),
+            limit = 10,
+            offset = 0,
+            includeDistanceFilter = true,
+        ).getOrThrow()
+
+        assertTrue(capturedBody.contains("\"maxDistance\":80.467"))
+        assertTrue(capturedBody.contains("\"userLocation\":{\"lat\":45.5,\"long\":-122.6}"))
+    }
+
+    @Test
     fun searchEvents_posts_query_with_small_suggestion_limit() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()

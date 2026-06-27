@@ -3,6 +3,7 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventRegistrationCacheEntry
 import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
+import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 
@@ -262,7 +263,9 @@ internal fun resolveWithdrawTargetMembershipFromEvent(
 }
 
 internal fun canRequestPaidRefund(event: Event, membership: WithdrawTargetMembership): Boolean =
-    event.hasAnyPaidDivision() && membership == WithdrawTargetMembership.PARTICIPANT
+    event.hasAnyPaidDivision() &&
+        !event.usesManualRegistrationPayments() &&
+        membership == WithdrawTargetMembership.PARTICIPANT
 
 internal fun usesRegisteredTeamWithdrawal(
     event: Event,

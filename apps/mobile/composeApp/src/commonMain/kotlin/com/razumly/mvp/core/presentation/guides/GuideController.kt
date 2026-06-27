@@ -16,11 +16,16 @@ import androidx.compose.runtime.DisposableEffect
 
 val LocalGuideController = compositionLocalOf<GuideController?> { null }
 
+data class GuideTarget(
+    val bounds: Rect,
+    val highlightShape: GuideHighlightShape,
+)
+
 @Stable
 class GuideController(
     private val onGuideCompleted: (String) -> Unit,
 ) {
-    private val targetBounds = mutableStateMapOf<String, Rect>()
+    private val targets = mutableStateMapOf<String, GuideTarget>()
 
     var completedGuideIds by mutableStateOf<Set<String>>(emptySet())
         private set
@@ -37,8 +42,8 @@ class GuideController(
     val activeStep: AppGuideStep?
         get() = activeGuide?.steps?.getOrNull(activeStepIndex)
 
-    val activeTargetBounds: Rect?
-        get() = activeStep?.targetId?.let { targetId -> targetBounds[targetId] }
+    val activeTarget: GuideTarget?
+        get() = activeStep?.targetId?.let { targetId -> targets[targetId] }
 
     val hasActiveGuide: Boolean
         get() = activeGuide != null
@@ -55,15 +60,22 @@ class GuideController(
         }
     }
 
-    fun registerTarget(targetId: String, bounds: Rect) {
-        targetBounds[targetId] = bounds
+    fun registerTarget(
+        targetId: String,
+        bounds: Rect,
+        highlightShape: GuideHighlightShape,
+    ) {
+        targets[targetId] = GuideTarget(
+            bounds = bounds,
+            highlightShape = highlightShape,
+        )
     }
 
     fun removeTarget(targetId: String) {
-        targetBounds.remove(targetId)
+        targets.remove(targetId)
     }
 
-    fun hasTarget(targetId: String): Boolean = targetBounds.containsKey(targetId)
+    fun hasTarget(targetId: String): Boolean = targets.containsKey(targetId)
 
     fun isGuideCompleted(guideId: String): Boolean = guideId in completedGuideIds
 
@@ -117,7 +129,10 @@ class GuideController(
     }
 }
 
-fun Modifier.guideTarget(targetId: String): Modifier = composed {
+fun Modifier.guideTarget(
+    targetId: String,
+    highlightShape: GuideHighlightShape = GuideHighlightShape.RoundedRect(),
+): Modifier = composed {
     val guideController = LocalGuideController.current
     if (guideController == null) {
         this
@@ -129,7 +144,11 @@ fun Modifier.guideTarget(targetId: String): Modifier = composed {
         }
 
         this.onGloballyPositioned { coordinates ->
-            guideController.registerTarget(targetId, coordinates.boundsInWindow())
+            guideController.registerTarget(
+                targetId = targetId,
+                bounds = coordinates.boundsInWindow(),
+                highlightShape = highlightShape,
+            )
         }
     }
 }

@@ -45,6 +45,7 @@ import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.divisionPriceRangeLabel
+import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
 import com.razumly.mvp.core.data.dataTypes.isDraftLikeState
 import com.razumly.mvp.core.data.dataTypes.isPrivateState
 import com.razumly.mvp.core.data.dataTypes.lifecycleStateLabel
@@ -78,10 +79,12 @@ fun EventCard(
     event: Event,
     navPadding: PaddingValues = PaddingValues(),
     showLoadingPlaceholder: Boolean = false,
+    fallbackImageId: String? = null,
     onMapClick: (Offset) -> Unit,
 ) {
-    val imageModel = remember(event.imageId) {
+    val imageModel = remember(event.imageId, fallbackImageId) {
         event.imageId.trim()
+            .ifBlank { fallbackImageId?.trim().orEmpty() }
             .takeIf { it.isNotBlank() }
             ?.let { imageId -> getImageUrl(imageId) }
     }
@@ -245,7 +248,11 @@ fun EventCard(
                     }
                 }
                 Text(
-                    text = if (event.teamSignup) "Team registration" else "Individual registration",
+                    text = when {
+                        event.isAffiliateEvent() -> "External registration"
+                        event.teamSignup -> "Team registration"
+                        else -> "Individual registration"
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.background,
                     maxLines = 1,

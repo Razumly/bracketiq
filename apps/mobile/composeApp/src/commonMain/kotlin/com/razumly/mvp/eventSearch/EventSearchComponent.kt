@@ -11,10 +11,12 @@ import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
+import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
 import com.razumly.mvp.core.util.ErrorMessage
@@ -46,7 +48,9 @@ interface EventSearchComponent {
     val isLoading: StateFlow<Boolean>
     val suggestedEvents: StateFlow<List<Event>>
     val suggestedOrganizations: StateFlow<List<Organization>>
+    val suggestedTeams: StateFlow<List<Team>>
     val currentLocation: StateFlow<LatLng?>
+    val selectedSearchLocationLabel: StateFlow<String?>
     val isLoadingMore: StateFlow<Boolean>
     val hasMoreEvents: StateFlow<Boolean>
     val filter: StateFlow<EventFilter>
@@ -55,6 +59,8 @@ interface EventSearchComponent {
     val isLoadingOrganizations: StateFlow<Boolean>
     val rentals: StateFlow<List<Organization>>
     val isLoadingRentals: StateFlow<Boolean>
+    val teams: StateFlow<List<Team>>
+    val isLoadingTeams: StateFlow<Boolean>
     val rentalFieldOptions: StateFlow<List<RentalFieldOption>>
     val isLoadingRentalFields: StateFlow<Boolean>
     val rentalBusyBlocks: StateFlow<List<RentalBusyBlock>>
@@ -69,14 +75,19 @@ interface EventSearchComponent {
     fun onMapClick(event: Event? = null)
     fun viewEvent(event: Event)
     fun viewOrganization(organization: Organization, initialTab: OrganizationDetailTab = OrganizationDetailTab.OVERVIEW)
+    fun viewTeam(team: Team)
     fun startEventCreate()
     fun suggestEvents(searchQuery: String)
     fun suggestOrganizations(searchQuery: String, rentalsOnly: Boolean = false)
+    fun suggestTeams(searchQuery: String)
     fun updateFilter(update: EventFilter.() -> EventFilter)
     fun refreshEvents(force: Boolean = false)
     fun refreshOrganizations(force: Boolean = false)
     fun refreshRentals(force: Boolean = false)
+    fun refreshTeams(force: Boolean = false)
     fun searchThisArea(center: LatLng, radiusMiles: Double? = null)
+    fun selectSearchLocation(label: String, center: LatLng)
+    fun useCurrentLocationForSearch()
     fun loadRentalFieldOptions(fieldIds: List<String>)
     fun loadRentalBusyBlocks(organizationId: String, fieldIds: List<String>)
     fun clearRentalFieldOptions()
@@ -102,6 +113,7 @@ class DefaultEventSearchComponent(
     private val matchRepository: IMatchRepository,
     private val billingRepository: IBillingRepository,
     private val fieldRepository: IFieldRepository,
+    private val teamRepository: ITeamRepository,
     eventId: String?,
     override val locationTracker: LocationTracker,
     private val navigationHandler: INavigationHandler
@@ -124,7 +136,7 @@ class DefaultEventSearchComponent(
         fieldRepository = fieldRepository,
     )
 
-    private val _currentRadius = MutableStateFlow(50.0)
+    private val _currentRadius = MutableStateFlow(0.0)
     override val currentRadius: StateFlow<Double> = _currentRadius.asStateFlow()
 
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
@@ -137,11 +149,15 @@ class DefaultEventSearchComponent(
     override val currentLocation = _currentLocation.asStateFlow()
     private val _isLocationSearchEnabled = MutableStateFlow(true)
     private val _searchCenter = MutableStateFlow<LatLng?>(null)
+    private val _selectedSearchLocationLabel = MutableStateFlow<String?>(null)
+    override val selectedSearchLocationLabel: StateFlow<String?> = _selectedSearchLocationLabel.asStateFlow()
 
     private val _suggestedEvents = MutableStateFlow<List<Event>>(emptyList())
     override val suggestedEvents: StateFlow<List<Event>> = _suggestedEvents.asStateFlow()
     private val _suggestedOrganizations = MutableStateFlow<List<Organization>>(emptyList())
     override val suggestedOrganizations: StateFlow<List<Organization>> = _suggestedOrganizations.asStateFlow()
+    private val _suggestedTeams = MutableStateFlow<List<Team>>(emptyList())
+    override val suggestedTeams: StateFlow<List<Team>> = _suggestedTeams.asStateFlow()
 
     private val _isLoadingMore = MutableStateFlow(false)
     override val isLoadingMore: StateFlow<Boolean> = _isLoadingMore.asStateFlow()
@@ -164,6 +180,10 @@ class DefaultEventSearchComponent(
     override val rentals: StateFlow<List<Organization>> = _rentals.asStateFlow()
     private val _isLoadingRentals = MutableStateFlow(false)
     override val isLoadingRentals: StateFlow<Boolean> = _isLoadingRentals.asStateFlow()
+    private val _teams = MutableStateFlow<List<Team>>(emptyList())
+    override val teams: StateFlow<List<Team>> = _teams.asStateFlow()
+    private val _isLoadingTeams = MutableStateFlow(false)
+    override val isLoadingTeams: StateFlow<Boolean> = _isLoadingTeams.asStateFlow()
     private val _rentalFieldOptions = MutableStateFlow<List<RentalFieldOption>>(emptyList())
     override val rentalFieldOptions: StateFlow<List<RentalFieldOption>> = _rentalFieldOptions.asStateFlow()
     private val _isLoadingRentalFields = MutableStateFlow(false)
@@ -172,8 +192,10 @@ class DefaultEventSearchComponent(
     override val rentalBusyBlocks: StateFlow<List<RentalBusyBlock>> = _rentalBusyBlocks.asStateFlow()
     private var organizationsLoaded = false
     private var rentalsLoaded = false
+    private var teamsLoaded = false
     private var suggestEventsJob: Job? = null
     private var suggestOrganizationsJob: Job? = null
+    private var suggestTeamsJob: Job? = null
     private var cachedEventsSyncJob: Job? = null
     private var isAwaitingInitialEventLocation = true
     private var eventOffset = 0
@@ -259,10 +281,14 @@ class DefaultEventSearchComponent(
         refreshEvents(force = true)
         refreshOrganizations(force = false)
         refreshRentals(force = false)
+        refreshTeams(force = false)
     }
 
     override fun selectRadius(radius: Double) {
-        _currentRadius.value = radius
+        val normalizedRadius = radius.coerceAtLeast(0.0)
+        if (_currentRadius.value == normalizedRadius) return
+        _currentRadius.value = normalizedRadius
+        refreshEvents(force = true)
     }
 
     override fun onMapClick(event: Event?) {
@@ -276,6 +302,15 @@ class DefaultEventSearchComponent(
 
     override fun viewOrganization(organization: Organization, initialTab: OrganizationDetailTab) {
         navigationHandler.navigateToOrganization(organization.id, initialTab)
+    }
+
+    override fun viewTeam(team: Team) {
+        val organizationId = team.organizationId?.trim()?.takeIf(String::isNotBlank)
+        if (organizationId != null) {
+            navigationHandler.navigateToOrganization(organizationId, OrganizationDetailTab.TEAMS)
+        } else {
+            navigationHandler.navigateToTeams()
+        }
     }
 
     override fun startEventCreate() {
@@ -347,6 +382,29 @@ class DefaultEventSearchComponent(
         }
     }
 
+    override fun suggestTeams(searchQuery: String) {
+        val normalizedQuery = searchQuery.trim()
+        if (normalizedQuery.length < SEARCH_MIN_QUERY_LENGTH) {
+            suggestTeamsJob?.cancel()
+            _suggestedTeams.value = emptyList()
+            return
+        }
+
+        suggestTeamsJob?.cancel()
+        suggestTeamsJob = scope.launch {
+            teamRepository.searchOpenRegistrationTeams(
+                query = normalizedQuery,
+                limit = SEARCH_SUGGESTION_LIMIT,
+            )
+                .onSuccess { teams ->
+                    _suggestedTeams.value = teams
+                }
+                .onFailure { e ->
+                    _errorState.value = ErrorMessage("Failed to fetch teams: ${e.userMessage()}")
+                }
+        }
+    }
+
     override fun loadMoreEvents() {
         if (_isLoadingMore.value || !_hasMoreEvents.value || _isLoading.value) return
 
@@ -355,7 +413,7 @@ class DefaultEventSearchComponent(
             try {
                 val activeFilter = _filter.value
                 val currentLocation = activeSearchLocation()
-                val includeDistanceFilter = currentLocation != null
+                val includeDistanceFilter = currentLocation != null && _currentRadius.value > 0.0
                 val currentBounds = if (currentLocation != null) {
                     getBounds(_currentRadius.value, currentLocation.latitude, currentLocation.longitude)
                 } else {
@@ -371,6 +429,7 @@ class DefaultEventSearchComponent(
                     includeDistanceFilter = includeDistanceFilter,
                 )
                     .onSuccess { (eventsPage, hasMore) ->
+                        loadOrganizationsForEvents(eventsPage)
                         eventOffset += eventsPage.size
                         _hasMoreEvents.value = hasMore
                         _rawEvents.value = mergeEvents(_rawEvents.value, eventsPage)
@@ -429,8 +488,15 @@ class DefaultEventSearchComponent(
         }
     }
 
+    override fun refreshTeams(force: Boolean) {
+        scope.launch {
+            loadTeams(force = force)
+        }
+    }
+
     override fun searchThisArea(center: LatLng, radiusMiles: Double?) {
         _searchCenter.value = center
+        _selectedSearchLocationLabel.value = "Map area"
         if (radiusMiles != null && radiusMiles > 0) {
             _currentRadius.value = radiusMiles
         }
@@ -438,6 +504,27 @@ class DefaultEventSearchComponent(
         refreshEvents(force = true)
         refreshOrganizations(force = true)
         refreshRentals(force = true)
+        refreshTeams(force = true)
+    }
+
+    override fun selectSearchLocation(label: String, center: LatLng) {
+        _searchCenter.value = center
+        _selectedSearchLocationLabel.value = label.trim().takeIf(String::isNotBlank) ?: "Selected location"
+        _isLocationSearchEnabled.value = true
+        refreshEvents(force = true)
+        refreshOrganizations(force = true)
+        refreshRentals(force = true)
+        refreshTeams(force = true)
+    }
+
+    override fun useCurrentLocationForSearch() {
+        _searchCenter.value = null
+        _selectedSearchLocationLabel.value = null
+        _isLocationSearchEnabled.value = true
+        refreshEvents(force = true)
+        refreshOrganizations(force = true)
+        refreshRentals(force = true)
+        refreshTeams(force = true)
     }
 
     override fun loadRentalFieldOptions(fieldIds: List<String>) {
@@ -490,6 +577,31 @@ class DefaultEventSearchComponent(
         return merged.values.toList()
     }
 
+    private suspend fun loadOrganizationsForEvents(events: List<Event>) {
+        val loadedOrganizationIds = _allOrganizations.value
+            .map { organization -> organization.id }
+            .toSet()
+        val organizationIds = events
+            .mapNotNull { event -> event.organizationId?.trim()?.takeIf(String::isNotBlank) }
+            .distinct()
+            .filterNot { organizationId -> organizationId in loadedOrganizationIds }
+        if (organizationIds.isEmpty()) return
+
+        billingRepository.getOrganizationsByIds(organizationIds)
+            .onSuccess { organizations ->
+                if (organizations.isEmpty()) return@onSuccess
+                val mergedById = LinkedHashMap<String, Organization>()
+                _allOrganizations.value.forEach { organization -> mergedById[organization.id] = organization }
+                organizations.forEach { organization -> mergedById[organization.id] = organization }
+                val merged = mergedById.values.sortedBy { organization -> organization.name.lowercase() }
+                _allOrganizations.value = merged
+                _organizations.value = applyDistanceFilter(merged)
+            }
+            .onFailure { error ->
+                Napier.w("Failed to load event organizations for discover cards: ${error.message}")
+            }
+    }
+
     private fun observeCachedEvents() {
         if (cachedEventsSyncJob != null) return
         cachedEventsSyncJob = scope.launch {
@@ -539,6 +651,24 @@ class DefaultEventSearchComponent(
         rentalsLoaded = true
         _isLoadingRentals.value = false
         Napier.d("Loaded ${_rentals.value.size} rental organizations", tag = "Discover")
+    }
+
+    private suspend fun loadTeams(force: Boolean = false): List<Team> {
+        if (_isLoadingTeams.value) return _teams.value
+        if (teamsLoaded && !force) return _teams.value
+
+        _isLoadingTeams.value = true
+        val teams = teamRepository.searchOpenRegistrationTeams(limit = 100)
+            .onFailure { e ->
+                _errorState.value = ErrorMessage("Failed to fetch teams: ${e.userMessage()}")
+            }
+            .getOrDefault(emptyList())
+            .sortedBy { team -> team.name.lowercase() }
+
+        _teams.value = teams
+        teamsLoaded = true
+        _isLoadingTeams.value = false
+        return teams
     }
 
     private suspend fun loadOrganizations(force: Boolean = false): List<Organization> {
@@ -678,6 +808,7 @@ class DefaultEventSearchComponent(
 
     private fun handleLocationUnavailable() {
         _searchCenter.value = null
+        _selectedSearchLocationLabel.value = null
         _isLocationSearchEnabled.value = false
         _currentLocation.value = null
         _errorState.value = ErrorMessage("Location is unavailable. Showing upcoming events without location filtering.")
@@ -688,6 +819,7 @@ class DefaultEventSearchComponent(
 
     private fun handleLocationPermissionDenied(alwaysDenied: Boolean) {
         _searchCenter.value = null
+        _selectedSearchLocationLabel.value = null
         _isLocationSearchEnabled.value = false
         _currentLocation.value = null
         _errorState.value = ErrorMessage(

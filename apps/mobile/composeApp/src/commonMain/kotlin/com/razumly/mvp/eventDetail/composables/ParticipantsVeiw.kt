@@ -75,6 +75,7 @@ import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.RegistrationQuestionAnswerSummary
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
+import com.razumly.mvp.core.network.apiBaseUrl
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
 import com.razumly.mvp.core.presentation.composables.MoneyInputField
@@ -554,6 +555,7 @@ fun ParticipantsView(
     val popUpHandler = LocalPopupHandler.current
     val loadingHandler = LocalLoadingHandler.current
     val coroutineScope = rememberCoroutineScope()
+    val uriHandler = LocalUriHandler.current
 
     var selectedTeam by remember { mutableStateOf<TeamWithPlayers?>(null) }
     var showTeamDialog by remember { mutableStateOf(false) }
@@ -568,6 +570,8 @@ fun ParticipantsView(
     var refundLoading by remember { mutableStateOf(false) }
     var refundingPaymentId by remember { mutableStateOf<String?>(null) }
     var refundAmountDraftByPaymentId by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var reviewingProofId by remember { mutableStateOf<String?>(null) }
+    var proofAmountDraftByProofId by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
     var billContext by remember { mutableStateOf<ParticipantBillingContext?>(null) }
     var createBillError by remember { mutableStateOf<String?>(null) }
@@ -1323,6 +1327,122 @@ fun ParticipantsView(
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
+                                            payment.manualPaymentProofs.forEach { proof ->
+                                                val proofStatus = proof.status?.uppercase().orEmpty()
+                                                val proofUrl = proof.fileUrl
+                                                    ?.trim()
+                                                    ?.takeIf(String::isNotBlank)
+                                                    ?.let { url ->
+                                                        if (url.startsWith("http", ignoreCase = true)) {
+                                                            url
+                                                        } else {
+                                                            "${apiBaseUrl.trimEnd('/')}/${url.trimStart('/')}"
+                                                        }
+                                                    }
+                                                Column(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                                                ) {
+                                                    Text(
+                                                        "Proof ${proofStatus.ifBlank { "SUBMITTED" }}",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    )
+                                                    if (proofUrl != null) {
+                                                        AsyncImage(
+                                                            model = proofUrl,
+                                                            contentDescription = "Payment proof",
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .height(120.dp),
+                                                            contentScale = ContentScale.Fit,
+                                                        )
+                                                        Text(
+                                                            text = "Open proof image",
+                                                            modifier = Modifier.clickable {
+                                                                uriHandler.openUri(proofUrl)
+                                                            },
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = MaterialTheme.colorScheme.primary,
+                                                        )
+                                                    }
+                                                    if (proofStatus == "SUBMITTED") {
+                                                        val amountDraft = proofAmountDraftByProofId[proof.id]
+                                                            ?: payment.amountCents.coerceAtLeast(0).toString()
+                                                        Row(
+                                                            modifier = Modifier.fillMaxWidth(),
+                                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                        ) {
+                                                            MoneyInputField(
+                                                                value = amountDraft,
+                                                                onValueChange = { value ->
+                                                                    proofAmountDraftByProofId =
+                                                                        proofAmountDraftByProofId +
+                                                                        (proof.id to value.filter(Char::isDigit))
+                                                                },
+                                                                modifier = Modifier.weight(1f),
+                                                                placeholder = "0",
+                                                            )
+                                                            OutlinedButton(
+                                                                enabled = reviewingProofId == null || reviewingProofId == proof.id,
+                                                                onClick = {
+                                                                    val amountCents = parseCentsInputToCents(
+                                                                        proofAmountDraftByProofId[proof.id]
+                                                                            ?: payment.amountCents.toString(),
+                                                                    )
+                                                                    if (amountCents == null || amountCents <= 0) {
+                                                                        refundError = "Enter an accepted amount greater than $0.00"
+                                                                        return@OutlinedButton
+                                                                    }
+                                                                    reviewingProofId = proof.id
+                                                                    refundError = null
+                                                                    coroutineScope.launch {
+                                                                        component.reviewParticipantManualPaymentProof(
+                                                                            billId = payment.billId,
+                                                                            billPaymentId = payment.id,
+                                                                            proofId = proof.id,
+                                                                            decision = "ACCEPT",
+                                                                            amountAcceptedCents = amountCents,
+                                                                        ).onSuccess {
+                                                                            popUpHandler.showPopup("Proof accepted.")
+                                                                            loadRefundSnapshot(context)
+                                                                        }.onFailure { throwable ->
+                                                                            refundError = throwable.userMessage("Failed to accept proof.")
+                                                                        }
+                                                                        reviewingProofId = null
+                                                                    }
+                                                                },
+                                                            ) {
+                                                                Text("Accept")
+                                                            }
+                                                            OutlinedButton(
+                                                                enabled = reviewingProofId == null || reviewingProofId == proof.id,
+                                                                onClick = {
+                                                                    reviewingProofId = proof.id
+                                                                    refundError = null
+                                                                    coroutineScope.launch {
+                                                                        component.reviewParticipantManualPaymentProof(
+                                                                            billId = payment.billId,
+                                                                            billPaymentId = payment.id,
+                                                                            proofId = proof.id,
+                                                                            decision = "REJECT",
+                                                                        ).onSuccess {
+                                                                            popUpHandler.showPopup("Proof rejected.")
+                                                                            loadRefundSnapshot(context)
+                                                                        }.onFailure { throwable ->
+                                                                            refundError = throwable.userMessage("Failed to reject proof.")
+                                                                        }
+                                                                        reviewingProofId = null
+                                                                    }
+                                                                },
+                                                            ) {
+                                                                Text("Reject")
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
                                             if (payment.isRefundable && !payment.paymentIntentId.isNullOrBlank()) {
                                                 Row(
                                                     modifier = Modifier.fillMaxWidth(),

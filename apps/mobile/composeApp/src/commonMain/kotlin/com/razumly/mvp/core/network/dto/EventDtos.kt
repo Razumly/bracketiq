@@ -10,12 +10,18 @@ import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_ONLINE
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.buildEventOfficialRecordId
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.isManualRegistrationPaymentMode
+import com.razumly.mvp.core.data.dataTypes.normalizeManualPaymentInstructions
+import com.razumly.mvp.core.data.dataTypes.normalizeManualPaymentLinks
+import com.razumly.mvp.core.data.dataTypes.normalizeRegistrationPaymentMode
 import com.razumly.mvp.core.data.dataTypes.requiresTeamOfficials
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionDetails
@@ -79,6 +85,10 @@ data class EventApiDto(
     val leagueScoringConfigId: String? = null,
     val leagueScoringConfig: LeagueScoringConfigDTO? = null,
     val organizationId: String? = null,
+    val affiliateUrl: String? = null,
+    val registrationPaymentMode: String? = null,
+    val manualPaymentLinks: List<ManualPaymentLink>? = null,
+    val manualPaymentInstructions: String? = null,
 
     val autoCancellation: Boolean? = null,
     val maxParticipants: Int? = null,
@@ -137,7 +147,9 @@ data class EventApiDto(
         val resolvedHostId = hostId
         val resolvedStart = start
         val resolvedEnd = end
-        if (resolvedId.isNullOrBlank() || resolvedName.isNullOrBlank() || resolvedHostId.isNullOrBlank()) return null
+        val resolvedAffiliateUrl = affiliateUrl?.trim()?.takeIf(String::isNotBlank)
+        if (resolvedId.isNullOrBlank() || resolvedName.isNullOrBlank()) return null
+        if (resolvedHostId.isNullOrBlank() && resolvedAffiliateUrl == null) return null
         if (resolvedStart.isNullOrBlank()) return null
         val parsedStart = runCatching { Instant.parse(resolvedStart) }.getOrNull() ?: return null
 
@@ -218,6 +230,8 @@ data class EventApiDto(
         val resolvedEventAllowPaymentPlans = allowPaymentPlans == true &&
             resolvedEventInstallmentCount != null &&
             resolvedPriceCents > 0
+        val resolvedRegistrationPaymentMode = normalizeRegistrationPaymentMode(registrationPaymentMode)
+        val manualPaymentsEnabled = isManualRegistrationPaymentMode(resolvedRegistrationPaymentMode)
         val mergedDetailsWithCapacity = mergedDetails.map { detail ->
             detail.copy(
                 price = detail.price?.coerceAtLeast(0),
@@ -313,7 +327,7 @@ data class EventApiDto(
             rating = rating,
             imageId = imageId ?: "",
             coordinates = coordinates ?: listOf(0.0, 0.0),
-            hostId = resolvedHostId,
+            hostId = resolvedHostId.orEmpty(),
             assistantHostIds = assistantHostIds ?: emptyList(),
             noFixedEndDateTime = resolvedNoFixedEndDateTime,
             teamSignup = teamSignup ?: true,
@@ -330,6 +344,18 @@ data class EventApiDto(
             fieldIds = resolvedFieldIds,
             leagueScoringConfigId = leagueScoringConfigId,
             organizationId = organizationId,
+            affiliateUrl = resolvedAffiliateUrl,
+            registrationPaymentMode = resolvedRegistrationPaymentMode,
+            manualPaymentLinks = if (manualPaymentsEnabled) {
+                normalizeManualPaymentLinks(manualPaymentLinks)
+            } else {
+                emptyList()
+            },
+            manualPaymentInstructions = if (manualPaymentsEnabled) {
+                normalizeManualPaymentInstructions(manualPaymentInstructions)
+            } else {
+                null
+            },
             autoCancellation = autoCancellation ?: false,
             maxParticipants = resolvedMaxParticipants,
             minAge = minAge,
@@ -566,6 +592,8 @@ data class EventCompliancePaymentSummaryDto(
     val isPaidInFull: Boolean? = null,
     val paymentPending: Boolean? = null,
     val inheritedFromTeamBill: Boolean? = null,
+    val manualPaymentProofStatus: String? = null,
+    val manualPaymentProofCount: Int? = null,
 )
 
 @Serializable
@@ -740,6 +768,10 @@ data class EventUpdateDto(
     val leagueScoringConfigId: String? = null,
     val leagueScoringConfig: LeagueScoringConfigDTO? = null,
     val organizationId: String? = null,
+    val affiliateUrl: String? = null,
+    val registrationPaymentMode: String? = null,
+    val manualPaymentLinks: List<ManualPaymentLink>? = null,
+    val manualPaymentInstructions: String? = null,
     val autoCancellation: Boolean? = null,
     val eventType: String? = null,
     val doTeamsOfficiate: Boolean? = null,
@@ -956,6 +988,8 @@ fun Event.toUpdateDto(
     val normalizedPlayoffDivisionDetailsForPayload = tournamentPoolBracketDetails.map(::normalizeDivisionDetailForPayload)
 
     val effectiveDoTeamsOfficiate = if (officialSchedulingMode.requiresTeamOfficials()) true else doTeamsOfficiate
+    val resolvedRegistrationPaymentMode = normalizeRegistrationPaymentMode(registrationPaymentMode)
+    val manualPaymentsEnabled = isManualRegistrationPaymentMode(resolvedRegistrationPaymentMode)
 
     return EventUpdateDto(
         name = name,
@@ -1019,6 +1053,18 @@ fun Event.toUpdateDto(
         leagueScoringConfigId = leagueScoringConfigId,
         leagueScoringConfig = leagueScoringConfigOverride,
         organizationId = if (includeOrganizationId) organizationId else null,
+        affiliateUrl = affiliateUrl?.trim()?.takeIf(String::isNotBlank),
+        registrationPaymentMode = resolvedRegistrationPaymentMode,
+        manualPaymentLinks = if (manualPaymentsEnabled) {
+            normalizeManualPaymentLinks(manualPaymentLinks)
+        } else {
+            emptyList()
+        },
+        manualPaymentInstructions = if (manualPaymentsEnabled) {
+            normalizeManualPaymentInstructions(manualPaymentInstructions)
+        } else {
+            null
+        },
         autoCancellation = autoCancellation,
         eventType = eventType.name,
         doTeamsOfficiate = effectiveDoTeamsOfficiate,

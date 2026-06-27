@@ -2216,6 +2216,22 @@ fun EventDetails(
             }
         }
     }
+    val displayImageId = remember(
+        editView,
+        event.imageId,
+        editEvent.imageId,
+        eventWithRelations.organization?.logoId,
+    ) {
+        val primaryImageId = if (editView) editEvent.imageId else event.imageId
+        primaryImageId.trim()
+            .ifBlank {
+                if (editView) {
+                    ""
+                } else {
+                    eventWithRelations.organization?.logoId?.trim().orEmpty()
+                }
+            }
+    }
 
     CompositionLocalProvider(localImageScheme provides imageScheme) {
         Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
@@ -2224,7 +2240,7 @@ fun EventDetails(
                     .fillMaxWidth()
                     .height(heroHeight)
                     .graphicsLayer(translationY = -heroParallaxOffset),
-                imageUrl = if (!editView) getImageUrl(event.imageId) else getImageUrl(editEvent.imageId),
+                imageUrl = displayImageId.takeIf(String::isNotBlank)?.let(::getImageUrl).orEmpty(),
             )
             LazyColumn(
                 state = lazyListState,

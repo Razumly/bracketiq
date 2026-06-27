@@ -105,6 +105,7 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.canManageEventsForViewer
 import com.razumly.mvp.core.data.dataTypes.assignedOfficialUserIds
 import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
+import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
 import com.razumly.mvp.core.data.dataTypes.isDraftLikeState
 import com.razumly.mvp.core.data.dataTypes.isPrivateState
 import com.razumly.mvp.core.data.dataTypes.resolvedDivisionPriceCents
@@ -113,6 +114,7 @@ import com.razumly.mvp.core.data.dataTypes.removeOfficialUser
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.updateOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.updateOfficialUserPositions
+import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.dataTypes.usesTeamOfficialScheduling
 import com.razumly.mvp.core.data.dataTypes.withDoTeamsOfficiate
 import com.razumly.mvp.core.data.dataTypes.withOfficialSchedulingMode
@@ -857,11 +859,12 @@ private fun DayOfWeek.toWeeklyDayIndex(): Int {
 
 internal fun shouldUseViewSchedulePrimaryAction(
     isWeeklyParentEvent: Boolean,
+    isAffiliateEvent: Boolean,
     isUserInEvent: Boolean,
     isHost: Boolean,
     isAssistantHost: Boolean,
     isEventOfficial: Boolean,
-): Boolean = !isWeeklyParentEvent && (
+): Boolean = !isWeeklyParentEvent && !isAffiliateEvent && (
     isUserInEvent || isHost || isAssistantHost || isEventOfficial
 )
 
@@ -1297,6 +1300,7 @@ fun EventDetailScreen(
             ?: "this event"
     }
     val canLeaveSelf = isUserInEvent && (!teamSignup || isCaptain || isFreeAgent || isWaitListed)
+    val platformRefundsAvailable = hasAnyPaidDivision && !selectedEvent.event.usesManualRegistrationPayments()
     val selectableWithdrawTargets = remember(withdrawTargets, teamSignup, isCaptain) {
         withdrawTargets.filter { target ->
             if (!target.isSelf) return@filter true
@@ -1307,8 +1311,8 @@ fun EventDetailScreen(
             }
         }
     }
-    val refundableWithdrawTargets = remember(withdrawTargets, hasAnyPaidDivision) {
-        if (!hasAnyPaidDivision) {
+    val refundableWithdrawTargets = remember(withdrawTargets, platformRefundsAvailable) {
+        if (!platformRefundsAvailable) {
             emptyList()
         } else {
             withdrawTargets.filter { it.membership == WithdrawTargetMembership.PARTICIPANT }
@@ -1327,25 +1331,25 @@ fun EventDetailScreen(
         singleWithdrawTarget?.membership == WithdrawTargetMembership.FREE_AGENT -> "Leave as Free Agent"
         singleWithdrawTarget?.membership == WithdrawTargetMembership.WAITLIST -> "Leave Waitlist"
         singleWithdrawTarget?.membership == WithdrawTargetMembership.PARTICIPANT &&
-            hasAnyPaidDivision &&
+            platformRefundsAvailable &&
             refundPolicy.canAutoRefund -> "Withdraw and Get Refund"
         singleWithdrawTarget?.membership == WithdrawTargetMembership.PARTICIPANT &&
-            hasAnyPaidDivision -> "Withdraw and Request Refund"
+            platformRefundsAvailable -> "Withdraw and Request Refund"
         singleWithdrawTarget?.membership == WithdrawTargetMembership.PARTICIPANT -> "Leave Event"
         isFreeAgent -> "Leave as Free Agent"
         isWaitListed -> "Leave Waitlist"
-        hasAnyPaidDivision && refundPolicy.canAutoRefund -> "Leave and Get Refund"
-        hasAnyPaidDivision -> "Leave and Request Refund"
+        platformRefundsAvailable && refundPolicy.canAutoRefund -> "Leave and Get Refund"
+        platformRefundsAvailable -> "Leave and Request Refund"
         else -> "Leave Event"
     }
     val openLeaveOrRefundForTarget: (WithdrawTargetOption?) -> Unit = { target ->
         val shouldRefund = when {
             target != null -> {
-                target.membership == WithdrawTargetMembership.PARTICIPANT && hasAnyPaidDivision
+                target.membership == WithdrawTargetMembership.PARTICIPANT && platformRefundsAvailable
             }
 
             else -> {
-                hasAnyPaidDivision && !isFreeAgent && !isWaitListed
+                platformRefundsAvailable && !isFreeAgent && !isWaitListed
             }
         }
 
@@ -1387,14 +1391,16 @@ fun EventDetailScreen(
     }
     val selectedWeeklyOccurrenceJoined =
         isWeeklyParentEvent && selectedWeeklyOccurrence != null && isUserInEvent
+    val isAffiliateEvent = selectedEvent.event.isAffiliateEvent()
     val shouldShowViewSchedulePrimaryAction = shouldUseViewSchedulePrimaryAction(
         isWeeklyParentEvent = isWeeklyParentEvent,
+        isAffiliateEvent = isAffiliateEvent,
         isUserInEvent = isUserInEvent,
         isHost = isHost,
         isAssistantHost = isAssistantHost,
         isEventOfficial = isEventOfficial,
     )
-    val showOverviewOpenDetailsAction = isWeeklyParentEvent || !shouldShowViewSchedulePrimaryAction
+    val showOverviewOpenDetailsAction = !isAffiliateEvent && (isWeeklyParentEvent || !shouldShowViewSchedulePrimaryAction)
     val showStickyActions = !showDetails && !isEditing && !showMap && showStickyDockByScroll
     val isEventRefreshInProgress = eventTeamsAndParticipantsLoading || eventMatchesLoading
     val joinDivisionOptions = remember(
@@ -1774,7 +1780,17 @@ fun EventDetailScreen(
         selectedWeeklyOccurrence,
         selectedJoinOptionDivisionId,
         registrationJoinDivisionOptions,
+        isAffiliateEvent,
     ) {
+        if (isAffiliateEvent) {
+            return@remember listOf(
+                JoinOption(
+                    label = "Register on website",
+                    requiresPayment = false,
+                    onClick = component::joinEvent,
+                )
+            )
+        }
         val requiresWeeklySelection = isWeeklyParentEvent && selectedWeeklyOccurrence == null
         val shouldHideJoinOptions = when {
             joinBlockedByStart -> true
@@ -2475,9 +2491,13 @@ fun EventDetailScreen(
 
                                     if (isHost && joinOptions.isNotEmpty()) {
                                         DropdownMenuItem(
-                                            text = { Text("Join Event") },
+                                            text = { Text(if (isAffiliateEvent) "Register on website" else "Join Event") },
                                             onClick = {
-                                                showJoinOptionsSheet = true
+                                                if (isAffiliateEvent) {
+                                                    component.joinEvent()
+                                                } else {
+                                                    showJoinOptionsSheet = true
+                                                }
                                                 showOptionsDropdown = false
                                             },
                                             leadingIcon = {
@@ -3446,6 +3466,7 @@ fun EventDetailScreen(
             ) {
                     StickyActionBar(
                     primaryLabel = when {
+                        isAffiliateEvent -> "Register on website"
                         isRegistrationPaymentPending -> "Payment pending"
                         isRegistrationPaymentFailed && !joinBlockedByStart -> "Complete payment"
                         isWeeklyParentEvent && !joinBlockedByStart -> "Join Event"
@@ -3455,7 +3476,9 @@ fun EventDetailScreen(
                         joinBlockedByStart -> "Event Started"
                         else -> "Joined with Team"
                     },
-                    primaryEnabled = if (isWeeklyParentEvent) {
+                    primaryEnabled = if (isAffiliateEvent) {
+                        true
+                    } else if (isWeeklyParentEvent) {
                         !isRegistrationPaymentPending && !joinBlockedByStart
                     } else {
                         !isRegistrationPaymentPending &&
@@ -3467,6 +3490,7 @@ fun EventDetailScreen(
                     },
                     onPrimaryClick = {
                         when {
+                            isAffiliateEvent -> component.joinEvent()
                             isRegistrationPaymentPending -> Unit
                             isRegistrationPaymentFailed && !joinBlockedByStart -> showJoinOptionsSheet = true
                             isWeeklyParentEvent && !joinBlockedByStart -> showJoinOptionsSheet = true

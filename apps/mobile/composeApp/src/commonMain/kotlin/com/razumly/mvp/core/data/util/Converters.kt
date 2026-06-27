@@ -8,6 +8,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
 import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
+import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.data.dataTypes.NotificationSettings
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
@@ -184,6 +185,15 @@ class Converters {
     @TypeConverter
     fun toTeamStaffAssignments(value: String): List<TeamStaffAssignment> =
         runCatching { Json.decodeFromString<List<TeamStaffAssignment>>(value) }
+            .getOrDefault(emptyList())
+
+    @TypeConverter
+    fun fromManualPaymentLinks(value: List<ManualPaymentLink>): String =
+        Json.encodeToString(value)
+
+    @TypeConverter
+    fun toManualPaymentLinks(value: String): List<ManualPaymentLink> =
+        runCatching { Json.decodeFromString<List<ManualPaymentLink>>(value) }
             .getOrDefault(emptyList())
 }
 

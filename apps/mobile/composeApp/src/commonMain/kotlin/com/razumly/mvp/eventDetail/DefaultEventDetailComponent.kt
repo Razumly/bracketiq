@@ -25,6 +25,8 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
+import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
+import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateUrl
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -1716,7 +1718,27 @@ class DefaultEventDetailComponent(
     }
 
     override fun joinEvent() {
+        if (openAffiliateEventRegistration(selectedEvent.value)) {
+            return
+        }
         registrationActionHandler.joinEvent()
+    }
+
+    private fun openAffiliateEventRegistration(event: Event): Boolean {
+        val affiliateUrl = event.normalizedAffiliateUrl() ?: return false
+        scope.launch {
+            val result = urlHandler?.openUrlInWebView(affiliateUrl)
+            if (result == null) {
+                _errorState.value = ErrorMessage("Unable to open registration link.")
+                return@launch
+            }
+            result.onFailure { throwable ->
+                _errorState.value = ErrorMessage(
+                    throwable.userMessage("Unable to open registration link."),
+                )
+            }
+        }
+        return true
     }
 
     override fun startTeamRegistration(team: TeamWithPlayers) {
@@ -1777,6 +1799,9 @@ class DefaultEventDetailComponent(
     }
 
     override fun joinEventAsTeam(team: TeamWithPlayers) {
+        if (openAffiliateEventRegistration(selectedEvent.value)) {
+            return
+        }
         registrationActionHandler.joinEventAsTeam(team)
     }
 
@@ -1843,6 +1868,9 @@ class DefaultEventDetailComponent(
     }
 
     override fun viewEvent() {
+        if (selectedEvent.value.isAffiliateEvent()) {
+            return
+        }
         _showDetails.value = true
     }
 
@@ -2549,6 +2577,26 @@ class DefaultEventDetailComponent(
                 refreshParticipantComplianceIfNeeded(selectedEvent.value)
             },
         )
+    }
+
+    override suspend fun reviewParticipantManualPaymentProof(
+        billId: String,
+        billPaymentId: String,
+        proofId: String,
+        decision: String,
+        amountAcceptedCents: Int?,
+        reviewNote: String?,
+    ): Result<Unit> {
+        return billingRepository.reviewManualPaymentProof(
+            billId = billId,
+            billPaymentId = billPaymentId,
+            proofId = proofId,
+            decision = decision,
+            amountAcceptedCents = amountAcceptedCents,
+            reviewNote = reviewNote,
+        ).mapCatching {
+            refreshParticipantComplianceIfNeeded(selectedEvent.value)
+        }
     }
 
     override fun selectPlace(place: MVPPlace?) {

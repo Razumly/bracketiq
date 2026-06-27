@@ -19,6 +19,7 @@ import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.ManualPaymentProof
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Product
@@ -895,6 +896,34 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
             ownerId = "user-1",
             totalAmountCents = 0,
             status = "OPEN",
+            id = billId,
+        )
+    )
+    override suspend fun submitManualPaymentProof(
+        billId: String,
+        billPaymentId: String,
+        fileId: String,
+    ): Result<ManualPaymentProof> = Result.success(
+        ManualPaymentProof(
+            id = "proof-test",
+            status = "SUBMITTED",
+            fileId = fileId,
+        )
+    )
+    override suspend fun reviewManualPaymentProof(
+        billId: String,
+        billPaymentId: String,
+        proofId: String,
+        decision: String,
+        amountAcceptedCents: Int?,
+        reviewNote: String?,
+    ): Result<Bill> = Result.success(
+        Bill(
+            ownerType = "USER",
+            ownerId = "user-1",
+            totalAmountCents = amountAcceptedCents ?: 0,
+            paidAmountCents = amountAcceptedCents,
+            status = if (decision.equals("ACCEPT", ignoreCase = true)) "PAID" else "OPEN",
             id = billId,
         )
     )

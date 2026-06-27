@@ -23,15 +23,26 @@ data class Bill(
 ) : MVPDocument
 
 @Serializable
+data class ManualPaymentProof(
+    val id: String,
+    val status: String? = null,
+    val fileId: String,
+    val fileUrl: String? = null,
+    val amountAcceptedCents: Int? = null,
+)
+
+@Serializable
 data class BillPayment(
     val billId: String,
     val sequence: Int,
     val dueDate: String,
     val amountCents: Int,
+    val paidAmountCents: Int? = null,
     val status: String? = null,
     val paidAt: String? = null,
     val paymentIntentId: String? = null,
     val payerUserId: String? = null,
+    val manualPaymentProofs: List<ManualPaymentProof> = emptyList(),
     @Transient
     override val id: String = "",
 ) : MVPDocument

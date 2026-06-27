@@ -96,6 +96,39 @@ private func imagePreviewURL(imageId: String?, width: Int? = nil, height: Int? =
     return components.url
 }
 
+private func normalizedImageId(_ value: String?) -> String? {
+    let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return normalized.isEmpty ? nil : normalized
+}
+
+private func eventImageId(_ event: Event, organizationLogoIdsById: [String: String]) -> String? {
+    if let imageId = normalizedImageId(event.imageId) {
+        return imageId
+    }
+
+    guard
+        let organizationId = normalizedImageId(event.organizationId),
+        let logoId = normalizedImageId(organizationLogoIdsById[organizationId])
+    else {
+        return nil
+    }
+
+    return logoId
+}
+
+private func eventImagePreviewURL(
+    event: Event,
+    organizationLogoIdsById: [String: String],
+    width: Int? = nil,
+    height: Int? = nil
+) -> URL? {
+    imagePreviewURL(
+        imageId: eventImageId(event, organizationLogoIdsById: organizationLogoIdsById),
+        width: width,
+        height: height
+    )
+}
+
 private func remoteURL(_ value: String?) -> URL? {
     let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     guard !normalized.isEmpty else { return nil }
@@ -284,6 +317,7 @@ struct EventMap: View {
     var selectedPlace: MVPPlace?
     var onPlaceSelectionCleared: () -> Void
     var canClickPOI: Bool
+    var organizationLogoIdsById: [String: String]
     var focusedEvent: Event?
     var focusedLocation: LatLng?
     var recenterRequestToken: Int
@@ -304,6 +338,7 @@ struct EventMap: View {
         selectedPlace: MVPPlace?,
         onPlaceSelectionCleared: @escaping () -> Void,
         canClickPOI: Bool,
+        organizationLogoIdsById: [String: String],
         focusedLocation: LatLng?,
         focusedEvent: Event?,
         recenterRequestToken: Int,
@@ -318,6 +353,7 @@ struct EventMap: View {
         self.selectedPlace = selectedPlace
         self.onPlaceSelectionCleared = onPlaceSelectionCleared
         self.canClickPOI = canClickPOI
+        self.organizationLogoIdsById = organizationLogoIdsById
         self.focusedLocation = focusedLocation
         self.focusedEvent = focusedEvent
         self.recenterRequestToken = recenterRequestToken
@@ -351,6 +387,7 @@ struct EventMap: View {
                     selectedPlace: selectedPlace,
                     onPlaceSelectionCleared: onPlaceSelectionCleared,
                     places: mergedPlaces,
+                    organizationLogoIdsById: organizationLogoIdsById,
                     recenterRequestToken: recenterRequestToken,
                     locationButtonBottomPadding: locationButtonBottomPadding
                 )
@@ -459,6 +496,7 @@ struct GoogleMapView: UIViewRepresentable {
     let selectedPlace: MVPPlace?
     let onPlaceSelectionCleared: () -> Void
     let places: [MVPPlace]
+    let organizationLogoIdsById: [String: String]
     let recenterRequestToken: Int
     let locationButtonBottomPadding: CGFloat
     
@@ -571,8 +609,9 @@ struct GoogleMapView: UIViewRepresentable {
             marker.iconView = makeMarkerIconView(
                 name: fe.name,
                 color: discoverEventMarkerColor,
-                imageURL: imagePreviewURL(
-                    imageId: fe.imageId,
+                imageURL: eventImagePreviewURL(
+                    event: fe,
+                    organizationLogoIdsById: organizationLogoIdsById,
                     width: eventMarkerImageRequestSize,
                     height: eventMarkerImageRequestSize
                 ),
@@ -595,8 +634,9 @@ struct GoogleMapView: UIViewRepresentable {
                 marker.iconView = makeMarkerIconView(
                     name: event.name,
                     color: discoverEventMarkerColor,
-                    imageURL: imagePreviewURL(
-                        imageId: event.imageId,
+                    imageURL: eventImagePreviewURL(
+                        event: event,
+                        organizationLogoIdsById: organizationLogoIdsById,
                         width: eventMarkerImageRequestSize,
                         height: eventMarkerImageRequestSize
                     ),
@@ -957,7 +997,12 @@ class Coordinator: NSObject, GMSMapViewDelegate {
     // MARK: - Custom Info Window Creation
     
     private func createEventInfoWindow(for event: Event, marker: GMSMarker) -> UIView {
-        let imageURL = imagePreviewURL(imageId: event.imageId, width: 560, height: 220)
+        let imageURL = eventImagePreviewURL(
+            event: event,
+            organizationLogoIdsById: parent.organizationLogoIdsById,
+            width: 560,
+            height: 220
+        )
         let locationText = event.location.trimmingCharacters(in: .whitespacesAndNewlines)
         let descriptionText = event.eventDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasDescription = !descriptionText.isEmpty && descriptionText.localizedCaseInsensitiveCompare(locationText) != .orderedSame

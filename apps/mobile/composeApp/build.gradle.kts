@@ -23,8 +23,8 @@ plugins {
     alias(libs.plugins.compose.vectorize)
     alias(libs.plugins.secrets)
     id("kotlin-parcelize")
-    id("com.google.gms.google-services") version "4.4.4"
-    id("co.touchlab.skie") version "0.10.10"
+    id("com.google.gms.google-services") version "4.5.0"
+    id("co.touchlab.skie") version "0.10.13"
 }
 composeCompiler {
     includeSourceInformation = true
@@ -34,8 +34,8 @@ compose.resources {
     generateResClass = always
 }
 
-val mvpVersion = "1.5.17"
-val mvpVersionCode = 52
+val mvpVersion = "1.6.0"
+val mvpVersionCode = 53
 kotlin {
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
@@ -47,13 +47,12 @@ kotlin {
         }
     }
 
-    iosX64()
     iosArm64()
     iosSimulatorArm64()
 
     applyDefaultHierarchyTemplate()
 
-    listOf(iosX64(), iosArm64(), iosSimulatorArm64()).forEach { target ->
+    listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
         target.binaries.framework {
             baseName = "ComposeApp"
             linkerOpts.add("-lsqlite3")
@@ -344,7 +343,6 @@ dependencies {
     debugImplementation("org.jetbrains.compose.ui:ui-tooling:${libs.versions.uiVersion.get()}")
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     add("kspAndroid", libs.androidx.room.compiler)
-    add("kspIosX64", libs.androidx.room.compiler)
     add("kspIosArm64", libs.androidx.room.compiler)
     add("kspIosSimulatorArm64", libs.androidx.room.compiler)
     implementation(libs.androidx.foundation.layout)
@@ -461,11 +459,19 @@ fun isBackendHttpReachable(port: Int, timeoutMs: Int = 2_000): Boolean {
     }
 }
 
+fun resolveBackendStartupTimeoutSeconds(project: Project): Long {
+    return project.findProperty("mvp.backendStartupTimeoutSeconds")
+        ?.toString()
+        ?.toLongOrNull()
+        ?.takeIf { it > 0 }
+        ?: 75L
+}
+
 fun waitForBackendHttp(port: Int, timeoutSeconds: Long): Boolean {
     val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds)
     while (System.nanoTime() < deadline) {
         if (isBackendHttpReachable(port)) return true
-        Thread.sleep(500)
+        Thread.sleep(750)
     }
     return false
 }
@@ -712,6 +718,7 @@ val startLocalBackend = tasks.register("startLocalBackend") {
         val isWindows = System.getProperty("os.name")?.lowercase()?.contains("win") == true
 
         val requestedBackendPort = resolveBackendPort(project, findProperty("mvp.site.port")?.toString())
+        val backendStartupTimeoutSeconds = resolveBackendStartupTimeoutSeconds(project)
         val alternateBackendPort = when (requestedBackendPort) {
             DEFAULT_BACKEND_PORT -> ALTERNATE_BACKEND_PORT
             ALTERNATE_BACKEND_PORT -> DEFAULT_BACKEND_PORT
@@ -889,14 +896,25 @@ val startLocalBackend = tasks.register("startLocalBackend") {
         }
 
         // Give the server a moment to serve the API origin the simulator will use.
-        if (waitForBackendHttp(backendPort, timeoutSeconds = 20)) {
+        if (waitForBackendHttp(backendPort, timeoutSeconds = backendStartupTimeoutSeconds)) {
             logger.lifecycle("startLocalBackend: backend reachable on ${backendHealthUrl(backendPort)}")
             return@doLast
         }
 
+        startedBackendProcess?.let { process ->
+            if (!process.isAlive) {
+                throw GradleException(
+                    "startLocalBackend: backend process exited before ${backendHealthUrl(backendPort)} became reachable. " +
+                        "Check ${outFile.absolutePath} and ${errFile.absolutePath}."
+                )
+            }
+        }
+
         throw GradleException(
             "startLocalBackend: backend started on port $backendPort but ${backendHealthUrl(backendPort)} did not " +
-                "return a successful response. Check ${outFile.absolutePath} and ${errFile.absolutePath}."
+                "return a successful response within ${backendStartupTimeoutSeconds}s. " +
+                "Check ${outFile.absolutePath} and ${errFile.absolutePath}. " +
+                "Override with -Pmvp.backendStartupTimeoutSeconds=<seconds> if this machine needs more time."
         )
     }
 }

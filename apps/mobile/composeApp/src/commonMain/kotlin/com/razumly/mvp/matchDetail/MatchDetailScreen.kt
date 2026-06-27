@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -55,6 +56,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.geometry.Offset
@@ -108,12 +110,16 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.time.Clock
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
 private const val WEB_LAYOUT_BREAKPOINT_DP = 600
 private const val FIELD_DISTANCE_WARNING_THRESHOLD_MILES = 0.01
 private const val EARTH_RADIUS_MILES = 3958.8
+private const val MATCH_DELAY_STATUS = "DELAYED"
+private val DelayedMatchTimeContainerColor = Color(0xFFFFD54F)
+private val DelayedMatchTimeContentColor = Color(0xFF3A2A00)
 private val MatchDetailBottomDockLift = 28.dp
 private val MatchDetailBottomDockContentReserve = 80.dp
 private val MatchDetailActionButtonHeight = 56.dp
@@ -173,6 +179,9 @@ private fun parseMatchInstant(value: String?): Instant? {
     val normalized = value?.trim()?.takeIf(String::isNotBlank) ?: return null
     return runCatching { Instant.parse(normalized) }.getOrNull()
 }
+
+private fun MatchMVP.isDelayedStatus(): Boolean =
+    status.equals(MATCH_DELAY_STATUS, ignoreCase = true)
 
 private fun formatClockSeconds(seconds: Int): String {
     val safeSeconds = seconds.coerceAtLeast(0)
@@ -488,6 +497,9 @@ fun MatchDetailScreen(
         mutableStateOf(parseMatchInstant(match.match.actualEnd))
     }
     var actualTimeError by remember(match.match.id) { mutableStateOf<String?>(null) }
+    var delayPromptNowMillis by remember(match.match.id) { mutableStateOf(Clock.System.now().toEpochMilliseconds()) }
+    var presentedDelayPromptKey by remember(match.match.id, match.match.start) { mutableStateOf<String?>(null) }
+    var deniedDelayPromptKey by remember(match.match.id, match.match.start) { mutableStateOf<String?>(null) }
     val locationTarget = remember(match.field, match.match.id, event, currentLocation) {
         resolveLocationTarget(
             field = match.field,
@@ -616,6 +628,49 @@ fun MatchDetailScreen(
         if (regulationClockEnded && regulationAlertedTimerKey != regulationTimerKey) {
             playMatchTimerAlert()
             regulationAlertedTimerKey = regulationTimerKey
+        }
+    }
+    val delayPromptKey = "${match.match.id}:${match.match.start?.toString().orEmpty()}"
+    val delayThresholdPassed = match.match.start?.let { scheduledStart ->
+        delayPromptNowMillis >= (scheduledStart + 5.minutes).toEpochMilliseconds()
+    } == true
+    val delayPromptEligible = isOfficial &&
+        officialCheckedIn &&
+        !matchFinished &&
+        !showOfficialCheckInDialog &&
+        !match.match.isDelayedStatus() &&
+        match.match.actualStart.isNullOrBlank() &&
+        delayThresholdPassed
+    val showDelayPrompt = remember(
+        delayPromptEligible,
+        presentedDelayPromptKey,
+        delayPromptKey,
+    ) {
+        delayPromptEligible && presentedDelayPromptKey != delayPromptKey
+    }
+    val showSetDelayedButton = delayPromptEligible &&
+        deniedDelayPromptKey == delayPromptKey
+    LaunchedEffect(
+        match.match.id,
+        match.match.start,
+        match.match.actualStart,
+        match.match.status,
+        isOfficial,
+        officialCheckedIn,
+        matchFinished,
+        showOfficialCheckInDialog,
+    ) {
+        while (
+            isOfficial &&
+            officialCheckedIn &&
+            !matchFinished &&
+            !showOfficialCheckInDialog &&
+            !match.match.isDelayedStatus() &&
+            match.match.actualStart.isNullOrBlank() &&
+            match.match.start != null
+        ) {
+            delayPromptNowMillis = Clock.System.now().toEpochMilliseconds()
+            delay(1_000L)
         }
     }
     val canAdjustScore = showOfficialScoreControls &&
@@ -839,6 +894,52 @@ fun MatchDetailScreen(
         )
     }
 
+    if (showDelayPrompt) {
+        AlertDialog(
+            onDismissRequest = {
+                presentedDelayPromptKey = delayPromptKey
+                deniedDelayPromptKey = delayPromptKey
+            },
+            title = { Text("Mark match as delayed?") },
+            text = { Text("This match is more than five minutes past its scheduled start time.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        presentedDelayPromptKey = delayPromptKey
+                        deniedDelayPromptKey = null
+                        component.markMatchDelayed()
+                    },
+                    enabled = !matchTimeSaving,
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (matchTimeSaving) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                            )
+                        }
+                        Text(if (matchTimeSaving) "Saving..." else "Yes")
+                    }
+                }
+            },
+            dismissButton = {
+                Button(
+                    onClick = {
+                        presentedDelayPromptKey = delayPromptKey
+                        deniedDelayPromptKey = delayPromptKey
+                    },
+                    enabled = !matchTimeSaving,
+                ) {
+                    Text("No")
+                }
+            },
+        )
+    }
+
     if (pendingIncidentTarget != null) {
         val incidentOptions = incidentDialogTypes(
             rules = rules,
@@ -1057,28 +1158,59 @@ fun MatchDetailScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                     if (canStartMatch) {
-                        Button(
-                            onClick = { component.startMatch() },
-                            enabled = !matchStartSaving,
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
+                            Button(
+                                onClick = { component.startMatch() },
+                                enabled = !matchStartSaving,
                             ) {
-                                if (matchStartSaving) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
-                                        strokeWidth = 2.dp,
-                                        color = MaterialTheme.colorScheme.onPrimary,
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    if (matchStartSaving) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            strokeWidth = 2.dp,
+                                            color = MaterialTheme.colorScheme.onPrimary,
+                                        )
+                                    }
+                                    Text(
+                                        if (activeSegment?.sequence == 1 && match.match.actualStart.isNullOrBlank()) {
+                                            "Start Match"
+                                        } else {
+                                            "Start ${activeSegmentLabel ?: segmentBaseLabel}"
+                                        }
                                     )
                                 }
-                                Text(
-                                    if (activeSegment?.sequence == 1 && match.match.actualStart.isNullOrBlank()) {
-                                        "Start Match"
-                                    } else {
-                                        "Start ${activeSegmentLabel ?: segmentBaseLabel}"
+                            }
+                            if (showSetDelayedButton) {
+                                Button(
+                                    onClick = { component.markMatchDelayed() },
+                                    enabled = !matchTimeSaving,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = DelayedMatchTimeContainerColor,
+                                        contentColor = DelayedMatchTimeContentColor,
+                                        disabledContainerColor = DelayedMatchTimeContainerColor.copy(alpha = 0.6f),
+                                        disabledContentColor = DelayedMatchTimeContentColor.copy(alpha = 0.7f),
+                                    ),
+                                ) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        if (matchTimeSaving) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(16.dp),
+                                                strokeWidth = 2.dp,
+                                                color = DelayedMatchTimeContentColor,
+                                            )
+                                        }
+                                        Text(if (matchTimeSaving) "Saving..." else "Set as delayed")
                                     }
-                                )
+                                }
                             }
                         }
                     }

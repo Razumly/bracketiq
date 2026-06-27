@@ -426,6 +426,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                         events = events,
                         isLoading = isLoadingEvents,
                         bottomPadding = bottomPadding,
+                        organizationLogoId = organization?.logoId,
                         onEventClick = component::viewEvent,
                     )
                 }
@@ -861,6 +862,7 @@ private fun OverviewTabContent(
                             EventCard(
                                 event = event,
                                 navPadding = PaddingValues(bottom = 16.dp),
+                                fallbackImageId = organization?.logoId,
                                 onMapClick = { }
                             )
                         }
@@ -894,6 +896,7 @@ private fun EventsTabContent(
     events: List<Event>,
     isLoading: Boolean,
     bottomPadding: androidx.compose.ui.unit.Dp,
+    organizationLogoId: String?,
     onEventClick: (Event) -> Unit,
 ) {
     if (isLoading) {
@@ -921,6 +924,7 @@ private fun EventsTabContent(
                     EventCard(
                         event = event,
                         navPadding = PaddingValues(bottom = 16.dp),
+                        fallbackImageId = organizationLogoId,
                         onMapClick = { }
                     )
                 }

@@ -57,6 +57,7 @@ fun MapEventCard(
     event: Event,
     imagePainter: Painter? = null,
     loadImageInternally: Boolean = true,
+    fallbackImageId: String? = null,
     modifier: Modifier = Modifier
 ) {
     // Always use info window style - no triangle pointer needed
@@ -74,6 +75,7 @@ fun MapEventCard(
             event = event,
             imagePainter = imagePainter,
             loadImageInternally = loadImageInternally,
+            fallbackImageId = fallbackImageId,
         )
     }
 }
@@ -386,13 +388,17 @@ private fun EventCardContent(
     event: Event,
     imagePainter: Painter?,
     loadImageInternally: Boolean,
+    fallbackImageId: String?,
 ) {
-    val imageUrl = remember(event.imageId, loadImageInternally) {
+    val imageUrl = remember(event.imageId, fallbackImageId, loadImageInternally) {
         if (loadImageInternally) {
-            event.imageId
+            val imageId = event.imageId
                 .trim()
                 .takeIf { it.isNotBlank() }
-                ?.let { imageId -> getImageUrl(fileId = imageId, width = 560, height = 220) }
+                ?: fallbackImageId
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() }
+            imageId?.let { getImageUrl(fileId = it, width = 560, height = 220) }
         } else {
             null
         }

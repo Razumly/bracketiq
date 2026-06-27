@@ -3,18 +3,21 @@
 package com.razumly.mvp.eventSearch
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -31,26 +34,25 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Business
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBarDefaults
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -69,15 +71,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImagePainter
-import coil3.compose.rememberAsyncImagePainter
+import androidx.compose.ui.unit.sp
 import com.kizitonwose.calendar.compose.WeekCalendar
 import com.kizitonwose.calendar.compose.weekcalendar.rememberWeekCalendarState
 import com.kizitonwose.calendar.core.Week
@@ -86,12 +89,14 @@ import com.kizitonwose.calendar.core.WeekDayPosition
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateUrl
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
-import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.composables.SearchBox
 import com.razumly.mvp.core.presentation.composables.SearchOverlay
+import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.guides.AppGuide
 import com.razumly.mvp.core.presentation.guides.AppGuideStep
 import com.razumly.mvp.core.presentation.guides.AppGuideTargets
@@ -102,7 +107,6 @@ import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.presentation.util.isScrollingUp
-import com.razumly.mvp.core.presentation.util.moneyFormat
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
@@ -117,6 +121,10 @@ import com.razumly.mvp.eventSearch.tabs.organizations.toMvpPlaceOrNull
 import com.razumly.mvp.eventSearch.tabs.organizations.composables.DiscoverOrganizationSuggestion
 import com.razumly.mvp.eventSearch.tabs.rentals.DiscoverRentalList
 import com.razumly.mvp.eventSearch.tabs.rentals.composables.DiscoverRentalSuggestion
+import com.razumly.mvp.eventSearch.tabs.teams.DiscoverTeamList
+import com.razumly.mvp.eventSearch.tabs.teams.DiscoverTeamSuggestion
+import com.razumly.mvp.icons.Jersey
+import com.razumly.mvp.icons.MVPIcons
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
@@ -145,8 +153,16 @@ import kotlin.time.Instant
 
 private enum class DiscoverTab(val label: String, val searchPlaceholder: String) {
     EVENTS(label = "Events", searchPlaceholder = "Search events"),
-    ORGANIZATIONS(label = "Organizations", searchPlaceholder = "Search organizations"),
+    ORGANIZATIONS(label = "Orgs", searchPlaceholder = "Search orgs"),
+    TEAMS(label = "Teams", searchPlaceholder = "Search teams"),
     RENTALS(label = "Rentals", searchPlaceholder = "Search rentals")
+}
+
+private fun DiscoverTab.icon(): ImageVector = when (this) {
+    DiscoverTab.EVENTS -> Icons.Default.DateRange
+    DiscoverTab.ORGANIZATIONS -> Icons.Default.Groups
+    DiscoverTab.TEAMS -> MVPIcons.Jersey
+    DiscoverTab.RENTALS -> Icons.Default.Business
 }
 
 internal enum class RentalDetailsStep {
@@ -184,7 +200,7 @@ internal data class RentalBusyRange(
 )
 private val DISCOVER_FIRST_ITEM_EXTRA_TOP_GAP = 4.dp
 private val DISCOVER_PULL_INDICATOR_TOP_OFFSET = 64.dp
-private val DISCOVER_TAB_ROW_HEIGHT = 48.dp
+private val DISCOVER_TAB_ROW_HEIGHT = 40.dp
 private const val DISCOVER_SEARCH_THIS_AREA_THRESHOLD_MILES = 0.25
 private const val DISCOVER_GUIDE_ID = "discover_onboarding_v1"
 private const val DISCOVER_GUIDE_TARGET_TABS = "discover.tabs"
@@ -197,6 +213,155 @@ private val DISCOVER_GUIDE_REQUIRED_TARGETS = setOf(
     DISCOVER_GUIDE_TARGET_SEARCH,
 )
 
+@Composable
+private fun DiscoverFilterLocationSection(
+    locationLabel: String,
+    pickerVisible: Boolean,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    suggestions: List<MVPPlace>,
+    isSearching: Boolean,
+    canUseCurrentLocation: Boolean,
+    onTogglePicker: () -> Unit,
+    onUseCurrentLocation: () -> Unit,
+    onSuggestionSelected: (MVPPlace) -> Unit,
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = "Location",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onTogglePicker)
+                .padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Default.Place,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = locationLabel,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onTogglePicker) {
+                Text(if (pickerVisible) "Hide" else "Change")
+            }
+        }
+
+        AnimatedVisibility(
+            visible = pickerVisible,
+            enter = expandVertically(animationSpec = tween(180)) + fadeIn(),
+            exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                StandardTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    placeholder = "Search city or area code",
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    },
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 14.sp,
+                        lineHeight = 18.sp,
+                    ),
+                    placeholderTextStyle = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 14.sp,
+                        lineHeight = 18.sp,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    height = 52.dp,
+                )
+
+                if (canUseCurrentLocation) {
+                    LocationChoiceRow(
+                        title = "My location",
+                        subtitle = "Use your current location for distance filters",
+                        onClick = onUseCurrentLocation,
+                    )
+                }
+
+                when {
+                    query.trim().length < 2 -> Text(
+                        text = "Type at least 2 characters.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                    )
+
+                    isSearching -> Text(
+                        text = "Searching locations...",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                    )
+
+                    suggestions.isEmpty() -> Text(
+                        text = "No locations found.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                    )
+
+                    else -> suggestions.take(5).forEach { place ->
+                        LocationChoiceRow(
+                            title = place.name,
+                            subtitle = place.address,
+                            onClick = { onSuggestionSelected(place) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocationChoiceRow(
+    title: String,
+    subtitle: String?,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (!subtitle.isNullOrBlank()) {
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
 fun EventSearchScreen(
@@ -207,9 +372,12 @@ fun EventSearchScreen(
     val organizations by component.organizations.collectAsState()
     val allOrganizations by component.allOrganizations.collectAsState()
     val organizationSuggestions by component.suggestedOrganizations.collectAsState()
+    val teamSuggestions by component.suggestedTeams.collectAsState()
     val isLoadingOrganizations by component.isLoadingOrganizations.collectAsState()
     val rentals by component.rentals.collectAsState()
     val isLoadingRentals by component.isLoadingRentals.collectAsState()
+    val teams by component.teams.collectAsState()
+    val isLoadingTeams by component.isLoadingTeams.collectAsState()
     val isMapVisible by mapComponent.showMap.collectAsState()
     val selectedEvent by component.selectedEvent.collectAsState()
     val hazeState = rememberHazeState()
@@ -220,6 +388,7 @@ fun EventSearchScreen(
 
     val eventsListState = rememberLazyListState()
     val organizationsListState = rememberLazyListState()
+    val teamsListState = rememberLazyListState()
     val rentalsListState = rememberLazyListState()
 
     var fabOffset by remember { mutableStateOf(Offset.Zero) }
@@ -229,6 +398,8 @@ fun EventSearchScreen(
     val mapViewCenter by mapComponent.currentViewCenter.collectAsState()
     val mapViewRadiusMiles by mapComponent.currentViewRadiusMiles.collectAsState()
     val currentFilter by component.filter.collectAsState()
+    val currentRadius by component.currentRadius.collectAsState()
+    val selectedSearchLocationLabel by component.selectedSearchLocationLabel.collectAsState()
 
     var selectedTab by rememberSaveable { mutableStateOf(DiscoverTab.EVENTS) }
     var searchQuery by remember { mutableStateOf("") }
@@ -242,6 +413,10 @@ fun EventSearchScreen(
     var showFab by remember { mutableStateOf(true) }
     var showFloatingSearch by remember { mutableStateOf(true) }
     var showingFilter by remember { mutableStateOf(false) }
+    var showLocationPicker by remember { mutableStateOf(false) }
+    var locationQuery by remember { mutableStateOf("") }
+    var locationSuggestions by remember { mutableStateOf<List<MVPPlace>>(emptyList()) }
+    var isSearchingLocations by remember { mutableStateOf(false) }
     var lastMapSearchCenter by remember { mutableStateOf<LatLng?>(null) }
     var lastMapSearchRadiusMiles by remember { mutableStateOf<Double?>(null) }
     var loadedInitialMapArea by remember { mutableStateOf(false) }
@@ -292,9 +467,12 @@ fun EventSearchScreen(
 
     val eventsScrollingUp by eventsListState.isScrollingUp()
     val organizationsScrollingUp by organizationsListState.isScrollingUp()
+    val teamsScrollingUp by teamsListState.isScrollingUp()
     val rentalsScrollingUp by rentalsListState.isScrollingUp()
+    val uriHandler = LocalUriHandler.current
 
     val density = LocalDensity.current
+    val fixedTabFontSize = (13f / density.fontScale).sp
     var overlayTopOffset by remember { mutableStateOf(0.dp) }
     var overlayStartOffset by remember { mutableStateOf(0.dp) }
     var overlayWidth by remember { mutableStateOf(0.dp) }
@@ -306,6 +484,18 @@ fun EventSearchScreen(
 
     val organizationLookup = remember(allOrganizations, rentals) {
         (allOrganizations + rentals).associateBy { organization -> organization.id }
+    }
+    val organizationLogoIdsById = remember(allOrganizations, rentals) {
+        (allOrganizations + rentals)
+            .mapNotNull { organization ->
+                val logoId = organization.logoId?.trim()?.takeIf(String::isNotBlank)
+                if (logoId == null) {
+                    null
+                } else {
+                    organization.id to logoId
+                }
+            }
+            .toMap()
     }
     val organizationPlaces = remember(organizations) {
         organizations.mapNotNull { organization ->
@@ -326,11 +516,13 @@ fun EventSearchScreen(
     val currentListScrollingUp = when (selectedTab) {
         DiscoverTab.EVENTS -> eventsScrollingUp
         DiscoverTab.ORGANIZATIONS -> organizationsScrollingUp
+        DiscoverTab.TEAMS -> teamsScrollingUp
         DiscoverTab.RENTALS -> rentalsScrollingUp
     }
     val isRefreshingCurrentTab = when (selectedTab) {
         DiscoverTab.EVENTS -> isLoadingMore
         DiscoverTab.ORGANIZATIONS -> isLoadingOrganizations
+        DiscoverTab.TEAMS -> isLoadingTeams
         DiscoverTab.RENTALS -> isLoadingRentals
     }
     val hasMapSearchMoved = mapViewCenter?.let { currentCenter ->
@@ -343,6 +535,21 @@ fun EventSearchScreen(
 
     val loadingHandler = LocalLoadingHandler.current
     val popupHandler = LocalPopupHandler.current
+    val openTeam: (Team) -> Unit = { team ->
+        val affiliateUrl = team.normalizedAffiliateUrl()
+        if (affiliateUrl != null) {
+            runCatching { uriHandler.openUri(affiliateUrl) }
+                .onFailure { throwable ->
+                    popupHandler.showPopup(
+                        com.razumly.mvp.core.util.ErrorMessage(
+                            throwable.message ?: "Unable to open registration link.",
+                        )
+                    )
+                }
+        } else {
+            component.viewTeam(team)
+        }
+    }
 
     LaunchedEffect(searchBoxSize, searchBoxPosition) {
         overlayTopOffset = with(density) {
@@ -374,6 +581,10 @@ fun EventSearchScreen(
             DiscoverTab.RENTALS -> {
                 mapComponent.setEvents(emptyList())
                 mapComponent.setPlaces(rentalPlaces)
+            }
+            DiscoverTab.TEAMS -> {
+                mapComponent.setEvents(emptyList())
+                mapComponent.setPlaces(emptyList())
             }
         }
     }
@@ -414,11 +625,30 @@ fun EventSearchScreen(
         }
     }
 
+    LaunchedEffect(showingFilter, showLocationPicker, locationQuery) {
+        val normalizedQuery = locationQuery.trim()
+        if (!showingFilter || !showLocationPicker || normalizedQuery.length < 2) {
+            locationSuggestions = emptyList()
+            isSearchingLocations = false
+            return@LaunchedEffect
+        }
+
+        delay(250)
+        isSearchingLocations = true
+        locationSuggestions = runCatching {
+            mapComponent.searchLocationPlaces(normalizedQuery)
+        }.getOrElse {
+            emptyList()
+        }
+        isSearchingLocations = false
+    }
+
     LaunchedEffect(selectedTab, searchQuery) {
         val normalizedQuery = searchQuery.trim()
         if (normalizedQuery.length < 2) {
             component.suggestEvents("")
             component.suggestOrganizations("", rentalsOnly = selectedTab == DiscoverTab.RENTALS)
+            component.suggestTeams("")
             return@LaunchedEffect
         }
 
@@ -426,6 +656,7 @@ fun EventSearchScreen(
         when (selectedTab) {
             DiscoverTab.EVENTS -> component.suggestEvents(normalizedQuery)
             DiscoverTab.ORGANIZATIONS -> component.suggestOrganizations(normalizedQuery, rentalsOnly = false)
+            DiscoverTab.TEAMS -> component.suggestTeams(normalizedQuery)
             DiscoverTab.RENTALS -> component.suggestOrganizations(normalizedQuery, rentalsOnly = true)
         }
     }
@@ -462,7 +693,19 @@ fun EventSearchScreen(
         )
     }
 
-    Box {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val filterDropdownMaxHeight = if (searchBoxSize.height > 0) {
+            with(density) {
+                val screenHeightPx = maxHeight.toPx()
+                val dropdownTopPx = searchBoxPosition.y + searchBoxSize.height
+                val navBottomPx = offsetNavPadding.calculateBottomPadding().toPx()
+                val availablePx = screenHeightPx - dropdownTopPx - navBottomPx - 32.dp.toPx()
+                availablePx.coerceAtLeast(640.dp.toPx()).toDp()
+            }
+        } else {
+            null
+        }
+
         BindLocationTrackerEffect(component.locationTracker)
         CircularRevealUnderlay(
             isRevealed = isMapVisible,
@@ -496,10 +739,12 @@ fun EventSearchScreen(
                                 }
                             }
 
+                            DiscoverTab.TEAMS -> {}
                             else -> {}
                         }
                     },
                     canClickPOI = false,
+                    organizationLogoIdsById = organizationLogoIdsById,
                     focusedLocation = selectedEvent?.takeIf { selectedTab == DiscoverTab.EVENTS }?.let {
                         LatLng(it.latitude, it.longitude)
                     } ?: currentLocation ?: LatLng(0.0, 0.0),
@@ -563,6 +808,7 @@ fun EventSearchScreen(
                             when (selectedTab) {
                                 DiscoverTab.EVENTS -> component.refreshEvents(force = true)
                                 DiscoverTab.ORGANIZATIONS -> component.refreshOrganizations(force = true)
+                                DiscoverTab.TEAMS -> component.refreshTeams(force = true)
                                 DiscoverTab.RENTALS -> component.refreshRentals(force = true)
                             }
                         },
@@ -580,6 +826,7 @@ fun EventSearchScreen(
                                 DiscoverTab.EVENTS -> {
                                     EventsTabContent(
                                         events = events,
+                                        organizationLogoIdsById = organizationLogoIdsById,
                                         firstElementPadding = firstElementPadding,
                                         lastElementPadding = offsetNavPadding,
                                         lazyListState = eventsListState,
@@ -611,6 +858,19 @@ fun EventSearchScreen(
                                         onOrganizationClick = { organization ->
                                             component.viewOrganization(organization)
                                         }
+                                    )
+                                }
+
+                                DiscoverTab.TEAMS -> {
+                                    DiscoverTeamList(
+                                        teams = teams,
+                                        isLoading = isLoadingTeams,
+                                        listState = teamsListState,
+                                        firstElementPadding = firstElementPadding,
+                                        lastElementPadding = offsetNavPadding,
+                                        emptyMessage = "No teams open for registration yet.",
+                                        firstItemGuideTargetId = DISCOVER_GUIDE_TARGET_FIRST_RESULT,
+                                        onTeamClick = openTeam,
                                     )
                                 }
 
@@ -648,27 +908,64 @@ fun EventSearchScreen(
                 .statusBarsPadding()
                 .align(Alignment.TopCenter),
         ) {
-            PrimaryTabRow(
-                selectedTabIndex = selectedTab.ordinal,
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .height(DISCOVER_TAB_ROW_HEIGHT)
                     .guideTarget(DISCOVER_GUIDE_TARGET_TABS)
             ) {
-                DiscoverTab.values().forEachIndexed { index, tab ->
-                    Tab(
-                        selected = selectedTab.ordinal == index,
-                        onClick = {
-                            selectedTab = tab
-                        },
-                        text = {
+                DiscoverTab.values().forEach { tab ->
+                    val selected = selectedTab == tab
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(DISCOVER_TAB_ROW_HEIGHT)
+                            .clickable { selectedTab = tab },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = tab.icon(),
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = if (selected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
                             Text(
                                 text = tab.label,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                                overflow = TextOverflow.Clip,
                                 softWrap = false,
+                                fontSize = fixedTabFontSize,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (selected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
                             )
                         }
-                    )
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .height(if (selected) 2.dp else 1.dp)
+                                .background(
+                                    if (selected) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.outlineVariant
+                                    }
+                                )
+                        )
+                    }
                 }
             }
         }
@@ -678,26 +975,24 @@ fun EventSearchScreen(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .statusBarsPadding()
-                .padding(top = 56.dp),
+                .padding(top = DISCOVER_TAB_ROW_HEIGHT + 6.dp),
             enter = slideInVertically { -it / 2 } + fadeIn(),
             exit = slideOutVertically { -it / 2 } + fadeOut()
         ) {
-            Card(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .guideTarget(DISCOVER_GUIDE_TARGET_SEARCH)
                     .guideTarget(DISCOVER_GUIDE_TARGET_FILTERS)
                     .padding(horizontal = 12.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
-                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
             ) {
                 SearchBox(
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = selectedTab.searchPlaceholder,
                     filter = selectedTab == DiscoverTab.EVENTS,
                     currentFilter = if (selectedTab == DiscoverTab.EVENTS) currentFilter else null,
+                    currentRadiusMiles = if (selectedTab == DiscoverTab.EVENTS) currentRadius else null,
+                    onRadiusChange = if (selectedTab == DiscoverTab.EVENTS) component::selectRadius else null,
                     onChange = { query ->
                         searchQuery = query
                         showSearchOverlay = query.isNotEmpty()
@@ -721,7 +1016,43 @@ fun EventSearchScreen(
                     },
                     onToggleFilter = { showFilter ->
                         showingFilter = showFilter
-                    }
+                    },
+                    filterMaxHeight = filterDropdownMaxHeight,
+                    filterExtraContent = if (selectedTab == DiscoverTab.EVENTS) {
+                        {
+                            DiscoverFilterLocationSection(
+                                locationLabel = selectedSearchLocationLabel ?: if (currentLocation != null) {
+                                    "My location"
+                                } else {
+                                    "Choose location"
+                                },
+                                pickerVisible = showLocationPicker,
+                                query = locationQuery,
+                                onQueryChange = { locationQuery = it },
+                                suggestions = locationSuggestions,
+                                isSearching = isSearchingLocations,
+                                canUseCurrentLocation = currentLocation != null,
+                                onTogglePicker = { showLocationPicker = !showLocationPicker },
+                                onUseCurrentLocation = {
+                                    component.useCurrentLocationForSearch()
+                                    showLocationPicker = false
+                                    locationQuery = ""
+                                    locationSuggestions = emptyList()
+                                },
+                                onSuggestionSelected = { place ->
+                                    component.selectSearchLocation(
+                                        label = place.name,
+                                        center = LatLng(place.latitude, place.longitude),
+                                    )
+                                    showLocationPicker = false
+                                    locationQuery = ""
+                                    locationSuggestions = emptyList()
+                                },
+                            )
+                        }
+                    } else {
+                        null
+                    },
                 )
             }
         }
@@ -821,6 +1152,29 @@ fun EventSearchScreen(
                         }
                     }
 
+                    DiscoverTab.TEAMS -> {
+                        LazyColumn(modifier = Modifier.wrapContentSize()) {
+                            if (!isQueryReady) {
+                                item {
+                                    EmptyDiscoverListItem(message = "Type at least 2 characters.")
+                                }
+                            } else if (teamSuggestions.isEmpty()) {
+                                item {
+                                    EmptyDiscoverListItem(message = "No team suggestions found.")
+                                }
+                            }
+                            items(teamSuggestions) { team ->
+                                DiscoverTeamSuggestion(
+                                    team = team,
+                                    onClick = {
+                                        openTeam(team)
+                                        showSearchOverlay = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
                     DiscoverTab.RENTALS -> {
                         LazyColumn(modifier = Modifier.wrapContentSize()) {
                             if (!isQueryReady) {
@@ -851,7 +1205,8 @@ fun EventSearchScreen(
             initial = {
                 val message = when (selectedTab) {
                     DiscoverTab.EVENTS -> "Start typing to search for events..."
-                    DiscoverTab.ORGANIZATIONS -> "Start typing to search for organizations..."
+                    DiscoverTab.ORGANIZATIONS -> "Start typing to search for orgs..."
+                    DiscoverTab.TEAMS -> "Start typing to search for teams..."
                     DiscoverTab.RENTALS -> "Start typing to search for rentals..."
                 }
                 EmptyDiscoverListItem(message = message)

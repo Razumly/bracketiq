@@ -302,6 +302,12 @@ actual class MapComponent(
     actual fun toggleMap() {
         _showMap.value = !_showMap.value
     }
+
+    actual suspend fun searchLocationPlaces(query: String): List<MVPPlace> {
+        val searchCenter = _currentViewCenter.value ?: _currentLocation.value ?: LatLng(45.5152, -122.6784)
+        return searchPlaces(query, searchCenter)
+            .filter { place -> place.latitude != 0.0 || place.longitude != 0.0 }
+    }
 }
 
 /** JSON data classes **/

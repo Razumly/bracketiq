@@ -31,6 +31,7 @@ import com.razumly.mvp.core.data.dataTypes.defaultNotificationSettings
 import com.razumly.mvp.core.data.dataTypes.isPaymentPending
 import com.razumly.mvp.core.data.dataTypes.isStarted
 import com.razumly.mvp.core.data.dataTypes.normalizeNotificationSettings
+import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.dataTypes.withNotificationSetting
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.repositories.FamilyChild
@@ -41,6 +42,7 @@ import com.razumly.mvp.core.data.repositories.DiscountCode
 import com.razumly.mvp.core.data.repositories.DiscountOffer
 import com.razumly.mvp.core.data.repositories.DiscountTarget
 import com.razumly.mvp.core.data.repositories.IEventRepository
+import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.PushDeviceTargetDebugStatus
@@ -56,11 +58,13 @@ import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.core.presentation.PaymentProcessor
+import com.razumly.mvp.core.presentation.util.convertPhotoResultToUploadFile
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.Platform
 import com.razumly.mvp.eventDetail.DiscountCodePromptState
 import io.github.aakira.napier.Napier
+import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import com.razumly.mvp.profile.profileDetails.ProfileDetailsComponent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -83,7 +87,11 @@ data class ProfilePaymentPlan(
     val bill: Bill,
     val ownerLabel: String,
     val payments: List<BillPayment> = emptyList(),
+    val event: Event? = null,
 ) {
+    val isManualRegistrationBill: Boolean
+        get() = event?.usesManualRegistrationPayments() == true
+
     val paidAmountCents: Int
         get() = bill.paidAmountCents ?: 0
 
@@ -103,7 +111,10 @@ data class ProfilePaymentPlan(
     val nextPendingPayment: BillPayment?
         get() = payments
             .sortedBy { it.sequence }
-            .firstOrNull { it.status.equals("PENDING", ignoreCase = true) }
+            .firstOrNull {
+                it.status.equals("PENDING", ignoreCase = true) ||
+                    it.status.equals("PARTIAL", ignoreCase = true)
+            }
 
     val nextPayablePayment: BillPayment?
         get() = failedPayment ?: nextPendingPayment
@@ -484,6 +495,7 @@ interface ProfileComponent : IPaymentProcessor {
     fun manageStripeAccount()
     fun refreshPaymentPlans()
     fun payNextInstallment(paymentPlan: ProfilePaymentPlan)
+    fun uploadManualPaymentProof(paymentPlan: ProfilePaymentPlan, photo: GalleryPhotoResult)
     fun cancelPendingBillPayment(paymentPlan: ProfilePaymentPlan)
     fun refreshMemberships()
     fun cancelMembership(membership: ProfileMembership)
@@ -625,6 +637,7 @@ class DefaultProfileComponent(
     componentContext: ComponentContext,
     private val userRepository: IUserRepository,
     private val billingRepository: IBillingRepository,
+    private val imageRepository: IImagesRepository,
     private val eventRepository: IEventRepository,
     private val teamRepository: ITeamRepository,
     private val pushNotificationsRepository: IPushNotificationsRepository,
@@ -1459,11 +1472,25 @@ class DefaultProfileComponent(
                 bill = bill,
                 ownerLabel = ownerLabel,
                 payments = payments,
+                event = bill.eventId
+                    ?.trim()
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { eventId ->
+                        eventRepository.getEvent(eventId)
+                            .onFailure { throwable ->
+                                Napier.w("Unable to load event $eventId for bill ${bill.id}", throwable)
+                            }
+                            .getOrNull()
+                    },
             )
         }
     }
 
     override fun payNextInstallment(paymentPlan: ProfilePaymentPlan) {
+        if (paymentPlan.isManualRegistrationBill) {
+            _errorState.value = ErrorMessage("Upload proof of payment for this manual bill.")
+            return
+        }
         val nextPayment = paymentPlan.nextPayablePayment
         if (nextPayment == null) {
             _errorState.value = ErrorMessage("No payable installment available for this bill.")
@@ -1518,6 +1545,41 @@ class DefaultProfileComponent(
                 loadingHandler?.hideLoading()
                 _errorState.value = ErrorMessage(it.userMessage("Unable to create payment intent."))
             }
+        }
+    }
+
+    override fun uploadManualPaymentProof(paymentPlan: ProfilePaymentPlan, photo: GalleryPhotoResult) {
+        val nextPayment = paymentPlan.nextPayablePayment
+        if (!paymentPlan.isManualRegistrationBill) {
+            _errorState.value = ErrorMessage("Proof upload is only available for manual registration bills.")
+            return
+        }
+        if (nextPayment == null) {
+            _errorState.value = ErrorMessage("No unpaid installment is available for this bill.")
+            return
+        }
+        scope.launch {
+            _activeBillPaymentId.value = paymentPlan.bill.id
+            loadingHandler?.showLoading("Uploading proof ...")
+            imageRepository.uploadImage(convertPhotoResultToUploadFile(photo))
+                .mapCatching { fileId ->
+                    billingRepository.submitManualPaymentProof(
+                        billId = paymentPlan.bill.id,
+                        billPaymentId = nextPayment.id,
+                        fileId = fileId,
+                    ).getOrThrow()
+                }
+                .onSuccess {
+                    loadingHandler?.hideLoading()
+                    _activeBillPaymentId.value = null
+                    _errorState.value = ErrorMessage("Payment proof submitted for host review.")
+                    refreshPaymentPlans()
+                }
+                .onFailure { throwable ->
+                    loadingHandler?.hideLoading()
+                    _activeBillPaymentId.value = null
+                    _errorState.value = ErrorMessage(throwable.userMessage("Failed to upload payment proof."))
+                }
         }
     }
 

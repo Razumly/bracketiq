@@ -389,6 +389,8 @@ data class EventCompliancePaymentSummary(
     val isPaidInFull: Boolean = false,
     val paymentPending: Boolean = false,
     val inheritedFromTeamBill: Boolean = false,
+    val manualPaymentProofStatus: String? = null,
+    val manualPaymentProofCount: Int = 0,
 )
 
 data class EventComplianceDocumentCounts(
@@ -505,6 +507,9 @@ private const val MANAGEMENT_SECTION_CHILD = "CHILD"
 private const val MANAGEMENT_SECTION_WAITLIST = "WAITLIST"
 private const val MANAGEMENT_SECTION_FREE_AGENT = "FREE_AGENT"
 private const val STANDALONE_COMPLIANCE_PARENT_TEAM_ID = ""
+private const val KILOMETERS_PER_MILE = 1.60934
+
+private fun milesToKilometers(value: Double): Double = value * KILOMETERS_PER_MILE
 
 private data class EventParticipantCacheScope(
     val eventId: String,
@@ -638,6 +643,8 @@ private fun EventCompliancePaymentSummaryDto?.toCompliancePaymentSummary(): Even
         isPaidInFull = isPaidInFull == true,
         paymentPending = paymentPending == true,
         inheritedFromTeamBill = inheritedFromTeamBill == true,
+        manualPaymentProofStatus = manualPaymentProofStatus?.trim()?.takeIf(String::isNotBlank),
+        manualPaymentProofCount = manualPaymentProofCount ?: 0,
     )
 }
 
@@ -728,6 +735,8 @@ private fun EventTeamComplianceSummary.toCacheEntry(
         paymentIsPaidInFull = payment.isPaidInFull,
         paymentPending = payment.paymentPending,
         paymentInheritedFromTeamBill = payment.inheritedFromTeamBill,
+        manualPaymentProofStatus = payment.manualPaymentProofStatus,
+        manualPaymentProofCount = payment.manualPaymentProofCount,
         documentsSignedCount = documents.signedCount,
         documentsRequiredCount = documents.requiredCount,
         registrationAnswersJson = jsonMVP.encodeToString(registrationAnswers),
@@ -756,6 +765,8 @@ private fun EventComplianceUserSummary.toCacheEntry(
         paymentIsPaidInFull = payment.isPaidInFull,
         paymentPending = payment.paymentPending,
         paymentInheritedFromTeamBill = payment.inheritedFromTeamBill,
+        manualPaymentProofStatus = payment.manualPaymentProofStatus,
+        manualPaymentProofCount = payment.manualPaymentProofCount,
         documentsSignedCount = documents.signedCount,
         documentsRequiredCount = documents.requiredCount,
         requiredDocumentsJson = jsonMVP.encodeToString(requiredDocuments),
@@ -778,6 +789,8 @@ private fun EventTeamComplianceCacheEntry.toTeamComplianceSummary(
             isPaidInFull = paymentIsPaidInFull,
             paymentPending = paymentPending,
             inheritedFromTeamBill = paymentInheritedFromTeamBill,
+            manualPaymentProofStatus = manualPaymentProofStatus,
+            manualPaymentProofCount = manualPaymentProofCount,
         ),
         documents = EventComplianceDocumentCounts(
             signedCount = documentsSignedCount,
@@ -806,6 +819,8 @@ private fun EventUserComplianceCacheEntry.toComplianceUserSummary(): EventCompli
             isPaidInFull = paymentIsPaidInFull,
             paymentPending = paymentPending,
             inheritedFromTeamBill = paymentInheritedFromTeamBill,
+            manualPaymentProofStatus = manualPaymentProofStatus,
+            manualPaymentProofCount = manualPaymentProofCount,
         ),
         documents = EventComplianceDocumentCounts(
             signedCount = documentsSignedCount,
@@ -1852,7 +1867,7 @@ class EventRepository(
             val normalizedLimit = limit.coerceIn(1, 500)
             val normalizedOffset = offset.coerceAtLeast(0)
             val filters = EventSearchFiltersDto(
-                maxDistance = bounds.radiusMiles.takeIf { includeDistanceFilter },
+                maxDistance = bounds.radiusMiles.takeIf { includeDistanceFilter }?.let(::milesToKilometers),
                 userLocation = if (includeDistanceFilter) {
                     EventSearchUserLocationDto(
                         lat = bounds.center.latitude,

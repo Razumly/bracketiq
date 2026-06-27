@@ -63,6 +63,7 @@ import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Clock
 import kotlin.time.Instant
 import kotlin.time.ExperimentalTime
@@ -82,7 +83,10 @@ private val AlternateBracketContainer = Color(0xFFD9F4EF)
 private val AlternateBracketOnContainer = Color(0xFF123B39)
 private val CurrentUserParticipantMatchGlowColor = Color(0xFF2FCC71)
 private val CurrentUserOfficialMatchGlowColor = Color(0xFFD97706)
+private val DelayedMatchTimeContainerColor = Color(0xFFFFD54F)
+private val DelayedMatchTimeContentColor = Color(0xFF3A2A00)
 private val MatchCardShape = RoundedCornerShape(14.dp)
+private const val MATCH_DELAY_STATUS = "DELAYED"
 
 internal const val MATCH_CARD_BASE_HEIGHT_DP = 90
 private const val MATCH_CARD_MANAGE_SECTION_BASE_HEIGHT_DP = 12
@@ -154,7 +158,11 @@ fun MatchCard(
                     )
                 }
                 val matchTimeZone = selectedEvent.resolvedTimeZone()
-                val matchDateTimeLabel = formatMatchDateTimeLabel(match.match.start, matchTimeZone)
+                val actualStart = parseMatchInstant(match.match.actualStart)
+                val displayStart = actualStart ?: match.match.start
+                val matchDateTimeLabel = formatMatchDateTimeLabel(displayStart, matchTimeZone)
+                val useDelayedTimeStyle = match.match.isDelayedStatus() ||
+                    match.match.actualStartIsDelayedByThreshold(actualStart)
                 val eventOfficialSummary = resolveEventOfficialSummary(
                     match = match.match,
                     positions = selectedEvent.officialPositions,
@@ -206,13 +214,21 @@ fun MatchCard(
                 val officialGlowOnDarkSurface = MaterialTheme.colorScheme.surface.luminance() < 0.5f
                 FloatingBox(
                     modifier = Modifier.align(Alignment.TopCenter).offset(y = (-20).dp).zIndex(1f),
-                    color = localColors.current.primaryContainer
+                    color = if (useDelayedTimeStyle) {
+                        DelayedMatchTimeContainerColor
+                    } else {
+                        localColors.current.primaryContainer
+                    }
                 ) {
                     Text(
                         text = matchDateTimeLabel,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                         style = MaterialTheme.typography.labelLarge,
-                        color = localColors.current.onPrimaryContainer
+                        color = if (useDelayedTimeStyle) {
+                            DelayedMatchTimeContentColor
+                        } else {
+                            localColors.current.onPrimaryContainer
+                        }
                     )
                 }
                 Box(modifier = Modifier.fillMaxWidth()) {
@@ -1545,6 +1561,23 @@ private fun formatMatchDateTimeLabel(
 ): String {
     val today = Clock.System.now().toLocalDateTime(timeZone).date
     return formatMatchDateTimeLabel(start = start, today = today, timeZone = timeZone)
+}
+
+private fun parseMatchInstant(value: String?): Instant? {
+    val normalized = value?.trim()?.takeIf(String::isNotBlank) ?: return null
+    return runCatching { Instant.parse(normalized) }.getOrNull()
+}
+
+private fun MatchMVP.isDelayedStatus(): Boolean =
+    status.equals(MATCH_DELAY_STATUS, ignoreCase = true)
+
+private fun MatchMVP.actualStartIsDelayedByThreshold(
+    actualStart: Instant?,
+    thresholdMinutes: Int = 5,
+): Boolean {
+    val scheduledStart = start ?: return false
+    val resolvedActualStart = actualStart ?: return false
+    return resolvedActualStart > scheduledStart + thresholdMinutes.minutes
 }
 
 internal fun formatMatchDateTimeLabel(

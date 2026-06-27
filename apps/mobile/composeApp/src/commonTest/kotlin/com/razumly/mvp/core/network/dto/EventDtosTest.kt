@@ -6,7 +6,10 @@ import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
+import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_VENMO
+import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_MANUAL
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
@@ -1091,5 +1094,64 @@ class EventDtosTest {
         val event = dto.toEventOrNull()
 
         assertFalse(event?.noFixedEndDateTime ?: true)
+    }
+
+    @Test
+    fun event_api_dto_allows_hostless_affiliate_events() {
+        val dto = EventApiDto(
+            id = "event-affiliate-1",
+            name = "Partner League",
+            hostId = null,
+            organizationId = "org_partner",
+            affiliateUrl = " https://partner.example.com/register ",
+            eventType = EventType.LEAGUE.name,
+            start = "2026-07-10T01:00:00Z",
+            end = "2026-08-10T01:00:00Z",
+        )
+
+        val event = dto.toEventOrNull()
+
+        assertNotNull(event)
+        assertEquals("", event.hostId)
+        assertEquals("org_partner", event.organizationId)
+        assertEquals("https://partner.example.com/register", event.affiliateUrl)
+        assertEquals(EventType.LEAGUE, event.eventType)
+    }
+
+    @Test
+    fun event_api_dto_maps_manual_registration_payment_fields() {
+        val dto = EventApiDto(
+            id = "event-manual-1",
+            name = "Manual Payment Tournament",
+            hostId = "host-manual",
+            eventType = EventType.TOURNAMENT.name,
+            start = "2026-07-10T01:00:00Z",
+            end = "2026-07-11T01:00:00Z",
+            registrationPaymentMode = "manual",
+            manualPaymentLinks = listOf(
+                ManualPaymentLink(
+                    id = "venmo",
+                    provider = "venmo",
+                    label = "Venmo",
+                    url = "https://venmo.com/bracketiq",
+                ),
+                ManualPaymentLink(
+                    id = "bad",
+                    provider = "paypal",
+                    label = "Bad",
+                    url = "http://not-secure.example.com",
+                ),
+            ),
+            manualPaymentInstructions = " Send a screenshot after paying. ",
+        )
+
+        val event = dto.toEventOrNull()
+
+        assertNotNull(event)
+        assertEquals(REGISTRATION_PAYMENT_MODE_MANUAL, event.registrationPaymentMode)
+        assertEquals("Send a screenshot after paying.", event.manualPaymentInstructions)
+        assertEquals(1, event.manualPaymentLinks.size)
+        assertEquals(MANUAL_PAYMENT_PROVIDER_VENMO, event.manualPaymentLinks.single().provider)
+        assertEquals("https://venmo.com/bracketiq", event.manualPaymentLinks.single().url)
     }
 }

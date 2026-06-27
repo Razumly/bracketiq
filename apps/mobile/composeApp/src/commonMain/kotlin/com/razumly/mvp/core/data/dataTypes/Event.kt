@@ -68,6 +68,10 @@ data class Event(
     val fieldIds: List<String> = emptyList(),
     val leagueScoringConfigId: String? = null,
     val organizationId: String? = null,
+    val affiliateUrl: String? = null,
+    val registrationPaymentMode: String = REGISTRATION_PAYMENT_MODE_ONLINE,
+    val manualPaymentLinks: List<ManualPaymentLink> = emptyList(),
+    val manualPaymentInstructions: String? = null,
     val autoCancellation: Boolean = false,
     val maxParticipants: Int = 0,
     val minAge: Int? = null,
@@ -222,6 +226,17 @@ fun Event.isPrivateState(): Boolean {
     return state.trim().uppercase() == "PRIVATE"
 }
 
+fun Event.normalizedAffiliateUrl(): String? =
+    affiliateUrl?.trim()?.takeIf(String::isNotBlank)
+
+fun Event.isAffiliateEvent(): Boolean = normalizedAffiliateUrl() != null
+
+fun Event.normalizedRegistrationPaymentMode(): String =
+    normalizeRegistrationPaymentMode(registrationPaymentMode)
+
+fun Event.usesManualRegistrationPayments(): Boolean =
+    isManualRegistrationPaymentMode(registrationPaymentMode)
+
 fun Event.lifecycleStateLabel(): String {
     return when (state.trim().uppercase()) {
         "UNPUBLISHED", "DRAFT" -> "Draft"
@@ -277,6 +292,18 @@ fun Event.toEventDTO(): EventDTO {
         fieldIds = fieldIds,
         leagueScoringConfigId = leagueScoringConfigId,
         organizationId = organizationId,
+        affiliateUrl = affiliateUrl,
+        registrationPaymentMode = normalizedRegistrationPaymentMode(),
+        manualPaymentLinks = if (usesManualRegistrationPayments()) {
+            normalizeManualPaymentLinks(manualPaymentLinks)
+        } else {
+            emptyList()
+        },
+        manualPaymentInstructions = if (usesManualRegistrationPayments()) {
+            normalizeManualPaymentInstructions(manualPaymentInstructions)
+        } else {
+            null
+        },
         autoCancellation = autoCancellation,
         eventType = eventType.name,
         minAge = minAge,

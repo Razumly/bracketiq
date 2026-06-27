@@ -82,6 +82,8 @@ import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.util.MoneyInputUtils
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
+import io.github.ismoy.imagepickerkmp.domain.models.MimeType
+import io.github.ismoy.imagepickerkmp.presentation.ui.components.GalleryPickerLauncher
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
@@ -837,9 +839,29 @@ fun ProfileNotificationsScreen(component: ProfileComponent) {
 fun ProfilePaymentPlansScreen(component: ProfileComponent) {
     val plansState by component.paymentPlansState.collectAsState()
     val activeBillPaymentId by component.activeBillPaymentId.collectAsState()
+    var proofUploadPlan by remember { mutableStateOf<ProfilePaymentPlan?>(null) }
 
     LaunchedEffect(component) {
         component.refreshPaymentPlans()
+    }
+
+    proofUploadPlan?.let { paymentPlan ->
+        GalleryPickerLauncher(
+            onPhotosSelected = { photos ->
+                proofUploadPlan = null
+                photos.firstOrNull()?.let { photo ->
+                    component.uploadManualPaymentProof(paymentPlan, photo)
+                }
+            },
+            onError = {
+                proofUploadPlan = null
+            },
+            onDismiss = {
+                proofUploadPlan = null
+            },
+            allowMultiple = false,
+            mimeTypes = listOf(MimeType.IMAGE_ALL),
+        )
     }
 
     ProfileSectionScaffold(
@@ -882,6 +904,7 @@ fun ProfilePaymentPlansScreen(component: ProfileComponent) {
                         paymentPlan = paymentPlan,
                         isProcessing = activeBillPaymentId == paymentPlan.bill.id,
                         onPayNextInstallment = { component.payNextInstallment(paymentPlan) },
+                        onUploadProof = { proofUploadPlan = paymentPlan },
                         onCancelPendingPayment = { component.cancelPendingBillPayment(paymentPlan) },
                     )
                 }
@@ -2676,14 +2699,23 @@ private fun PaymentPlanCard(
     paymentPlan: ProfilePaymentPlan,
     isProcessing: Boolean,
     onPayNextInstallment: () -> Unit,
+    onUploadProof: () -> Unit,
     onCancelPendingPayment: () -> Unit,
 ) {
     val status = paymentPlan.bill.status ?: "OPEN"
     val billDisplayId = paymentPlan.bill.id.take(6)
     val processingPayment = paymentPlan.processingPayment
     val failedPayment = paymentPlan.failedPayment
+    val isManualBill = paymentPlan.isManualRegistrationBill
+    val nextProofStatus = paymentPlan.nextPayablePayment
+        ?.manualPaymentProofs
+        ?.lastOrNull()
+        ?.status
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
     val actionLabel = when {
         isProcessing -> "Opening payment..."
+        isManualBill -> "Upload payment proof"
         processingPayment != null -> "Payment pending"
         failedPayment != null -> "Complete payment"
         else -> "Pay next installment"
@@ -2729,6 +2761,16 @@ private fun PaymentPlanCard(
             )
 
             when {
+                isManualBill -> Text(
+                    text = when (nextProofStatus?.uppercase()) {
+                        "SUBMITTED" -> "Proof submitted. The host will review it."
+                        "ACCEPTED" -> "Proof accepted. Paid amount is reflected on this bill."
+                        "REJECTED" -> "Proof rejected. Upload a new proof image when ready."
+                        else -> "Pay the host outside BracketIQ, then upload an image as proof."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 processingPayment != null -> Text(
                     text = "Payment pending. You can cancel it if the bank payment should not continue.",
                     style = MaterialTheme.typography.bodySmall,
@@ -2743,16 +2785,16 @@ private fun PaymentPlanCard(
 
             Button(
                 modifier = Modifier.fillMaxWidth(),
-                onClick = onPayNextInstallment,
+                onClick = if (isManualBill) onUploadProof else onPayNextInstallment,
                 enabled = !isProcessing &&
-                    processingPayment == null &&
+                    (isManualBill || processingPayment == null) &&
                     paymentPlan.nextPayablePayment != null &&
                     paymentPlan.nextPaymentAmountCents > 0,
             ) {
                 Text(actionLabel)
             }
 
-            if (processingPayment != null) {
+            if (processingPayment != null && !isManualBill) {
                 OutlinedButton(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = onCancelPendingPayment,

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
@@ -33,10 +34,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
@@ -60,15 +66,15 @@ fun GuideHost(
 ) {
     val activeGuide = controller.activeGuide ?: return
     val activeStep = controller.activeStep ?: return
-    val targetBoundsInWindow = controller.activeTargetBounds
+    val activeTarget = controller.activeTarget
 
-    LaunchedEffect(activeGuide.id, activeStep.id, targetBoundsInWindow) {
-        if (targetBoundsInWindow == null) {
+    LaunchedEffect(activeGuide.id, activeStep.id, activeTarget) {
+        if (activeTarget == null) {
             controller.cancel()
         }
     }
 
-    if (targetBoundsInWindow == null) return
+    if (activeTarget == null) return
 
     var rootBoundsInWindow by remember { mutableStateOf(Rect.Zero) }
     var rootSize by remember { mutableStateOf(IntSize.Zero) }
@@ -84,7 +90,7 @@ fun GuideHost(
     ) {
         if (rootSize.width <= 0 || rootSize.height <= 0) return@Box
 
-        val targetBounds = targetBoundsInWindow.translate(
+        val targetBounds = activeTarget.bounds.translate(
             translateX = -rootBoundsInWindow.left,
             translateY = -rootBoundsInWindow.top,
         )
@@ -92,7 +98,10 @@ fun GuideHost(
             targetBounds.inflate(GUIDE_TARGET_PADDING.toPx()).clampTo(rootSize)
         }
 
-        GuideScrim(targetBounds = paddedTarget)
+        GuideScrim(
+            targetBounds = paddedTarget,
+            highlightShape = activeTarget.highlightShape,
+        )
 
         Box(
             modifier = Modifier
@@ -104,6 +113,7 @@ fun GuideHost(
                 )
         )
 
+        val borderShape = guideBorderShape(activeTarget.highlightShape)
         Box(
             modifier = with(density) {
                 Modifier
@@ -115,7 +125,7 @@ fun GuideHost(
                     .border(
                         width = 2.dp,
                         color = MaterialTheme.colorScheme.primary,
-                        shape = RoundedCornerShape(GUIDE_TARGET_CORNER_RADIUS),
+                        shape = borderShape,
                     )
             }
         )
@@ -136,29 +146,38 @@ fun GuideHost(
 @Composable
 private fun GuideScrim(
     targetBounds: Rect,
+    highlightShape: GuideHighlightShape,
 ) {
     val scrimColor = Color.Black.copy(alpha = 0.58f)
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        drawRect(
-            color = scrimColor,
-            topLeft = Offset.Zero,
-            size = Size(size.width, targetBounds.top.coerceAtLeast(0f)),
-        )
-        drawRect(
-            color = scrimColor,
-            topLeft = Offset(0f, targetBounds.bottom.coerceAtMost(size.height)),
-            size = Size(size.width, (size.height - targetBounds.bottom).coerceAtLeast(0f)),
-        )
-        drawRect(
-            color = scrimColor,
-            topLeft = Offset(0f, targetBounds.top),
-            size = Size(targetBounds.left.coerceAtLeast(0f), targetBounds.height),
-        )
-        drawRect(
-            color = scrimColor,
-            topLeft = Offset(targetBounds.right.coerceAtMost(size.width), targetBounds.top),
-            size = Size((size.width - targetBounds.right).coerceAtLeast(0f), targetBounds.height),
-        )
+    val density = LocalDensity.current
+    Canvas(
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen),
+    ) {
+        drawRect(color = scrimColor)
+
+        when (highlightShape) {
+            GuideHighlightShape.Circle -> {
+                drawOval(
+                    color = Color.Transparent,
+                    topLeft = Offset(targetBounds.left, targetBounds.top),
+                    size = Size(targetBounds.width, targetBounds.height),
+                    blendMode = BlendMode.Clear,
+                )
+            }
+
+            is GuideHighlightShape.RoundedRect -> {
+                val cornerRadius = with(density) { highlightShape.cornerRadius.toPx() }
+                drawRoundRect(
+                    color = Color.Transparent,
+                    topLeft = Offset(targetBounds.left, targetBounds.top),
+                    size = Size(targetBounds.width, targetBounds.height),
+                    cornerRadius = CornerRadius(cornerRadius, cornerRadius),
+                    blendMode = BlendMode.Clear,
+                )
+            }
+        }
     }
 }
 
@@ -293,6 +312,12 @@ private fun Rect.clampTo(size: IntSize): Rect =
         right = right.coerceIn(0f, size.width.toFloat()),
         bottom = bottom.coerceIn(0f, size.height.toFloat()),
     )
+
+private fun guideBorderShape(highlightShape: GuideHighlightShape): Shape =
+    when (highlightShape) {
+        GuideHighlightShape.Circle -> CircleShape
+        is GuideHighlightShape.RoundedRect -> RoundedCornerShape(highlightShape.cornerRadius)
+    }
 
 private fun Modifier.offsetToRect(rect: Rect): Modifier =
     this.then(

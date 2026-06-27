@@ -10,6 +10,7 @@ import com.razumly.mvp.eventSearch.tabs.events.EventList
 @Composable
 fun EventsTabContent(
     events: List<Event>,
+    organizationLogoIdsById: Map<String, String> = emptyMap(),
     firstElementPadding: PaddingValues,
     lastElementPadding: PaddingValues,
     lazyListState: LazyListState,
@@ -23,6 +24,7 @@ fun EventsTabContent(
 ) {
     EventList(
         events = events,
+        organizationLogoIdsById = organizationLogoIdsById,
         firstElementPadding = firstElementPadding,
         lastElementPadding = lastElementPadding,
         lazyListState = lazyListState,

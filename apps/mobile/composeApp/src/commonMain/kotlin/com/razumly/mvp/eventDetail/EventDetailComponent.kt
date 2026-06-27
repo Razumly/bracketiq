@@ -208,6 +208,14 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
         billPaymentId: String,
         amountCents: Int,
     ): Result<Unit>
+    suspend fun reviewParticipantManualPaymentProof(
+        billId: String,
+        billPaymentId: String,
+        proofId: String,
+        decision: String,
+        amountAcceptedCents: Int? = null,
+        reviewNote: String? = null,
+    ): Result<Unit>
     fun selectPlace(place: MVPPlace?)
     fun onTypeSelected(type: EventType)
     fun selectFieldCount(count: Int)

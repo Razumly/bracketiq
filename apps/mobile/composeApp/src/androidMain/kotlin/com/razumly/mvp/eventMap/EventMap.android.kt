@@ -3,6 +3,7 @@ package com.razumly.mvp.eventMap
 import android.location.Geocoder
 import android.os.Build
 import android.location.Location
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -148,6 +149,7 @@ actual fun EventMap(
     selectedPlace: MVPPlace?,
     onPlaceSelectionCleared: () -> Unit,
     canClickPOI: Boolean,
+    organizationLogoIdsById: Map<String, String>,
     modifier: Modifier,
     focusedLocation: dev.icerock.moko.geo.LatLng,
     focusedEvent: Event?,
@@ -181,6 +183,7 @@ actual fun EventMap(
     val originalPlaceMarkerState = remember { MarkerState() }
     val selectedPlaceMarkerState = remember { MarkerState() }
     var selectedPOI by remember { mutableStateOf<PointOfInterest?>(null) }
+    var selectedMapEvent by remember { mutableStateOf<Event?>(null) }
     var isAnimating by remember { mutableStateOf(false) }
     val poiMarkerState = remember { MarkerState() }
     var armedPlaceId by remember { mutableStateOf<String?>(null) }
@@ -264,6 +267,20 @@ actual fun EventMap(
 
     fun overlapsExistingPlace(searchPlace: Place): Boolean =
         places.any { matchesSearchPlace(searchPlace, it) }
+
+    fun eventFallbackImageId(event: Event): String? =
+        event.organizationId
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?.let(organizationLogoIdsById::get)
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+
+    fun eventMarkerImageRef(event: Event): String? =
+        event.imageId
+            .trim()
+            .takeIf(String::isNotBlank)
+            ?: eventFallbackImageId(event)
 
     val distinctSelectedPlace = selectedPlace?.takeIf { !sameLocation(it, originalPlace) }
     val focusedIsCurrentUserLocation = trackedLatLng?.let { tracked ->
@@ -493,6 +510,7 @@ actual fun EventMap(
                 myLocationButtonEnabled = false,
             ),
             onPOIClick = { poi ->
+                selectedMapEvent = null
                 if (canClickPOI && !isAnimating) {
                     selectedPOI = poi
                     armedPlaceId = null
@@ -518,18 +536,28 @@ actual fun EventMap(
                     }
                 }
             },
+            onMapClick = {
+                selectedMapEvent = null
+            },
         ) {
             if (!canClickPOI) {
                 events.forEach { event ->
                     val markerState = eventMarkerStates[event.id]
                     markerState?.let {
-                        val markerImageUrl = remember(event.id, event.imageId) {
-                            resolveMarkerImageUrl(event.imageId)
+                        val fallbackImageId = remember(event.organizationId, organizationLogoIdsById) {
+                            eventFallbackImageId(event)
+                        }
+                        val markerImageRef = remember(event.imageId, fallbackImageId) {
+                            eventMarkerImageRef(event)
+                        }
+                        val markerImageUrl = remember(markerImageRef) {
+                            resolveMarkerImageUrl(markerImageRef)
                         }
                         val markerImage = rememberMarkerImage(markerImageUrl)
-                        val cardImageUrl = remember(event.id, event.imageId) {
+                        val cardImageRef = event.imageId.trim().takeIf(String::isNotBlank) ?: fallbackImageId
+                        val cardImageUrl = remember(cardImageRef) {
                             resolveMarkerImageUrl(
-                                imageRef = event.imageId,
+                                imageRef = cardImageRef,
                                 width = MAP_EVENT_CARD_IMAGE_WIDTH_PX,
                                 height = MAP_EVENT_CARD_IMAGE_HEIGHT_PX,
                             )
@@ -544,13 +572,18 @@ actual fun EventMap(
                             state = it,
                             anchor = Offset(0.5f, 0.5f),
                             infoWindowAnchor = Offset(0.5f, 0.0f),
-                            onClick = { false },
+                            onClick = {
+                                eventMarkerStates.values.forEach(MarkerState::hideInfoWindow)
+                                selectedMapEvent = event
+                                true
+                            },
                             onInfoWindowClick = { onEventSelected(event) },
                             infoContent = {
                                 MapEventCard(
                                     event = event,
                                     imagePainter = cardImage.painter,
                                     loadImageInternally = false,
+                                    fallbackImageId = fallbackImageId,
                                     modifier = Modifier.wrapContentSize(),
                                 )
                             },
@@ -887,13 +920,20 @@ actual fun EventMap(
                 val focusedMarkerState = remember(event.id) {
                     MarkerState(position = LatLng(event.latitude, event.longitude))
                 }
-                val markerImageUrl = remember(event.id, event.imageId) {
-                    resolveMarkerImageUrl(event.imageId)
+                val fallbackImageId = remember(event.organizationId, organizationLogoIdsById) {
+                    eventFallbackImageId(event)
+                }
+                val markerImageRef = remember(event.imageId, fallbackImageId) {
+                    eventMarkerImageRef(event)
+                }
+                val markerImageUrl = remember(markerImageRef) {
+                    resolveMarkerImageUrl(markerImageRef)
                 }
                 val markerImage = rememberMarkerImage(markerImageUrl)
-                val cardImageUrl = remember(event.id, event.imageId) {
+                val cardImageRef = event.imageId.trim().takeIf(String::isNotBlank) ?: fallbackImageId
+                val cardImageUrl = remember(cardImageRef) {
                     resolveMarkerImageUrl(
-                        imageRef = event.imageId,
+                        imageRef = cardImageRef,
                         width = MAP_EVENT_CARD_IMAGE_WIDTH_PX,
                         height = MAP_EVENT_CARD_IMAGE_HEIGHT_PX,
                     )
@@ -908,13 +948,18 @@ actual fun EventMap(
                     state = focusedMarkerState,
                     anchor = Offset(0.5f, 0.5f),
                     infoWindowAnchor = Offset(0.5f, 0.0f),
-                    onClick = { false },
+                    onClick = {
+                        eventMarkerStates.values.forEach(MarkerState::hideInfoWindow)
+                        selectedMapEvent = event
+                        true
+                    },
                     onInfoWindowClick = { onEventSelected(event) },
                     infoContent = {
                         MapEventCard(
                             event = event,
                             imagePainter = cardImage.painter,
                             loadImageInternally = false,
+                            fallbackImageId = fallbackImageId,
                             modifier = Modifier.wrapContentSize(),
                         )
                     },
@@ -926,6 +971,17 @@ actual fun EventMap(
                     )
                 }
             }
+        }
+
+        selectedMapEvent?.let { event ->
+            MapEventCard(
+                event = event,
+                fallbackImageId = eventFallbackImageId(event),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = closeButtonBottomPadding + 72.dp)
+                    .clickable { onEventSelected(event) },
+            )
         }
 
         if (canClickPOI) {

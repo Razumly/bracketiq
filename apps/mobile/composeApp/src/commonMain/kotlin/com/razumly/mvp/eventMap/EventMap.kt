@@ -17,6 +17,7 @@ expect fun EventMap(
     selectedPlace: MVPPlace? = null,
     onPlaceSelectionCleared: () -> Unit = {},
     canClickPOI: Boolean,
+    organizationLogoIdsById: Map<String, String> = emptyMap(),
     modifier: Modifier = Modifier,
     focusedLocation: LatLng,
     focusedEvent: Event?,
