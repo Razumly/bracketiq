@@ -5,6 +5,8 @@ import com.razumly.mvp.chat.ChatGroupComponent
 import com.razumly.mvp.chat.ChatListComponent
 import com.razumly.mvp.chat.DefaultChatGroupComponent
 import com.razumly.mvp.chat.DefaultChatListComponent
+import com.razumly.mvp.app.RootComponent
+import com.razumly.mvp.app.RootComponent.DeepLinkNav
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
@@ -12,8 +14,6 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.DefaultPlayerInteractionComponent
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
-import com.razumly.mvp.core.presentation.RootComponent
-import com.razumly.mvp.core.presentation.RootComponent.DeepLinkNav
 import com.razumly.mvp.eventCreate.CreateEventComponent
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
 import com.razumly.mvp.eventDetail.DefaultEventDetailComponent

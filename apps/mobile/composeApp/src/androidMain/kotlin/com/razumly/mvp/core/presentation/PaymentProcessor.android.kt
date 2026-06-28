@@ -67,10 +67,12 @@ actual open class PaymentProcessor : IPaymentProcessor {
         }
         PaymentConfiguration.init(context, publishableKey)
 
-        _customerConfig = if (!intent.customer.isNullOrBlank() && !intent.ephemeralKey.isNullOrBlank()) {
+        val customer = intent.customer
+        val ephemeralKey = intent.ephemeralKey
+        _customerConfig = if (!customer.isNullOrBlank() && !ephemeralKey.isNullOrBlank()) {
             PaymentSheet.CustomerConfiguration(
-                id = intent.customer,
-                ephemeralKeySecret = intent.ephemeralKey,
+                id = customer,
+                ephemeralKeySecret = ephemeralKey,
             )
         } else {
             null

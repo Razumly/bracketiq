@@ -19,3 +19,9 @@ dependencyResolutionManagement {
 
 include(":composeApp")
 include(":wearApp")
+include(":core:model")
+include(":core:database")
+include(":core:network")
+include(":core:repository-api")
+include(":core:repository-impl")
+include(":core:ui")

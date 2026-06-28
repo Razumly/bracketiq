@@ -160,14 +160,15 @@ private fun RefundRequestItem(
 
             HorizontalDivider()
 
-            if (refundWithRelations.user != null) {
+            val user = refundWithRelations.user
+            if (user != null) {
                 Text(
                     "Requested by:",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Medium
                 )
                 PlayerCard(
-                    player = refundWithRelations.user,
+                    player = user,
                     modifier = Modifier.fillMaxWidth()
                 )
             }

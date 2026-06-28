@@ -160,6 +160,34 @@ class EventDetailsScheduleLockingTest {
     }
 
     @Test
+    fun field_count_validation_only_applies_to_leagues_and_tournaments() {
+        assertTrue(
+            requiresFieldCountValidation(
+                eventType = EventType.LEAGUE,
+                scheduleTimeLocked = false,
+            ),
+        )
+        assertTrue(
+            requiresFieldCountValidation(
+                eventType = EventType.TOURNAMENT,
+                scheduleTimeLocked = false,
+            ),
+        )
+        assertFalse(
+            requiresFieldCountValidation(
+                eventType = EventType.EVENT,
+                scheduleTimeLocked = false,
+            ),
+        )
+        assertFalse(
+            requiresFieldCountValidation(
+                eventType = EventType.WEEKLY_EVENT,
+                scheduleTimeLocked = false,
+            ),
+        )
+    }
+
+    @Test
     fun fixed_end_validation_is_skipped_when_schedule_is_locked() {
         val shouldValidate = requiresFixedEndRangeValidation(
             event = Event(

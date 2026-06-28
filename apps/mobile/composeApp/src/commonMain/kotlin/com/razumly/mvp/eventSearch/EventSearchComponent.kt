@@ -4,7 +4,6 @@ package com.razumly.mvp.eventSearch
 
 import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
-import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.instancekeeper.InstanceKeeper
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.Bounds
@@ -70,7 +69,6 @@ interface EventSearchComponent {
 
     val events: StateFlow<List<Event>>
     val selectedEvent: StateFlow<Event?>
-    val showMapCard: StateFlow<Boolean>
 
     fun setLoadingHandler(handler: LoadingHandler)
     fun loadMoreEvents()
@@ -216,15 +214,7 @@ class DefaultEventSearchComponent(
     private val _selectedEvent = MutableStateFlow<Event?>(null)
     override val selectedEvent: StateFlow<Event?> = _selectedEvent.asStateFlow()
 
-    private val _showMapCard = MutableStateFlow(false)
-    override val showMapCard: StateFlow<Boolean> = _showMapCard.asStateFlow()
-
-    private val backCallback = BackCallback(false) {
-        _showMapCard.value = false
-    }
-
     init {
-        backHandler.register(backCallback)
         eventRepository.resetCursor()
 
         if (eventId != null) {
@@ -236,12 +226,6 @@ class DefaultEventSearchComponent(
                 }
             }
         }
-        scope.launch {
-            _showMapCard.collect {
-                backCallback.isEnabled = it
-            }
-        }
-
         scope.launch {
             startTrackingLocationSafely()
         }
@@ -300,7 +284,6 @@ class DefaultEventSearchComponent(
 
     override fun onMapClick(event: Event?) {
         _selectedEvent.value = event
-        _showMapCard.value = !_showMapCard.value
     }
 
     override fun viewEvent(event: Event) {

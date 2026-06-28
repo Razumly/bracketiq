@@ -2,7 +2,7 @@ package com.razumly.mvp.chat
 
 import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
-import com.razumly.mvp.chat.data.ChatGroupSummary
+import com.razumly.mvp.core.data.dataTypes.ChatGroupSummary
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.core.data.dataTypes.ChatGroup

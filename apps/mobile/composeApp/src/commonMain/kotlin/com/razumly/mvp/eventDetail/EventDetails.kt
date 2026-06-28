@@ -573,8 +573,8 @@ fun EventDetails(
         }
     }
     fun normalizeLeagueConfigWithSportMode(config: LeagueConfig): LeagueConfig {
-        val setCount = when (config.setsPerMatch) {
-            1, 3, 5 -> config.setsPerMatch
+        val setCount = when (val setsPerMatch = config.setsPerMatch) {
+            1, 3, 5 -> setsPerMatch
             else -> 1
         }
         return if (divisionScheduleUsesSets) {

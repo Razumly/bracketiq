@@ -14,5 +14,7 @@ expect class MapComponent {
     fun setEvents(events: List<Event>)
     fun setPlaces(places: List<MVPPlace>)
     suspend fun searchLocationPlaces(query: String): List<MVPPlace>
+    fun openMap()
+    fun closeMap()
     fun toggleMap()
 }

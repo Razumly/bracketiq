@@ -494,7 +494,6 @@ private fun ManualPaymentSettingsSection(
             modifier = Modifier.fillMaxWidth(),
             label = "Manual payment instructions",
             placeholder = "Tell players what to include with their payment and when proof is reviewed.",
-            height = 120.dp,
         )
     }
 }

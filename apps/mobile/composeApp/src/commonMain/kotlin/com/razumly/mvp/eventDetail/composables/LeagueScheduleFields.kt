@@ -1049,11 +1049,15 @@ private fun TimeslotCard(
                                 onUpdateSlot(index, slot.copy(endTimeMinutes = minutes))
                             },
                             modifier = Modifier.weight(1f),
-                            isError = slot.endTimeMinutes == null ||
-                                (
-                                    slot.startTimeMinutes != null &&
-                                        slot.endTimeMinutes <= slot.startTimeMinutes
-                                    ),
+                            isError = run {
+                                val startTimeMinutes = slot.startTimeMinutes
+                                val endTimeMinutes = slot.endTimeMinutes
+                                endTimeMinutes == null ||
+                                    (
+                                        startTimeMinutes != null &&
+                                            endTimeMinutes <= startTimeMinutes
+                                        )
+                            },
                             enabled = !slotTimingReadOnly,
                         )
                     }
@@ -1075,7 +1079,7 @@ private fun TimeslotCard(
                             onUpdateSlot(index, slot.copy(endDate = selected))
                         },
                         timeZone = slotTimeZone,
-                        isError = slot.endDate == null || slot.endDate <= slot.startDate,
+                        isError = slot.endDate?.let { endDate -> endDate <= slot.startDate } ?: true,
                         enabled = !slotTimingReadOnly,
                     )
                 }
@@ -1134,10 +1138,15 @@ private fun TimeSlot.toOneTimeSlot(
     val slotTimeZone = timeZone.toTimeZoneOrUtc(eventTimeZone)
     val baselineDate = startDate.takeUnless { it == Instant.DISTANT_PAST } ?: eventStart
     val startInstant = startTimeMinutes?.let { baselineDate.withMinutesOfDay(it, slotTimeZone) } ?: baselineDate
+    val currentEndDate = endDate
+    val currentStartTimeMinutes = startTimeMinutes
+    val currentEndTimeMinutes = endTimeMinutes
     val fallbackEnd = when {
-        endDate != null && endDate > startInstant -> endDate
-        endTimeMinutes != null && startTimeMinutes != null && endTimeMinutes > startTimeMinutes ->
-            baselineDate.withMinutesOfDay(endTimeMinutes, slotTimeZone)
+        currentEndDate != null && currentEndDate > startInstant -> currentEndDate
+        currentEndTimeMinutes != null &&
+            currentStartTimeMinutes != null &&
+            currentEndTimeMinutes > currentStartTimeMinutes ->
+            baselineDate.withMinutesOfDay(currentEndTimeMinutes, slotTimeZone)
         eventEnd != null && eventEnd > startInstant -> eventEnd
         else -> Instant.fromEpochMilliseconds(startInstant.toEpochMilliseconds() + 60L * 60L * 1000L)
     }

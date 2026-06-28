@@ -111,6 +111,14 @@ actual class MapComponent(
         _places.value = places
     }
 
+    actual fun openMap() {
+        _showMap.value = true
+    }
+
+    actual fun closeMap() {
+        _showMap.value = false
+    }
+
     fun updateCameraCenter(center: LatLng) {
         _currentViewCenter.value = center
     }

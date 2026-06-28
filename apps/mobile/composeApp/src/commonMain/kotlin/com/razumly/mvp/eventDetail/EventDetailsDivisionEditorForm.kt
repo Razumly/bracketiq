@@ -23,6 +23,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.LeagueConfig
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.presentation.composables.DropdownOption
@@ -388,6 +389,7 @@ private fun DivisionSingleDivisionDefaults(
     val editEvent = state.editEvent
     val divisionEditor = state.divisionEditor
     val divisionEditorDefaults = state.divisionEditorDefaults
+    val manualPaymentsEnabled = editEvent.usesManualRegistrationPayments()
 
     AnimatedVisibility(editEvent.singleDivision) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -400,24 +402,59 @@ private fun DivisionSingleDivisionDefaults(
                 maxTeams = editEvent.maxParticipants,
                 poolCount = singleDivisionPoolCount,
             )
-            FlowRow(
+            DivisionPriceAndMaxTeamsFields(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                InclusivePriceInput(
-                    totalPriceCents = editEvent.priceCents.coerceAtLeast(0),
-                    onTotalPriceChange = { parsedPrice ->
-                        if (!state.hostHasAccount) {
-                            return@InclusivePriceInput
-                        }
+                priceCents = editEvent.priceCents,
+                maxParticipants = editEvent.maxParticipants.takeIf { value -> value > 0 },
+                maxParticipantsLabel = if (editEvent.teamSignup) "Max Teams" else "Max Participants",
+                priceLabel = "Price",
+                manualPaymentsEnabled = manualPaymentsEnabled,
+                hostHasAccount = state.hostHasAccount,
+                enabled = true,
+                onPriceChange = { parsedPrice ->
+                    actions.onDivisionEditorDefaultsChange(
+                        divisionEditorDefaults.copy(priceCents = parsedPrice),
+                    )
+                    if (divisionEditor.editingId.isNullOrBlank()) {
+                        actions.onDivisionEditorChange(
+                            divisionEditor.copy(
+                                priceCents = parsedPrice,
+                                error = null,
+                            ),
+                        )
+                    }
+                    actions.onEditEvent {
+                        val nextDetails = applySingleDivisionDefaultsToDetails(
+                            details = divisionDetails,
+                            defaultPriceCents = parsedPrice,
+                            defaultMaxParticipants = maxParticipants,
+                            defaultPlayoffTeamCount = if (includePlayoffs) playoffTeamCount else null,
+                            defaultPoolCount = if (singleDivisionTournamentPoolPlayEnabled) {
+                                singleDivisionPoolCount
+                            } else {
+                                null
+                            },
+                        )
+                        copy(
+                            priceCents = parsedPrice,
+                            divisionDetails = nextDetails,
+                        )
+                    }
+                },
+                onMaxParticipantsChange = { value ->
+                    if (value.isEmpty() || value.all { it.isDigit() }) {
+                        val parsedMaxParticipants = value.toIntOrNull() ?: 0
+                        val nextDefaultMaxParticipants = parsedMaxParticipants
+                            .takeIf { parsed -> parsed >= 2 }
                         actions.onDivisionEditorDefaultsChange(
-                            divisionEditorDefaults.copy(priceCents = parsedPrice),
+                            divisionEditorDefaults.copy(
+                                maxParticipants = nextDefaultMaxParticipants,
+                            ),
                         )
                         if (divisionEditor.editingId.isNullOrBlank()) {
                             actions.onDivisionEditorChange(
                                 divisionEditor.copy(
-                                    priceCents = parsedPrice,
+                                    maxParticipants = nextDefaultMaxParticipants,
                                     error = null,
                                 ),
                             )
@@ -425,8 +462,8 @@ private fun DivisionSingleDivisionDefaults(
                         actions.onEditEvent {
                             val nextDetails = applySingleDivisionDefaultsToDetails(
                                 details = divisionDetails,
-                                defaultPriceCents = parsedPrice,
-                                defaultMaxParticipants = maxParticipants,
+                                defaultPriceCents = priceCents,
+                                defaultMaxParticipants = parsedMaxParticipants,
                                 defaultPlayoffTeamCount = if (includePlayoffs) playoffTeamCount else null,
                                 defaultPoolCount = if (singleDivisionTournamentPoolPlayEnabled) {
                                     singleDivisionPoolCount
@@ -435,62 +472,19 @@ private fun DivisionSingleDivisionDefaults(
                                 },
                             )
                             copy(
-                                priceCents = parsedPrice,
+                                maxParticipants = parsedMaxParticipants,
                                 divisionDetails = nextDetails,
                             )
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    totalLabel = "Price",
-                    enabled = state.hostHasAccount,
-                )
-                NumberInputField(
-                    modifier = Modifier.fillMaxWidth(0.48f),
-                    value = editEvent.maxParticipants
-                        .takeIf { value -> value > 0 }
-                        ?.toString()
-                        .orEmpty(),
-                    label = if (editEvent.teamSignup) "Max Teams" else "Max Participants",
-                    onValueChange = { value ->
-                        if (value.isEmpty() || value.all { it.isDigit() }) {
-                            val parsedMaxParticipants = value.toIntOrNull() ?: 0
-                            val nextDefaultMaxParticipants = parsedMaxParticipants
-                                .takeIf { parsed -> parsed >= 2 }
-                            actions.onDivisionEditorDefaultsChange(
-                                divisionEditorDefaults.copy(
-                                    maxParticipants = nextDefaultMaxParticipants,
-                                ),
-                            )
-                            if (divisionEditor.editingId.isNullOrBlank()) {
-                                actions.onDivisionEditorChange(
-                                    divisionEditor.copy(
-                                        maxParticipants = nextDefaultMaxParticipants,
-                                        error = null,
-                                    ),
-                                )
-                            }
-                            actions.onEditEvent {
-                                val nextDetails = applySingleDivisionDefaultsToDetails(
-                                    details = divisionDetails,
-                                    defaultPriceCents = priceCents,
-                                    defaultMaxParticipants = parsedMaxParticipants,
-                                    defaultPlayoffTeamCount = if (includePlayoffs) playoffTeamCount else null,
-                                    defaultPoolCount = if (singleDivisionTournamentPoolPlayEnabled) {
-                                        singleDivisionPoolCount
-                                    } else {
-                                        null
-                                    },
-                                )
-                                copy(
-                                    maxParticipants = parsedMaxParticipants,
-                                    divisionDetails = nextDetails,
-                                )
-                            }
-                        }
-                    },
-                    isError = editEvent.maxParticipants < 2,
-                    errorMessage = "Required and must be at least 2.",
-                )
+                    }
+                },
+                isMaxParticipantsError = editEvent.maxParticipants < 2,
+            )
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 if (
                     editEvent.includePlayoffs &&
                     editEvent.eventType == EventType.LEAGUE
@@ -573,12 +567,15 @@ private fun DivisionSingleDivisionDefaults(
                                 )
                             }
                         },
-                        isError = (editEvent.playoffTeamCount ?: 0) < 2 ||
-                            (
-                                singleDivisionPoolCount != null &&
-                                    editEvent.playoffTeamCount != null &&
-                                    editEvent.playoffTeamCount % singleDivisionPoolCount != 0
-                                ),
+                        isError = run {
+                            val playoffTeamCount = editEvent.playoffTeamCount
+                            (playoffTeamCount ?: 0) < 2 ||
+                                (
+                                    singleDivisionPoolCount != null &&
+                                        playoffTeamCount != null &&
+                                        playoffTeamCount % singleDivisionPoolCount != 0
+                                    )
+                        },
                         errorMessage = "Must be at least 2 and divide evenly by pools.",
                     )
                     NumberInputField(
@@ -645,11 +642,12 @@ private fun DivisionSingleDivisionDefaults(
 private fun DivisionInfoFields(
     state: EventDetailsDivisionEditorFormState,
     actions: EventDetailsDivisionEditorFormActions,
-) {
-    val editEvent = state.editEvent
-    val divisionEditor = state.divisionEditor
+    ) {
+        val editEvent = state.editEvent
+        val divisionEditor = state.divisionEditor
+        val manualPaymentsEnabled = editEvent.usesManualRegistrationPayments()
 
-    Text(
+        Text(
         text = "Division Info",
         style = MaterialTheme.typography.titleSmall,
         color = Color(localImageScheme.current.onSurface),
@@ -735,56 +733,92 @@ private fun DivisionInfoFields(
     AnimatedVisibility(!editEvent.singleDivision) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             FormSectionDivider()
-            Row(
+            DivisionPriceAndMaxTeamsFields(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                InclusivePriceInput(
-                    totalPriceCents = divisionEditor.priceCents.coerceAtLeast(0),
-                    onTotalPriceChange = { priceCents ->
-                        if (!state.divisionEditorReady || !state.hostHasAccount) {
-                            return@InclusivePriceInput
-                        }
+                priceCents = divisionEditor.priceCents,
+                maxParticipants = divisionEditor.maxParticipants,
+                maxParticipantsLabel = if (editEvent.teamSignup) {
+                    "Division Max Teams"
+                } else {
+                    "Division Max Participants"
+                },
+                priceLabel = "Division price",
+                manualPaymentsEnabled = manualPaymentsEnabled,
+                hostHasAccount = state.hostHasAccount,
+                enabled = state.divisionEditorReady,
+                onPriceChange = { priceCents ->
+                    actions.onDivisionEditorChange(
+                        divisionEditor.copy(
+                            priceCents = priceCents.coerceAtLeast(0),
+                            error = null,
+                        ),
+                    )
+                },
+                onMaxParticipantsChange = { value ->
+                    if (value.isEmpty() || value.all { it.isDigit() }) {
                         actions.onDivisionEditorChange(
                             divisionEditor.copy(
-                                priceCents = priceCents.coerceAtLeast(0),
+                                maxParticipants = value.toIntOrNull(),
                                 error = null,
                             ),
                         )
-                    },
-                    modifier = Modifier.weight(1f),
-                    totalLabel = "Division price",
-                    enabled = state.hostHasAccount && state.divisionEditorReady,
-                )
-                NumberInputField(
-                    modifier = Modifier.weight(1f),
-                    value = divisionEditor.maxParticipants?.toString().orEmpty(),
-                    label = if (editEvent.teamSignup) {
-                        "Division Max Teams"
-                    } else {
-                        "Division Max Participants"
-                    },
-                    enabled = state.divisionEditorReady,
-                    onValueChange = { value ->
-                        if (!state.divisionEditorReady) {
-                            return@NumberInputField
-                        }
-                        if (value.isEmpty() || value.all { it.isDigit() }) {
-                            actions.onDivisionEditorChange(
-                                divisionEditor.copy(
-                                    maxParticipants = value.toIntOrNull(),
-                                    error = null,
-                                ),
-                            )
-                        }
-                    },
-                    isError = divisionEditor.maxParticipants.let { maxParticipants ->
-                        maxParticipants == null || maxParticipants < 2
-                    },
-                    errorMessage = "Required and must be at least 2.",
-                )
-            }
+                    }
+                },
+                isMaxParticipantsError = divisionEditor.maxParticipants.let { maxParticipants ->
+                    maxParticipants == null || maxParticipants < 2
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DivisionPriceAndMaxTeamsFields(
+    priceCents: Int,
+    maxParticipants: Int?,
+    maxParticipantsLabel: String,
+    priceLabel: String,
+    manualPaymentsEnabled: Boolean,
+    hostHasAccount: Boolean,
+    enabled: Boolean,
+    onPriceChange: (Int) -> Unit,
+    onMaxParticipantsChange: (String) -> Unit,
+    isMaxParticipantsError: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        NumberInputField(
+            modifier = Modifier.weight(1f),
+            value = maxParticipants?.toString().orEmpty(),
+            label = maxParticipantsLabel,
+            enabled = enabled,
+            onValueChange = onMaxParticipantsChange,
+            isError = isMaxParticipantsError,
+            errorMessage = "Required and must be at least 2.",
+        )
+        if (manualPaymentsEnabled) {
+            MoneyInputField(
+                value = centsInputValue(priceCents),
+                onValueChange = { value ->
+                    onPriceChange(value.filter(Char::isDigit).toIntOrNull()?.coerceAtLeast(0) ?: 0)
+                },
+                modifier = Modifier.weight(1f),
+                label = priceLabel,
+                enabled = enabled,
+            )
+            Spacer(modifier = Modifier.weight(1f))
+        } else {
+            InclusivePriceInput(
+                totalPriceCents = priceCents.coerceAtLeast(0),
+                onTotalPriceChange = onPriceChange,
+                modifier = Modifier.weight(2f),
+                totalLabel = priceLabel,
+                enabled = hostHasAccount && enabled,
+            )
         }
     }
 }
@@ -1036,6 +1070,9 @@ private fun DivisionPaymentPlanFields(
         }
     }
 }
+
+private fun centsInputValue(cents: Int): String =
+    cents.coerceAtLeast(0).takeIf { it > 0 }?.toString().orEmpty()
 
 private fun applySingleDivisionDefaultsToDetails(
     details: List<DivisionDetail>,

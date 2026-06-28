@@ -18,8 +18,6 @@ plugins {
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.ksp)
-    alias(libs.plugins.room)
     alias(libs.plugins.compose.vectorize)
     alias(libs.plugins.secrets)
     id("kotlin-parcelize")
@@ -34,8 +32,8 @@ compose.resources {
     generateResClass = always
 }
 
-val mvpVersion = "1.6.2"
-val mvpVersionCode = 55
+val mvpVersion = "1.6.3"
+val mvpVersionCode = 56
 kotlin {
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
@@ -116,6 +114,10 @@ kotlin {
         commonMain {
             dependencies {
                 implementation(libs.runtime)
+                api(projects.core.model)
+                implementation(projects.core.database)
+                api(project(":core:repository-impl"))
+                api(projects.core.ui)
                 implementation(libs.foundation)
                 implementation(libs.material3)
                 implementation(libs.material.icons.extended)
@@ -124,15 +126,9 @@ kotlin {
                 implementation(libs.jetbrains.ui.tooling.preview)
                 implementation(libs.runtime.saveable)
                 implementation(libs.coil.compose)
-                implementation(libs.androidx.room.runtime)
-                implementation(libs.androidx.sqlite.bundled)
                 implementation(libs.compose.vectorize.core)
                 implementation(libs.permissions.compose)
-                implementation(libs.ktor.client.core)
-                implementation(libs.ktor.client.content.negotiation)
-                implementation(libs.ktor.client.logging)
-                implementation(libs.ktor.client.websockets)
-                implementation(libs.ktor.serialization.kotlinx.json)
+                api(projects.core.network)
                 implementation(libs.coil.compose.core)
                 implementation(libs.coil.compose)
                 implementation(libs.coil.mp)
@@ -209,13 +205,11 @@ kotlin {
                 implementation(libs.financial.connections)
                 implementation(libs.androidx.browser)
                 implementation(libs.androidx.security.crypto)
-                implementation(libs.ktor.client.okhttp)
+                implementation(libs.androidx.sqlite.bundled)
             }
         }
         iosMain {
             dependencies {
-                implementation(libs.multiplatform.settings)
-                implementation(libs.ktor.client.darwin)
             }
         }
         commonTest {
@@ -307,11 +301,6 @@ tasks.configureEach {
     }
 }
 
-room {
-    schemaDirectory("$projectDir/schemas")
-    generateKotlin = true
-}
-
 skie {
     features {
         enableSwiftUIObservingPreview = true
@@ -342,25 +331,8 @@ dependencies {
     implementation(libs.androidx.animation.android)
     debugImplementation("org.jetbrains.compose.ui:ui-tooling:${libs.versions.uiVersion.get()}")
     debugImplementation(libs.androidx.compose.ui.test.manifest)
-    add("kspAndroid", libs.androidx.room.compiler)
-    add("kspIosArm64", libs.androidx.room.compiler)
-    add("kspIosSimulatorArm64", libs.androidx.room.compiler)
     implementation(libs.androidx.foundation.layout)
     implementation(libs.androidx.material)
-}
-
-// KSP can occasionally keep stale Room constructor outputs between Android variants on Windows.
-// Force Android KSP regeneration and wipe all Android KSP outputs/caches before each Android KSP run.
-tasks.matching { task ->
-    task.name.startsWith("ksp") && task.name.endsWith("KotlinAndroid")
-}.configureEach {
-    outputs.upToDateWhen { false }
-    outputs.cacheIf { false }
-    doFirst {
-        delete(layout.buildDirectory.dir("generated/ksp/android"))
-        delete(layout.buildDirectory.dir("kspCaches/android"))
-        delete(layout.buildDirectory.dir("tmp/ksp"))
-    }
 }
 
 val deviceName =

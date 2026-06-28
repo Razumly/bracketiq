@@ -1,0 +1,1806 @@
+package com.razumly.mvp.core.data.repositories
+
+import com.razumly.mvp.core.data.CurrentUserDataSource
+import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.dataTypes.AuthAccount
+import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
+import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
+import com.razumly.mvp.core.auth.NoOpWatchAuthSync
+import com.razumly.mvp.core.auth.WatchAuthSync
+import com.razumly.mvp.core.network.ApiException
+import com.razumly.mvp.core.network.AuthTokenStore
+import com.razumly.mvp.core.network.MvpApiClient
+import com.razumly.mvp.core.network.dto.AuthResponseDto
+import com.razumly.mvp.core.network.dto.AppleMobileLoginRequestDto
+import com.razumly.mvp.core.network.dto.CreateInvitesRequestDto
+import com.razumly.mvp.core.network.dto.DeleteAccountRequestDto
+import com.razumly.mvp.core.network.dto.EmailMembershipLookupRequestDto
+import com.razumly.mvp.core.network.dto.EmailMembershipLookupResponseDto
+import com.razumly.mvp.core.network.dto.EnsureUserByEmailRequestDto
+import com.razumly.mvp.core.network.dto.GoogleMobileLoginRequestDto
+import com.razumly.mvp.core.network.dto.InviteCreateDto
+import com.razumly.mvp.core.network.dto.InvitesResponseDto
+import com.razumly.mvp.core.network.dto.LoginRequestDto
+import com.razumly.mvp.core.network.dto.OkResponseDto
+import com.razumly.mvp.core.network.dto.PasswordRequestDto
+import com.razumly.mvp.core.network.dto.RegisterConflictResponseDto
+import com.razumly.mvp.core.network.dto.RegisterProfileSelectionDto
+import com.razumly.mvp.core.network.dto.RegisterProfileSnapshotDto
+import com.razumly.mvp.core.network.dto.RegisterRequestDto
+import com.razumly.mvp.core.network.dto.TeamApiDto
+import com.razumly.mvp.core.network.dto.TeamPlayerRegistrationApiDto
+import com.razumly.mvp.core.network.dto.UpdateUserRequestDto
+import com.razumly.mvp.core.network.dto.UserResponseDto
+import com.razumly.mvp.core.network.dto.UserProfileDto
+import com.razumly.mvp.core.network.dto.UserUpdateDto
+import com.razumly.mvp.core.network.dto.UsersResponseDto
+import com.razumly.mvp.core.network.dto.toTeamPlayerRegistrationOrNull
+import com.razumly.mvp.core.network.dto.toAuthAccountOrNull
+import com.razumly.mvp.core.network.dto.toUserDataOrNull
+import com.razumly.mvp.core.data.util.toNameCase
+import com.razumly.mvp.core.util.jsonMVP
+import io.github.aakira.napier.Napier
+import io.ktor.http.encodeURLQueryComponent
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlin.time.Clock
+
+private const val USER_REPOSITORY_LOG_TAG = "UserRepository"
+private const val EMAIL_NOT_VERIFIED_CODE = "EMAIL_NOT_VERIFIED"
+private const val CHAT_TERMS_REQUIRED_CODE = "CHAT_TERMS_REQUIRED"
+
+sealed class StartupAuthState {
+    data object Checking : StartupAuthState()
+    data object Authenticated : StartupAuthState()
+    data object Unauthenticated : StartupAuthState()
+}
+
+data class RequiredProfileCompletionState(
+    val isRequired: Boolean = false,
+    val missingFields: Set<SignupProfileField> = emptySet(),
+    val prefill: SignupProfileSnapshot = SignupProfileSnapshot(),
+)
+
+private val defaultStartupAuthStateFlow =
+    MutableStateFlow<StartupAuthState>(StartupAuthState.Unauthenticated)
+private val defaultRequiredProfileCompletionStateFlow =
+    MutableStateFlow(RequiredProfileCompletionState())
+private val defaultChatTermsConsentStateFlow =
+    MutableStateFlow(ChatTermsConsentState())
+private val defaultChatTermsConsentLoadingFlow =
+    MutableStateFlow(false)
+
+data class FamilyChild(
+    val userId: String,
+    val firstName: String,
+    val lastName: String,
+    val userName: String? = null,
+    val dateOfBirth: String? = null,
+    val age: Int? = null,
+    val linkStatus: String? = null,
+    val relationship: String? = null,
+    val email: String? = null,
+    val hasEmail: Boolean? = null,
+)
+
+data class FamilyJoinRequest(
+    val registrationId: String,
+    val requestType: String = "EVENT",
+    val requestSource: String? = null,
+    val inviteId: String? = null,
+    val eventId: String? = null,
+    val eventName: String? = null,
+    val eventStart: String? = null,
+    val teamId: String? = null,
+    val teamName: String? = null,
+    val teamRegistrationPriceCents: Int? = null,
+    val teamOpenRegistration: Boolean? = null,
+    val childUserId: String,
+    val childFirstName: String? = null,
+    val childLastName: String? = null,
+    val childFullName: String? = null,
+    val childDateOfBirth: String? = null,
+    val childEmail: String? = null,
+    val childHasEmail: Boolean = false,
+    val consentStatus: String? = null,
+    val divisionId: String? = null,
+    val divisionTypeId: String? = null,
+    val divisionTypeKey: String? = null,
+    val requestedAt: String? = null,
+    val updatedAt: String? = null,
+)
+
+enum class FamilyJoinRequestAction(val apiValue: String) {
+    APPROVE("approve"),
+    DECLINE("decline"),
+}
+
+data class FamilyJoinRequestResolution(
+    val action: String? = null,
+    val requestType: String? = null,
+    val inviteId: String? = null,
+    val team: Team? = null,
+    val teamRegistration: TeamPlayerRegistration? = null,
+    val registrationStatus: String? = null,
+    val consentStatus: String? = null,
+    val childEmail: String? = null,
+    val requiresChildEmail: Boolean = false,
+    val warnings: List<String> = emptyList(),
+)
+
+enum class SignupProfileField(
+    val apiName: String,
+    val label: String,
+) {
+    FIRST_NAME(apiName = "firstName", label = "First Name"),
+    LAST_NAME(apiName = "lastName", label = "Last Name"),
+    USER_NAME(apiName = "userName", label = "Username"),
+    DATE_OF_BIRTH(apiName = "dateOfBirth", label = "Birthday"),
+    ;
+
+    companion object {
+        fun fromApiName(value: String): SignupProfileField? = entries.firstOrNull { it.apiName == value }
+    }
+}
+
+data class SignupProfileSnapshot(
+    val firstName: String? = null,
+    val lastName: String? = null,
+    val userName: String? = null,
+    val dateOfBirth: String? = null,
+) {
+    fun valueFor(field: SignupProfileField): String? = when (field) {
+        SignupProfileField.FIRST_NAME -> firstName
+        SignupProfileField.LAST_NAME -> lastName
+        SignupProfileField.USER_NAME -> userName
+        SignupProfileField.DATE_OF_BIRTH -> dateOfBirth
+    }
+}
+
+data class SignupProfileSelection(
+    val firstName: String? = null,
+    val lastName: String? = null,
+    val userName: String? = null,
+    val dateOfBirth: String? = null,
+)
+
+data class SignupProfileConflict(
+    val fields: Set<SignupProfileField>,
+    val existing: SignupProfileSnapshot,
+    val incoming: SignupProfileSnapshot,
+)
+
+data class UserEmailMembershipMatch(
+    val email: String,
+    val userId: String,
+)
+
+data class UserVisibilityContext(
+    val teamId: String? = null,
+    val eventId: String? = null,
+)
+
+data class ChatTermsConsentState(
+    val version: String = "",
+    val url: String = "/terms",
+    val summary: List<String> = emptyList(),
+    val accepted: Boolean = false,
+    val acceptedAt: String? = null,
+)
+
+class SignupProfileConflictException(
+    val conflict: SignupProfileConflict,
+) : Exception(
+    buildString {
+        append("Signup profile conflict. Selection required for: ")
+        append(conflict.fields.joinToString { it.apiName })
+    },
+)
+
+class EmailVerificationRequiredException(
+    val email: String,
+    message: String,
+) : Exception(message)
+
+interface IUserRepository : IMVPRepository {
+    val currentUser: StateFlow<Result<UserData>>
+    val currentAccount: StateFlow<Result<AuthAccount>>
+    val startupAuthState: StateFlow<StartupAuthState>
+        get() = defaultStartupAuthStateFlow
+    val requiredProfileCompletionState: StateFlow<RequiredProfileCompletionState>
+        get() = defaultRequiredProfileCompletionStateFlow
+    val chatTermsConsentState: StateFlow<ChatTermsConsentState>
+        get() = defaultChatTermsConsentStateFlow
+    val chatTermsConsentLoading: StateFlow<Boolean>
+        get() = defaultChatTermsConsentLoadingFlow
+
+    suspend fun login(email: String, password: String): Result<UserData>
+    suspend fun logout(): Result<Unit>
+    suspend fun deleteAccount(confirmationText: String): Result<Unit>
+
+    suspend fun getUsers(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext = UserVisibilityContext(),
+    ): Result<List<UserData>>
+    fun getUsersFlow(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext = UserVisibilityContext(),
+    ): Flow<Result<List<UserData>>>
+
+    suspend fun searchPlayers(search: String): Result<List<UserData>>
+
+    /**
+     * Server-side only behavior: ensures a public user profile exists for the given email.
+     * Used for invite flows where we only have an email address.
+     *
+     * The returned [UserData] must not contain sensitive information (email/password/etc).
+     */
+    suspend fun ensureUserByEmail(email: String): Result<UserData>
+    suspend fun createInvites(invites: List<InviteCreateDto>): Result<List<Invite>>
+    suspend fun deleteInvite(inviteId: String): Result<Unit>
+    suspend fun findEmailMembership(
+        emails: List<String>,
+        userIds: List<String>,
+    ): Result<List<UserEmailMembershipMatch>>
+    suspend fun listInvites(userId: String, type: String? = null): Result<List<Invite>>
+    suspend fun acceptInvite(inviteId: String): Result<Unit>
+    suspend fun declineInvite(inviteId: String): Result<Unit>
+    suspend fun isCurrentUserChild(minorAgeThreshold: Int = 18): Result<Boolean>
+    suspend fun listChildren(): Result<List<FamilyChild>>
+    suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>>
+    suspend fun resolveChildJoinRequest(
+        registrationId: String,
+        action: FamilyJoinRequestAction,
+    ): Result<FamilyJoinRequestResolution>
+    suspend fun createChildAccount(
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+        email: String? = null,
+        relationship: String? = null,
+    ): Result<Unit>
+
+    suspend fun updateChildAccount(
+        childUserId: String,
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+        email: String? = null,
+        relationship: String? = null,
+    ): Result<Unit>
+
+    suspend fun linkChildToParent(
+        childEmail: String? = null,
+        childUserId: String? = null,
+        relationship: String? = null,
+    ): Result<Unit>
+
+    suspend fun createNewUser(
+        email: String,
+        password: String,
+        firstName: String,
+        lastName: String,
+        userName: String,
+        dateOfBirth: String? = null,
+        profileSelection: SignupProfileSelection? = null,
+    ): Result<UserData>
+
+    suspend fun updateUser(user: UserData): Result<UserData>
+
+    suspend fun updateEmail(email: String, password: String): Result<Unit>
+
+    suspend fun updatePassword(currentPassword: String, newPassword: String): Result<Unit>
+
+    suspend fun updateProfile(
+        firstName: String,
+        lastName: String,
+        email: String,
+        currentPassword: String,
+        newPassword: String,
+        userName: String,
+        profileImageId: String?,
+    ): Result<Unit>
+    suspend fun completeRequiredProfile(
+        firstName: String,
+        lastName: String,
+        userName: String,
+        dateOfBirth: String,
+    ): Result<UserData> = Result.failure(NotImplementedError("Profile completion is not implemented"))
+
+    suspend fun getCurrentAccount(): Result<Unit>
+
+    suspend fun sendFriendRequest(user: UserData): Result<Unit>
+    suspend fun acceptFriendRequest(user: UserData): Result<Unit>
+    suspend fun declineFriendRequest(userId: String): Result<Unit>
+    suspend fun followUser(userId: String): Result<Unit>
+    suspend fun unfollowUser(userId: String): Result<Unit>
+    suspend fun removeFriend(userId: String): Result<Unit>
+    suspend fun blockUser(userId: String, leaveSharedChats: Boolean = true): Result<List<String>> =
+        Result.failure(NotImplementedError("Blocking users is not implemented"))
+    suspend fun unblockUser(userId: String): Result<Unit> =
+        Result.failure(NotImplementedError("Unblocking users is not implemented"))
+    suspend fun getChatTermsConsentState(): Result<ChatTermsConsentState> =
+        Result.failure(NotImplementedError("Chat terms consent is not implemented"))
+    suspend fun acceptChatTermsConsent(): Result<ChatTermsConsentState> =
+        Result.failure(NotImplementedError("Chat terms consent is not implemented"))
+    suspend fun refreshCurrentUserProfile(): Result<UserData> =
+        Result.failure(NotImplementedError("Refreshing the current user profile is not implemented"))
+    suspend fun setCachedCurrentUserProfile(profile: UserData): Result<UserData> =
+        Result.failure(NotImplementedError("Caching the current user profile is not implemented"))
+}
+
+class UserRepository(
+    internal val databaseService: DatabaseService,
+    private val api: MvpApiClient,
+    private val tokenStore: AuthTokenStore,
+    private val currentUserDataSource: CurrentUserDataSource,
+    private val watchAuthSync: WatchAuthSync = NoOpWatchAuthSync,
+    private val startupDispatcher: CoroutineDispatcher = Dispatchers.Default,
+) : IUserRepository {
+    private val scope = CoroutineScope(SupervisorJob() + startupDispatcher)
+
+    private val _currentUser = MutableStateFlow(Result.failure<UserData>(Exception("No User")))
+    override val currentUser: StateFlow<Result<UserData>> = _currentUser.asStateFlow()
+
+    private val _currentAccount = MutableStateFlow(Result.failure<AuthAccount>(Exception("No Account")))
+    override val currentAccount: StateFlow<Result<AuthAccount>> = _currentAccount.asStateFlow()
+    private val _startupAuthState = MutableStateFlow<StartupAuthState>(StartupAuthState.Checking)
+    override val startupAuthState: StateFlow<StartupAuthState> = _startupAuthState.asStateFlow()
+    private val _requiredProfileCompletionState = MutableStateFlow(RequiredProfileCompletionState())
+    override val requiredProfileCompletionState: StateFlow<RequiredProfileCompletionState> =
+        _requiredProfileCompletionState.asStateFlow()
+    private val _chatTermsConsentState = MutableStateFlow(ChatTermsConsentState())
+    override val chatTermsConsentState: StateFlow<ChatTermsConsentState> = _chatTermsConsentState.asStateFlow()
+    private val _chatTermsConsentLoading = MutableStateFlow(false)
+    override val chatTermsConsentLoading: StateFlow<Boolean> = _chatTermsConsentLoading.asStateFlow()
+    private var hasLoadedChatTermsConsent = false
+    private var chatTermsPrefetchJob: Job? = null
+    private val startupLoadJob = scope.launch {
+        runCatching { loadCurrentUser() }.onFailure { throwable ->
+            if (throwable !is CancellationException) {
+                Napier.w("loadCurrentUser failed", throwable)
+            }
+        }
+    }
+
+    private fun syncAuthenticatedWatchAsync() {
+        scope.launch {
+            runCatching { watchAuthSync.syncAuthenticatedWatch() }
+                .onFailure { throwable ->
+                    if (throwable !is CancellationException) {
+                        Napier.w(tag = USER_REPOSITORY_LOG_TAG) {
+                            "Watch auth sync failed: ${throwable.message}"
+                        }
+                    }
+                }
+        }
+    }
+
+    override suspend fun login(email: String, password: String): Result<UserData> = runCatching {
+        cancelStartupLoadIfRunning()
+        val normalizedEmail = normalizeEmail(email)
+        if (normalizedEmail.isBlank()) error("Email is required")
+        Napier.d(tag = USER_REPOSITORY_LOG_TAG) { "Email login started for ${maskEmail(normalizedEmail)}" }
+        val res = api.post<LoginRequestDto, AuthResponseDto>(
+            path = "api/auth/login",
+            body = LoginRequestDto(email = normalizedEmail, password = password),
+        )
+
+        val token = res.token?.takeIf(String::isNotBlank)
+            ?: error("Login response missing token")
+        tokenStore.set(token)
+
+        val account = res.user?.toAuthAccountOrNull()
+            ?: error("Login response missing user")
+        _currentAccount.value = Result.success(account)
+        updateRequiredProfileCompletionState(res.toRequiredProfileCompletionState())
+
+        val profile = res.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
+            ?: error("Login response missing profile")
+
+        cacheCurrentUserProfile(profile, prefetchChatTermsImmediately = true)
+        _startupAuthState.value = StartupAuthState.Authenticated
+        Napier.i(tag = USER_REPOSITORY_LOG_TAG) { "Email login succeeded for userId=${profile.id}" }
+        profile
+    }.onFailure { throwable ->
+        Napier.e(tag = USER_REPOSITORY_LOG_TAG, throwable = throwable) {
+            "Email login failed for ${maskEmail(email)}: ${throwable.message}"
+        }
+    }
+
+    suspend fun loginWithGoogleIdToken(idToken: String): Result<UserData> = runCatching {
+        cancelStartupLoadIfRunning()
+        Napier.d(tag = USER_REPOSITORY_LOG_TAG) { "Google login started" }
+        val res = api.post<GoogleMobileLoginRequestDto, AuthResponseDto>(
+            path = "api/auth/google/mobile",
+            body = GoogleMobileLoginRequestDto(idToken = idToken),
+        )
+
+        val token = res.token?.takeIf(String::isNotBlank)
+            ?: error("Google login response missing token")
+        tokenStore.set(token)
+
+        val account = res.user?.toAuthAccountOrNull()
+            ?: error("Google login response missing user")
+        _currentAccount.value = Result.success(account)
+        updateRequiredProfileCompletionState(res.toRequiredProfileCompletionState())
+
+        val profile = res.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
+            ?: error("Google login response missing profile")
+
+        cacheCurrentUserProfile(profile, prefetchChatTermsImmediately = true)
+        _startupAuthState.value = StartupAuthState.Authenticated
+        Napier.i(tag = USER_REPOSITORY_LOG_TAG) { "Google login succeeded for userId=${profile.id}" }
+        profile
+    }.onFailure { throwable ->
+        Napier.e(tag = USER_REPOSITORY_LOG_TAG, throwable = throwable) {
+            "Google login failed: ${throwable.message}"
+        }
+    }
+
+    suspend fun loginWithAppleIdentityToken(
+        identityToken: String,
+        authorizationCode: String,
+        user: String? = null,
+        email: String? = null,
+        firstName: String? = null,
+        lastName: String? = null,
+    ): Result<UserData> = runCatching {
+        cancelStartupLoadIfRunning()
+        Napier.d(tag = USER_REPOSITORY_LOG_TAG) { "Apple login started" }
+        val res = api.post<AppleMobileLoginRequestDto, AuthResponseDto>(
+            path = "api/auth/apple/mobile",
+            body = AppleMobileLoginRequestDto(
+                identityToken = identityToken,
+                authorizationCode = authorizationCode.trim().takeIf(String::isNotBlank)
+                    ?: error("Apple login response missing authorization code"),
+                user = user?.trim()?.takeIf(String::isNotBlank),
+                email = email?.trim()?.lowercase()?.takeIf(String::isNotBlank),
+                firstName = firstName?.trim()?.takeIf(String::isNotBlank),
+                lastName = lastName?.trim()?.takeIf(String::isNotBlank),
+            ),
+        )
+
+        val token = res.token?.takeIf(String::isNotBlank)
+            ?: error("Apple login response missing token")
+        tokenStore.set(token)
+
+        val account = res.user?.toAuthAccountOrNull()
+            ?: error("Apple login response missing user")
+        _currentAccount.value = Result.success(account)
+        updateRequiredProfileCompletionState(res.toRequiredProfileCompletionState())
+
+        val profile = res.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
+            ?: error("Apple login response missing profile")
+
+        cacheCurrentUserProfile(profile, prefetchChatTermsImmediately = true)
+        _startupAuthState.value = StartupAuthState.Authenticated
+        Napier.i(tag = USER_REPOSITORY_LOG_TAG) { "Apple login succeeded for userId=${profile.id}" }
+        profile
+    }.onFailure { throwable ->
+        Napier.e(tag = USER_REPOSITORY_LOG_TAG, throwable = throwable) {
+            "Apple login failed: ${throwable.message}"
+        }
+    }
+
+    override suspend fun createNewUser(
+        email: String,
+        password: String,
+        firstName: String,
+        lastName: String,
+        userName: String,
+        dateOfBirth: String?,
+        profileSelection: SignupProfileSelection?,
+    ): Result<UserData> = runCatching {
+        cancelStartupLoadIfRunning()
+        val normalizedEmail = normalizeEmail(email)
+        val normalizedFirstName = normalizeRequiredName(firstName)
+        val normalizedLastName = normalizeRequiredName(lastName)
+        if (normalizedEmail.isBlank()) error("Email is required")
+        Napier.d(tag = USER_REPOSITORY_LOG_TAG) { "Signup started for ${maskEmail(normalizedEmail)}" }
+        val res = try {
+            api.post<RegisterRequestDto, AuthResponseDto>(
+                path = "api/auth/register",
+                body = RegisterRequestDto(
+                    email = normalizedEmail,
+                    password = password,
+                    name = userName,
+                    firstName = normalizedFirstName,
+                    lastName = normalizedLastName,
+                    userName = userName,
+                    dateOfBirth = dateOfBirth,
+                    enforceProfileConflictSelection = true,
+                    profileSelection = profileSelection?.toDto(),
+                ),
+            )
+        } catch (apiException: ApiException) {
+            val conflict = apiException.toSignupConflictOrNull()
+            if (conflict != null) throw SignupProfileConflictException(conflict)
+            throw apiException
+        }
+
+        val hasAuthenticatedVerificationResponse = !res.token.isNullOrBlank() &&
+            res.user != null &&
+            res.profile != null
+        if ((res.requiresEmailVerification == true ||
+                res.code?.equals(EMAIL_NOT_VERIFIED_CODE, ignoreCase = true) == true
+            ) && !hasAuthenticatedVerificationResponse
+        ) {
+            val verificationEmail = res.email?.trim()?.takeIf(String::isNotBlank) ?: normalizedEmail
+            val verificationMessage = res.error?.trim()?.takeIf(String::isNotBlank)
+                ?: "Email verification is required. Check your inbox for a verification link, then sign in."
+            throw EmailVerificationRequiredException(
+                email = verificationEmail,
+                message = verificationMessage,
+            )
+        }
+
+        val token = res.token?.takeIf(String::isNotBlank)
+            ?: error("Register response missing token")
+        tokenStore.set(token)
+
+        val account = res.user?.toAuthAccountOrNull()
+            ?: error("Register response missing user")
+        _currentAccount.value = Result.success(account)
+        updateRequiredProfileCompletionState(res.toRequiredProfileCompletionState())
+
+        val profile = res.profile?.toUserDataOrNull()
+            ?: error("Register response missing profile")
+
+        cacheCurrentUserProfile(profile, prefetchChatTermsImmediately = true)
+        _startupAuthState.value = StartupAuthState.Authenticated
+        Napier.i(tag = USER_REPOSITORY_LOG_TAG) { "Signup succeeded for userId=${profile.id}" }
+        profile
+    }.onFailure { throwable ->
+        Napier.e(tag = USER_REPOSITORY_LOG_TAG, throwable = throwable) {
+            "Signup failed for ${maskEmail(email)}: ${throwable.message}"
+        }
+    }
+
+    override suspend fun logout(): Result<Unit> = runCatching {
+        runCatching { api.postNoResponse("api/auth/logout") }
+        clearLoginState()
+    }
+
+    override suspend fun deleteAccount(confirmationText: String): Result<Unit> = runCatching {
+        val currentUserId = currentUser.value.getOrNull()?.id?.trim()?.takeIf(String::isNotBlank)
+            ?: currentAccount.value.getOrNull()?.id?.trim()?.takeIf(String::isNotBlank)
+            ?: error("No user")
+
+        val response = api.delete<DeleteAccountRequestDto, OkResponseDto>(
+            path = "api/auth/account",
+            body = DeleteAccountRequestDto(confirmationText = confirmationText.trim()),
+        )
+        if (!response.ok) {
+            error("Account deletion failed.")
+        }
+
+        runCatching {
+            databaseService.getUserDataDao.deleteUsersById(listOf(currentUserId))
+        }
+        clearLoginState()
+    }
+
+    override suspend fun getCurrentAccount(): Result<Unit> = runCatching {
+        loadCurrentUser()
+    }
+
+    private suspend fun cancelStartupLoadIfRunning() {
+        if (!startupLoadJob.isCompleted) {
+            startupLoadJob.cancelAndJoin()
+        }
+    }
+
+    private suspend fun loadCurrentUser() {
+        _startupAuthState.value = StartupAuthState.Checking
+        try {
+            val token = tokenStore.get().takeIf(String::isNotBlank)
+            if (token.isNullOrBlank()) {
+                if (!bootstrapSessionFromAuthMe()) {
+                    clearLoginState()
+                } else {
+                    updateStartupAuthStateFromCurrentUser()
+                }
+                return
+            }
+
+            // If we have a stored user id, surface cached data quickly while validating token.
+            val savedId = runCatching {
+                currentUserDataSource.getUserId().first().takeIf(String::isNotBlank)
+            }.getOrNull()
+
+            if (!savedId.isNullOrBlank()) {
+                val local = runCatching {
+                    databaseService.getUserDataDao.getUserDataById(savedId)
+                }.onFailure { throwable ->
+                    Napier.e(tag = USER_REPOSITORY_LOG_TAG, throwable = throwable) {
+                        "Failed reading local cached user for id=$savedId"
+                    }
+                }.getOrNull()
+                if (local != null) {
+                    _currentUser.value = Result.success(local)
+                    syncChatTermsConsentFromProfile(local)
+                }
+            }
+
+            val me = api.get<AuthResponseDto>("api/auth/me")
+            val account = me.user?.toAuthAccountOrNull()
+            if (account == null) {
+                clearLoginState()
+                return
+            }
+
+            _currentAccount.value = Result.success(account)
+            updateRequiredProfileCompletionState(me.toRequiredProfileCompletionState())
+
+            val refreshed = me.token?.takeIf(String::isNotBlank)
+            if (!refreshed.isNullOrBlank() && refreshed != token) {
+                tokenStore.set(refreshed)
+            }
+
+            val remoteProfile = me.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
+            if (remoteProfile != null) {
+                cacheCurrentUserProfile(remoteProfile)
+            }
+            updateStartupAuthStateFromCurrentUser()
+        } catch (throwable: Throwable) {
+            if (throwable is CancellationException) {
+                throw throwable
+            }
+            Napier.w(tag = USER_REPOSITORY_LOG_TAG) {
+                "loadCurrentUser failed: ${throwable.message}"
+            }
+            clearLoginState()
+        }
+    }
+
+    private suspend fun bootstrapSessionFromAuthMe(): Boolean {
+        val me = runCatching {
+            api.get<AuthResponseDto>("api/auth/me")
+        }.onFailure { throwable ->
+            Napier.w(tag = USER_REPOSITORY_LOG_TAG) {
+                "Session bootstrap via /api/auth/me failed: ${throwable.message}"
+            }
+        }.getOrNull() ?: return false
+
+        val account = me.user?.toAuthAccountOrNull() ?: return false
+        val refreshed = me.token?.takeIf(String::isNotBlank) ?: return false
+        tokenStore.set(refreshed)
+        _currentAccount.value = Result.success(account)
+        updateRequiredProfileCompletionState(me.toRequiredProfileCompletionState())
+
+        val remoteProfile = me.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
+        if (remoteProfile != null) {
+            cacheCurrentUserProfile(remoteProfile)
+        } else {
+            currentUserDataSource.saveUserId(account.id)
+            syncAuthenticatedWatchAsync()
+        }
+        return true
+    }
+
+    private suspend fun cacheCurrentUserProfile(
+        profile: UserData,
+        prefetchChatTermsConsent: Boolean = true,
+        prefetchChatTermsImmediately: Boolean = false,
+    ) {
+        runCatching {
+            databaseService.getUserDataDao.upsertUserData(profile)
+            currentUserDataSource.saveUserId(profile.id)
+        }.onFailure { throwable ->
+            Napier.e(tag = USER_REPOSITORY_LOG_TAG, throwable = throwable) {
+                "Failed caching user profile locally for userId=${profile.id}"
+            }
+        }
+        _currentUser.value = Result.success(profile)
+        syncChatTermsConsentFromProfile(profile)
+        if (prefetchChatTermsConsent) {
+            if (prefetchChatTermsImmediately) {
+                getChatTermsConsentState()
+            } else {
+                scheduleChatTermsConsentPrefetch()
+            }
+        }
+        _startupAuthState.value = StartupAuthState.Authenticated
+        syncAuthenticatedWatchAsync()
+    }
+
+    override suspend fun setCachedCurrentUserProfile(profile: UserData): Result<UserData> = runCatching {
+        cancelStartupLoadIfRunning()
+        cacheCurrentUserProfile(profile, prefetchChatTermsConsent = false)
+        profile
+    }
+
+    private suspend fun clearLoginState() {
+        chatTermsPrefetchJob?.cancelAndJoin()
+        chatTermsPrefetchJob = null
+        hasLoadedChatTermsConsent = false
+        _chatTermsConsentState.value = ChatTermsConsentState()
+        _chatTermsConsentLoading.value = false
+        runCatching { tokenStore.clear() }
+        runCatching { currentUserDataSource.saveUserId("") }
+        _currentUser.value = Result.failure(Exception("No User"))
+        _currentAccount.value = Result.failure(Exception("No Account"))
+        updateRequiredProfileCompletionState(RequiredProfileCompletionState())
+        _startupAuthState.value = StartupAuthState.Unauthenticated
+    }
+
+    private fun updateStartupAuthStateFromCurrentUser() {
+        val currentUserId = _currentUser.value.getOrNull()?.id?.trim()
+        _startupAuthState.value = if (currentUserId.isNullOrEmpty()) {
+            StartupAuthState.Unauthenticated
+        } else {
+            StartupAuthState.Authenticated
+        }
+    }
+
+    private suspend fun fetchUserProfile(userId: String): UserData? {
+        return runCatching {
+            val res = api.get<UserResponseDto>("api/users/$userId")
+            res.user?.toUserDataOrNull()
+        }.getOrNull()
+    }
+
+    override suspend fun refreshCurrentUserProfile(): Result<UserData> = runCatching {
+        val currentId = currentUser.value.getOrNull()?.id
+            ?: currentAccount.value.getOrNull()?.id
+            ?: error("No user")
+        val profile = fetchUserProfile(currentId) ?: error("Failed to load current user profile.")
+        cacheCurrentUserProfile(profile)
+        profile
+    }
+
+    private fun UserVisibilityContext.toQuerySuffix(): String {
+        val params = buildList {
+            teamId?.trim()?.takeIf(String::isNotBlank)?.let { normalizedTeamId ->
+                add("teamId=${normalizedTeamId.encodeURLQueryComponent()}")
+            }
+            eventId?.trim()?.takeIf(String::isNotBlank)?.let { normalizedEventId ->
+                add("eventId=${normalizedEventId.encodeURLQueryComponent()}")
+            }
+        }
+
+        return if (params.isEmpty()) "" else "&${params.joinToString("&")}"
+    }
+
+    private suspend fun fetchUsersByIds(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext = UserVisibilityContext(),
+    ): List<UserData> {
+        if (userIds.isEmpty()) return emptyList()
+
+        val orderedIds = userIds.distinct().filter(String::isNotBlank)
+        if (orderedIds.isEmpty()) return emptyList()
+
+        val byId = LinkedHashMap<String, UserData>()
+        val visibilityContextQuerySuffix = visibilityContext.toQuerySuffix()
+        orderedIds.chunked(100).forEach { chunk ->
+            val encodedIds = chunk.joinToString(",") { it.encodeURLQueryComponent() }
+            val response = api.get<UsersResponseDto>("api/users?ids=$encodedIds$visibilityContextQuerySuffix")
+            response.users.mapNotNull { it.toUserDataOrNull() }.forEach { user ->
+                byId[user.id] = user
+            }
+        }
+
+        return orderedIds.mapNotNull { byId[it] }
+    }
+
+    private fun normalizeEmail(email: String): String = email.trim().lowercase()
+
+    private fun maskEmail(email: String): String {
+        val atIndex = email.indexOf('@')
+        if (atIndex <= 1) return "***"
+        return "${email.first()}***${email.substring(atIndex)}"
+    }
+
+    private fun ApiException.toSignupConflictOrNull(): SignupProfileConflict? {
+        if (statusCode != 409 || responseBody.isNullOrBlank()) return null
+        val body = responseBody ?: return null
+        val payload = runCatching {
+            jsonMVP.decodeFromString<RegisterConflictResponseDto>(body)
+        }.getOrNull() ?: return null
+
+        val conflictDto = payload.conflict ?: return null
+        val existing = conflictDto.existing.toSignupProfileSnapshot()
+        val incoming = conflictDto.incoming.toSignupProfileSnapshot()
+
+        val parsedFields = conflictDto.fields.mapNotNull(SignupProfileField::fromApiName).toSet()
+        val fields = if (parsedFields.isNotEmpty()) parsedFields else inferDifferingFields(existing, incoming)
+        if (fields.isEmpty()) return null
+
+        return SignupProfileConflict(
+            fields = fields,
+            existing = existing,
+            incoming = incoming,
+        )
+    }
+
+    private fun inferDifferingFields(
+        existing: SignupProfileSnapshot,
+        incoming: SignupProfileSnapshot,
+    ): Set<SignupProfileField> {
+        return SignupProfileField.entries
+            .filter { field -> existing.valueFor(field) != incoming.valueFor(field) }
+            .toSet()
+    }
+
+    private fun RegisterProfileSnapshotDto?.toSignupProfileSnapshot(): SignupProfileSnapshot {
+        return SignupProfileSnapshot(
+            firstName = normalizeName(this?.firstName),
+            lastName = normalizeName(this?.lastName),
+            userName = this?.userName?.trim()?.takeIf(String::isNotBlank),
+            dateOfBirth = normalizeDateOnly(this?.dateOfBirth),
+        )
+    }
+
+    private fun UserProfileDto?.toSignupProfileSnapshot(): SignupProfileSnapshot {
+        return SignupProfileSnapshot(
+            firstName = normalizeName(this?.firstName),
+            lastName = normalizeName(this?.lastName),
+            userName = this?.userName?.trim()?.takeIf(String::isNotBlank),
+            dateOfBirth = normalizeDateOnly(this?.dateOfBirth),
+        )
+    }
+
+    private fun SignupProfileSelection.toDto(): RegisterProfileSelectionDto {
+        return RegisterProfileSelectionDto(
+            firstName = normalizeName(firstName),
+            lastName = normalizeName(lastName),
+            userName = userName?.trim()?.takeIf(String::isNotBlank),
+            dateOfBirth = normalizeDateOnly(dateOfBirth),
+        )
+    }
+
+    private fun normalizeName(value: String?): String? = value
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?.toNameCase()
+
+    private fun normalizeRequiredName(value: String): String = value.trim().toNameCase()
+
+    private fun normalizeDateOnly(value: String?): String? {
+        val trimmed = value?.trim()?.takeIf(String::isNotBlank) ?: return null
+        return trimmed.substringBefore('T')
+    }
+
+    private fun AuthResponseDto.toRequiredProfileCompletionState(): RequiredProfileCompletionState {
+        val resolvedMissingFields = missingProfileFields
+            .mapNotNull(SignupProfileField::fromApiName)
+            .toSet()
+        return RequiredProfileCompletionState(
+            isRequired = requiresProfileCompletion == true || resolvedMissingFields.isNotEmpty(),
+            missingFields = resolvedMissingFields,
+            prefill = profile.toSignupProfileSnapshot(),
+        )
+    }
+
+    private fun updateRequiredProfileCompletionState(state: RequiredProfileCompletionState) {
+        _requiredProfileCompletionState.value = state
+    }
+
+    private fun isMinorDateOfBirth(dateOfBirth: String, ageThreshold: Int): Boolean {
+        val normalizedDatePart = dateOfBirth.substringBefore('T').trim()
+        val birthDate = runCatching { LocalDate.parse(normalizedDatePart) }.getOrNull() ?: return false
+        val today = Clock.System.now().toLocalDateTime(TimeZone.UTC).date
+
+        var age = today.year - birthDate.year
+        if (today.month < birthDate.month ||
+            (today.month == birthDate.month && today.day < birthDate.day)
+        ) {
+            age -= 1
+        }
+
+        return age in 0 until ageThreshold
+    }
+
+    override suspend fun searchPlayers(search: String): Result<List<UserData>> = runCatching {
+        val query = search.trim()
+        if (query.isBlank()) return@runCatching emptyList()
+        val encoded = query.encodeURLQueryComponent()
+        val res = api.get<UsersResponseDto>("api/users?query=$encoded")
+        res.users.mapNotNull { it.toUserDataOrNull() }
+    }
+
+    override suspend fun ensureUserByEmail(email: String): Result<UserData> = runCatching {
+        val normalized = email.trim().lowercase()
+        if (normalized.isBlank()) error("Email is required")
+
+        val res = api.post<EnsureUserByEmailRequestDto, UserResponseDto>(
+            path = "api/users/ensure",
+            body = EnsureUserByEmailRequestDto(email = normalized),
+        )
+
+        val user = res.user?.toUserDataOrNull() ?: error("Ensure user response missing user")
+        databaseService.getUserDataDao.upsertUserData(user)
+        user
+    }
+
+    override suspend fun createInvites(invites: List<InviteCreateDto>): Result<List<Invite>> = runCatching {
+        val normalizedInvites = invites.mapNotNull { invite ->
+            val normalizedType = invite.type.trim()
+            if (normalizedType.isBlank()) {
+                null
+            } else {
+                invite.copy(
+                    type = normalizedType,
+                    email = invite.email?.trim()?.lowercase()?.takeIf(String::isNotBlank),
+                    status = invite.status?.trim()?.takeIf(String::isNotBlank),
+                    staffTypes = invite.staffTypes
+                        .map { staffType -> staffType.trim().uppercase() }
+                        .filter(String::isNotBlank)
+                        .distinct(),
+                    eventId = invite.eventId?.trim()?.takeIf(String::isNotBlank),
+                    organizationId = invite.organizationId?.trim()?.takeIf(String::isNotBlank),
+                    teamId = invite.teamId?.trim()?.takeIf(String::isNotBlank),
+                    userId = invite.userId?.trim()?.takeIf(String::isNotBlank),
+                    createdBy = invite.createdBy?.trim()?.takeIf(String::isNotBlank),
+                    firstName = normalizeName(invite.firstName),
+                    lastName = normalizeName(invite.lastName),
+                )
+            }
+        }
+        if (normalizedInvites.isEmpty()) {
+            emptyList()
+        } else {
+            api.post<CreateInvitesRequestDto, InvitesResponseDto>(
+                path = "api/invites",
+                body = CreateInvitesRequestDto(invites = normalizedInvites),
+            ).invites
+        }
+    }
+
+    override suspend fun deleteInvite(inviteId: String): Result<Unit> = runCatching {
+        val normalizedInviteId = inviteId.trim().takeIf(String::isNotBlank) ?: error("Invite id is required")
+        api.deleteNoResponse("api/invites/${normalizedInviteId.encodeURLQueryComponent()}")
+    }
+
+    override suspend fun findEmailMembership(
+        emails: List<String>,
+        userIds: List<String>,
+    ): Result<List<UserEmailMembershipMatch>> = runCatching {
+        val normalizedEmails = emails
+            .map { email -> email.trim().lowercase() }
+            .filter(String::isNotBlank)
+            .distinct()
+        val normalizedUserIds = userIds
+            .map { userId -> userId.trim() }
+            .filter(String::isNotBlank)
+            .distinct()
+        if (normalizedEmails.isEmpty() || normalizedUserIds.isEmpty()) {
+            emptyList()
+        } else {
+            api.post<EmailMembershipLookupRequestDto, EmailMembershipLookupResponseDto>(
+                path = "api/users/email-membership",
+                body = EmailMembershipLookupRequestDto(
+                    emails = normalizedEmails,
+                    userIds = normalizedUserIds,
+                ),
+            ).matches.mapNotNull { match ->
+                val normalizedEmail = match.email.trim().lowercase()
+                val normalizedUserId = match.userId.trim()
+                if (normalizedEmail.isBlank() || normalizedUserId.isBlank()) {
+                    null
+                } else {
+                    UserEmailMembershipMatch(
+                        email = normalizedEmail,
+                        userId = normalizedUserId,
+                    )
+                }
+            }
+        }
+    }
+
+    override suspend fun listInvites(userId: String, type: String?): Result<List<Invite>> = runCatching {
+        val normalizedUserId = userId.trim().takeIf(String::isNotBlank) ?: error("User id is required")
+        val params = buildList {
+            add("userId=${normalizedUserId.encodeURLQueryComponent()}")
+            type?.trim()?.takeIf(String::isNotBlank)?.let { inviteType ->
+                add("type=${inviteType.encodeURLQueryComponent()}")
+            }
+        }.joinToString("&")
+
+        api.get<InvitesResponseDto>("api/invites?$params").invites
+    }
+
+    override suspend fun acceptInvite(inviteId: String): Result<Unit> = runCatching {
+        val normalizedInviteId = inviteId.trim().takeIf(String::isNotBlank) ?: error("Invite id is required")
+        api.postNoResponse("api/invites/${normalizedInviteId.encodeURLQueryComponent()}/accept")
+    }
+
+    override suspend fun declineInvite(inviteId: String): Result<Unit> = runCatching {
+        val normalizedInviteId = inviteId.trim().takeIf(String::isNotBlank) ?: error("Invite id is required")
+        api.postNoResponse("api/invites/${normalizedInviteId.encodeURLQueryComponent()}/decline")
+    }
+
+    override suspend fun isCurrentUserChild(minorAgeThreshold: Int): Result<Boolean> = runCatching {
+        val currentUserId = currentUser.value.getOrNull()?.id?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: return@runCatching false
+
+        val response = api.get<UserResponseDto>("api/users/${currentUserId.encodeURLQueryComponent()}")
+        val dateOfBirth = response.user?.dateOfBirth?.trim()?.takeIf(String::isNotBlank)
+            ?: return@runCatching false
+
+        isMinorDateOfBirth(dateOfBirth = dateOfBirth, ageThreshold = minorAgeThreshold)
+    }
+
+    override suspend fun listChildren(): Result<List<FamilyChild>> = runCatching {
+        val response = api.get<FamilyChildrenResponseDto>(path = "api/family/children")
+        response.error?.takeIf(String::isNotBlank)?.let { error(it) }
+        response.children.mapNotNull { it.toFamilyChildOrNull() }
+    }
+
+    override suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>> = runCatching {
+        val response = api.get<FamilyJoinRequestsResponseDto>(path = "api/family/join-requests")
+        response.error?.takeIf(String::isNotBlank)?.let { error(it) }
+        response.requests.mapNotNull { it.toFamilyJoinRequestOrNull() }
+    }
+
+    override suspend fun resolveChildJoinRequest(
+        registrationId: String,
+        action: FamilyJoinRequestAction,
+    ): Result<FamilyJoinRequestResolution> = runCatching {
+        val normalizedRegistrationId = registrationId.trim()
+        if (normalizedRegistrationId.isBlank()) {
+            error("Registration id is required.")
+        }
+
+        val response = api.patch<JoinRequestActionRequestDto, JoinRequestActionResponseDto>(
+            path = "api/family/join-requests/${normalizedRegistrationId.encodeURLQueryComponent()}",
+            body = JoinRequestActionRequestDto(action = action.apiValue),
+        )
+        response.error?.takeIf(String::isNotBlank)?.let { error(it) }
+        response.toResolution()
+    }
+
+    override suspend fun createChildAccount(
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+        email: String?,
+        relationship: String?,
+    ): Result<Unit> = runCatching {
+        val normalizedFirstName = normalizeRequiredName(firstName)
+        val normalizedLastName = normalizeRequiredName(lastName)
+        val normalizedDateOfBirth = dateOfBirth.trim()
+
+        if (normalizedFirstName.isBlank() || normalizedLastName.isBlank() || normalizedDateOfBirth.isBlank()) {
+            error("First name, last name, and date of birth are required.")
+        }
+
+        val response = api.post<CreateChildAccountRequestDto, FamilyActionResponseDto>(
+            path = "api/family/children",
+            body = CreateChildAccountRequestDto(
+                firstName = normalizedFirstName,
+                lastName = normalizedLastName,
+                email = email?.trim()?.takeIf(String::isNotBlank),
+                dateOfBirth = normalizedDateOfBirth,
+                relationship = relationship?.trim()?.takeIf(String::isNotBlank),
+            ),
+        )
+        response.error?.takeIf(String::isNotBlank)?.let { error(it) }
+    }
+
+    override suspend fun updateChildAccount(
+        childUserId: String,
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+        email: String?,
+        relationship: String?,
+    ): Result<Unit> = runCatching {
+        val normalizedChildUserId = childUserId.trim()
+        val normalizedFirstName = normalizeRequiredName(firstName)
+        val normalizedLastName = normalizeRequiredName(lastName)
+        val normalizedDateOfBirth = dateOfBirth.trim()
+
+        if (
+            normalizedChildUserId.isBlank() ||
+            normalizedFirstName.isBlank() ||
+            normalizedLastName.isBlank() ||
+            normalizedDateOfBirth.isBlank()
+        ) {
+            error("Child user ID, first name, last name, and date of birth are required.")
+        }
+
+        val response = api.patch<UpdateChildAccountRequestDto, FamilyActionResponseDto>(
+            path = "api/family/children/${normalizedChildUserId.encodeURLQueryComponent()}",
+            body = UpdateChildAccountRequestDto(
+                firstName = normalizedFirstName,
+                lastName = normalizedLastName,
+                email = email?.trim()?.takeIf(String::isNotBlank),
+                dateOfBirth = normalizedDateOfBirth,
+                relationship = relationship?.trim()?.takeIf(String::isNotBlank),
+            ),
+        )
+        response.error?.takeIf(String::isNotBlank)?.let { error(it) }
+    }
+
+    override suspend fun linkChildToParent(
+        childEmail: String?,
+        childUserId: String?,
+        relationship: String?,
+    ): Result<Unit> = runCatching {
+        val normalizedChildEmail = childEmail?.trim()?.lowercase()?.takeIf(String::isNotBlank)
+        val normalizedChildUserId = childUserId?.trim()?.takeIf(String::isNotBlank)
+        if (normalizedChildEmail == null && normalizedChildUserId == null) {
+            error("Provide a child email or user ID.")
+        }
+
+        val response = api.post<LinkChildToParentRequestDto, FamilyActionResponseDto>(
+            path = "api/family/links",
+            body = LinkChildToParentRequestDto(
+                childEmail = normalizedChildEmail,
+                childUserId = normalizedChildUserId,
+                relationship = relationship?.trim()?.takeIf(String::isNotBlank),
+            ),
+        )
+        response.error?.takeIf(String::isNotBlank)?.let { error(it) }
+    }
+
+    override suspend fun getUsers(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext,
+    ): Result<List<UserData>> {
+        val ids = userIds.distinct().filter(String::isNotBlank)
+        if (ids.isEmpty()) return Result.success(emptyList())
+
+        return multiResponse(
+            getRemoteData = {
+                fetchUsersByIds(ids, visibilityContext)
+            },
+            getLocalData = { databaseService.getUserDataDao.getUserDatasById(ids) },
+            saveData = { usersData -> databaseService.getUserDataDao.upsertUsersData(usersData) },
+            deleteData = { databaseService.getUserDataDao.deleteUsersById(it) },
+        )
+    }
+
+    override fun getUsersFlow(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext,
+    ): Flow<Result<List<UserData>>> {
+        val ids = userIds.distinct().filter(String::isNotBlank)
+        if (ids.isEmpty()) return kotlinx.coroutines.flow.flowOf(Result.success(emptyList()))
+
+        val localUsersFlow = databaseService.getUserDataDao.getUserDatasByIdFlow(ids)
+            .map { Result.success(it) }
+
+        scope.launch {
+            getUsers(ids, visibilityContext)
+        }
+
+        return localUsersFlow
+    }
+
+    override suspend fun updateUser(user: UserData): Result<UserData> = runCatching {
+        val currentId = currentUser.value.getOrNull()?.id
+            ?: currentAccount.value.getOrNull()?.id
+            ?: error("No user")
+
+        if (user.id != currentId) {
+            error("Forbidden")
+        }
+
+        val normalizedUser = user.copy(
+            firstName = normalizeRequiredName(user.firstName),
+            lastName = normalizeRequiredName(user.lastName),
+        )
+
+        val request = UpdateUserRequestDto(
+            data = UserUpdateDto(
+                firstName = normalizedUser.firstName,
+                lastName = normalizedUser.lastName,
+                userName = normalizedUser.userName,
+                friendIds = normalizedUser.friendIds,
+                friendRequestIds = normalizedUser.friendRequestIds,
+                friendRequestSentIds = normalizedUser.friendRequestSentIds,
+                followingIds = normalizedUser.followingIds,
+                hasStripeAccount = normalizedUser.hasStripeAccount,
+                uploadedImages = normalizedUser.uploadedImages,
+                profileImageId = normalizedUser.profileImageId,
+                notificationSettings = normalizedUser.notificationSettings,
+            )
+        )
+
+        val res = api.patch<UpdateUserRequestDto, UserResponseDto>(
+            path = "api/users/${user.id}",
+            body = request,
+        )
+
+        val responseUser = res.user
+        val updated = responseUser?.toUserDataOrNull()?.copy(
+            firstName = normalizeName(responseUser.firstName) ?: normalizedUser.firstName,
+            lastName = normalizeName(responseUser.lastName) ?: normalizedUser.lastName,
+            userName = responseUser.userName ?: normalizedUser.userName,
+            teamIds = responseUser.teamIds ?: normalizedUser.teamIds,
+            friendIds = responseUser.friendIds ?: normalizedUser.friendIds,
+            friendRequestIds = responseUser.friendRequestIds ?: normalizedUser.friendRequestIds,
+            friendRequestSentIds = responseUser.friendRequestSentIds ?: normalizedUser.friendRequestSentIds,
+            followingIds = responseUser.followingIds ?: normalizedUser.followingIds,
+            hasStripeAccount = responseUser.hasStripeAccount ?: normalizedUser.hasStripeAccount,
+            uploadedImages = responseUser.uploadedImages ?: normalizedUser.uploadedImages,
+            profileImageId = responseUser.profileImageId ?: normalizedUser.profileImageId,
+            notificationSettings = responseUser.notificationSettings ?: normalizedUser.notificationSettings,
+        ) ?: normalizedUser
+        databaseService.getUserDataDao.upsertUserWithRelations(updated)
+
+        // Update current user state.
+        _currentUser.value = Result.success(updated)
+        updated
+    }
+
+    override suspend fun updateEmail(email: String, password: String): Result<Unit> {
+        return Result.failure(NotImplementedError("Email update is not supported by the Next.js API yet."))
+    }
+
+    override suspend fun updatePassword(currentPassword: String, newPassword: String): Result<Unit> = runCatching {
+        val response = api.post<PasswordRequestDto, AuthResponseDto>(
+            path = "api/auth/password",
+            body = PasswordRequestDto(
+                currentPassword = currentPassword,
+                newPassword = newPassword,
+            ),
+        )
+
+        response.token?.takeIf(String::isNotBlank)?.let { tokenStore.set(it) }
+        loadCurrentUser()
+    }
+
+    override suspend fun updateProfile(
+        firstName: String,
+        lastName: String,
+        email: String,
+        currentPassword: String,
+        newPassword: String,
+        userName: String,
+        profileImageId: String?,
+    ): Result<Unit> = runCatching {
+        val currentUserData = currentUser.value.getOrThrow()
+        val normalizedProfileImageId = profileImageId?.trim()?.takeIf(String::isNotBlank)
+
+        if (newPassword.isNotBlank()) {
+            if (currentPassword.isBlank()) error("Current password is required")
+            updatePassword(currentPassword, newPassword).getOrThrow()
+        }
+
+        val updatedUser = currentUserData.copy(
+            firstName = normalizeRequiredName(firstName),
+            lastName = normalizeRequiredName(lastName),
+            userName = userName,
+            profileImageId = normalizedProfileImageId,
+        )
+
+        updateUser(updatedUser).getOrThrow()
+
+        // TODO(server): add an email update endpoint. For now, ignore email changes.
+        if (email != currentAccount.value.getOrNull()?.email) {
+            Napier.w("Email update requested but not supported by API yet")
+        }
+    }
+
+    override suspend fun completeRequiredProfile(
+        firstName: String,
+        lastName: String,
+        userName: String,
+        dateOfBirth: String,
+    ): Result<UserData> = runCatching {
+        val currentUserData = currentUser.value.getOrNull()
+        val currentId = currentUser.value.getOrNull()?.id
+            ?: currentAccount.value.getOrNull()?.id
+            ?: error("No user")
+
+        val normalizedFirstName = normalizeRequiredName(firstName)
+        val normalizedLastName = normalizeRequiredName(lastName)
+        val normalizedUserName = userName.trim().takeIf(String::isNotBlank)
+        val normalizedDateOfBirth = normalizeDateOnly(dateOfBirth)
+            ?: error("Birthday is required")
+
+        val request = UpdateUserRequestDto(
+            data = UserUpdateDto(
+                firstName = normalizedFirstName,
+                lastName = normalizedLastName,
+                userName = normalizedUserName,
+                dateOfBirth = normalizedDateOfBirth,
+            ),
+        )
+
+        val response = api.patch<UpdateUserRequestDto, UserResponseDto>(
+            path = "api/users/$currentId",
+            body = request,
+        )
+
+        val responseUser = response.user
+        val updatedUser = responseUser?.toUserDataOrNull()
+            ?.copy(
+                firstName = normalizeName(responseUser.firstName) ?: normalizedFirstName,
+                lastName = normalizeName(responseUser.lastName) ?: normalizedLastName,
+                userName = responseUser.userName ?: normalizedUserName ?: currentUserData?.userName.orEmpty(),
+            )
+            ?: currentUserData?.copy(
+                firstName = normalizedFirstName,
+                lastName = normalizedLastName,
+                userName = normalizedUserName ?: currentUserData.userName,
+            )
+            ?: error("Profile completion response missing user")
+
+        databaseService.getUserDataDao.upsertUserWithRelations(updatedUser)
+        _currentUser.value = Result.success(updatedUser)
+        updateRequiredProfileCompletionState(RequiredProfileCompletionState())
+        updatedUser
+    }
+
+    override suspend fun sendFriendRequest(user: UserData): Result<Unit> {
+        return runCatching {
+            val targetUserId = user.id.trim()
+            if (targetUserId.isBlank()) error("Target user id is required.")
+
+            val response = api.post<SocialTargetRequestDto, UserResponseDto>(
+                path = "api/users/social/friend-requests",
+                body = SocialTargetRequestDto(targetUserId = targetUserId),
+            )
+            refreshCurrentUserFromSocialResponse(response.user)
+        }
+    }
+
+    override suspend fun acceptFriendRequest(user: UserData): Result<Unit> {
+        return runCatching {
+            val requesterId = user.id.trim()
+            if (requesterId.isBlank()) error("Requester id is required.")
+
+            val response = api.post<SocialEmptyRequestDto, UserResponseDto>(
+                path = "api/users/social/friend-requests/${requesterId.encodeURLQueryComponent()}/accept",
+                body = SocialEmptyRequestDto(),
+            )
+            refreshCurrentUserFromSocialResponse(response.user)
+        }
+    }
+
+    override suspend fun declineFriendRequest(userId: String): Result<Unit> {
+        return runCatching {
+            val requesterId = userId.trim()
+            if (requesterId.isBlank()) error("Requester id is required.")
+
+            val response = api.delete<SocialEmptyRequestDto, UserResponseDto>(
+                path = "api/users/social/friend-requests/${requesterId.encodeURLQueryComponent()}",
+                body = SocialEmptyRequestDto(),
+            )
+            refreshCurrentUserFromSocialResponse(response.user)
+        }
+    }
+
+    override suspend fun followUser(userId: String): Result<Unit> {
+        return runCatching {
+            val targetUserId = userId.trim()
+            if (targetUserId.isBlank()) error("Target user id is required.")
+
+            val response = api.post<SocialTargetRequestDto, UserResponseDto>(
+                path = "api/users/social/following",
+                body = SocialTargetRequestDto(targetUserId = targetUserId),
+            )
+            refreshCurrentUserFromSocialResponse(response.user)
+        }
+    }
+
+    override suspend fun unfollowUser(userId: String): Result<Unit> {
+        return runCatching {
+            val targetUserId = userId.trim()
+            if (targetUserId.isBlank()) error("Target user id is required.")
+
+            val response = api.delete<SocialEmptyRequestDto, UserResponseDto>(
+                path = "api/users/social/following/${targetUserId.encodeURLQueryComponent()}",
+                body = SocialEmptyRequestDto(),
+            )
+            refreshCurrentUserFromSocialResponse(response.user)
+        }
+    }
+
+    override suspend fun removeFriend(userId: String): Result<Unit> {
+        return runCatching {
+            val friendUserId = userId.trim()
+            if (friendUserId.isBlank()) error("Friend user id is required.")
+
+            val response = api.delete<SocialEmptyRequestDto, UserResponseDto>(
+                path = "api/users/social/friends/${friendUserId.encodeURLQueryComponent()}",
+                body = SocialEmptyRequestDto(),
+            )
+            refreshCurrentUserFromSocialResponse(response.user)
+        }
+    }
+
+    override suspend fun blockUser(userId: String, leaveSharedChats: Boolean): Result<List<String>> {
+        return runCatching {
+            val targetUserId = userId.trim()
+            if (targetUserId.isBlank()) error("Target user id is required.")
+
+            val response = api.post<BlockUserRequestDto, SocialBlockResponseDto>(
+                path = "api/users/social/blocked",
+                body = BlockUserRequestDto(
+                    targetUserId = targetUserId,
+                    leaveSharedChats = leaveSharedChats,
+                ),
+            )
+            refreshCurrentUserFromSocialResponse(response.user)
+
+            val removedChatIds = response.removedChatIds
+                .map { chatId -> chatId.trim() }
+                .filter(String::isNotBlank)
+                .distinct()
+            if (removedChatIds.isNotEmpty()) {
+                databaseService.getChatGroupDao.deleteChatGroupsByIds(removedChatIds)
+            }
+            removedChatIds
+        }
+    }
+
+    override suspend fun unblockUser(userId: String): Result<Unit> {
+        return runCatching {
+            val targetUserId = userId.trim()
+            if (targetUserId.isBlank()) error("Target user id is required.")
+
+            val response = api.delete<SocialEmptyRequestDto, UserResponseDto>(
+                path = "api/users/social/blocked/${targetUserId.encodeURLQueryComponent()}",
+                body = SocialEmptyRequestDto(),
+            )
+            refreshCurrentUserFromSocialResponse(response.user)
+        }
+    }
+
+    override suspend fun getChatTermsConsentState(): Result<ChatTermsConsentState> = runCatching {
+        _chatTermsConsentLoading.value = true
+        val state = api.get<ChatTermsConsentResponseDto>("api/chat/terms-consent").toState()
+        hasLoadedChatTermsConsent = true
+        _chatTermsConsentState.value = state
+
+        val currentProfile = currentUser.value.getOrNull()
+        if (currentProfile != null) {
+                cacheCurrentUserProfile(
+                    currentProfile.copy(
+                        chatTermsAcceptedAt = state.acceptedAt,
+                        chatTermsVersion = state.version.takeIf(String::isNotBlank),
+                    ),
+                    prefetchChatTermsConsent = false,
+                )
+            }
+
+        state
+    }.onFailure { throwable ->
+        if (throwable is CancellationException) {
+            throw throwable
+        }
+    }.also {
+        chatTermsPrefetchJob = null
+        _chatTermsConsentLoading.value = false
+    }
+
+    override suspend fun acceptChatTermsConsent(): Result<ChatTermsConsentState> = runCatching {
+        chatTermsPrefetchJob?.cancelAndJoin()
+        chatTermsPrefetchJob = null
+        _chatTermsConsentLoading.value = true
+        val response = api.post<ChatTermsConsentRequestDto, ChatTermsConsentResponseDto>(
+            path = "api/chat/terms-consent",
+            body = ChatTermsConsentRequestDto(accepted = true),
+        )
+        val state = response.toState()
+        hasLoadedChatTermsConsent = true
+        _chatTermsConsentState.value = state
+        val currentProfile = currentUser.value.getOrNull()
+        if (currentProfile != null) {
+                cacheCurrentUserProfile(
+                    currentProfile.copy(
+                        chatTermsAcceptedAt = state.acceptedAt,
+                        chatTermsVersion = state.version.takeIf(String::isNotBlank),
+                    ),
+                    prefetchChatTermsConsent = false,
+                )
+            }
+        state
+    }.onFailure { throwable ->
+        if (throwable is CancellationException) {
+            throw throwable
+        }
+    }.also {
+        _chatTermsConsentLoading.value = false
+    }
+
+    private suspend fun refreshCurrentUserFromSocialResponse(responseUser: UserProfileDto?) {
+        val updated = responseUser?.toUserDataOrNull()
+            ?: currentUser.value.getOrNull()?.id?.let { fetchUserProfile(it) }
+            ?: error("Failed to refresh current user after social update.")
+        cacheCurrentUserProfile(updated, prefetchChatTermsConsent = false)
+    }
+
+    private fun syncChatTermsConsentFromProfile(profile: UserData?) {
+        if (profile == null) {
+            if (!hasLoadedChatTermsConsent) {
+                _chatTermsConsentState.value = ChatTermsConsentState()
+            }
+            return
+        }
+
+        val acceptedAt = profile.chatTermsAcceptedAt?.trim()?.takeIf(String::isNotBlank)
+        val version = profile.chatTermsVersion?.trim()?.takeIf(String::isNotBlank)
+        if (acceptedAt == null && version == null && hasLoadedChatTermsConsent) {
+            return
+        }
+
+        val currentState = _chatTermsConsentState.value
+        _chatTermsConsentState.value = currentState.copy(
+            version = version ?: currentState.version,
+            accepted = acceptedAt != null,
+            acceptedAt = acceptedAt,
+        )
+    }
+
+    private fun scheduleChatTermsConsentPrefetch() {
+        if (hasLoadedChatTermsConsent || chatTermsPrefetchJob?.isActive == true) {
+            return
+        }
+        chatTermsPrefetchJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            getChatTermsConsentState()
+        }
+    }
+}
+
+@Serializable
+private data class SocialEmptyRequestDto(
+    val placeholder: String = "",
+)
+
+@Serializable
+private data class SocialTargetRequestDto(
+    val targetUserId: String,
+)
+
+@Serializable
+private data class BlockUserRequestDto(
+    val targetUserId: String,
+    val leaveSharedChats: Boolean = true,
+)
+
+@Serializable
+private data class SocialBlockResponseDto(
+    val user: UserProfileDto? = null,
+    val removedChatIds: List<String> = emptyList(),
+)
+
+@Serializable
+private data class ChatTermsConsentRequestDto(
+    val accepted: Boolean,
+)
+
+@Serializable
+private data class ChatTermsConsentResponseDto(
+    val error: String? = null,
+    val code: String? = null,
+    val version: String? = null,
+    val url: String? = null,
+    val summary: List<String> = emptyList(),
+    val accepted: Boolean? = null,
+    val acceptedAt: String? = null,
+) {
+    fun toState(): ChatTermsConsentState {
+        if (code == CHAT_TERMS_REQUIRED_CODE) {
+            return ChatTermsConsentState(
+                version = version.orEmpty(),
+                url = url?.trim()?.takeIf(String::isNotBlank) ?: "/terms",
+                summary = summary,
+                accepted = false,
+                acceptedAt = null,
+            )
+        }
+
+        return ChatTermsConsentState(
+            version = version.orEmpty(),
+            url = url?.trim()?.takeIf(String::isNotBlank) ?: "/terms",
+            summary = summary,
+            accepted = accepted == true,
+            acceptedAt = acceptedAt?.trim()?.takeIf(String::isNotBlank),
+        )
+    }
+}
+
+@Serializable
+private data class FamilyChildrenResponseDto(
+    val children: List<FamilyChildDto> = emptyList(),
+    val error: String? = null,
+)
+
+@Serializable
+private data class FamilyJoinRequestsResponseDto(
+    val requests: List<FamilyJoinRequestDto> = emptyList(),
+    val error: String? = null,
+)
+
+@Serializable
+private data class FamilyChildDto(
+    val userId: String? = null,
+    @SerialName("\$id") val legacyUserId: String? = null,
+    val firstName: String? = null,
+    val lastName: String? = null,
+    val userName: String? = null,
+    val dateOfBirth: String? = null,
+    val age: Int? = null,
+    val linkStatus: String? = null,
+    val relationship: String? = null,
+    val email: String? = null,
+    val hasEmail: Boolean? = null,
+) {
+    fun toFamilyChildOrNull(): FamilyChild? {
+        val resolvedUserId = userId ?: legacyUserId
+        if (resolvedUserId.isNullOrBlank()) return null
+
+        return FamilyChild(
+            userId = resolvedUserId,
+            firstName = firstName?.trim()?.takeIf(String::isNotBlank)?.toNameCase().orEmpty(),
+            lastName = lastName?.trim()?.takeIf(String::isNotBlank)?.toNameCase().orEmpty(),
+            userName = userName?.trim()?.takeIf(String::isNotBlank),
+            dateOfBirth = dateOfBirth,
+            age = age,
+            linkStatus = linkStatus,
+            relationship = relationship,
+            email = email,
+            hasEmail = hasEmail,
+        )
+    }
+}
+
+@Serializable
+private data class FamilyJoinRequestDto(
+    val registrationId: String? = null,
+    val requestType: String? = null,
+    val requestSource: String? = null,
+    val inviteId: String? = null,
+    val eventId: String? = null,
+    val eventName: String? = null,
+    val eventStart: String? = null,
+    val teamId: String? = null,
+    val teamName: String? = null,
+    val teamRegistrationPriceCents: Int? = null,
+    val teamOpenRegistration: Boolean? = null,
+    val childUserId: String? = null,
+    val childFirstName: String? = null,
+    val childLastName: String? = null,
+    val childFullName: String? = null,
+    val childDateOfBirth: String? = null,
+    val childEmail: String? = null,
+    val childHasEmail: Boolean? = null,
+    val consentStatus: String? = null,
+    val divisionId: String? = null,
+    val divisionTypeId: String? = null,
+    val divisionTypeKey: String? = null,
+    val requestedAt: String? = null,
+    val updatedAt: String? = null,
+) {
+    fun toFamilyJoinRequestOrNull(): FamilyJoinRequest? {
+        val normalizedRegistrationId = registrationId?.trim()?.takeIf(String::isNotBlank) ?: return null
+        val normalizedEventId = eventId?.trim()?.takeIf(String::isNotBlank)
+        val normalizedTeamId = teamId?.trim()?.takeIf(String::isNotBlank)
+        val normalizedChildUserId = childUserId?.trim()?.takeIf(String::isNotBlank) ?: return null
+        val normalizedRequestType = requestType
+            ?.trim()
+            ?.uppercase()
+            ?.takeIf { it == "EVENT" || it == "TEAM" }
+            ?: if (normalizedTeamId != null) "TEAM" else "EVENT"
+
+        if (normalizedRequestType == "EVENT" && normalizedEventId == null) return null
+        if (normalizedRequestType == "TEAM" && normalizedTeamId == null) return null
+
+        return FamilyJoinRequest(
+            registrationId = normalizedRegistrationId,
+            requestType = normalizedRequestType,
+            requestSource = requestSource?.trim()?.takeIf(String::isNotBlank),
+            inviteId = inviteId?.trim()?.takeIf(String::isNotBlank),
+            eventId = normalizedEventId,
+            eventName = eventName?.trim()?.takeIf(String::isNotBlank),
+            eventStart = eventStart?.trim()?.takeIf(String::isNotBlank),
+            teamId = normalizedTeamId,
+            teamName = teamName?.trim()?.takeIf(String::isNotBlank),
+            teamRegistrationPriceCents = teamRegistrationPriceCents?.coerceAtLeast(0),
+            teamOpenRegistration = teamOpenRegistration,
+            childUserId = normalizedChildUserId,
+            childFirstName = childFirstName?.trim()?.takeIf(String::isNotBlank)?.toNameCase(),
+            childLastName = childLastName?.trim()?.takeIf(String::isNotBlank)?.toNameCase(),
+            childFullName = childFullName?.trim()?.takeIf(String::isNotBlank)?.toNameCase(),
+            childDateOfBirth = childDateOfBirth?.trim()?.takeIf(String::isNotBlank),
+            childEmail = childEmail?.trim()?.takeIf(String::isNotBlank),
+            childHasEmail = childHasEmail ?: (childEmail?.isNotBlank() == true),
+            consentStatus = consentStatus?.trim()?.takeIf(String::isNotBlank),
+            divisionId = divisionId?.trim()?.takeIf(String::isNotBlank),
+            divisionTypeId = divisionTypeId?.trim()?.takeIf(String::isNotBlank),
+            divisionTypeKey = divisionTypeKey?.trim()?.takeIf(String::isNotBlank),
+            requestedAt = requestedAt?.trim()?.takeIf(String::isNotBlank),
+            updatedAt = updatedAt?.trim()?.takeIf(String::isNotBlank),
+        )
+    }
+}
+
+@Serializable
+private data class JoinRequestActionRequestDto(
+    val action: String,
+)
+
+@Serializable
+private data class JoinRequestActionResponseDto(
+    val action: String? = null,
+    val requestType: String? = null,
+    val inviteId: String? = null,
+    val team: TeamApiDto? = null,
+    val registration: TeamPlayerRegistrationApiDto? = null,
+    val consent: JoinRequestConsentDto? = null,
+    val warnings: List<String> = emptyList(),
+    val error: String? = null,
+) {
+    fun toResolution(): FamilyJoinRequestResolution {
+        return FamilyJoinRequestResolution(
+            action = action?.trim()?.takeIf(String::isNotBlank),
+            requestType = requestType?.trim()?.takeIf(String::isNotBlank),
+            inviteId = inviteId?.trim()?.takeIf(String::isNotBlank),
+            team = team?.toTeamOrNull(),
+            teamRegistration = registration?.toTeamPlayerRegistrationOrNull(),
+            registrationStatus = registration?.status?.trim()?.takeIf(String::isNotBlank),
+            consentStatus = consent?.status?.trim()?.takeIf(String::isNotBlank)
+                ?: registration?.consentStatus?.trim()?.takeIf(String::isNotBlank),
+            childEmail = consent?.childEmail?.trim()?.takeIf(String::isNotBlank),
+            requiresChildEmail = consent?.requiresChildEmail ?: false,
+            warnings = warnings,
+        )
+    }
+}
+
+@Serializable
+private data class JoinRequestConsentDto(
+    val status: String? = null,
+    val childEmail: String? = null,
+    val requiresChildEmail: Boolean? = null,
+)
+
+@Serializable
+private data class CreateChildAccountRequestDto(
+    val firstName: String,
+    val lastName: String,
+    val email: String? = null,
+    val dateOfBirth: String,
+    val relationship: String? = null,
+)
+
+@Serializable
+private data class UpdateChildAccountRequestDto(
+    val firstName: String,
+    val lastName: String,
+    val email: String? = null,
+    val dateOfBirth: String,
+    val relationship: String? = null,
+)
+
+@Serializable
+private data class LinkChildToParentRequestDto(
+    val childEmail: String? = null,
+    val childUserId: String? = null,
+    val relationship: String? = null,
+)
+
+@Serializable
+private data class FamilyActionResponseDto(
+    val error: String? = null,
+)

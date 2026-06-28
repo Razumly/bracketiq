@@ -7,6 +7,10 @@ import com.google.firebase.FirebaseOptions
 import com.mmk.kmpnotifier.notification.NotifierManager
 import com.mmk.kmpnotifier.notification.configuration.NotificationPlatformConfiguration
 import com.razumly.mvp.core.auth.MatchOperationNetworkSync
+import com.razumly.mvp.core.auth.configureWatchSyncContext
+import com.razumly.mvp.core.data.repositories.configureAppUpdateUrlOpener
+import com.razumly.mvp.core.network.configureSecureAuthTokenStore
+import com.razumly.mvp.core.util.configurePlatform
 import com.razumly.mvp.di.KoinInitializer
 import io.github.aakira.napier.DebugAntilog
 import io.github.aakira.napier.Napier
@@ -19,6 +23,15 @@ class MvpApp : Application() {
             Napier.d("Napier DebugAntilog initialized for Android debug builds", tag = "Logging")
         }
         instance = this
+        configurePlatform(
+            isDebugBuild = BuildConfig.DEBUG,
+            buildType = BuildConfig.BUILD_TYPE,
+            appVersionName = BuildConfig.VERSION_NAME,
+            appBuildNumber = BuildConfig.VERSION_CODE,
+        )
+        configureSecureAuthTokenStore(applicationContext)
+        configureWatchSyncContext(applicationContext)
+        configureAppUpdateUrlOpener(applicationContext)
         initializeFirebase()
         NotifierManager.initialize(
             configuration = NotificationPlatformConfiguration.Android(

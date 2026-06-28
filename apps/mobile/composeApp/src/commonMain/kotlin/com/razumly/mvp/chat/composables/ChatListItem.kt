@@ -9,7 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.chat.data.ChatGroupSummary
+import com.razumly.mvp.core.data.dataTypes.ChatGroupSummary
 import com.razumly.mvp.chat.data.countUnreadMessages
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.presentation.composables.UnifiedCard

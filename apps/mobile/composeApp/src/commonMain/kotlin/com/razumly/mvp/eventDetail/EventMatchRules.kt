@@ -628,8 +628,9 @@ internal fun resolveEventMatchRules(
     event: Event,
     sport: Sport?,
 ): ResolvedMatchRulesMVP {
-    if (sport == null && event.matchRulesOverride == null && event.resolvedMatchRules != null) {
-        return event.resolvedMatchRules
+    val resolvedMatchRules = event.resolvedMatchRules
+    if (sport == null && event.matchRulesOverride == null && resolvedMatchRules != null) {
+        return resolvedMatchRules
     }
 
     val sportTemplate = sport?.let { selectedSport ->

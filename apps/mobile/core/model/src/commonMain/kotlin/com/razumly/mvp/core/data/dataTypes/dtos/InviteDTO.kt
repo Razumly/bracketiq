@@ -1,0 +1,46 @@
+package com.razumly.mvp.core.data.dataTypes.dtos
+
+import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.data.util.toNameCase
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
+
+@Serializable
+data class InviteDTO(
+    val type: String,
+    val email: String,
+    val status: String? = null,
+    val eventId: String? = null,
+    val organizationId: String? = null,
+    val teamId: String? = null,
+    val userId: String? = null,
+    val createdBy: String? = null,
+    val firstName: String? = null,
+    val lastName: String? = null,
+    val childUserId: String? = null,
+    val childFirstName: String? = null,
+    val childLastName: String? = null,
+    val childFullName: String? = null,
+    val viewerCanAcceptForChild: Boolean = false,
+    @Transient val id: String = "",
+) {
+    fun toInvite(id: String): Invite =
+        Invite(
+            type = type,
+            email = email,
+            status = status,
+            eventId = eventId,
+            organizationId = organizationId,
+            teamId = teamId,
+            userId = userId,
+            createdBy = createdBy,
+            firstName = firstName?.toNameCase(),
+            lastName = lastName?.toNameCase(),
+            childUserId = childUserId,
+            childFirstName = childFirstName?.toNameCase(),
+            childLastName = childLastName?.toNameCase(),
+            childFullName = childFullName?.toNameCase(),
+            viewerCanAcceptForChild = viewerCanAcceptForChild,
+            id = id,
+        )
+}

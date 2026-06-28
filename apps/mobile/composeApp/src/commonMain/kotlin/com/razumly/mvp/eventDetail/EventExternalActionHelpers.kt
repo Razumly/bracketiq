@@ -61,8 +61,9 @@ internal fun eventQrCodeSharePayload(event: Event): EventQrCodeSharePayload =
     )
 
 internal fun eventDirectionsPlan(event: Event): EventDirectionsPlan {
+    val address = event.address
     val destinationQuery = when {
-        !event.address.isNullOrBlank() -> event.address.trim()
+        !address.isNullOrBlank() -> address.trim()
         event.lat != 0.0 || event.long != 0.0 -> "${event.lat},${event.long}"
         else -> return EventDirectionsPlan.Unavailable(
             "No event location available for directions."

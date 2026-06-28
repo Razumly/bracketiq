@@ -17,6 +17,7 @@ import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -205,6 +206,7 @@ private val DISCOVER_FIRST_ITEM_EXTRA_TOP_GAP = 4.dp
 private val DISCOVER_PULL_INDICATOR_TOP_OFFSET = 64.dp
 private val DISCOVER_TAB_ROW_HEIGHT = 40.dp
 private const val DISCOVER_SEARCH_THIS_AREA_THRESHOLD_MILES = 0.25
+private const val DISCOVER_MAP_REVEAL_DURATION_MILLIS = 700
 private const val DISCOVER_GUIDE_ID = "discover_onboarding_v1"
 private const val DISCOVER_GUIDE_TARGET_TABS = "discover.tabs"
 private const val DISCOVER_GUIDE_TARGET_SEARCH = "discover.search"
@@ -641,6 +643,7 @@ fun EventSearchScreen(
         if (!loadedInitialMapArea && mapViewRadiusMiles != null) {
             val initialCenter = currentLocation ?: mapViewCenter
             if (initialCenter != null) {
+                delay(DISCOVER_MAP_REVEAL_DURATION_MILLIS.toLong())
                 component.searchThisArea(initialCenter, mapViewRadiusMiles)
                 lastMapSearchCenter = initialCenter
                 lastMapSearchRadiusMiles = mapViewRadiusMiles
@@ -735,6 +738,12 @@ fun EventSearchScreen(
         )
     }
 
+    val openDiscoverMap: (Offset, com.razumly.mvp.core.data.dataTypes.Event?) -> Unit = { center, event ->
+        revealCenter = center
+        component.onMapClick(event)
+        mapComponent.openMap()
+    }
+
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val filterDropdownMaxHeight = if (searchBoxSize.height > 0) {
             with(density) {
@@ -747,6 +756,46 @@ fun EventSearchScreen(
         } else {
             null
         }
+        val discoverMapContent: @Composable BoxScope.() -> Unit = {
+            EventMap(
+                component = mapComponent,
+                onEventSelected = { event ->
+                    if (selectedTab == DiscoverTab.EVENTS) {
+                        component.viewEvent(event)
+                    }
+                },
+                onPlaceSelected = { place ->
+                    val organization = organizationLookup[place.id]
+                    when (selectedTab) {
+                        DiscoverTab.ORGANIZATIONS -> {
+                            if (organization != null) {
+                                component.viewOrganization(organization)
+                            }
+                        }
+
+                        DiscoverTab.RENTALS -> {
+                            if (organization != null) {
+                                component.viewOrganization(
+                                    organization,
+                                    com.razumly.mvp.core.presentation.OrganizationDetailTab.RENTALS
+                                )
+                            }
+                        }
+
+                        DiscoverTab.TEAMS -> {}
+                        else -> {}
+                    }
+                },
+                canClickPOI = false,
+                organizationLogoIdsById = organizationLogoIdsById,
+                focusedLocation = selectedEvent?.takeIf { selectedTab == DiscoverTab.EVENTS }?.let {
+                    LatLng(it.latitude, it.longitude)
+                } ?: currentLocation ?: LatLng(0.0, 0.0),
+                focusedEvent = selectedEvent?.takeIf { selectedTab == DiscoverTab.EVENTS },
+                modifier = Modifier.fillMaxSize(),
+                onBackPressed = mapComponent::closeMap,
+            )
+        }
 
         BindLocationTrackerEffect(component.locationTracker)
         CircularRevealUnderlay(
@@ -756,44 +805,7 @@ fun EventSearchScreen(
                 .fillMaxSize()
                 .hazeSource(hazeState),
             backgroundContent = {
-                EventMap(
-                    component = mapComponent,
-                    onEventSelected = { event ->
-                        if (selectedTab == DiscoverTab.EVENTS) {
-                            component.viewEvent(event)
-                        }
-                    },
-                    onPlaceSelected = { place ->
-                        val organization = organizationLookup[place.id]
-                        when (selectedTab) {
-                            DiscoverTab.ORGANIZATIONS -> {
-                                if (organization != null) {
-                                    component.viewOrganization(organization)
-                                }
-                            }
-
-                            DiscoverTab.RENTALS -> {
-                                if (organization != null) {
-                                    component.viewOrganization(
-                                        organization,
-                                        com.razumly.mvp.core.presentation.OrganizationDetailTab.RENTALS
-                                    )
-                                }
-                            }
-
-                            DiscoverTab.TEAMS -> {}
-                            else -> {}
-                        }
-                    },
-                    canClickPOI = false,
-                    organizationLogoIdsById = organizationLogoIdsById,
-                    focusedLocation = selectedEvent?.takeIf { selectedTab == DiscoverTab.EVENTS }?.let {
-                        LatLng(it.latitude, it.longitude)
-                    } ?: currentLocation ?: LatLng(0.0, 0.0),
-                    focusedEvent = selectedEvent?.takeIf { selectedTab == DiscoverTab.EVENTS },
-                    modifier = Modifier.fillMaxSize(),
-                    onBackPressed = mapComponent::toggleMap,
-                )
+                discoverMapContent()
             },
             foregroundContent = {
                 Scaffold(
@@ -813,11 +825,7 @@ fun EventSearchScreen(
                         ) {
                             Button(
                                 onClick = {
-                                    if (!isMapVisible) {
-                                        revealCenter = fabOffset
-                                    }
-                                    component.onMapClick()
-                                    mapComponent.toggleMap()
+                                    openDiscoverMap(fabOffset, null)
                                 },
                                 modifier = Modifier
                                     .padding(offsetNavPadding)
@@ -876,9 +884,7 @@ fun EventSearchScreen(
                                         hasMoreEvents = hasMoreEvents,
                                         onLoadMore = { component.loadMoreEvents() },
                                         onMapClick = { offset, event ->
-                                            revealCenter = offset
-                                            component.onMapClick(event)
-                                            mapComponent.toggleMap()
+                                            openDiscoverMap(offset, event)
                                         },
                                         onEventClick = { event ->
                                             component.viewEvent(event)
@@ -1268,6 +1274,7 @@ fun EventSearchScreen(
                 EmptyDiscoverListItem(message = message)
             }
         )
+
     }
 
 }

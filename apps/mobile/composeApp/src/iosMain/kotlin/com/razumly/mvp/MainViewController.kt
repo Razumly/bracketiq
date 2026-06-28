@@ -16,9 +16,9 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.window.ComposeUIViewController
-import com.razumly.mvp.core.presentation.App
+import com.razumly.mvp.app.App
+import com.razumly.mvp.app.RootComponent
 import com.razumly.mvp.core.presentation.MVPTheme
-import com.razumly.mvp.core.presentation.RootComponent
 import org.koin.mp.KoinPlatform.getKoin
 import com.arkivanov.decompose.DefaultComponentContext
 import com.arkivanov.essenty.lifecycle.LifecycleRegistry

@@ -227,6 +227,14 @@ actual class MapComponent(
         _places.value = places
     }
 
+    actual fun openMap() {
+        _showMap.value = true
+    }
+
+    actual fun closeMap() {
+        _showMap.value = false
+    }
+
     actual fun toggleMap() {
         _showMap.value = !_showMap.value
     }

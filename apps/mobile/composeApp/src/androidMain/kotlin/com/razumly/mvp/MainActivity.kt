@@ -26,10 +26,10 @@ import com.arkivanov.decompose.handleDeepLink
 import com.arkivanov.decompose.retainedComponent
 import com.mmk.kmpnotifier.extensions.onCreateOrOnNewIntent
 import com.mmk.kmpnotifier.notification.NotifierManager
-import com.razumly.mvp.core.presentation.App
+import com.razumly.mvp.app.App
+import com.razumly.mvp.app.RootComponent
+import com.razumly.mvp.app.RootComponent.DeepLinkNav
 import com.razumly.mvp.core.presentation.MVPTheme
-import com.razumly.mvp.core.presentation.RootComponent
-import com.razumly.mvp.core.presentation.RootComponent.DeepLinkNav
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import dev.icerock.moko.permissions.compose.BindEffect
 import io.github.aakira.napier.Napier
