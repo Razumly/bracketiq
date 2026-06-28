@@ -24,7 +24,7 @@ private func focusedLocationMatchesUser(
     userLocation: LatLng?,
     thresholdMeters: CLLocationDistance = 10
 ) -> Bool {
-    guard let focusedLocation, let userLocation else { return false }
+    guard let focusedLocation = focusedLocation, let userLocation = userLocation else { return false }
     let focused = CLLocation(latitude: focusedLocation.latitude, longitude: focusedLocation.longitude)
     let user = CLLocation(latitude: userLocation.latitude, longitude: userLocation.longitude)
     return focused.distance(from: user) <= thresholdMeters
@@ -48,7 +48,7 @@ private func eventTypeWithSportLabel(for event: Event) -> String {
     let sportLabel = event.sportId?
         .trimmingCharacters(in: .whitespacesAndNewlines)
 
-    guard let sportLabel, !sportLabel.isEmpty else {
+    guard let sportLabel = sportLabel, !sportLabel.isEmpty else {
         return eventTypeLabel
     }
 
@@ -86,10 +86,10 @@ private func imagePreviewURL(imageId: String?, width: Int? = nil, height: Int? =
     }
 
     var queryItems = components.queryItems ?? []
-    if let width {
+    if let width = width {
         queryItems.append(URLQueryItem(name: "w", value: "\(width)"))
     }
-    if let height {
+    if let height = height {
         queryItems.append(URLQueryItem(name: "h", value: "\(height)"))
     }
     components.queryItems = queryItems.isEmpty ? nil : queryItems
@@ -139,6 +139,21 @@ private func placeImageURL(_ place: MVPPlace, width: Int? = nil, height: Int? = 
     remoteURL(place.imageUrl) ?? imagePreviewURL(imageId: place.imageRef, width: width, height: height)
 }
 
+private func priceCentsLabel(_ priceCents: Int) -> String {
+    let normalizedPriceCents = max(priceCents, 0)
+    if normalizedPriceCents == 0 {
+        return "Free"
+    }
+
+    let dollars = normalizedPriceCents / 100
+    let cents = normalizedPriceCents % 100
+    return String(format: "$%d.%02d", dollars, cents)
+}
+
+private func eventPriceLabel(for event: Event) -> String {
+    priceCentsLabel(Int(event.priceCents))
+}
+
 private func isSyntheticPlaceId(_ id: String) -> Bool {
     id.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("__")
 }
@@ -155,7 +170,7 @@ private func coordinatesMatch(
 }
 
 private func placesRepresentSameLocation(_ first: MVPPlace?, _ second: MVPPlace?) -> Bool {
-    guard let first, let second else { return false }
+    guard let first = first, let second = second else { return false }
 
     let firstId = first.id.trimmingCharacters(in: .whitespacesAndNewlines)
     let secondId = second.id.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -172,7 +187,7 @@ private func placesRepresentSameLocation(_ first: MVPPlace?, _ second: MVPPlace?
 }
 
 private func markerRepresentsSelection(_ marker: GMSMarker?, place: MVPPlace?) -> Bool {
-    guard let marker, let place else { return false }
+    guard let marker = marker, let place = place else { return false }
 
     if let placeData = marker.userData as? PlaceMarkerData {
         return placesRepresentSameLocation(placeData.place, place)
@@ -217,7 +232,7 @@ private func loadRemoteImage(
     marker: GMSMarker?,
     tracksMarkerView: Bool
 ) {
-    guard let url else { return }
+    guard let url = url else { return }
 
     if tracksMarkerView {
         marker?.tracksViewChanges = true
@@ -226,7 +241,7 @@ private func loadRemoteImage(
     }
 
     URLSession.shared.dataTask(with: url) { data, _, _ in
-        guard let data, let image = UIImage(data: data) else {
+        guard let data = data, let image = UIImage(data: data) else {
             DispatchQueue.main.async {
                 if tracksMarkerView {
                     marker?.tracksViewChanges = false
@@ -265,7 +280,7 @@ private func makeMarkerIconView(
     outerView.layer.shadowOpacity = 0.25
     outerView.layer.shadowRadius = 6
 
-    if let imageURL {
+    if let imageURL = imageURL {
         let imageView = UIImageView(frame: CGRect(x: 5, y: 5, width: 40, height: 40))
         imageView.backgroundColor = .black
         imageView.contentMode = .scaleAspectFill
@@ -399,7 +414,7 @@ private struct EventMapCarouselCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let imageURL {
+            if let imageURL = imageURL {
                 AsyncImage(url: imageURL) { phase in
                     switch phase {
                     case .success(let image):
@@ -444,9 +459,9 @@ private struct EventMapCarouselCard: View {
                     .foregroundStyle(.secondary)
                     .padding(.top, 4)
 
-                Text("$\(event.price)")
+                Text(eventPriceLabel(for: event))
                     .font(.title3.weight(.bold))
-                    .foregroundStyle(Color(uiColor: discoverEventMarkerColor))
+                    .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, 2)
             }
@@ -646,7 +661,7 @@ struct EventMap: View {
                             onEventSelected: onEventSelected
                         )
                         .padding(.horizontal, 16)
-                        .padding(.bottom, locationButtonBottomPadding + 72)
+                        .padding(.bottom, locationButtonBottomPadding + 48)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -715,9 +730,9 @@ struct GoogleMapView: UIViewRepresentable {
         context.coordinator.attach(to: mapView)
         context.coordinator.updateCameraViewport(mapView)
 
-        if isFocusedOnUserLocation, let focusedLocation {
+        if isFocusedOnUserLocation, focusedLocation != nil {
             context.coordinator.markInitialUserCameraFocusApplied()
-        } else if let focusedLocation {
+        } else if let focusedLocation = focusedLocation {
             context.coordinator.recordExplicitFocus(
                 CLLocationCoordinate2D(
                     latitude: focusedLocation.latitude,
@@ -758,7 +773,7 @@ struct GoogleMapView: UIViewRepresentable {
 
         var markerToReselect: GMSMarker?
 
-        if isFocusedOnUserLocation, let focusedLocation {
+        if isFocusedOnUserLocation, let focusedLocation = focusedLocation {
             if context.coordinator.shouldApplyInitialUserCameraFocus() {
                 let focusedCoordinate = CLLocationCoordinate2D(
                     latitude: focusedLocation.latitude,
@@ -767,7 +782,7 @@ struct GoogleMapView: UIViewRepresentable {
                 mapView.animate(with: GMSCameraUpdate.setTarget(focusedCoordinate))
                 context.coordinator.markInitialUserCameraFocusApplied()
             }
-        } else if let focusedLocation, !(selectionRequiresConfirmation && selectedPlace != nil) {
+        } else if let focusedLocation = focusedLocation, !(selectionRequiresConfirmation && selectedPlace != nil) {
             let focusedCoordinate = CLLocationCoordinate2D(
                 latitude: focusedLocation.latitude,
                 longitude: focusedLocation.longitude
@@ -793,7 +808,7 @@ struct GoogleMapView: UIViewRepresentable {
             marker.title = group.events.count == 1 ? group.events[0].name : "\(group.events.count) events"
             if group.events.count == 1 {
                 let event = group.events[0]
-                marker.snippet = "\(eventTypeWithSportLabel(for: event)) – $\(event.price)"
+                marker.snippet = "\(eventTypeWithSportLabel(for: event)) - \(eventPriceLabel(for: event))"
                 marker.userData = EventMarkerData(event: event)
                 marker.iconView = makeMarkerIconView(
                     name: event.name,
@@ -864,7 +879,7 @@ struct GoogleMapView: UIViewRepresentable {
             }
         }
 
-        if selectionRequiresConfirmation, let originalPlace,
+        if selectionRequiresConfirmation, let originalPlace = originalPlace,
            !(originalPlace.latitude == 0 && originalPlace.longitude == 0) {
             let hasExistingOriginalMarker =
                 context.coordinator.placeMarkers.contains { marker in
@@ -898,7 +913,7 @@ struct GoogleMapView: UIViewRepresentable {
             }
         }
 
-        if selectionRequiresConfirmation, let distinctSelectedPlace,
+        if selectionRequiresConfirmation, let distinctSelectedPlace = distinctSelectedPlace,
            !(distinctSelectedPlace.latitude == 0 && distinctSelectedPlace.longitude == 0) {
             let hasExistingSelectionMarker =
                 context.coordinator.placeMarkers.contains { marker in
@@ -950,7 +965,7 @@ struct GoogleMapView: UIViewRepresentable {
             }
             mapView.selectedMarker = confirmedMarker
             context.coordinator.lastConfirmedSelectionKey = confirmedSelectionKey
-        } else if let markerToReselect {
+        } else if let markerToReselect = markerToReselect {
             mapView.selectedMarker = markerToReselect
             context.coordinator.lastConfirmedSelectionKey = nil
         } else {
@@ -1003,7 +1018,7 @@ struct GoogleMapView: UIViewRepresentable {
                 }
             }
 
-            if let closestIndex {
+            if let closestIndex = closestIndex {
                 let nextSize = CGFloat(pendingGroups[closestIndex].events.count + 1)
                 pendingGroups[closestIndex].events.append(event)
                 pendingGroups[closestIndex].center = CGPoint(
@@ -1076,7 +1091,7 @@ class Coordinator: NSObject, GMSMapViewDelegate {
     }
 
     fileprivate func selectionKey(for marker: GMSMarker?) -> MarkerSelectionKey? {
-        guard let marker else { return nil }
+        guard let marker = marker else { return nil }
         if let eventData = marker.userData as? EventMarkerData {
             return .event(eventData.event.id)
         }
@@ -1108,7 +1123,7 @@ class Coordinator: NSObject, GMSMapViewDelegate {
         _ coordinate: CLLocationCoordinate2D,
         thresholdMeters: CLLocationDistance
     ) -> Bool {
-        guard let lastExplicitFocusLocation else { return true }
+        guard let lastExplicitFocusLocation = lastExplicitFocusLocation else { return true }
         let nextLocation = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
         return nextLocation.distance(from: lastExplicitFocusLocation) >= thresholdMeters
     }
@@ -1129,7 +1144,7 @@ class Coordinator: NSObject, GMSMapViewDelegate {
     }
 
     func recenterOnCurrentLocationIfNeeded() {
-        guard let currentLocation, let mapView else { return }
+        guard let currentLocation = currentLocation, let mapView = mapView else { return }
 
         let coordinate = CLLocationCoordinate2D(
             latitude: currentLocation.latitude,
@@ -1289,7 +1304,7 @@ class Coordinator: NSObject, GMSMapViewDelegate {
         containerView.layer.shadowOpacity = 0.3
         containerView.layer.shadowRadius = 8
 
-        if let imageURL {
+        if let imageURL = imageURL {
             let imageView = UIImageView(frame: CGRect(x: 0, y: 0, width: 280, height: imageHeight))
             imageView.backgroundColor = UIColor.secondarySystemBackground
             imageView.contentMode = .scaleAspectFill
@@ -1333,9 +1348,9 @@ class Coordinator: NSObject, GMSMapViewDelegate {
         }
 
         let priceLabel = UILabel(frame: CGRect(x: 12, y: nextY + 4, width: 256, height: 28))
-        priceLabel.text = "$\(event.price)"
+        priceLabel.text = eventPriceLabel(for: event)
         priceLabel.font = UIFont.boldSystemFont(ofSize: 20)
-        priceLabel.textColor = UIColor.systemBlue
+        priceLabel.textColor = UIColor.label
         priceLabel.textAlignment = .center
         containerView.addSubview(priceLabel)
         

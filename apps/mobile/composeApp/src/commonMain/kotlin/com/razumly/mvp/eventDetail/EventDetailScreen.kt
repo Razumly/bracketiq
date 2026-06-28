@@ -5,8 +5,11 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.animateDp
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -81,6 +84,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -3455,16 +3459,68 @@ fun EventDetailScreen(
                     }
                 }
             }
-            AnimatedVisibility(
-                visible = showStickyActions,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(LocalNavBarPadding.current)
-                    .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
-                enter = slideInVertically(initialOffsetY = { fullHeight -> fullHeight / 2 }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { fullHeight -> fullHeight / 2 }) + fadeOut(),
-            ) {
-                    StickyActionBar(
+            var stickyActionBarHeightPx by remember { mutableStateOf(0) }
+            val stickyActionBarTransition = updateTransition(
+                targetState = showStickyActions,
+                label = "StickyActionBarVisibility",
+            )
+            val stickyActionBarMotionDurationMillis = 180
+            val stickyActionBarEnterShadowDurationMillis = 120
+            val stickyActionBarExitShadowDurationMillis = 1
+            val stickyActionBarExitMotionDelayMillis = 40
+            val stickyActionBarAlpha by stickyActionBarTransition.animateFloat(
+                transitionSpec = {
+                    if (!initialState && targetState) {
+                        tween(durationMillis = stickyActionBarMotionDurationMillis)
+                    } else {
+                        tween(
+                            durationMillis = stickyActionBarMotionDurationMillis,
+                            delayMillis = stickyActionBarExitMotionDelayMillis,
+                        )
+                    }
+                },
+                label = "StickyActionBarAlpha",
+            ) { visible ->
+                if (visible) 1f else 0f
+            }
+            val stickyActionBarOffsetFraction by stickyActionBarTransition.animateFloat(
+                transitionSpec = {
+                    if (!initialState && targetState) {
+                        tween(durationMillis = stickyActionBarMotionDurationMillis)
+                    } else {
+                        tween(
+                            durationMillis = stickyActionBarMotionDurationMillis,
+                            delayMillis = stickyActionBarExitMotionDelayMillis,
+                        )
+                    }
+                },
+                label = "StickyActionBarOffsetFraction",
+            ) { visible ->
+                if (visible) 0f else 0.5f
+            }
+            val stickyActionBarShadowElevation by stickyActionBarTransition.animateDp(
+                transitionSpec = {
+                    if (!initialState && targetState) {
+                        tween(
+                            durationMillis = stickyActionBarEnterShadowDurationMillis,
+                            delayMillis = stickyActionBarMotionDurationMillis,
+                        )
+                    } else {
+                        tween(durationMillis = stickyActionBarExitShadowDurationMillis)
+                    }
+                },
+                label = "StickyActionBarShadowElevation",
+            ) { visible ->
+                if (visible) 6.dp else 0.dp
+            }
+            val shouldRenderStickyActionBar =
+                showStickyActions ||
+                    stickyActionBarAlpha > 0.01f ||
+                    stickyActionBarShadowElevation > 0.dp ||
+                    stickyActionBarTransition.currentState != stickyActionBarTransition.targetState
+
+            if (shouldRenderStickyActionBar) {
+                StickyActionBar(
                     primaryLabel = when {
                         isAffiliateEvent -> "Register on website"
                         isRegistrationPaymentPending -> "Payment pending"
@@ -3506,13 +3562,28 @@ fun EventDetailScreen(
                     },
                     onShareClick = component::shareEvent,
                     selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
-                        onClearSelectedWeeklyOccurrence = if (isWeeklyParentEvent) {
-                            component::clearSelectedWeeklySession
-                        } else {
-                            null
-                        },
-                        modifier = Modifier.guideTarget(EventGuideTargets.OverviewPrimaryAction),
-                    )
+                    onClearSelectedWeeklyOccurrence = if (isWeeklyParentEvent) {
+                        component::clearSelectedWeeklySession
+                    } else {
+                        null
+                    },
+                    barAlpha = stickyActionBarAlpha,
+                    shadowElevation = stickyActionBarShadowElevation,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(LocalNavBarPadding.current)
+                        .padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
+                        .offset {
+                            IntOffset(
+                                x = 0,
+                                y = (stickyActionBarHeightPx * stickyActionBarOffsetFraction).toInt(),
+                            )
+                        }
+                        .onSizeChanged { size ->
+                            stickyActionBarHeightPx = size.height
+                        }
+                        .guideTarget(EventGuideTargets.OverviewPrimaryAction),
+                )
             }
             }
                 }

@@ -88,18 +88,25 @@ internal fun StickyActionBar(
     onShareClick: () -> Unit,
     selectedWeeklyOccurrenceLabel: String? = null,
     onClearSelectedWeeklyOccurrence: (() -> Unit)? = null,
+    barAlpha: Float = 1f,
+    shadowElevation: Dp = 6.dp,
     modifier: Modifier = Modifier
 ) {
     var mapButtonCenter by remember { mutableStateOf(Offset.Zero) }
+    val clampedBarAlpha = barAlpha.coerceIn(0f, 1f)
     Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        modifier = modifier
+            .fillMaxWidth(),
+        shape = FloatingDockShape,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = clampedBarAlpha),
+        contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 3.dp,
-        shadowElevation = 6.dp
+        shadowElevation = shadowElevation,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .alpha(clampedBarAlpha)
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)

@@ -3,16 +3,18 @@ package com.razumly.mvp.core.presentation.composables
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
@@ -26,9 +28,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -41,9 +40,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
@@ -53,6 +54,7 @@ import com.razumly.mvp.core.presentation.guides.AppGuideTargets
 import com.razumly.mvp.core.presentation.guides.GuideHighlightShape
 import com.razumly.mvp.core.presentation.guides.guideTarget
 import com.razumly.mvp.core.presentation.util.getImageUrl
+import com.razumly.mvp.core.util.Platform
 
 data class NavigationItem(
     val page: AppConfig,
@@ -82,20 +84,17 @@ fun MVPBottomNavBar(
     val localDensity = LocalDensity.current
     val unreadBadgeText = if (unreadChatMessageCount > 99) "99+" else unreadChatMessageCount.toString()
     val inviteBadgeText = if (pendingInviteCount > 99) "99+" else pendingInviteCount.toString()
-    val iconSize = 22.dp
-    val navBarHeightDp = 52.dp
+    val iconSize = 24.dp
+    val navBarHeightDp = if (Platform.isIOS) 36.dp else 56.dp
+    val navHorizontalPadding = if (Platform.isIOS) 16.dp else 0.dp
+    val centerButtonSize = 64.dp
+    val centerButtonOffsetY = (-14).dp
     val bottomSafeAreaPadding = with(localDensity) {
         WindowInsets.safeDrawing.getBottom(this).toDp()
     }
-    val navBarInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)
+    val navBarContainerHeight = navBarHeightDp + bottomSafeAreaPadding
+    val navContentOffsetY = (navBarContainerHeight * 0.30f) - (navBarHeightDp / 2)
     val navBarContainerColor = MaterialTheme.colorScheme.surfaceContainer
-    val navItemColors = NavigationBarItemDefaults.colors(
-        selectedIconColor = MaterialTheme.colorScheme.primary,
-        selectedTextColor = MaterialTheme.colorScheme.primary,
-        indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
 
     Box(modifier = Modifier.fillMaxSize()) {
         // Main content
@@ -107,7 +106,7 @@ fun MVPBottomNavBar(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .height(navBarHeightDp + bottomSafeAreaPadding)
+                    .height(navBarContainerHeight)
                     .background(navBarContainerColor)
                     .onGloballyPositioned { layoutCoordinates ->
                         navBarHeight = with(localDensity) {
@@ -115,73 +114,30 @@ fun MVPBottomNavBar(
                         }
                     }
             ) {
-                NavigationBar(
+                Row(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .zIndex(1f)
-                        .height(navBarHeightDp),
-                    windowInsets = navBarInsets,
-                    containerColor = navBarContainerColor,
+                        .fillMaxWidth()
+                        .height(navBarHeightDp)
+                        .offset(y = navContentOffsetY)
+                        .padding(horizontal = navHorizontalPadding),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     items.forEachIndexed { index, item ->
-                        NavigationBarItem(
-                            icon = {
-                                when (item.icon) {
-                                    "search" -> Icon(
-                                        Icons.Default.Search,
-                                        contentDescription = item.titleResId,
-                                        modifier = Modifier.size(iconSize),
-                                    )
-                                    "messages" -> BadgedBox(
-                                        badge = {
-                                            if (unreadChatMessageCount > 0) {
-                                                Badge(
-                                                    containerColor = MaterialTheme.colorScheme.primary,
-                                                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                                                ) {
-                                                    Text(unreadBadgeText)
-                                                }
-                                            }
-                                        }
-                                    ) {
-                                        Icon(
-                                            Icons.Default.MailOutline,
-                                            contentDescription = item.titleResId,
-                                            modifier = Modifier.size(iconSize),
-                                        )
-                                    }
-                                    "schedule" -> Icon(
-                                        Icons.Default.DateRange,
-                                        contentDescription = item.titleResId,
-                                        modifier = Modifier.size(iconSize),
-                                    )
-                                    "home" -> BadgedBox(
-                                        badge = {
-                                            if (pendingInviteCount > 0) {
-                                                Badge(
-                                                    containerColor = MaterialTheme.colorScheme.primary,
-                                                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                                                ) {
-                                                    Text(inviteBadgeText)
-                                                }
-                                            }
-                                        }
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Home,
-                                            contentDescription = item.titleResId,
-                                            modifier = Modifier.size(iconSize),
-                                        )
-                                    }
-                                }
-                            },
-                            label = null,
+                        BottomNavIconButton(
+                            item = item,
                             selected = isNavigationItemSelected(
                                 selectedPage = selectedPage,
                                 itemPage = item.page,
                             ),
-                            colors = navItemColors,
-                            onClick = { onPageSelected(item.page) }
+                            iconSize = iconSize,
+                            unreadBadgeText = unreadBadgeText,
+                            inviteBadgeText = inviteBadgeText,
+                            showUnreadBadge = unreadChatMessageCount > 0,
+                            showInviteBadge = pendingInviteCount > 0,
+                            onClick = { onPageSelected(item.page) },
                         )
                         if (index == 1) {
                             Spacer(modifier = Modifier.weight(1f))
@@ -191,10 +147,11 @@ fun MVPBottomNavBar(
 
                 CenterNavButton(
                     action = centerAction,
+                    size = centerButtonSize,
                     onClick = onCenterActionClick,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .offset(y = (-14).dp)
+                        .offset(y = centerButtonOffsetY)
                         .zIndex(2f)
                         .guideTarget(
                             targetId = AppGuideTargets.BottomNavCenterAction,
@@ -204,6 +161,117 @@ fun MVPBottomNavBar(
             }
         }
     }
+}
+
+@Composable
+private fun RowScope.BottomNavIconButton(
+    item: NavigationItem,
+    selected: Boolean,
+    iconSize: androidx.compose.ui.unit.Dp,
+    unreadBadgeText: String,
+    inviteBadgeText: String,
+    showUnreadBadge: Boolean,
+    showInviteBadge: Boolean,
+    onClick: () -> Unit,
+) {
+    val iconColor = if (selected) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = 56.dp, height = 32.dp)
+                .clip(CircleShape)
+                .background(
+                    if (selected) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        Color.Transparent
+                    }
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            when (item.icon) {
+                "search" -> BottomNavIcon(
+                    icon = Icons.Default.Search,
+                    contentDescription = item.titleResId,
+                    iconSize = iconSize,
+                    tint = iconColor,
+                )
+
+                "messages" -> BadgedBox(
+                    badge = {
+                        if (showUnreadBadge) {
+                            Badge(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                            ) {
+                                Text(unreadBadgeText)
+                            }
+                        }
+                    }
+                ) {
+                    BottomNavIcon(
+                        icon = Icons.Default.MailOutline,
+                        contentDescription = item.titleResId,
+                        iconSize = iconSize,
+                        tint = iconColor,
+                    )
+                }
+
+                "schedule" -> BottomNavIcon(
+                    icon = Icons.Default.DateRange,
+                    contentDescription = item.titleResId,
+                    iconSize = iconSize,
+                    tint = iconColor,
+                )
+
+                "home" -> BadgedBox(
+                    badge = {
+                        if (showInviteBadge) {
+                            Badge(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                            ) {
+                                Text(inviteBadgeText)
+                            }
+                        }
+                    }
+                ) {
+                    BottomNavIcon(
+                        icon = Icons.Default.Home,
+                        contentDescription = item.titleResId,
+                        iconSize = iconSize,
+                        tint = iconColor,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BottomNavIcon(
+    icon: ImageVector,
+    contentDescription: String,
+    iconSize: androidx.compose.ui.unit.Dp,
+    tint: Color,
+) {
+    Icon(
+        imageVector = icon,
+        contentDescription = contentDescription,
+        tint = tint,
+        modifier = Modifier.size(iconSize),
+    )
 }
 
 private fun isNavigationItemSelected(selectedPage: AppConfig, itemPage: AppConfig): Boolean {
@@ -219,12 +287,13 @@ private fun isNavigationItemSelected(selectedPage: AppConfig, itemPage: AppConfi
 @Composable
 private fun CenterNavButton(
     action: CenterNavAction,
+    size: androidx.compose.ui.unit.Dp,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(
         modifier = modifier
-            .size(64.dp)
+            .size(size)
             .shadow(
                 elevation = 12.dp,
                 shape = CircleShape,

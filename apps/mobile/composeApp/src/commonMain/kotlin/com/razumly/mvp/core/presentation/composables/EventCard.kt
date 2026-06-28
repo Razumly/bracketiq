@@ -31,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
@@ -53,6 +54,7 @@ import com.razumly.mvp.core.data.util.divisionDisplayLabels
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.eventTypeWithSportLabel
 import com.razumly.mvp.core.presentation.util.getImageUrl
+import com.razumly.mvp.core.util.Platform
 import com.razumly.mvp.core.util.resolvedTimeZone
 import dev.chrisbanes.haze.ExperimentalHazeApi
 import dev.chrisbanes.haze.HazeInputScale
@@ -90,6 +92,7 @@ fun EventCard(
     }
     var isImageReady by remember(imageModel) { mutableStateOf(imageModel == null) }
     val hazeState = rememberHazeState()
+    val useHaze = !Platform.isIOS
     var mapButtonOffset by remember { mutableStateOf(Offset.Zero) }
 
     val eventTimeZone = remember(event.timeZone) { event.resolvedTimeZone() }
@@ -140,7 +143,13 @@ fun EventCard(
             contentDescription = "Event Image",
             modifier = Modifier
                 .matchParentSize()
-                .hazeSource(hazeState, key = event.id),
+                .then(
+                    if (useHaze) {
+                        Modifier.hazeSource(hazeState, key = event.id)
+                    } else {
+                        Modifier
+                    }
+                ),
             contentScale = ContentScale.Crop,
             onState = { state ->
                 isImageReady = when (state) {
@@ -156,8 +165,8 @@ fun EventCard(
                 modifier = Modifier.fillMaxWidth()
             )
         } else {
-            Column(
-                modifier = Modifier.hazeEffect(
+            val contentModifier = if (useHaze) {
+                Modifier.hazeEffect(
                     hazeState, HazeMaterials.ultraThin(MaterialTheme.colorScheme.onBackground)
                 ) {
                     inputScale = HazeInputScale.Fixed(0.5f)
@@ -167,7 +176,23 @@ fun EventCard(
                         endIntensity = 1f,
                         startY = 200f
                     )
-                }.padding(navPadding).padding(horizontal = 16.dp).fillMaxWidth(),
+                }
+            } else {
+                Modifier.background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            Color.Black.copy(alpha = 0.68f),
+                        ),
+                    )
+                )
+            }
+
+            Column(
+                modifier = contentModifier
+                    .padding(navPadding)
+                    .padding(horizontal = 16.dp)
+                    .fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(4.dp, alignment = Alignment.Bottom)
             ) {
                 Spacer(modifier = Modifier.height(232.dp))
