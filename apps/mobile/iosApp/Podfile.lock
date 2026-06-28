@@ -9,7 +9,7 @@ PODS:
     - GoogleUtilities/Environment (~> 8.0)
     - GoogleUtilities/UserDefaults (~> 8.0)
     - PromisesObjC (~> 2.4)
-  - composeApp (1.6.1):
+  - composeApp (1.6.2):
     - FirebaseAnalytics
     - FirebaseCore
     - FirebaseMessaging
@@ -208,7 +208,7 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   AppAuth: 1c1a8afa7e12f2ec3a294d9882dfa5ab7d3cb063
   AppCheckCore: cc8fd0a3a230ddd401f326489c99990b013f0c4f
-  composeApp: 635080a95608949543a100d20b7e8168cf8631ad
+  composeApp: 3746add16d2c9077ea396dd0ff5bf901d96ca07b
   FirebaseAnalytics: e89a37004bce8789cb53f4cb3e80160d925e6624
   FirebaseCore: 5a452ffa66f37c8e281076996837626c5d08c090
   FirebaseCoreInternal: ff526c22671bb564d1b34a47615e29ba99389dee
