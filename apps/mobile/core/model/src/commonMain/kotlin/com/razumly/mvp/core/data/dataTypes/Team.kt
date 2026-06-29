@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.data.dataTypes
 
 import androidx.room.Entity
+import androidx.room.Ignore
 import androidx.room.PrimaryKey
 import com.razumly.mvp.core.data.dataTypes.dtos.TeamDTO
 import com.razumly.mvp.core.data.util.DEFAULT_AGE_DIVISION
@@ -46,9 +47,18 @@ data class Team(
     val staffAssignments: List<TeamStaffAssignment> = emptyList(),
     @PrimaryKey override val id: String
 ) : MVPDocument, DisplayableEntity {
-    override val displayName: String get() = name.ifBlank { "Team ${activePlayerRegistrations().size}" }
-    override val imageUrl: String? get() = profileImageId
-    val assistantCoachIds: List<String> get() = coachIds
+    @Ignore
+    override var displayName: String = ""
+        get() = name.ifBlank { "Team ${activePlayerRegistrations().size}" }
+        set(value) { field = value }
+    @Ignore
+    override var imageUrl: String? = null
+        get() = profileImageId
+        set(value) { field = value }
+    @Ignore
+    var assistantCoachIds: List<String> = emptyList()
+        get() = coachIds
+        set(value) { field = value }
 
     companion object {
         operator fun invoke(captainId: String): Team {

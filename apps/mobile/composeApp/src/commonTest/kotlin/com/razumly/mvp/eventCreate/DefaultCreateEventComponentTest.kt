@@ -7,10 +7,12 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.SportOfficialPositionTemplate
+import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
+import com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft
 import com.razumly.mvp.eventDetail.EventStaffRole
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
@@ -22,8 +24,61 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Instant
 
 class DefaultCreateEventComponentTest : MainDispatcherTest() {
+    @Test
+    fun create_screen_initializes_from_seeded_event_template_draft() = runTest(testDispatcher) {
+        val seededEvent = com.razumly.mvp.core.data.dataTypes.Event(
+            id = "seeded-event",
+            name = "Seeded League",
+            hostId = "user-1",
+            eventType = EventType.LEAGUE,
+            sportId = "Indoor Volleyball",
+            start = Instant.parse("2026-07-01T00:00:00Z"),
+            end = Instant.parse("2026-07-01T02:00:00Z"),
+            divisions = listOf("open"),
+            fieldIds = listOf("field-1"),
+            timeSlotIds = listOf("slot-1"),
+        )
+        val seededField = Field(
+            id = "field-1",
+            name = "Template Court",
+            divisions = listOf("open"),
+        )
+        val seededSlot = TimeSlot(
+            id = "slot-1",
+            dayOfWeek = 3,
+            startTimeMinutes = 0,
+            endTimeMinutes = 120,
+            startDate = Instant.parse("2026-07-01T00:00:00Z"),
+            repeating = false,
+            endDate = Instant.parse("2026-07-01T02:00:00Z"),
+            scheduledFieldId = "field-1",
+            scheduledFieldIds = listOf("field-1"),
+            divisions = listOf("open"),
+            price = null,
+        )
+        val seededScoring = LeagueScoringConfigDTO(
+            pointsForWin = 3,
+        )
+        val harness = CreateEventHarness(
+            initialSeed = SeededEventTemplateDraft(
+                event = seededEvent,
+                fields = listOf(seededField),
+                timeSlots = listOf(seededSlot),
+                leagueScoringConfig = seededScoring,
+            ),
+        )
+
+        assertEquals("Seeded League", harness.component.newEventState.value.name)
+        assertEquals(EventType.LEAGUE, harness.component.currentEventType.value)
+        assertEquals(listOf("field-1"), harness.component.localFields.value.map(Field::id))
+        assertEquals(listOf("slot-1"), harness.component.leagueSlots.value.map(TimeSlot::id))
+        assertTrue(harness.component.useManualTimeSlots.value)
+        assertEquals(3, harness.component.leagueScoringConfig.value.pointsForWin)
+    }
+
     @Test
     fun create_screen_terms_loading_mirrors_repository_state() = runTest(testDispatcher) {
         val harness = CreateEventHarness()

@@ -99,6 +99,7 @@ kotlin {
             baseName = "ComposeApp"
             isStatic = true
             freeCompilerArgs += "-Xbinary=bundleId=com.razumly.mvp"
+            export(projects.core.model)
             export(libs.decompose.decompose)
             export(libs.lifecycle)
             export(libs.kmpnotifier)

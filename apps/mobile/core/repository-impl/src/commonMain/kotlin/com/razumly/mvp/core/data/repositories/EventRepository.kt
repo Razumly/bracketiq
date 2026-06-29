@@ -33,6 +33,7 @@ import dev.icerock.moko.geo.LatLng
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.CreateEventRequestDto
+import com.razumly.mvp.core.network.dto.CreateEventTemplateRequestDto
 import com.razumly.mvp.core.network.dto.CurrentUserEventRegistrationsResponseDto
 import com.razumly.mvp.core.network.dto.EventApiDto
 import com.razumly.mvp.core.network.dto.EventChildRegistrationRequestDto
@@ -54,6 +55,9 @@ import com.razumly.mvp.core.network.dto.EventSearchRequestDto
 import com.razumly.mvp.core.network.dto.EventSearchUserLocationDto
 import com.razumly.mvp.core.network.dto.EventTeamComplianceResponseDto
 import com.razumly.mvp.core.network.dto.EventTeamComplianceSummaryDto
+import com.razumly.mvp.core.network.dto.EventTemplateApiDto
+import com.razumly.mvp.core.network.dto.EventTemplateResponseDto
+import com.razumly.mvp.core.network.dto.EventTemplatesResponseDto
 import com.razumly.mvp.core.network.dto.EventUserComplianceResponseDto
 import com.razumly.mvp.core.network.dto.EventsResponseDto
 import com.razumly.mvp.core.network.dto.ProfileScheduleResponseDto
@@ -61,6 +65,7 @@ import com.razumly.mvp.core.network.dto.RegistrationQuestionAnswerDto
 import com.razumly.mvp.core.network.dto.RegistrationQuestionAnswerSnapshotDto
 import com.razumly.mvp.core.network.dto.ScheduleEventRequestDto
 import com.razumly.mvp.core.network.dto.ScheduleEventResponseDto
+import com.razumly.mvp.core.network.dto.SeedEventTemplateRequestDto
 import com.razumly.mvp.core.network.dto.StandingsConfirmRequestDto
 import com.razumly.mvp.core.network.dto.StandingsConfirmResponseDto
 import com.razumly.mvp.core.network.dto.StandingsDivisionDto
@@ -80,6 +85,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -139,8 +145,16 @@ interface IEventRepository : IMVPRepository {
         offset: Int = 0,
     ): Result<Pair<List<Event>, Boolean>>
     fun getEventsByHostFlow(hostId: String): Flow<Result<List<Event>>>
-    fun getEventTemplatesByHostFlow(hostId: String): Flow<Result<List<Event>>> =
+    fun getEventTemplatesByHostFlow(hostId: String): Flow<Result<List<EventTemplateSummary>>> =
         flowOf(Result.success(emptyList()))
+    suspend fun createEventTemplateFromEvent(sourceEventId: String): Result<EventTemplateSummary> =
+        Result.failure(UnsupportedOperationException("Event template creation is not supported."))
+    suspend fun seedEventTemplate(
+        templateId: String,
+        newEventId: String,
+        newStartDate: Instant,
+    ): Result<SeededEventTemplateDraft> =
+        Result.failure(UnsupportedOperationException("Event template seeding is not supported."))
     suspend fun deleteEvent(eventId: String): Result<Unit>
     suspend fun addCurrentUserToEvent(
         event: Event,
@@ -397,6 +411,27 @@ data class EventCompliancePaymentSummary(
 data class EventComplianceDocumentCounts(
     val signedCount: Int = 0,
     val requiredCount: Int = 0,
+)
+
+data class EventTemplateSummary(
+    val id: String,
+    val name: String,
+    val description: String? = null,
+    val sourceEventId: String? = null,
+    val ownerUserId: String? = null,
+    val organizationId: String? = null,
+    val sportId: String? = null,
+    val eventType: String? = null,
+    val createdAt: Instant? = null,
+    val updatedAt: Instant? = null,
+)
+
+@Serializable
+data class SeededEventTemplateDraft(
+    val event: Event,
+    val fields: List<Field> = emptyList(),
+    val timeSlots: List<TimeSlot> = emptyList(),
+    val leagueScoringConfig: LeagueScoringConfigDTO? = null,
 )
 
 @Serializable
@@ -676,6 +711,27 @@ private fun EventComplianceRequiredDocumentDto.toComplianceRequiredDocumentOrNul
         status = status?.trim()?.takeIf(String::isNotBlank) ?: "UNSIGNED",
         signedDocumentRecordId = signedDocumentRecordId?.trim()?.takeIf(String::isNotBlank),
         signedAt = signedAt?.trim()?.takeIf(String::isNotBlank),
+    )
+}
+
+private fun EventTemplateApiDto.toEventTemplateSummaryOrNull(): EventTemplateSummary? {
+    val normalizedId = id?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val normalizedName = name?.trim()?.takeIf(String::isNotBlank) ?: "Untitled Template"
+    return EventTemplateSummary(
+        id = normalizedId,
+        name = normalizedName,
+        description = description?.trim()?.takeIf(String::isNotBlank),
+        sourceEventId = sourceEventId?.trim()?.takeIf(String::isNotBlank),
+        ownerUserId = ownerUserId?.trim()?.takeIf(String::isNotBlank),
+        organizationId = organizationId?.trim()?.takeIf(String::isNotBlank),
+        sportId = sportId?.trim()?.takeIf(String::isNotBlank),
+        eventType = eventType?.trim()?.takeIf(String::isNotBlank),
+        createdAt = createdAt?.trim()?.takeIf(String::isNotBlank)?.let { raw ->
+            runCatching { Instant.parse(raw) }.getOrNull()
+        },
+        updatedAt = updatedAt?.trim()?.takeIf(String::isNotBlank)?.let { raw ->
+            runCatching { Instant.parse(raw) }.getOrNull()
+        },
     )
 }
 
@@ -1086,12 +1142,12 @@ class EventRepository(
         return res.events.mapNotNull { it.toEventOrNull() }
     }
 
-    private suspend fun fetchRemoteEventTemplatesByHost(hostId: String): List<Event> {
+    private suspend fun fetchRemoteEventTemplatesByHost(hostId: String): List<EventTemplateSummary> {
         val encodedHostId = hostId.encodeURLQueryComponent()
-        val res = api.get<EventsResponseDto>(
-            "api/events?hostId=$encodedHostId&state=TEMPLATE&limit=200"
+        val res = api.get<EventTemplatesResponseDto>(
+            "api/event-templates?hostId=$encodedHostId&limit=200"
         )
-        return res.events.mapNotNull { it.toEventOrNull() }
+        return res.templates.mapNotNull { it.toEventTemplateSummaryOrNull() }
     }
 
     private suspend fun fetchRemoteEventsByOrganization(organizationId: String, limit: Int): List<Event> {
@@ -1771,6 +1827,51 @@ class EventRepository(
             event
         })
 
+    override suspend fun createEventTemplateFromEvent(sourceEventId: String): Result<EventTemplateSummary> = runCatching {
+        val normalizedSourceEventId = sourceEventId.trim()
+        if (normalizedSourceEventId.isEmpty()) error("Template source event id is required.")
+
+        val response = api.post<CreateEventTemplateRequestDto, EventTemplateResponseDto>(
+            path = "api/event-templates",
+            body = CreateEventTemplateRequestDto(sourceEventId = normalizedSourceEventId),
+        )
+        response.template?.toEventTemplateSummaryOrNull() ?: error("Create template response missing template")
+    }
+
+    override suspend fun seedEventTemplate(
+        templateId: String,
+        newEventId: String,
+        newStartDate: Instant,
+    ): Result<SeededEventTemplateDraft> = runCatching {
+        val normalizedTemplateId = templateId.trim()
+        val normalizedEventId = newEventId.trim()
+        if (normalizedTemplateId.isEmpty()) error("Template id is required.")
+        if (normalizedEventId.isEmpty()) error("New event id is required.")
+
+        val response = api.post<SeedEventTemplateRequestDto, EventResponseDto>(
+            path = "api/event-templates/${normalizedTemplateId.encodeURLQueryComponent()}/seed",
+            body = SeedEventTemplateRequestDto(
+                newEventId = normalizedEventId,
+                newStartDate = newStartDate.toString(),
+            ),
+        )
+        val eventDto = response.event ?: error("Template seed response missing event")
+        val event = eventDto.toEventOrNull() ?: error("Template seed response included an invalid event")
+        val seededTimeSlots = eventDto.timeSlots.map { slot ->
+            val slotId = slot.id?.trim().orEmpty()
+            if (slotId.isEmpty()) {
+                error("Template seed response included a time slot without an id")
+            }
+            slot.toTimeSlot(slotId)
+        }
+        SeededEventTemplateDraft(
+            event = event,
+            fields = eventDto.fields,
+            timeSlots = seededTimeSlots,
+            leagueScoringConfig = eventDto.leagueScoringConfig,
+        )
+    }
+
     override suspend fun scheduleEvent(
         eventId: String,
         participantCount: Int?,
@@ -2013,41 +2114,9 @@ class EventRepository(
             }
         }
 
-    override fun getEventTemplatesByHostFlow(hostId: String): Flow<Result<List<Event>>> =
-        callbackFlow {
-            val localJob = launch {
-                databaseService.getEventDao.getAllCachedEvents().collect { cached ->
-                    trySend(
-                        Result.success(
-                            cached.filter { event ->
-                                event.hostId == hostId && event.state.equals("TEMPLATE", ignoreCase = true)
-                            },
-                        ),
-                    )
-                }
-            }
-
-            val remoteJob = launch {
-                runCatching {
-                    val remote = preserveCachedDivisionState(fetchRemoteEventTemplatesByHost(hostId))
-
-                    val localTemplateEvents = databaseService.getEventDao.getAllCachedEvents().first()
-                        .filter { event ->
-                            event.hostId == hostId && event.state.equals("TEMPLATE", ignoreCase = true)
-                        }
-                    val staleIds = localTemplateEvents.map { it.id }.toSet() - remote.map { it.id }.toSet()
-                    if (staleIds.isNotEmpty()) {
-                        databaseService.getEventDao.deleteEventsWithCrossRefs(staleIds.toList())
-                    }
-
-                    databaseService.getEventDao.upsertEvents(remote)
-                }.onFailure { error -> trySend(Result.failure(error)) }
-            }
-
-            awaitClose {
-                localJob.cancel()
-                remoteJob.cancel()
-            }
+    override fun getEventTemplatesByHostFlow(hostId: String): Flow<Result<List<EventTemplateSummary>>> =
+        flow {
+            emit(runCatching { fetchRemoteEventTemplatesByHost(hostId) })
         }
 
     override suspend fun addCurrentUserToEvent(

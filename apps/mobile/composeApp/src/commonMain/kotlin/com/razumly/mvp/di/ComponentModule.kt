@@ -97,10 +97,11 @@ val componentModule = module {
         )
     }
 
-    factory<CreateEventComponent> { (componentContext: ComponentContext, onCreatedEvent: (Event) -> Unit) ->
+    factory<CreateEventComponent> { (componentContext: ComponentContext, onCreatedEvent: (Event) -> Unit, seed: com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft?) ->
         DefaultCreateEventComponent(
             componentContext = componentContext,
             onEventCreated = onCreatedEvent,
+            initialSeed = seed,
             userRepository = get(),
             eventRepository = get(),
             fieldRepository = get(),

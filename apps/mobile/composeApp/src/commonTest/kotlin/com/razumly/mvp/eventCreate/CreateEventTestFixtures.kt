@@ -51,6 +51,7 @@ import com.razumly.mvp.core.data.repositories.PurchaseIntentTimeSlotContext
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.RecordSignatureResult
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
+import com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft
 import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.CreateBillRequest
 import com.razumly.mvp.core.data.repositories.DiscountCode
@@ -118,6 +119,7 @@ internal class CreateEventHarness(
     sports: List<Sport> = emptyList(),
     existingOrganizationEvents: List<Event> = emptyList(),
     rentalResourceOptions: List<RentalResourceOption> = emptyList(),
+    initialSeed: SeededEventTemplateDraft? = null,
 ) {
     val userRepository = CreateEvent_FakeUserRepository()
     val eventRepository = CreateEvent_FakeEventRepository(existingOrganizationEvents)
@@ -139,6 +141,7 @@ internal class CreateEventHarness(
         sportsRepository = sportsRepository,
         billingRepository = billingRepository,
         imageRepository = imageRepository,
+        initialSeed = initialSeed,
         onEventCreated = { onEventCreatedCount += 1 }
     ).also { component ->
         component.setLoadingHandler(loadingHandler)

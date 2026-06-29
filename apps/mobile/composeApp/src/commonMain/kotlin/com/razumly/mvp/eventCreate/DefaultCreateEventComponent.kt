@@ -39,6 +39,7 @@ import com.razumly.mvp.core.data.repositories.ChatTermsConsentState
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
+import com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
@@ -177,11 +178,13 @@ class DefaultCreateEventComponent(
     private val sportsRepository: ISportsRepository,
     private val billingRepository: IBillingRepository,
     private val imageRepository: IImagesRepository,
+    private val initialSeed: SeededEventTemplateDraft? = null,
     val onEventCreated: (Event) -> Unit
 ) : CreateEventComponent, PaymentProcessor(), ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
-    private val initialEventDraft = createInitialEventDraft(initialHostId = resolveCurrentUserId())
+    private val initialEventDraft = initialSeed?.event
+        ?: createInitialEventDraft(initialHostId = resolveCurrentUserId())
 
     private val _newEventState: MutableStateFlow<Event> = MutableStateFlow(initialEventDraft)
     override val newEventState = _newEventState.asStateFlow()
@@ -194,7 +197,7 @@ class DefaultCreateEventComponent(
             )
         )
 
-    private val _currentEventType = MutableStateFlow(EventType.EVENT)
+    private val _currentEventType = MutableStateFlow(initialEventDraft.eventType)
     override val currentEventType = _currentEventType.asStateFlow()
 
     private val _canProceed = MutableStateFlow(false)
@@ -229,19 +232,19 @@ class DefaultCreateEventComponent(
     override val organizationTemplatesLoading = _organizationTemplatesLoading.asStateFlow()
     private val _organizationTemplatesError = MutableStateFlow<String?>(null)
     override val organizationTemplatesError = _organizationTemplatesError.asStateFlow()
-    private val _localFields = MutableStateFlow<List<Field>>(emptyList())
+    private val _localFields = MutableStateFlow(initialSeed?.fields.orEmpty())
     override val localFields = _localFields.asStateFlow()
-    private val _leagueSlots = MutableStateFlow<List<TimeSlot>>(emptyList())
+    private val _leagueSlots = MutableStateFlow(initialSeed?.timeSlots.orEmpty())
     override val leagueSlots = _leagueSlots.asStateFlow()
-    private val _useManualTimeSlots = MutableStateFlow(false)
+    private val _useManualTimeSlots = MutableStateFlow(initialSeed?.timeSlots?.isNotEmpty() == true)
     override val useManualTimeSlots = _useManualTimeSlots.asStateFlow()
     private val _availableRentalResources = MutableStateFlow<List<RentalResourceOption>>(emptyList())
     override val availableRentalResources = _availableRentalResources.asStateFlow()
     private val _selectedRentalResourceIds = MutableStateFlow<Set<String>>(emptySet())
     override val selectedRentalResourceIds = _selectedRentalResourceIds.asStateFlow()
-    private val _leagueScoringConfig = MutableStateFlow(LeagueScoringConfigDTO())
+    private val _leagueScoringConfig = MutableStateFlow(initialSeed?.leagueScoringConfig ?: LeagueScoringConfigDTO())
     override val leagueScoringConfig = _leagueScoringConfig.asStateFlow()
-    private val _fieldCount = MutableStateFlow(0)
+    private val _fieldCount = MutableStateFlow(initialSeed?.fields?.size ?: 0)
     private lateinit var loadingHandler: LoadingHandler
 
     override fun setLoadingHandler(loadingHandler: LoadingHandler) {

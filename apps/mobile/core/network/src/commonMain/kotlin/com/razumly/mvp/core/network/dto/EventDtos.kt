@@ -16,6 +16,7 @@ import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_ONLINE
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.TimeSlotDTO
 import com.razumly.mvp.core.data.dataTypes.buildEventOfficialRecordId
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.isManualRegistrationPaymentMode
@@ -27,6 +28,9 @@ import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionDetails
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -37,6 +41,29 @@ import kotlin.time.Instant
 
 private fun DivisionDetail.isPlayoffDivisionKind(): Boolean =
     kind?.trim()?.equals("PLAYOFF", ignoreCase = true) == true
+
+private val apiDateOnlyPattern = Regex("""^\d{4}-\d{2}-\d{2}$""")
+private val apiDateTimeWithoutSecondsPattern = Regex("""^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$""")
+private val apiLocalDateTimePattern = Regex("""^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$""")
+
+@OptIn(ExperimentalTime::class)
+private fun parseApiInstant(value: String, timeZone: String): Instant? {
+    val trimmed = value.trim().takeIf(String::isNotBlank) ?: return null
+    runCatching { Instant.parse(trimmed) }
+        .getOrNull()
+        ?.let { return it }
+
+    val normalized = when {
+        apiDateOnlyPattern.matches(trimmed) -> "${trimmed}T00:00:00"
+        apiDateTimeWithoutSecondsPattern.matches(trimmed) -> "${trimmed}:00"
+        apiLocalDateTimePattern.matches(trimmed) -> trimmed
+        else -> trimmed
+    }
+    val zone = runCatching {
+        TimeZone.of(timeZone.trim().takeIf(String::isNotBlank) ?: "UTC")
+    }.getOrDefault(TimeZone.UTC)
+    return runCatching { LocalDateTime.parse(normalized).toInstant(zone) }.getOrNull()
+}
 
 @Serializable
 data class EventApiDto(
@@ -81,6 +108,8 @@ data class EventApiDto(
     val sportId: String? = null,
     val timeSlotIds: List<String>? = null,
     val fieldIds: List<String>? = null,
+    val fields: List<Field> = emptyList(),
+    val timeSlots: List<TimeSlotDTO> = emptyList(),
     val leagueScoringConfigId: String? = null,
     val leagueScoringConfig: LeagueScoringConfigDTO? = null,
     val organizationId: String? = null,
@@ -150,14 +179,15 @@ data class EventApiDto(
         if (resolvedId.isNullOrBlank() || resolvedName.isNullOrBlank()) return null
         if (resolvedHostId.isNullOrBlank() && resolvedAffiliateUrl == null) return null
         if (resolvedStart.isNullOrBlank()) return null
-        val parsedStart = runCatching { Instant.parse(resolvedStart) }.getOrNull() ?: return null
+        val resolvedTimeZone = timeZone?.trim()?.takeIf(String::isNotBlank) ?: "UTC"
+        val parsedStart = parseApiInstant(resolvedStart, resolvedTimeZone) ?: return null
 
         val normalizedEventType = eventType?.trim()?.uppercase()
         val resolvedEventType = runCatching { EventType.valueOf(normalizedEventType ?: EventType.EVENT.name) }
             .getOrDefault(EventType.EVENT)
         val resolvedNoFixedEndDateTime = noFixedEndDateTime ?: false
         val parsedEnd = when {
-            !resolvedEnd.isNullOrBlank() -> runCatching { Instant.parse(resolvedEnd) }.getOrNull()
+            !resolvedEnd.isNullOrBlank() -> parseApiInstant(resolvedEnd, resolvedTimeZone)
             resolvedNoFixedEndDateTime -> parsedStart
             else -> null
         } ?: return null
@@ -321,7 +351,7 @@ data class EventApiDto(
             address = address,
             start = parsedStart,
             end = parsedEnd,
-            timeZone = timeZone?.trim()?.takeIf(String::isNotBlank) ?: "UTC",
+            timeZone = resolvedTimeZone,
             priceCents = resolvedPriceCents,
             rating = rating,
             imageId = imageId ?: "",
@@ -404,6 +434,41 @@ data class EventApiDto(
 @Serializable
 data class EventsResponseDto(
     val events: List<EventApiDto> = emptyList(),
+)
+
+@Serializable
+data class EventTemplateApiDto(
+    val id: String? = null,
+    val name: String? = null,
+    val description: String? = null,
+    val sourceEventId: String? = null,
+    val ownerUserId: String? = null,
+    val organizationId: String? = null,
+    val sportId: String? = null,
+    val eventType: String? = null,
+    val createdAt: String? = null,
+    val updatedAt: String? = null,
+)
+
+@Serializable
+data class EventTemplatesResponseDto(
+    val templates: List<EventTemplateApiDto> = emptyList(),
+)
+
+@Serializable
+data class EventTemplateResponseDto(
+    val template: EventTemplateApiDto? = null,
+)
+
+@Serializable
+data class CreateEventTemplateRequestDto(
+    val sourceEventId: String,
+)
+
+@Serializable
+data class SeedEventTemplateRequestDto(
+    val newEventId: String,
+    val newStartDate: String,
 )
 
 @Serializable

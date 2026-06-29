@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.data.dataTypes
 
 import androidx.room.Entity
+import androidx.room.Ignore
 import androidx.room.PrimaryKey
 import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
 import com.razumly.mvp.core.data.util.toNameCase
@@ -30,8 +31,14 @@ data class UserData(
     val notificationSettings: NotificationSettings = defaultNotificationSettings(),
     @PrimaryKey override val id: String,
 ) : MVPDocument, DisplayableEntity {
-    override val displayName: String get() = fullName
-    override val imageUrl: String? get() = profileImageId
+    @Ignore
+    override var displayName: String = ""
+        get() = fullName
+        set(value) { field = value }
+    @Ignore
+    override var imageUrl: String? = null
+        get() = profileImageId
+        set(value) { field = value }
 
     companion object {
         const val NAME_HIDDEN_LABEL = "Name Hidden"
@@ -62,7 +69,8 @@ data class UserData(
         }
     }
 
-    val fullName: String
+    @Ignore
+    var fullName: String = ""
         get() {
             val explicitDisplayName = privacyDisplayName?.trim()?.takeIf(String::isNotBlank)
             if (explicitDisplayName != null) {
@@ -81,16 +89,21 @@ data class UserData(
             val normalizedHandle = userName.trim()
             return if (normalizedHandle.isNotBlank()) normalizedHandle else "User"
         }
+        set(value) { field = value }
 
-    val shouldRestrictSocialActions: Boolean
+    @Ignore
+    var shouldRestrictSocialActions: Boolean = false
         get() = isMinor || isIdentityHidden
+        set(value) { field = value }
 
-    val publicHandle: String?
+    @Ignore
+    var publicHandle: String? = null
         get() {
             if (isIdentityHidden) return null
             val normalizedHandle = userName.trim().ifBlank { "user" }
             return "@$normalizedHandle"
         }
+        set(value) { field = value }
 
     fun toUserDataDTO(): UserDataDTO {
         return UserDataDTO(

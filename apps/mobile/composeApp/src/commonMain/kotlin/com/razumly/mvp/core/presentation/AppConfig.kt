@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -54,7 +55,9 @@ sealed class AppConfig {
     ) : AppConfig()
 
     @Serializable
-    data object Create : AppConfig()
+    data class Create(
+        val seed: SeededEventTemplateDraft? = null,
+    ) : AppConfig()
 
     @Serializable
     data object ProfileHome : AppConfig()

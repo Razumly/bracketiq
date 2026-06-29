@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft
 
 interface INavigationHandler {
     fun navigateToMatch(match: MatchWithRelations, event: Event)
@@ -18,6 +19,9 @@ interface INavigationHandler {
     )
     fun navigateToChat(user: UserData? = null, chat: ChatGroupWithRelations? = null)
     fun navigateToCreate()
+    fun navigateToCreate(seed: SeededEventTemplateDraft) {
+        navigateToCreate()
+    }
     fun navigateToSearch()
     fun navigateToEvent(event: Event)
     fun navigateToOrganization(organizationId: String, initialTab: OrganizationDetailTab = OrganizationDetailTab.OVERVIEW)

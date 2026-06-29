@@ -1084,6 +1084,9 @@ fun EventDetailScreen(
             isHost
         }
     }
+    val canCreateTemplateFromCurrentEvent = remember(isHost, isTemplateEvent, selectedEvent.event.organizationId) {
+        isHost && !isTemplateEvent && selectedEvent.event.organizationId.isNullOrBlank()
+    }
     val canManageLeagueStandings = remember(
         currentUser.id,
         selectedEvent.event.hostId,
@@ -2392,12 +2395,18 @@ fun EventDetailScreen(
                                                 Text("Rebuild Without Placeholders")
                                             }
                                         }
-                                        Button(
-                                            onClick = { component.createTemplateFromCurrentEvent() },
-                                            enabled = !editedEvent.state.equals("TEMPLATE", ignoreCase = true),
-                                            colors = buttonColors,
+                                        if (
+                                            isHost &&
+                                            !editedEvent.state.equals("TEMPLATE", ignoreCase = true) &&
+                                            editedEvent.organizationId.isNullOrBlank()
                                         ) {
-                                            Text("Create Template")
+                                            Button(
+                                                onClick = { component.createTemplateFromCurrentEvent() },
+                                                enabled = true,
+                                                colors = buttonColors,
+                                            ) {
+                                                Text("Create Template")
+                                            }
                                         }
                                     }
                                 } else {
@@ -2474,13 +2483,7 @@ fun EventDetailScreen(
                                         )
                                     }
 
-                                    if (
-                                        selectedEvent.event.state != "TEMPLATE" &&
-                                        (
-                                            selectedEvent.event.organizationId.isNullOrBlank() ||
-                                                isHost
-                                            )
-                                    ) {
+                                    if (canCreateTemplateFromCurrentEvent) {
                                         DropdownMenuItem(
                                             text = { Text("Create Template") },
                                             onClick = {

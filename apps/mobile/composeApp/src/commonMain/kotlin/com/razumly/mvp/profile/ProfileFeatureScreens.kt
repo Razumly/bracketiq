@@ -69,6 +69,7 @@ import com.razumly.mvp.core.data.dataTypes.staffInviteRoleLabel
 import com.razumly.mvp.core.data.repositories.DiscountCode
 import com.razumly.mvp.core.data.repositories.DiscountOffer
 import com.razumly.mvp.core.data.repositories.DiscountTarget
+import com.razumly.mvp.core.data.repositories.EventTemplateSummary
 import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
 import com.razumly.mvp.core.data.repositories.ProfileDocumentType
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
@@ -86,6 +87,7 @@ import io.github.ismoy.imagepickerkmp.domain.models.MimeType
 import io.github.ismoy.imagepickerkmp.presentation.ui.components.GalleryPickerLauncher
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Clock
 
 private enum class DiscountValueMode {
     PERCENT,
@@ -1014,7 +1016,7 @@ fun ProfileEventTemplatesScreen(component: ProfileComponent) {
                 templatesState.templates.forEach { template ->
                     EventTemplateCard(
                         template = template,
-                        onOpenTemplate = { component.openEventTemplate(template) },
+                        onUseTemplate = component::useEventTemplate,
                     )
                 }
             }
@@ -2902,9 +2904,11 @@ private fun formatRelationship(rawRelationship: String?): String {
 
 @Composable
 private fun EventTemplateCard(
-    template: Event,
-    onOpenTemplate: () -> Unit,
+    template: EventTemplateSummary,
+    onUseTemplate: (EventTemplateSummary, kotlin.time.Instant) -> Unit,
 ) {
+    var showStartDatePicker by rememberSaveable(template.id) { mutableStateOf(false) }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -2914,35 +2918,56 @@ private fun EventTemplateCard(
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = "Event Template",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-                text = template.name.ifBlank { "Untitled Template" },
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = "Starts: ${formatTemplateDateTime(template.start)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = "Ends: ${formatTemplateDateTime(template.end)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Button(
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Event Template",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = template.name.ifBlank { "Untitled Template" },
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                template.description?.takeIf(String::isNotBlank)?.let { description ->
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                template.updatedAt?.let { updatedAt ->
+                    Text(
+                        text = "Updated: ${formatTemplateDateTime(updatedAt)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            OutlinedButton(
                 modifier = Modifier.fillMaxWidth(),
-                onClick = onOpenTemplate,
+                onClick = { showStartDatePicker = true },
             ) {
-                Text("Open template")
+                Text("Use Template")
             }
         }
     }
+
+    PlatformDateTimePicker(
+        onDateSelected = { selected ->
+            showStartDatePicker = false
+            selected?.let { startDate ->
+                onUseTemplate(template, startDate)
+            }
+        },
+        onDismissRequest = { showStartDatePicker = false },
+        showPicker = showStartDatePicker,
+        getTime = false,
+        canSelectPast = false,
+        initialDate = Clock.System.now(),
+    )
 }
 
 private fun normalizeDateInput(rawDate: String?): String {

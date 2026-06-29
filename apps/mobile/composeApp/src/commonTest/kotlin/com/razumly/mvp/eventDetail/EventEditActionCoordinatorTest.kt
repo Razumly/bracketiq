@@ -256,13 +256,8 @@ class EventEditActionCoordinatorTest {
 
         val alreadyTemplate = coordinator.runCreateTemplateAction(
             sourceEvent = Event(id = "template-1", state = "TEMPLATE"),
-            prepareTemplate = {
-                events += "prepare-existing"
-                PreparedTemplateForCreate(event = Event())
-            },
-            createTemplate = {
-                events += "create-existing"
-                Event()
+            createTemplate = { sourceEventId ->
+                events += "create-existing:$sourceEventId"
             },
             showLoading = { message -> events += "show:$message" },
             hideLoading = { events += "hide" },
@@ -274,16 +269,25 @@ class EventEditActionCoordinatorTest {
         )
         assertEquals(emptyList(), events)
 
-        val createdTemplate = Event(id = "template-2", state = "TEMPLATE")
+        val organizationManaged = coordinator.runCreateTemplateAction(
+            sourceEvent = Event(id = "event-org", state = "PUBLISHED", organizationId = "org-1"),
+            createTemplate = { sourceEventId ->
+                events += "create-org:$sourceEventId"
+            },
+            showLoading = { message -> events += "show:$message" },
+            hideLoading = { events += "hide" },
+        )
+
+        assertEquals(
+            EventTemplateCreateResult.OrganizationManaged("Create organization event templates from the web app."),
+            organizationManaged,
+        )
+        assertEquals(emptyList(), events)
+
         val created = coordinator.runCreateTemplateAction(
             sourceEvent = Event(id = "event-1", state = "DRAFT"),
-            prepareTemplate = {
-                events += "prepare"
-                PreparedTemplateForCreate(event = createdTemplate)
-            },
-            createTemplate = { payload ->
-                events += "create:${payload.event.id}"
-                payload.event
+            createTemplate = { sourceEventId ->
+                events += "create:$sourceEventId"
             },
             showLoading = { message -> events += "show:$message" },
             hideLoading = { events += "hide" },
@@ -296,8 +300,7 @@ class EventEditActionCoordinatorTest {
         assertEquals(
             listOf(
                 "show:Creating template ...",
-                "prepare",
-                "create:template-2",
+                "create:event-1",
                 "hide",
             ),
             events,

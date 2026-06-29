@@ -26,6 +26,7 @@ import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.StartupAuthState
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.UserScheduleSnapshot
+import com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft
 import com.razumly.mvp.core.presentation.AppConfig
 import com.razumly.mvp.core.presentation.CenterNavAction
 import com.razumly.mvp.core.presentation.EventDetailInitialTab
@@ -94,6 +95,7 @@ class RootComponent(
     }
 
     private val navigation = StackNavigation<AppConfig>()
+    private var pendingCreateSeed: SeededEventTemplateDraft? = null
     private val _koin = getKoin()
     private val scopeExceptionHandler = CoroutineExceptionHandler { _, throwable ->
         when (throwable) {
@@ -473,7 +475,7 @@ class RootComponent(
         when (page) {
             is AppConfig.Search -> navigation.replaceAll(AppConfig.Search())
             AppConfig.ChatList -> navigation.replaceAll(AppConfig.ChatList)
-            AppConfig.Create -> navigation.replaceAll(AppConfig.Create)
+            is AppConfig.Create -> navigation.replaceAll(AppConfig.Create())
             AppConfig.Schedule -> navigation.replaceAll(AppConfig.Schedule)
             AppConfig.ProfileHome -> navigation.replaceAll(AppConfig.ProfileHome)
             else -> {}
@@ -782,9 +784,18 @@ class RootComponent(
     }
 
     override fun navigateToCreate() {
+        openCreate(seed = null)
+    }
+
+    override fun navigateToCreate(seed: SeededEventTemplateDraft) {
+        openCreate(seed = seed)
+    }
+
+    private fun openCreate(seed: SeededEventTemplateDraft?) {
         setDefaultNavigationDirection()
-        navigation.pushNew(AppConfig.Create)
-        _selectedPage.value = AppConfig.Create
+        pendingCreateSeed = seed
+        navigation.pushNew(AppConfig.Create())
+        _selectedPage.value = AppConfig.Create()
     }
 
     override fun navigateToEvent(event: Event) {
@@ -901,10 +912,14 @@ class RootComponent(
             _koin.get { parametersOf(componentContext, config.user, config.chat, this@RootComponent) }
         )
 
-        AppConfig.Create -> Child.Create(
-            _koin.get { parametersOf(componentContext, ::onEventCreated) },
-            _koin.get { parametersOf(componentContext) }
-        )
+        is AppConfig.Create -> {
+            val createSeed = config.seed ?: pendingCreateSeed
+            pendingCreateSeed = null
+            Child.Create(
+                _koin.get { parametersOf(componentContext, ::onEventCreated, createSeed) },
+                _koin.get { parametersOf(componentContext) }
+            )
+        }
 
         AppConfig.ProfileHome -> Child.Profile(
             _koin.get {

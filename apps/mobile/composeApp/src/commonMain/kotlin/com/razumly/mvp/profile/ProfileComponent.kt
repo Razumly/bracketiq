@@ -41,6 +41,7 @@ import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.DiscountCode
 import com.razumly.mvp.core.data.repositories.DiscountOffer
 import com.razumly.mvp.core.data.repositories.DiscountTarget
+import com.razumly.mvp.core.data.repositories.EventTemplateSummary
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
@@ -62,6 +63,7 @@ import com.razumly.mvp.core.presentation.util.convertPhotoResultToUploadFile
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.Platform
+import com.razumly.mvp.core.util.newId
 import com.razumly.mvp.eventDetail.DiscountCodePromptState
 import io.github.aakira.napier.Napier
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
@@ -82,6 +84,7 @@ import org.koin.mp.KoinPlatform.getKoin
 import kotlin.native.ObjCName
 import kotlin.coroutines.resume
 import kotlin.time.Clock
+import kotlin.time.Instant
 
 data class ProfilePaymentPlan(
     val bill: Bill,
@@ -155,7 +158,7 @@ data class ProfileMembershipsState(
 
 data class ProfileEventTemplatesState(
     val isLoading: Boolean = false,
-    val templates: List<Event> = emptyList(),
+    val templates: List<EventTemplateSummary> = emptyList(),
     val error: String? = null,
 )
 
@@ -471,6 +474,7 @@ interface ProfileComponent : IPaymentProcessor {
     fun navigateToPaymentPlans()
     fun navigateToMemberships()
     fun navigateToEventTemplates()
+    fun useEventTemplate(template: EventTemplateSummary, newStartDate: Instant)
     fun navigateToChildren()
     fun navigateToConnections()
     fun navigateToDocuments()
@@ -490,7 +494,6 @@ interface ProfileComponent : IPaymentProcessor {
     fun setNotificationSetting(type: String, channel: String, enabled: Boolean)
     fun saveNotificationSettings()
     fun refreshEventTemplates()
-    fun openEventTemplate(event: Event)
     fun manageStripeAccountOnboarding()
     fun manageStripeAccount()
     fun refreshPaymentPlans()
@@ -853,6 +856,31 @@ class DefaultProfileComponent(
         push(ProfileConfig.EventTemplates)
     }
 
+    override fun useEventTemplate(template: EventTemplateSummary, newStartDate: Instant) {
+        val templateId = template.id.trim()
+        if (templateId.isEmpty()) {
+            _errorState.value = ErrorMessage("Template id is missing.")
+            return
+        }
+
+        scope.launch {
+            loadingHandler?.showLoading("Starting from template...")
+            eventRepository.seedEventTemplate(
+                templateId = templateId,
+                newEventId = newId(),
+                newStartDate = newStartDate,
+            ).onSuccess { seed ->
+                loadingHandler?.hideLoading()
+                navigationHandler.navigateToCreate(seed)
+            }.onFailure { throwable ->
+                loadingHandler?.hideLoading()
+                _errorState.value = ErrorMessage(
+                    throwable.userMessage("Failed to start event from template."),
+                )
+            }
+        }
+    }
+
     override fun navigateToChildren() {
         push(ProfileConfig.Children)
     }
@@ -1048,7 +1076,11 @@ class DefaultProfileComponent(
                 result.onSuccess { templates ->
                     _eventTemplatesState.value = ProfileEventTemplatesState(
                         isLoading = false,
-                        templates = templates.sortedByDescending { it.start },
+                        templates = templates.sortedWith(
+                            compareByDescending<EventTemplateSummary> { it.updatedAt }
+                                .thenByDescending { it.createdAt }
+                                .thenBy { it.name.lowercase() },
+                        ),
                         error = null,
                     )
                 }.onFailure { throwable ->
@@ -1059,10 +1091,6 @@ class DefaultProfileComponent(
                 }
             }
         }
-    }
-
-    override fun openEventTemplate(event: Event) {
-        navigationHandler.navigateToEvent(event)
     }
 
     override fun refreshMySchedule() {

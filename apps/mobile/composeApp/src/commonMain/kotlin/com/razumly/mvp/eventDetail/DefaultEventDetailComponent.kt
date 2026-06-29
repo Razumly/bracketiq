@@ -2316,35 +2316,16 @@ class DefaultEventDetailComponent(
             val sourceEvent = if (editDraftCoordinator.isEditing.value) editDraftCoordinator.editedEvent.value else selectedEvent.value
             when (val result = editActionCoordinator.runCreateTemplateAction(
                 sourceEvent = sourceEvent,
-                prepareTemplate = {
-                    EventTemplateCreateBuilder.prepare(
-                        EventTemplateCreateInput(
-                            sourceEvent = sourceEvent,
-                            currentUserId = currentUser.value.id,
-                            sourceSport = sportsCatalogCoordinator.sportForId(sourceEvent.sportId),
-                            isEditing = editDraftCoordinator.isEditing.value,
-                            editableFields = editDraftCoordinator.editableFields.value,
-                            relationFields = eventFields.value.map { relation -> relation.field },
-                            editableTimeSlots = editDraftCoordinator.editableLeagueTimeSlots.value,
-                            relationTimeSlots = eventWithRelations.value.timeSlots,
-                            editableLeagueScoringConfig = editDraftCoordinator.editableLeagueScoringConfig.value,
-                            nextId = ::newId,
-                        ),
-                    )
-                },
-                createTemplate = { templatePayload ->
-                    eventRepository.createEvent(
-                        newEvent = templatePayload.event,
-                        requiredTemplateIds = emptyList(),
-                        leagueScoringConfig = templatePayload.leagueScoringConfig,
-                        fields = templatePayload.fields,
-                        timeSlots = templatePayload.timeSlots,
-                    ).getOrThrow()
+                createTemplate = { sourceEventId ->
+                    eventRepository.createEventTemplateFromEvent(sourceEventId).getOrThrow()
                 },
                 showLoading = { message -> loadingHandler.showLoading(message) },
                 hideLoading = loadingHandler::hideLoading,
             )) {
                 is EventTemplateCreateResult.AlreadyTemplate -> {
+                    _errorState.value = ErrorMessage(result.message)
+                }
+                is EventTemplateCreateResult.OrganizationManaged -> {
                     _errorState.value = ErrorMessage(result.message)
                 }
                 is EventTemplateCreateResult.Success -> {

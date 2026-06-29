@@ -3,6 +3,7 @@
 package com.razumly.mvp.core.data.dataTypes
 
 import androidx.room.Entity
+import androidx.room.Ignore
 import androidx.room.PrimaryKey
 import androidx.room.TypeConverters
 import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
@@ -107,15 +108,39 @@ data class Event(
     val requiredTemplateIds: List<String> = emptyList(),
     @Transient val lastUpdated: Instant = Clock.System.now(),
 ) : MVPDocument {
-    val price: Double get() = priceCents.toDouble() / 100.0
+    @Ignore
+    var price: Double = 0.0
+        get() = priceCents.toDouble() / 100.0
+        set(value) { field = value }
 
-    val latitude: Double get() = coordinates.getOrNull(1) ?: 0.0
-    val longitude: Double get() = coordinates.getOrNull(0) ?: 0.0
-    val lat: Double get() = latitude
-    val long: Double get() = longitude
-    val freeAgents: List<String> get() = freeAgentIds
-    val waitList: List<String> get() = waitListIds
-    val playerIds: List<String> get() = userIds
+    @Ignore
+    var latitude: Double = 0.0
+        get() = coordinates.getOrNull(1) ?: 0.0
+        set(value) { field = value }
+    @Ignore
+    var longitude: Double = 0.0
+        get() = coordinates.getOrNull(0) ?: 0.0
+        set(value) { field = value }
+    @Ignore
+    var lat: Double = 0.0
+        get() = latitude
+        set(value) { field = value }
+    @Ignore
+    var long: Double = 0.0
+        get() = longitude
+        set(value) { field = value }
+    @Ignore
+    var freeAgents: List<String> = emptyList()
+        get() = freeAgentIds
+        set(value) { field = value }
+    @Ignore
+    var waitList: List<String> = emptyList()
+        get() = waitListIds
+        set(value) { field = value }
+    @Ignore
+    var playerIds: List<String> = emptyList()
+        get() = userIds
+        set(value) { field = value }
 }
 
 const val DEFAULT_EVENT_SEED_COLOR_ARGB: Int = -9781761

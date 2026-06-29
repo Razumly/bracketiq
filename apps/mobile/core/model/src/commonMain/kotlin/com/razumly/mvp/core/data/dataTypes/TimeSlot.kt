@@ -2,8 +2,34 @@ package com.razumly.mvp.core.data.dataTypes
 
 import kotlinx.serialization.Contextual
 import kotlinx.serialization.Serializable
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
+
+private val dateOnlyPattern = Regex("""^\d{4}-\d{2}-\d{2}$""")
+private val dateTimeWithoutSecondsPattern = Regex("""^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$""")
+private val localDateTimePattern = Regex("""^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$""")
+
+@OptIn(ExperimentalTime::class)
+private fun parseSlotInstant(value: String, timeZone: String): Instant {
+    val trimmed = value.trim()
+    runCatching { Instant.parse(trimmed) }
+        .getOrNull()
+        ?.let { return it }
+
+    val normalized = when {
+        dateOnlyPattern.matches(trimmed) -> "${trimmed}T00:00:00"
+        dateTimeWithoutSecondsPattern.matches(trimmed) -> "${trimmed}:00"
+        localDateTimePattern.matches(trimmed) -> trimmed
+        else -> trimmed
+    }
+    val zone = runCatching {
+        TimeZone.of(timeZone.trim().takeIf(String::isNotBlank) ?: "UTC")
+    }.getOrDefault(TimeZone.UTC)
+    return LocalDateTime.parse(normalized).toInstant(zone)
+}
 
 @Serializable
 @OptIn(ExperimentalTime::class)
@@ -32,6 +58,7 @@ data class TimeSlot(
 @Serializable
 @OptIn(ExperimentalTime::class)
 data class TimeSlotDTO(
+    val id: String? = null,
     val dayOfWeek: Int? = null,
     val daysOfWeek: List<Int>? = null,
     val divisions: List<String>? = null,
@@ -63,10 +90,10 @@ data class TimeSlotDTO(
                 ?: emptyList(),
             startTimeMinutes = startTimeMinutes,
             endTimeMinutes = endTimeMinutes,
-            startDate = Instant.parse(startDate),
+            startDate = parseSlotInstant(startDate, timeZone),
             timeZone = timeZone,
             repeating = repeating,
-            endDate = endDate?.let(Instant::parse),
+            endDate = endDate?.let { parseSlotInstant(it, timeZone) },
             scheduledFieldId = scheduledFieldIds?.firstOrNull() ?: scheduledFieldId,
             scheduledFieldIds = (scheduledFieldIds ?: scheduledFieldId?.let(::listOf) ?: emptyList())
                 .map(String::trim)

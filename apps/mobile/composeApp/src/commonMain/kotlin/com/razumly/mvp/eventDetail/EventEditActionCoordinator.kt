@@ -64,6 +64,7 @@ internal sealed class EventSaveActionResult {
 
 internal sealed class EventTemplateCreateResult {
     data class AlreadyTemplate(val message: String) : EventTemplateCreateResult()
+    data class OrganizationManaged(val message: String) : EventTemplateCreateResult()
     data class Success(val message: String) : EventTemplateCreateResult()
     data class Failure(
         val throwable: Throwable,
@@ -184,18 +185,22 @@ internal class EventEditActionCoordinator {
 
     suspend fun runCreateTemplateAction(
         sourceEvent: Event,
-        prepareTemplate: () -> PreparedTemplateForCreate,
-        createTemplate: suspend (PreparedTemplateForCreate) -> Event,
+        createTemplate: suspend (String) -> Unit,
         showLoading: (String) -> Unit,
         hideLoading: () -> Unit,
     ): EventTemplateCreateResult {
         if (sourceEvent.state.equals("TEMPLATE", ignoreCase = true)) {
             return EventTemplateCreateResult.AlreadyTemplate("This event is already a template.")
         }
+        if (!sourceEvent.organizationId.isNullOrBlank()) {
+            return EventTemplateCreateResult.OrganizationManaged(
+                "Create organization event templates from the web app.",
+            )
+        }
 
         showLoading("Creating template ...")
         return try {
-            createTemplate(prepareTemplate())
+            createTemplate(sourceEvent.id)
             EventTemplateCreateResult.Success("Template created and added to your templates.")
         } catch (throwable: Throwable) {
             EventTemplateCreateResult.Failure(

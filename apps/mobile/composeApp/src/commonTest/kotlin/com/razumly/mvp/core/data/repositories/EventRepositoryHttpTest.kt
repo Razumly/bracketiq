@@ -1297,7 +1297,7 @@ class EventRepositoryHttpTest {
     }
 
     @Test
-    fun getEventTemplatesByHostFlow_requests_template_state_and_returns_templates() = runTest {
+    fun getEventTemplatesByHostFlow_requests_event_templates_endpoint_and_returns_templates() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()
         val db = EventRepositoryHttp_FakeDatabaseService(
@@ -1308,27 +1308,23 @@ class EventRepositoryHttpTest {
         val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
 
         val engine = MockEngine { request ->
-            assertEquals("/api/events", request.url.encodedPath)
+            assertEquals("/api/event-templates", request.url.encodedPath)
             assertEquals(HttpMethod.Get, request.method)
             assertEquals("h1", request.url.parameters["hostId"])
-            assertEquals("TEMPLATE", request.url.parameters["state"])
             assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
 
             respond(
                 content = """
                     {
-                      "events": [
+                      "templates": [
                         {
                           "id": "tmpl_1",
                           "name": "Template One",
-                          "hostId": "h1",
-                          "state": "TEMPLATE",
-                          "start": "2026-02-10T00:00:00Z",
-                          "end": "2026-02-10T01:00:00Z",
-                          "coordinates": [-80.0, 25.0],
+                          "ownerUserId": "h1",
+                          "sourceEventId": "event_1",
+                          "updatedAt": "2026-02-10T00:00:00Z",
                           "eventType": "EVENT",
-                          "userIds": [],
-                          "teamIds": []
+                          "organizationId": null
                         }
                       ]
                     }
@@ -1350,7 +1346,152 @@ class EventRepositoryHttpTest {
 
         assertEquals(1, templates.size)
         assertEquals("tmpl_1", templates.first().id)
-        assertEquals("TEMPLATE", templates.first().state)
+        assertEquals("Template One", templates.first().name)
+        assertEquals("event_1", templates.first().sourceEventId)
+        assertEquals(Instant.parse("2026-02-10T00:00:00Z"), templates.first().updatedAt)
+    }
+
+    @Test
+    fun createEventTemplateFromEvent_posts_source_event_id_and_returns_template() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/event-templates", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "template": {
+                        "id": "tmpl_2",
+                        "name": "Template Two",
+                        "ownerUserId": "u1",
+                        "sourceEventId": "event_2",
+                        "createdAt": "2026-02-11T00:00:00Z",
+                        "updatedAt": "2026-02-11T00:05:00Z",
+                        "eventType": "LEAGUE"
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.Created,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val template = repo.createEventTemplateFromEvent(" event_2 ").getOrThrow()
+
+        assertTrue(capturedBody.contains("\"sourceEventId\":\"event_2\""))
+        assertFalse(capturedBody.contains("\"event\""))
+        assertFalse(capturedBody.contains("\"id\""))
+        assertEquals("tmpl_2", template.id)
+        assertEquals("Template Two", template.name)
+        assertEquals("event_2", template.sourceEventId)
+        assertEquals(Instant.parse("2026-02-11T00:05:00Z"), template.updatedAt)
+    }
+
+    @Test
+    fun seedEventTemplate_posts_start_date_and_returns_seeded_draft_bundle() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/event-templates/tmpl%202/seed", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "event": {
+                        "id": "event_seeded",
+                        "name": "Seeded Template Event",
+                        "hostId": "u1",
+                        "start": "2026-07-01T00:00:00",
+                        "end": "2026-07-01T02:00:00",
+                        "timeZone": "UTC",
+                        "eventType": "LEAGUE",
+                        "divisions": ["open"],
+                        "fieldIds": ["field_1"],
+                        "timeSlotIds": ["slot_1"],
+                        "fields": [
+                          {
+                            "id": "field_1",
+                            "name": "Template Court",
+                            "divisions": ["open"]
+                          }
+                        ],
+                        "timeSlots": [
+	                          {
+	                            "id": "slot_1",
+	                            "dayOfWeek": 3,
+	                            "startTimeMinutes": 540,
+	                            "endTimeMinutes": 660,
+	                            "startDate": "2026-07-01T00:00:00",
+	                            "endDate": "2026-07-01T02:00:00",
+	                            "repeating": false,
+	                            "scheduledFieldId": "field_1",
+	                            "scheduledFieldIds": ["field_1"],
+	                            "price": 0,
+	                            "divisions": ["open"]
+	                          }
+                        ],
+                        "leagueScoringConfig": {
+                          "id": "cfg_1",
+                          "pointsForWin": 3
+                        }
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val seed = repo.seedEventTemplate(
+            templateId = " tmpl 2 ",
+            newEventId = " event_seeded ",
+            newStartDate = Instant.parse("2026-07-01T00:00:00Z"),
+        ).getOrThrow()
+
+        assertTrue(capturedBody.contains("\"newEventId\":\"event_seeded\""))
+        assertTrue(capturedBody.contains("\"newStartDate\":\"2026-07-01T00:00:00Z\""))
+        assertEquals("event_seeded", seed.event.id)
+        assertEquals("Seeded Template Event", seed.event.name)
+        assertEquals(listOf("field_1"), seed.fields.map(Field::id))
+        assertEquals(listOf("slot_1"), seed.timeSlots.map { slot -> slot.id })
+        assertEquals(3, seed.leagueScoringConfig?.pointsForWin)
     }
 
     @Test
