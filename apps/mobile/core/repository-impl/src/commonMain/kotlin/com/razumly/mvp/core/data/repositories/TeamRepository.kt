@@ -1,5 +1,7 @@
 package com.razumly.mvp.core.data.repositories
 
+import com.razumly.mvp.core.analytics.AnalyticsEvent
+import com.razumly.mvp.core.analytics.AnalyticsTracker
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.Team
@@ -748,7 +750,16 @@ class TeamRepository(
                     createdBy = created.captainId,
                 )
             },
-            onReturn = { it },
+            onReturn = { created ->
+                AnalyticsTracker.capture(
+                    AnalyticsEvent.TeamCreated,
+                    mapOf(
+                        "team_id" to created.id,
+                        "has_organization" to (!created.organizationId.isNullOrBlank()).toString(),
+                    ),
+                )
+                created
+            },
         )
     }
 
@@ -851,6 +862,15 @@ class TeamRepository(
         ensureUsersCachedForTeam(result.team)
         databaseService.getTeamDao.upsertTeamWithRelations(result.team)
         runCatching { userRepository.getCurrentAccount().getOrThrow() }
+        AnalyticsTracker.capture(
+            if (result.isActive()) AnalyticsEvent.TeamRegistrationCompleted else AnalyticsEvent.TeamRegistrationStarted,
+            mapOf(
+                "team_id" to result.team.id,
+                "requires_parent_approval" to result.requiresParentApproval.toString(),
+                "requires_additional_signing" to result.requiresAdditionalSigning().toString(),
+                "status" to (result.registrationStatus ?: result.registration?.status ?: "unknown"),
+            ),
+        )
         result
     }
 

@@ -6,6 +6,8 @@ import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.mmk.kmpnotifier.notification.NotifierManager
 import com.mmk.kmpnotifier.notification.configuration.NotificationPlatformConfiguration
+import com.posthog.android.PostHogAndroid
+import com.posthog.android.PostHogAndroidConfig
 import com.razumly.mvp.core.auth.MatchOperationNetworkSync
 import com.razumly.mvp.core.auth.configureWatchSyncContext
 import com.razumly.mvp.core.data.repositories.configureAppUpdateUrlOpener
@@ -32,6 +34,7 @@ class MvpApp : Application() {
         configureSecureAuthTokenStore(applicationContext)
         configureWatchSyncContext(applicationContext)
         configureAppUpdateUrlOpener(applicationContext)
+        initializePostHog()
         initializeFirebase()
         NotifierManager.initialize(
             configuration = NotificationPlatformConfiguration.Android(
@@ -45,6 +48,31 @@ class MvpApp : Application() {
         KoinInitializer(applicationContext).init()
         MatchOperationNetworkSync.start(applicationContext)
     }
+
+    private fun initializePostHog() {
+        val token = BuildConfig.POSTHOG_PROJECT_TOKEN.trimConfigValue()
+        if (token.isBlank()) {
+            Napier.d(tag = "PostHog", message = "PostHog project token missing; analytics disabled.")
+            return
+        }
+
+        val host = BuildConfig.POSTHOG_HOST.trimConfigValue().ifBlank { "https://us.i.posthog.com" }
+        runCatching {
+            PostHogAndroid.setup(
+                context = this,
+                config = PostHogAndroidConfig(
+                    apiKey = token,
+                    host = host,
+                ),
+            )
+        }.onSuccess {
+            Napier.i(tag = "PostHog", message = "PostHog initialized for Android.")
+        }.onFailure { throwable ->
+            Napier.w(tag = "PostHog", throwable = throwable, message = "PostHog initialization failed.")
+        }
+    }
+
+    private fun String.trimConfigValue(): String = trim().trim('"', '\'')
 
     private fun initializeFirebase() {
         val options = FirebaseOptions.fromResource(this)

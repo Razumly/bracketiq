@@ -202,6 +202,7 @@ kotlin {
                     exclude(module = "commons-logging")
                 }
                 implementation(libs.firebase.messaging)
+                implementation(libs.posthog.android)
                 implementation(libs.stripe.android)
                 implementation(libs.financial.connections)
                 implementation(libs.androidx.browser)

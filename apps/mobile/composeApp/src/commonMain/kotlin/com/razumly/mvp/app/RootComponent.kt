@@ -154,6 +154,7 @@ class RootComponent(
     val completedGuideIds: StateFlow<Set<String>> = _completedGuideIds.asStateFlow()
     private val _completedGuideIdsLoaded = MutableStateFlow(false)
     val completedGuideIdsLoaded: StateFlow<Boolean> = _completedGuideIdsLoaded.asStateFlow()
+    val currentUser: StateFlow<Result<UserData>> = userRepository.currentUser
 
     val childStack: Value<ChildStack<AppConfig, Child>> = childStack(
         source = navigation,

@@ -8,6 +8,7 @@ target 'iosApp' do
   pod 'FirebaseCore'
   pod 'FirebaseMessaging'
   pod 'FirebaseAnalytics'
+  pod 'PostHog', '~> 3.62.3'
 
   # (Your other pod dependencies go here…)
 end

@@ -24,6 +24,8 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
+import com.razumly.mvp.core.analytics.AnalyticsEvent
+import com.razumly.mvp.core.analytics.AnalyticsTracker
 import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
@@ -546,6 +548,14 @@ private const val STANDALONE_COMPLIANCE_PARENT_TEAM_ID = ""
 private const val KILOMETERS_PER_MILE = 1.60934
 
 private fun milesToKilometers(value: Double): Double = value * KILOMETERS_PER_MILE
+
+private fun Event.analyticsProperties(): Map<String, String> = buildMap {
+    put("event_id", id)
+    put("event_type", eventType.name)
+    put("team_signup", teamSignup.toString())
+    organizationId?.trim()?.takeIf(String::isNotBlank)?.let { put("organization_id", it) }
+    sportId?.trim()?.takeIf(String::isNotBlank)?.let { put("sport_id", it) }
+}
 
 private data class EventParticipantCacheScope(
     val eventId: String,
@@ -1824,6 +1834,10 @@ class EventRepository(
             databaseService.getEventDao.upsertEvent(event)
             persistEventRelations(event)
         }, onReturn = { event ->
+            AnalyticsTracker.capture(
+                AnalyticsEvent.EventCreated,
+                event.analyticsProperties(),
+            )
             event
         })
 
@@ -2195,6 +2209,14 @@ class EventRepository(
             val updatedEvent = response.event?.toEventOrNull() ?: event
             syncEventParticipantsAfterMutation(updatedEvent, occurrence)
 
+            AnalyticsTracker.capture(
+                AnalyticsEvent.EventRegistrationCompleted,
+                event.analyticsProperties() + mapOf(
+                    "registration_type" to "self",
+                    "joined_waitlist" to (eventAtCapacity && response.requiresParentApproval != true).toString(),
+                    "requires_parent_approval" to (response.requiresParentApproval == true).toString(),
+                ),
+            )
             SelfRegistrationResult(
                 requiresParentApproval = response.requiresParentApproval == true,
                 joinedWaitlist = eventAtCapacity && response.requiresParentApproval != true,
@@ -2298,6 +2320,15 @@ class EventRepository(
                     ?: error("Updated event not found after waitlist response.")
                 syncEventParticipantsAfterMutation(baseEvent, occurrence)
 
+                AnalyticsTracker.capture(
+                    AnalyticsEvent.EventRegistrationCompleted,
+                    mapOf(
+                        "event_id" to normalizedEventId,
+                        "registration_type" to "child",
+                        "joined_waitlist" to (waitlistResponse.requiresParentApproval != true).toString(),
+                        "requires_parent_approval" to (waitlistResponse.requiresParentApproval == true).toString(),
+                    ),
+                )
                 return@runCatching ChildRegistrationResult(
                     registrationStatus = if (waitlistResponse.requiresParentApproval == true) {
                         null
@@ -2318,6 +2349,16 @@ class EventRepository(
                 ),
             )
             response.error?.takeIf(String::isNotBlank)?.let { error(it) }
+            AnalyticsTracker.capture(
+                AnalyticsEvent.EventRegistrationCompleted,
+                mapOf(
+                    "event_id" to normalizedEventId,
+                    "registration_type" to "child",
+                    "joined_waitlist" to "false",
+                    "requires_parent_approval" to (response.requiresParentApproval == true).toString(),
+                    "requires_child_email" to (response.consent?.requiresChildEmail == true).toString(),
+                ),
+            )
             ChildRegistrationResult(
                 registrationStatus = response.registration?.status,
                 consentStatus = response.consent?.status ?: response.registration?.consentStatus,
@@ -2385,6 +2426,13 @@ class EventRepository(
             }.event?.toEventOrNull() ?: event
 
             syncEventParticipantsAfterMutation(updated, occurrence)
+            AnalyticsTracker.capture(
+                AnalyticsEvent.EventRegistrationCompleted,
+                event.analyticsProperties() + mapOf(
+                    "registration_type" to "team",
+                    "joined_waitlist" to updated.waitList.contains(team.id).toString(),
+                ),
+            )
         }
 
     override suspend fun moveTeamParticipantDivision(

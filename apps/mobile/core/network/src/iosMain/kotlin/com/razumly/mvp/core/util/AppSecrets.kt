@@ -60,6 +60,20 @@ object AppSecrets {
             fileType = "plist",
             valueKey = "mvpWebBaseUrl"
         ) ?: ""
+
+    val posthogProjectToken: String
+        get() = getStringResource(
+            filename = "Secrets",
+            fileType = "plist",
+            valueKey = "posthogProjectToken"
+        ) ?: ""
+
+    val posthogHost: String
+        get() = getStringResource(
+            filename = "Secrets",
+            fileType = "plist",
+            valueKey = "posthogHost"
+        ) ?: ""
 }
 
 internal fun getStringResource(

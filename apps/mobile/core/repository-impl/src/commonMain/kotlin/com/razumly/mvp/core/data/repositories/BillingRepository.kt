@@ -1,5 +1,7 @@
 package com.razumly.mvp.core.data.repositories
 
+import com.razumly.mvp.core.analytics.AnalyticsEvent
+import com.razumly.mvp.core.analytics.AnalyticsTracker
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.Bill
 import com.razumly.mvp.core.data.dataTypes.BillPayment
@@ -729,6 +731,18 @@ class BillingRepository(
         if (!response.error.isNullOrBlank()) {
             throw Exception(response.error)
         }
+        AnalyticsTracker.capture(
+            AnalyticsEvent.CheckoutStarted,
+            buildMap {
+                put("checkout_type", timeSlotContext?.let { "rental" } ?: "event_registration")
+                put("event_id", event.id)
+                put("event_type", event.eventType.name)
+                put("amount_cents", effectivePriceCents.toString())
+                normalizedTeamId?.let { put("team_id", it) }
+                normalizedDivisionId?.let { put("division_id", it) }
+                event.organizationId?.trim()?.takeIf(String::isNotBlank)?.let { put("organization_id", it) }
+            },
+        )
         response
     }
 
@@ -761,6 +775,13 @@ class BillingRepository(
         if (!response.error.isNullOrBlank()) {
             throw Exception(response.error)
         }
+        AnalyticsTracker.capture(
+            AnalyticsEvent.CheckoutStarted,
+            mapOf(
+                "checkout_type" to "team_registration",
+                "team_id" to normalizedTeamId,
+            ),
+        )
         response
     }
 
@@ -1358,6 +1379,14 @@ class BillingRepository(
         if (!response.error.isNullOrBlank()) {
             throw Exception(response.error)
         }
+        AnalyticsTracker.capture(
+            AnalyticsEvent.CheckoutStarted,
+            mapOf(
+                "checkout_type" to "bill_payment",
+                "bill_id" to billId,
+                "bill_payment_id" to billPaymentId,
+            ),
+        )
         response
     }
 
@@ -1568,6 +1597,13 @@ class BillingRepository(
         if (!response.error.isNullOrBlank()) {
             throw Exception(response.error)
         }
+        AnalyticsTracker.capture(
+            AnalyticsEvent.CheckoutStarted,
+            mapOf(
+                "checkout_type" to "product_purchase",
+                "product_id" to normalizedId,
+            ),
+        )
         response
     }
 
@@ -1593,6 +1629,13 @@ class BillingRepository(
         if (!response.error.isNullOrBlank()) {
             throw Exception(response.error)
         }
+        AnalyticsTracker.capture(
+            AnalyticsEvent.CheckoutStarted,
+            mapOf(
+                "checkout_type" to "product_subscription",
+                "product_id" to normalizedId,
+            ),
+        )
         response
     }
 

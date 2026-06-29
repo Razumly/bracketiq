@@ -5,11 +5,15 @@ import FirebaseMessaging
 import GoogleMaps
 import GoogleSignIn
 import IQKeyboardManagerSwift
+import PostHog
 import UserNotifications
 
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
     private static let appForegroundKey = "mvp_app_is_foreground"
     private static let fcmTokenDefaultsKey = "mvp_ios_fcm_token"
+    private static let analyticsCaptureNotification = Notification.Name("BracketIQAnalyticsCapture")
+    private static let analyticsIdentifyNotification = Notification.Name("BracketIQAnalyticsIdentify")
+    private static let analyticsResetNotification = Notification.Name("BracketIQAnalyticsReset")
     private let apiKey: String = {
         guard let filePath = Bundle.main.path(forResource: "Secrets", ofType: "plist") else {
             fatalError("Couldn't find file 'Secrets.plist'.")
@@ -27,6 +31,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
         
         FirebaseApp.configure()
+        initializePostHog()
         GMSServices.provideAPIKey(apiKey)
         Messaging.messaging().delegate = self
         UNUserNotificationCenter.current().delegate = self
@@ -50,6 +55,70 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
         
         return true
+    }
+
+    private func initializePostHog() {
+        guard let token = optionalSecret("posthogProjectToken")?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !token.isEmpty else {
+            print("PostHog project token missing; analytics disabled.")
+            return
+        }
+
+        let host = optionalSecret("posthogHost")?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let config = PostHogConfig(
+            projectToken: token,
+            host: host?.isEmpty == false ? host! : "https://us.i.posthog.com"
+        )
+        PostHogSDK.shared.setup(config)
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAnalyticsCapture(_:)),
+            name: AppDelegate.analyticsCaptureNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAnalyticsIdentify(_:)),
+            name: AppDelegate.analyticsIdentifyNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAnalyticsReset(_:)),
+            name: AppDelegate.analyticsResetNotification,
+            object: nil
+        )
+    }
+
+    private func optionalSecret(_ key: String) -> String? {
+        guard let filePath = Bundle.main.path(forResource: "Secrets", ofType: "plist"),
+              let plist = NSDictionary(contentsOfFile: filePath) else {
+            return nil
+        }
+        return plist.object(forKey: key) as? String
+    }
+
+    @objc private func handleAnalyticsCapture(_ notification: Notification) {
+        guard let event = notification.userInfo?["event"] as? String,
+              !event.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        let properties = notification.userInfo?["properties"] as? [String: Any] ?? [:]
+        PostHogSDK.shared.capture(event, properties: properties)
+    }
+
+    @objc private func handleAnalyticsIdentify(_ notification: Notification) {
+        guard let userId = notification.userInfo?["userId"] as? String,
+              !userId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        let properties = notification.userInfo?["properties"] as? [String: Any] ?? [:]
+        PostHogSDK.shared.identify(userId, userProperties: properties)
+    }
+
+    @objc private func handleAnalyticsReset(_ notification: Notification) {
+        PostHogSDK.shared.reset()
     }
     
     func application(_ application: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {

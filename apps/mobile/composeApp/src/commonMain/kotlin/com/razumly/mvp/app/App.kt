@@ -37,8 +37,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusManager
@@ -57,6 +59,7 @@ import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.arkivanov.decompose.router.stack.ChildStack
 import com.razumly.mvp.chat.ChatGroupScreen
 import com.razumly.mvp.chat.ChatListScreen
+import com.razumly.mvp.core.analytics.AnalyticsTracker
 import com.razumly.mvp.core.data.repositories.AppUpdatePrompt
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.MVPBottomNavBar
@@ -98,6 +101,7 @@ fun App(root: RootComponent) {
     val centerNavAction by root.centerNavAction.collectAsState()
     val completedGuideIds by root.completedGuideIds.collectAsState()
     val completedGuideIdsLoaded by root.completedGuideIdsLoaded.collectAsState()
+    val currentUserResult by root.currentUser.collectAsState()
 
     val popupHandler = remember { PopupHandlerImpl() }
     val loadingHandler = remember { LoadingHandlerImpl() }
@@ -109,10 +113,24 @@ fun App(root: RootComponent) {
     val guideController = remember(root) {
         GuideController(onGuideCompleted = root::markGuideCompleted)
     }
+    var analyticsUserId by remember { mutableStateOf<String?>(null) }
 
 
     LaunchedEffect(Unit) {
         root.requestInitialPermissions()
+    }
+
+    LaunchedEffect(currentUserResult) {
+        val userId = currentUserResult.getOrNull()?.id?.trim().orEmpty()
+        if (userId.isNotEmpty()) {
+            if (analyticsUserId != userId) {
+                AnalyticsTracker.identify(userId)
+                analyticsUserId = userId
+            }
+        } else if (analyticsUserId != null) {
+            AnalyticsTracker.reset()
+            analyticsUserId = null
+        }
     }
 
     // Handle error display from your existing HomeScreen logic

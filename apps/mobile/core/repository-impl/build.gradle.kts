@@ -46,6 +46,7 @@ kotlin {
                 implementation(libs.androidx.core)
                 implementation(libs.firebase.messaging)
                 implementation(libs.kotlinx.coroutines.android)
+                implementation(libs.posthog.android)
                 implementation(libs.play.services.wearable)
                 implementation("androidx.lifecycle:lifecycle-process:2.10.0")
             }

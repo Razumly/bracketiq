@@ -10,6 +10,8 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.auth.NoOpWatchAuthSync
 import com.razumly.mvp.core.auth.WatchAuthSync
+import com.razumly.mvp.core.analytics.AnalyticsEvent
+import com.razumly.mvp.core.analytics.AnalyticsTracker
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.AuthTokenStore
 import com.razumly.mvp.core.network.MvpApiClient
@@ -422,6 +424,10 @@ class UserRepository(
 
         cacheCurrentUserProfile(profile, prefetchChatTermsImmediately = true)
         _startupAuthState.value = StartupAuthState.Authenticated
+        AnalyticsTracker.capture(
+            AnalyticsEvent.UserLoggedIn,
+            mapOf("auth_method" to "email"),
+        )
         Napier.i(tag = USER_REPOSITORY_LOG_TAG) { "Email login succeeded for userId=${profile.id}" }
         profile
     }.onFailure { throwable ->
@@ -452,6 +458,10 @@ class UserRepository(
 
         cacheCurrentUserProfile(profile, prefetchChatTermsImmediately = true)
         _startupAuthState.value = StartupAuthState.Authenticated
+        AnalyticsTracker.capture(
+            AnalyticsEvent.UserLoggedIn,
+            mapOf("auth_method" to "google"),
+        )
         Napier.i(tag = USER_REPOSITORY_LOG_TAG) { "Google login succeeded for userId=${profile.id}" }
         profile
     }.onFailure { throwable ->
@@ -497,6 +507,10 @@ class UserRepository(
 
         cacheCurrentUserProfile(profile, prefetchChatTermsImmediately = true)
         _startupAuthState.value = StartupAuthState.Authenticated
+        AnalyticsTracker.capture(
+            AnalyticsEvent.UserLoggedIn,
+            mapOf("auth_method" to "apple"),
+        )
         Napier.i(tag = USER_REPOSITORY_LOG_TAG) { "Apple login succeeded for userId=${profile.id}" }
         profile
     }.onFailure { throwable ->
@@ -571,6 +585,10 @@ class UserRepository(
 
         cacheCurrentUserProfile(profile, prefetchChatTermsImmediately = true)
         _startupAuthState.value = StartupAuthState.Authenticated
+        AnalyticsTracker.capture(
+            AnalyticsEvent.UserSignedUp,
+            mapOf("auth_method" to "email"),
+        )
         Napier.i(tag = USER_REPOSITORY_LOG_TAG) { "Signup succeeded for userId=${profile.id}" }
         profile
     }.onFailure { throwable ->
