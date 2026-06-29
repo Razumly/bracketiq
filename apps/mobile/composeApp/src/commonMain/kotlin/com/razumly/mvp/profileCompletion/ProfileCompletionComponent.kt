@@ -3,10 +3,13 @@ package com.razumly.mvp.profileCompletion
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.SignupProfileField
 import com.razumly.mvp.core.data.repositories.SignupProfileSnapshot
+import com.razumly.mvp.core.presentation.util.convertPhotoResultToUploadFile
 import com.razumly.mvp.core.network.userMessage
+import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,15 +26,20 @@ interface ProfileCompletionComponent {
     val prefillProfile: StateFlow<SignupProfileSnapshot>
     val isSubmitting: StateFlow<Boolean>
     val errorMessage: StateFlow<String?>
+    val lastUploadedImageId: StateFlow<String?>
+    val isImageUploading: StateFlow<Boolean>
 
     fun clearError()
-    fun submit(firstName: String, lastName: String, userName: String, dateOfBirth: String)
+    fun onUploadSelected(photo: GalleryPhotoResult)
+    fun consumeUploadedImageSelection()
+    fun submit(firstName: String, lastName: String, userName: String, dateOfBirth: String, profileImageId: String?)
     fun logout()
 }
 
 class DefaultProfileCompletionComponent(
     componentContext: ComponentContext,
     private val userRepository: IUserRepository,
+    private val imageRepository: IImagesRepository,
 ) : ProfileCompletionComponent, ComponentContext by componentContext {
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -67,11 +75,42 @@ class DefaultProfileCompletionComponent(
     private val _errorMessage = MutableStateFlow<String?>(null)
     override val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
+    private val _lastUploadedImageId = MutableStateFlow<String?>(null)
+    override val lastUploadedImageId: StateFlow<String?> = _lastUploadedImageId.asStateFlow()
+
+    private val _isImageUploading = MutableStateFlow(false)
+    override val isImageUploading: StateFlow<Boolean> = _isImageUploading.asStateFlow()
+
     override fun clearError() {
         _errorMessage.value = null
     }
 
-    override fun submit(firstName: String, lastName: String, userName: String, dateOfBirth: String) {
+    override fun onUploadSelected(photo: GalleryPhotoResult) {
+        scope.launch {
+            _isImageUploading.value = true
+            _errorMessage.value = null
+            runCatching {
+                imageRepository.uploadImage(convertPhotoResultToUploadFile(photo)).getOrThrow()
+            }.onFailure { throwable ->
+                _errorMessage.value = throwable.userMessage("Failed to upload image.")
+            }.onSuccess { imageId ->
+                _lastUploadedImageId.value = imageId
+            }
+            _isImageUploading.value = false
+        }
+    }
+
+    override fun consumeUploadedImageSelection() {
+        _lastUploadedImageId.value = null
+    }
+
+    override fun submit(
+        firstName: String,
+        lastName: String,
+        userName: String,
+        dateOfBirth: String,
+        profileImageId: String?,
+    ) {
         scope.launch {
             _isSubmitting.value = true
             _errorMessage.value = null
@@ -80,6 +119,7 @@ class DefaultProfileCompletionComponent(
                 lastName = lastName,
                 userName = userName,
                 dateOfBirth = dateOfBirth,
+                profileImageId = profileImageId,
             ).onFailure { throwable ->
                 _errorMessage.value = throwable.userMessage("Failed to update your profile.")
             }

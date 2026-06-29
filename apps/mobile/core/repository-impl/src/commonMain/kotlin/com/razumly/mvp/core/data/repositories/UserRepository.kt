@@ -326,6 +326,7 @@ interface IUserRepository : IMVPRepository {
         lastName: String,
         userName: String,
         dateOfBirth: String,
+        profileImageId: String? = null,
     ): Result<UserData> = Result.failure(NotImplementedError("Profile completion is not implemented"))
 
     suspend fun getCurrentAccount(): Result<Unit>
@@ -1304,6 +1305,7 @@ class UserRepository(
         lastName: String,
         userName: String,
         dateOfBirth: String,
+        profileImageId: String?,
     ): Result<UserData> = runCatching {
         val currentUserData = currentUser.value.getOrNull()
         val currentId = currentUser.value.getOrNull()?.id
@@ -1315,6 +1317,7 @@ class UserRepository(
         val normalizedUserName = userName.trim().takeIf(String::isNotBlank)
         val normalizedDateOfBirth = normalizeDateOnly(dateOfBirth)
             ?: error("Birthday is required")
+        val normalizedProfileImageId = profileImageId?.trim()?.takeIf(String::isNotBlank)
 
         val request = UpdateUserRequestDto(
             data = UserUpdateDto(
@@ -1322,6 +1325,7 @@ class UserRepository(
                 lastName = normalizedLastName,
                 userName = normalizedUserName,
                 dateOfBirth = normalizedDateOfBirth,
+                profileImageId = normalizedProfileImageId,
             ),
         )
 
@@ -1336,11 +1340,13 @@ class UserRepository(
                 firstName = normalizeName(responseUser.firstName) ?: normalizedFirstName,
                 lastName = normalizeName(responseUser.lastName) ?: normalizedLastName,
                 userName = responseUser.userName ?: normalizedUserName ?: currentUserData?.userName.orEmpty(),
+                profileImageId = responseUser.profileImageId ?: normalizedProfileImageId ?: currentUserData?.profileImageId,
             )
             ?: currentUserData?.copy(
                 firstName = normalizedFirstName,
                 lastName = normalizedLastName,
                 userName = normalizedUserName ?: currentUserData.userName,
+                profileImageId = normalizedProfileImageId ?: currentUserData.profileImageId,
             )
             ?: error("Profile completion response missing user")
 

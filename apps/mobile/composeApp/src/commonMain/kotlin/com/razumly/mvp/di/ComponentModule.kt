@@ -176,6 +176,7 @@ val componentModule = module {
         DefaultProfileCompletionComponent(
             componentContext = componentContext,
             userRepository = get(),
+            imageRepository = get(),
         )
     }
 

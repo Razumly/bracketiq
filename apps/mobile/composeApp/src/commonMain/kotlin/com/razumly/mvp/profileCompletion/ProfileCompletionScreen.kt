@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -25,11 +26,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.repositories.SignupProfileField
+import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.StandardTextField
+import io.github.ismoy.imagepickerkmp.domain.models.MimeType
+import io.github.ismoy.imagepickerkmp.presentation.ui.components.GalleryPickerLauncher
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
@@ -40,12 +45,16 @@ fun ProfileCompletionScreen(component: ProfileCompletionComponent) {
     val prefillProfile by component.prefillProfile.collectAsState()
     val isSubmitting by component.isSubmitting.collectAsState()
     val errorMessage by component.errorMessage.collectAsState()
+    val lastUploadedImageId by component.lastUploadedImageId.collectAsState()
+    val isImageUploading by component.isImageUploading.collectAsState()
 
     var firstName by remember { mutableStateOf("") }
     var lastName by remember { mutableStateOf("") }
     var userName by remember { mutableStateOf("") }
     var dateOfBirth by remember { mutableStateOf("") }
+    var profileImageId by remember { mutableStateOf<String?>(null) }
     var showBirthdayPicker by remember { mutableStateOf(false) }
+    var showUploadImagePicker by remember { mutableStateOf(false) }
 
     LaunchedEffect(currentUser.id, prefillProfile) {
         if (firstName.isBlank()) {
@@ -60,6 +69,17 @@ fun ProfileCompletionScreen(component: ProfileCompletionComponent) {
         if (dateOfBirth.isBlank()) {
             dateOfBirth = prefillProfile.dateOfBirth.orEmpty()
         }
+        if (profileImageId.isNullOrBlank()) {
+            profileImageId = currentUser.profileImageId
+        }
+    }
+
+    LaunchedEffect(lastUploadedImageId) {
+        val uploadedId = lastUploadedImageId?.trim().orEmpty()
+        if (uploadedId.isNotBlank()) {
+            profileImageId = uploadedId
+            component.consumeUploadedImageSelection()
+        }
     }
 
     val missingSummary = remember(missingFields) {
@@ -73,6 +93,12 @@ fun ProfileCompletionScreen(component: ProfileCompletionComponent) {
                 SignupProfileField.USER_NAME -> "username"
             }
             }
+    }
+    val avatarDisplayName = remember(firstName, lastName, userName) {
+        listOf(firstName.trim(), lastName.trim())
+            .filter(String::isNotBlank)
+            .joinToString(" ")
+            .ifBlank { userName.trim().ifBlank { "User" } }
     }
 
     Box(
@@ -110,6 +136,50 @@ fun ProfileCompletionScreen(component: ProfileCompletionComponent) {
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSecondaryContainer,
                     )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                NetworkAvatar(
+                    displayName = avatarDisplayName,
+                    imageRef = profileImageId,
+                    size = 80.dp,
+                    contentDescription = "Profile photo",
+                    modifier = Modifier.size(80.dp),
+                )
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        text = "Profile photo (optional)",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Button(
+                        onClick = {
+                            component.clearError()
+                            showUploadImagePicker = true
+                        },
+                        enabled = !isSubmitting && !isImageUploading,
+                    ) {
+                        Text(if (isImageUploading) "Uploading..." else "Upload Photo")
+                    }
+                    if (!profileImageId.isNullOrBlank()) {
+                        OutlinedButton(
+                            onClick = {
+                                component.clearError()
+                                profileImageId = null
+                            },
+                            enabled = !isSubmitting && !isImageUploading,
+                        ) {
+                            Text("Remove Photo")
+                        }
+                    }
                 }
             }
 
@@ -190,10 +260,11 @@ fun ProfileCompletionScreen(component: ProfileCompletionComponent) {
                         lastName = lastName,
                         userName = userName,
                         dateOfBirth = dateOfBirth,
+                        profileImageId = profileImageId,
                     )
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
+                enabled = !isSubmitting && !isImageUploading,
             ) {
                 Text(if (isSubmitting) "Saving..." else "Continue")
             }
@@ -222,4 +293,21 @@ fun ProfileCompletionScreen(component: ProfileCompletionComponent) {
         showDate = true,
         canSelectPast = true,
     )
+
+    if (showUploadImagePicker) {
+        GalleryPickerLauncher(
+            onPhotosSelected = { photos ->
+                showUploadImagePicker = false
+                photos.firstOrNull()?.let(component::onUploadSelected)
+            },
+            onError = {
+                showUploadImagePicker = false
+            },
+            onDismiss = {
+                showUploadImagePicker = false
+            },
+            allowMultiple = false,
+            mimeTypes = listOf(MimeType.IMAGE_ALL),
+        )
+    }
 }

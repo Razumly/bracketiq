@@ -686,7 +686,7 @@ class UserRepositoryAuthTest {
     }
 
     @Test
-    fun completeRequiredProfile_includes_username_in_patch_payload() = runTest {
+    fun completeRequiredProfile_includes_username_and_profile_image_in_patch_payload() = runTest {
         val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("complete_token")
         val userDao = FakeUserDataDao()
         val db = UserRepositoryAuth_FakeDatabaseService(userDao)
@@ -737,6 +737,7 @@ class UserRepositoryAuthTest {
                                 "firstName":"Updated",
                                 "lastName":"Profile",
                                 "userName":"updated_user",
+                                "profileImageId":"profile_image_123",
                                 "teamIds":[],
                                 "friendIds":[],
                                 "friendRequestIds":[],
@@ -768,12 +769,16 @@ class UserRepositoryAuthTest {
             lastName = "Profile",
             userName = "updated_user",
             dateOfBirth = "2008-05-02",
+            profileImageId = " profile_image_123 ",
         ).getOrThrow()
 
         assertEquals(true, capturedPatchBody.contains("\"userName\":\"updated_user\""))
         assertEquals(true, capturedPatchBody.contains("\"dateOfBirth\":\"2008-05-02\""))
+        assertEquals(true, capturedPatchBody.contains("\"profileImageId\":\"profile_image_123\""))
         assertEquals("updated_user", updated.userName)
+        assertEquals("profile_image_123", updated.profileImageId)
         assertEquals("updated_user", repo.currentUser.value.getOrThrow().userName)
+        assertEquals("profile_image_123", repo.currentUser.value.getOrThrow().profileImageId)
         assertEquals(RequiredProfileCompletionState(), repo.requiredProfileCompletionState.value)
     }
 
