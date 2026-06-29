@@ -8,6 +8,7 @@ import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlin.test.Test
+import kotlin.test.assertFalse
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.time.Instant
@@ -149,6 +150,79 @@ class EventTemplateCreateBuilderTest {
         assertEquals(listOf("slot-clone-1"), result.event.timeSlotIds)
         assertEquals(listOf("field-a"), result.timeSlots?.single()?.scheduledFieldIds)
         assertNull(result.leagueScoringConfig)
+    }
+
+    @Test
+    fun template_creation_removes_rental_only_fields_and_keeps_rental_reference_slot() {
+        val result = EventTemplateCreateBuilder.prepare(
+            input = EventTemplateCreateInput(
+                sourceEvent = Event(
+                    id = "event-1",
+                    name = "Rental League",
+                    eventType = EventType.LEAGUE,
+                    organizationId = "org-1",
+                    fieldIds = listOf("rental-field", "regular-field"),
+                ),
+                currentUserId = null,
+                sourceSport = null,
+                isEditing = true,
+                editableFields = listOf(
+                    Field(
+                        id = "rental-field",
+                        fieldNumber = 1,
+                        name = "Rental Court",
+                        organizationId = "org-1",
+                    ),
+                    Field(
+                        id = "regular-field",
+                        fieldNumber = 2,
+                        name = "Practice Court",
+                        organizationId = "org-1",
+                    ),
+                ),
+                relationFields = emptyList(),
+                editableTimeSlots = listOf(
+                    slot(
+                        id = "rental-slot",
+                        scheduledFieldIds = listOf("rental-field"),
+                    ).copy(
+                        sourceType = "RENTAL_BOOKING",
+                        rentalBookingId = "booking-1",
+                        rentalBookingItemId = "item-1",
+                        rentalLocked = true,
+                        price = 5000,
+                    ),
+                    slot(
+                        id = "regular-slot",
+                        scheduledFieldIds = listOf("regular-field"),
+                    ),
+                ),
+                relationTimeSlots = emptyList(),
+                editableLeagueScoringConfig = LeagueScoringConfigDTO(),
+                nextId = fixedIds("template-1", "slot-clone-1", "slot-clone-2"),
+            ),
+        )
+
+        assertEquals(listOf("regular-field"), result.event.fieldIds)
+        assertNull(result.fields)
+        assertEquals(listOf("slot-clone-1", "slot-clone-2"), result.event.timeSlotIds)
+
+        val rentalSlot = result.timeSlots?.first()
+        assertEquals("slot-clone-1", rentalSlot?.id)
+        assertNull(rentalSlot?.scheduledFieldId)
+        assertEquals(emptyList(), rentalSlot?.scheduledFieldIds)
+        assertNull(rentalSlot?.rentalBookingId)
+        assertNull(rentalSlot?.rentalBookingItemId)
+        assertFalse(rentalSlot?.rentalLocked == true)
+        assertNull(rentalSlot?.price)
+        assertEquals(
+            true,
+            rentalSlot?.sourceType?.startsWith("BRACKETIQ_TEMPLATE_RENTAL_RESOURCE:"),
+        )
+
+        val regularSlot = result.timeSlots?.last()
+        assertEquals(listOf("regular-field"), regularSlot?.scheduledFieldIds)
+        assertEquals("regular-field", regularSlot?.scheduledFieldId)
     }
 
     private fun fixedIds(vararg ids: String): () -> String {

@@ -3,10 +3,10 @@ package com.razumly.mvp.chat
 import com.arkivanov.decompose.DefaultComponentContext
 import com.arkivanov.essenty.backhandler.BackDispatcher
 import com.arkivanov.essenty.lifecycle.LifecycleRegistry
-import com.razumly.mvp.chat.data.ChatGroupSummary
 import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.chat.data.IMessageRepository
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
+import com.razumly.mvp.core.data.dataTypes.ChatGroupSummary
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations

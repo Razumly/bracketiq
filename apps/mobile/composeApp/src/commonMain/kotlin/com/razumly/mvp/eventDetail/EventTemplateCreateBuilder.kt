@@ -15,6 +15,8 @@ import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 
+private const val TEMPLATE_RENTAL_RESOURCE_SOURCE_TYPE_PREFIX = "BRACKETIQ_TEMPLATE_RENTAL_RESOURCE:"
+
 internal data class EventTemplateCreateInput(
     val sourceEvent: Event,
     val currentUserId: String?,
@@ -55,6 +57,12 @@ internal object EventTemplateCreateBuilder {
             )
         }
 
+        val sourceSlots = if (input.isEditing) {
+            input.editableTimeSlots
+        } else {
+            input.relationTimeSlots
+        }
+        val rentalOnlyFieldIds = sourceSlots.rentalOnlyFieldIds()
         val sourceFields = buildEditableFieldDrafts(
             event = templateEvent,
             sourceFields = if (input.isEditing) {
@@ -62,12 +70,15 @@ internal object EventTemplateCreateBuilder {
             } else {
                 input.relationFields
             },
-        )
-        val sourceSlots = if (input.isEditing) {
-            input.editableTimeSlots
-        } else {
-            input.relationTimeSlots
-        }
+        ).filterNot { field -> rentalOnlyFieldIds.contains(field.id.trim()) }
+        val sourceFieldById = buildEditableFieldDrafts(
+            event = templateEvent,
+            sourceFields = if (input.isEditing) {
+                input.editableFields
+            } else {
+                input.relationFields
+            },
+        ).associateBy { field -> field.id.trim() }
 
         val isOrganizationManaged = !templateEvent.organizationId.isNullOrBlank()
         val clonedFields = if (isOrganizationManaged) {
@@ -105,6 +116,7 @@ internal object EventTemplateCreateBuilder {
             templateEvent.fieldIds
                 .map { fieldId -> fieldId.trim() }
                 .filter(String::isNotBlank)
+                .filterNot(rentalOnlyFieldIds::contains)
                 .ifEmpty {
                     sourceFields
                         .map { field -> field.id.trim() }
@@ -114,19 +126,45 @@ internal object EventTemplateCreateBuilder {
         val resolvedFieldIdSet = resolvedFieldIds.toSet()
 
         val clonedTimeSlots = sourceSlots.mapNotNull { slot ->
-            val mappedFieldIds = slot.normalizedScheduledFieldIds()
-                .map { fieldId -> fieldIdRemap[fieldId] ?: fieldId }
-                .filter(resolvedFieldIdSet::contains)
-                .distinct()
-            if (mappedFieldIds.isEmpty()) {
-                return@mapNotNull null
-            }
+            val sourceSlotFieldIds = slot.normalizedScheduledFieldIds()
+            val isRentalReference = slot.isRentalBacked() &&
+                sourceSlotFieldIds.any(rentalOnlyFieldIds::contains)
             val normalizedDays = slot.normalizedDaysOfWeek()
             val normalizedDivisions = slot.normalizedDivisionIds()
                 .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
                 .filter(String::isNotBlank)
                 .distinct()
                 .ifEmpty { defaultFieldDivisions(templateEvent) }
+
+            if (isRentalReference) {
+                val sourceField = sourceSlotFieldIds
+                    .firstNotNullOfOrNull { fieldId -> sourceFieldById[fieldId] }
+                return@mapNotNull slot.copy(
+                    id = input.nextId(),
+                    dayOfWeek = normalizedDays.firstOrNull(),
+                    daysOfWeek = normalizedDays,
+                    divisions = normalizedDivisions,
+                    scheduledFieldId = null,
+                    scheduledFieldIds = emptyList(),
+                    price = null,
+                    sourceType = buildTemplateRentalResourceSourceType(
+                        field = sourceField,
+                        event = templateEvent,
+                    ),
+                    rentalBookingId = null,
+                    rentalBookingItemId = null,
+                    rentalLocked = false,
+                )
+            }
+
+            val mappedFieldIds = sourceSlotFieldIds
+                .map { fieldId -> fieldIdRemap[fieldId] ?: fieldId }
+                .filterNot(rentalOnlyFieldIds::contains)
+                .filter(resolvedFieldIdSet::contains)
+                .distinct()
+            if (mappedFieldIds.isEmpty()) {
+                return@mapNotNull null
+            }
             slot.copy(
                 id = input.nextId(),
                 dayOfWeek = normalizedDays.firstOrNull(),
@@ -197,6 +235,69 @@ internal object EventTemplateCreateBuilder {
         ).syncOfficialStaffing(sport = sourceSport)
     }
 }
+
+private fun List<TimeSlot>.rentalOnlyFieldIds(): Set<String> {
+    val rentalFieldIds = mutableSetOf<String>()
+    val regularFieldIds = mutableSetOf<String>()
+    forEach { slot ->
+        val target = if (slot.isRentalBacked()) rentalFieldIds else regularFieldIds
+        target += slot.normalizedScheduledFieldIds()
+    }
+    return rentalFieldIds.filterNot(regularFieldIds::contains).toSet()
+}
+
+private fun buildTemplateRentalResourceSourceType(
+    field: Field?,
+    event: Event,
+): String {
+    val payload = mapOf(
+        "fieldId" to field?.id.orEmpty(),
+        "fieldName" to field?.name.orEmpty(),
+        "facilityName" to field?.facility?.name.orEmpty(),
+        "organizationId" to (field?.organizationId ?: event.organizationId).orEmpty(),
+        "location" to (field?.location ?: event.location).orEmpty(),
+    ).entries
+        .filter { (_, value) -> value.isNotBlank() }
+        .joinToString(prefix = "{", postfix = "}") { (key, value) ->
+            "\"${key.jsonEscape()}\":\"${value.jsonEscape()}\""
+        }
+    return TEMPLATE_RENTAL_RESOURCE_SOURCE_TYPE_PREFIX + payload.percentEncode()
+}
+
+private fun String.jsonEscape(): String =
+    buildString {
+        this@jsonEscape.forEach { char ->
+            when (char) {
+                '\\' -> append("\\\\")
+                '"' -> append("\\\"")
+                '\b' -> append("\\b")
+                '\u000C' -> append("\\f")
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                else -> append(char)
+            }
+        }
+    }
+
+private fun String.percentEncode(): String =
+    encodeToByteArray().joinToString(separator = "") { byte ->
+        val value = byte.toInt() and 0xFF
+        val char = value.toChar()
+        if (
+            char in 'A'..'Z' ||
+            char in 'a'..'z' ||
+            char in '0'..'9' ||
+            char == '-' ||
+            char == '_' ||
+            char == '.' ||
+            char == '~'
+        ) {
+            char.toString()
+        } else {
+            "%${value.toString(16).uppercase().padStart(2, '0')}"
+        }
+    }
 
 internal fun addTemplateSuffix(name: String): String {
     val trimmed = name.trim()

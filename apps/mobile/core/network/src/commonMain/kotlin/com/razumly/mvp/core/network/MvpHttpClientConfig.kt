@@ -31,7 +31,7 @@ private fun summarizeResponseBody(body: String?): String? {
     return normalized.take(1000)
 }
 
-internal fun HttpClientConfig<*>.configureMvpHttpClient() {
+fun HttpClientConfig<*>.configureMvpHttpClient() {
     install(HttpTimeout) {
         // Next.js dev server can take noticeable time to compile routes on first hit.
         connectTimeoutMillis = 15_000
