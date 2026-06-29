@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.time.ExperimentalTime
 
 interface EventSearchComponent {
@@ -382,10 +383,12 @@ class DefaultEventSearchComponent(
 
         suggestTeamsJob?.cancel()
         suggestTeamsJob = scope.launch {
-            teamRepository.searchOpenRegistrationTeams(
-                query = normalizedQuery,
-                limit = SEARCH_SUGGESTION_LIMIT,
-            )
+            withContext(Dispatchers.Default) {
+                teamRepository.searchOpenRegistrationTeams(
+                    query = normalizedQuery,
+                    limit = SEARCH_SUGGESTION_LIMIT,
+                )
+            }
                 .onSuccess { teams ->
                     _suggestedTeams.value = teams
                 }
@@ -671,7 +674,9 @@ class DefaultEventSearchComponent(
         if (teamsLoaded && !force) return _teams.value
 
         _isLoadingTeams.value = true
-        val teams = teamRepository.searchOpenRegistrationTeams(limit = 100)
+        val teams = withContext(Dispatchers.Default) {
+            teamRepository.searchOpenRegistrationTeams(limit = 100)
+        }
             .onFailure { e ->
                 _errorState.value = ErrorMessage("Failed to fetch teams: ${e.userMessage()}")
             }

@@ -51,7 +51,7 @@ class MvpApp : Application() {
 
     private fun initializePostHog() {
         val token = BuildConfig.POSTHOG_PROJECT_TOKEN.trimConfigValue()
-        if (token.isBlank()) {
+        if (token.isBlank() || token == DEFAULT_POSTHOG_PROJECT_TOKEN) {
             Napier.d(tag = "PostHog", message = "PostHog project token missing; analytics disabled.")
             return
         }
@@ -122,6 +122,8 @@ class MvpApp : Application() {
     }
 
     companion object {
+        private const val DEFAULT_POSTHOG_PROJECT_TOKEN = "DEFAULT_POSTHOG_PROJECT_TOKEN"
+
         private var instance: MvpApp? = null
 
         fun applicationContext() : Context {
