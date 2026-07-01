@@ -11,6 +11,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -77,7 +78,7 @@ data class MatchApiDto(
     val winnerEventTeamId: String? = null,
     val matchRulesSnapshot: ResolvedMatchRulesMVP? = null,
     val resolvedMatchRules: ResolvedMatchRulesMVP? = null,
-    val segments: List<MatchSegmentMVP>? = null,
+    val segments: List<MatchSegmentApiDto>? = null,
     val incidents: List<MatchIncidentMVP>? = null,
     val start: String? = null,
     val end: String? = null,
@@ -125,7 +126,7 @@ data class MatchApiDto(
             winnerEventTeamId = winnerEventTeamId,
             matchRulesSnapshot = matchRulesSnapshot,
             resolvedMatchRules = resolvedMatchRules,
-            segments = segments ?: emptyList(),
+            segments = segments?.mapNotNull(MatchSegmentApiDto::toMatchSegmentOrNull) ?: emptyList(),
             incidents = incidents ?: emptyList(),
             start = start?.let { Instant.parse(it) },
             end = end?.let { Instant.parse(it) },
@@ -146,6 +147,56 @@ data class MatchApiDto(
         )
     }
 }
+
+@Serializable
+data class MatchSegmentApiDto(
+    val id: String? = null,
+    @SerialName("\$id") val legacyId: String? = null,
+    val eventId: String? = null,
+    val matchId: String? = null,
+    val sequence: Int? = null,
+    val status: String? = null,
+    val scores: Map<String, Int>? = null,
+    val winnerEventTeamId: String? = null,
+    val startedAt: String? = null,
+    val endedAt: String? = null,
+    val resultType: String? = null,
+    val statusReason: String? = null,
+    val metadata: Map<String, JsonElement>? = null,
+) {
+    fun toMatchSegmentOrNull(): MatchSegmentMVP? {
+        val resolvedId = id ?: legacyId
+        val resolvedMatchId = matchId
+        val resolvedSequence = sequence
+        if (resolvedId.isNullOrBlank() || resolvedMatchId.isNullOrBlank() || resolvedSequence == null) return null
+
+        return MatchSegmentMVP(
+            id = resolvedId,
+            legacyId = legacyId,
+            eventId = eventId,
+            matchId = resolvedMatchId,
+            sequence = resolvedSequence,
+            status = status ?: "NOT_STARTED",
+            scores = scores ?: emptyMap(),
+            winnerEventTeamId = winnerEventTeamId,
+            startedAt = startedAt,
+            endedAt = endedAt,
+            resultType = resultType,
+            statusReason = statusReason,
+            metadata = metadata.toStringMetadata(),
+        )
+    }
+}
+
+private fun Map<String, JsonElement>?.toStringMetadata(): Map<String, String>? =
+    this
+        ?.mapValues { (_, value) ->
+            when (value) {
+                is JsonPrimitive -> value.content
+                else -> value.toString()
+            }
+        }
+        ?.takeIf { it.isNotEmpty() }
 
 @Serializable
 data class MatchesResponseDto(
@@ -253,11 +304,103 @@ data class MatchOfficialCheckInOperationDto(
 )
 
 @Serializable
+data class MatchActionOperationDto(
+    val action: String,
+    val forfeitingEventTeamId: String? = null,
+    val winnerEventTeamId: String? = null,
+    val reason: String? = null,
+)
+
+@Serializable
+data class TeamCheckInDto(
+    val id: String? = null,
+    val eventId: String? = null,
+    val matchId: String? = null,
+    val eventTeamId: String? = null,
+    val checkedInAt: String? = null,
+    val checkedInByUserId: String? = null,
+    val scope: String? = null,
+    val status: String? = null,
+)
+
+@Serializable
+data class TeamCheckInsResponseDto(
+    val checkIns: List<TeamCheckInDto> = emptyList(),
+    val teamCheckInMode: String? = null,
+    val teamCheckInOpenMinutesBefore: Int? = null,
+)
+
+@Serializable
+data class TeamCheckInRequestDto(
+    val eventTeamId: String,
+)
+
+@Serializable
+data class TeamCheckInResponseDto(
+    val checkIn: TeamCheckInDto? = null,
+)
+
+@Serializable
+data class MatchRosterEntryDto(
+    val id: String? = null,
+    val source: String? = null,
+    val status: String? = null,
+    val userId: String? = null,
+    val firstName: String? = null,
+    val lastName: String? = null,
+    val userName: String? = null,
+    val email: String? = null,
+    val noAccount: Boolean? = null,
+    val linkedAt: String? = null,
+    val removedAt: String? = null,
+)
+
+@Serializable
+data class MatchRosterDto(
+    val eventTeamId: String? = null,
+    val entries: List<MatchRosterEntryDto> = emptyList(),
+)
+
+@Serializable
+data class MatchRostersResponseDto(
+    val rosters: List<MatchRosterDto> = emptyList(),
+    val allowMatchRosterEdits: Boolean? = null,
+    val allowTemporaryMatchPlayers: Boolean? = null,
+)
+
+@Serializable
+data class MatchRosterPlayerRequestDto(
+    val userId: String,
+)
+
+@Serializable
+data class MatchRosterAddPlayerRequestDto(
+    val firstName: String? = null,
+    val lastName: String? = null,
+    val email: String? = null,
+    val entryId: String? = null,
+)
+
+@Serializable
+data class MatchRosterOperationRequestDto(
+    val eventTeamId: String,
+    val removePlayer: MatchRosterPlayerRequestDto? = null,
+    val restorePlayer: MatchRosterPlayerRequestDto? = null,
+    val addPlayer: MatchRosterAddPlayerRequestDto? = null,
+)
+
+@Serializable
+data class MatchRosterResponseDto(
+    val roster: MatchRosterDto? = null,
+)
+
+@Serializable
 data class MatchUpdateDto(
     val lifecycle: MatchLifecycleOperationDto? = null,
     val segmentOperations: List<MatchSegmentOperationDto>? = null,
     val incidentOperations: List<MatchIncidentOperationDto>? = null,
     val officialCheckIn: MatchOfficialCheckInOperationDto? = null,
+    val matchAction: MatchActionOperationDto? = null,
     val team1Points: List<Int>? = null,
     val team2Points: List<Int>? = null,
     val setResults: List<Int>? = null,
@@ -304,6 +447,7 @@ fun MatchUpdateDto.toMatchOperationsJsonObject(): JsonObject = buildJsonObject {
         ?.takeIf { it.isNotEmpty() }
         ?.let { operations -> put("incidentOperations", JsonArray(operations.map(MatchIncidentOperationDto::toJsonObject))) }
     officialCheckIn?.toJsonObject()?.let { put("officialCheckIn", it) }
+    matchAction?.toJsonObject()?.let { put("matchAction", it) }
     finalize?.let { put("finalize", JsonPrimitive(it)) }
     time?.let { put("time", JsonPrimitive(it)) }
     clientOperationId?.let { put("clientOperationId", JsonPrimitive(it)) }
@@ -311,6 +455,13 @@ fun MatchUpdateDto.toMatchOperationsJsonObject(): JsonObject = buildJsonObject {
     clientCreatedAt?.let { put("clientCreatedAt", JsonPrimitive(it)) }
     clientSequence?.let { put("clientSequence", JsonPrimitive(it)) }
     sourceDevice?.let { put("sourceDevice", JsonPrimitive(it)) }
+}
+
+private fun MatchActionOperationDto.toJsonObject(): JsonObject = buildJsonObject {
+    put("action", JsonPrimitive(action))
+    forfeitingEventTeamId?.let { put("forfeitingEventTeamId", JsonPrimitive(it)) }
+    winnerEventTeamId?.let { put("winnerEventTeamId", JsonPrimitive(it)) }
+    reason?.let { put("reason", JsonPrimitive(it)) }
 }
 
 private fun MatchLifecycleOperationDto.toJsonObject(): JsonObject = buildJsonObject {

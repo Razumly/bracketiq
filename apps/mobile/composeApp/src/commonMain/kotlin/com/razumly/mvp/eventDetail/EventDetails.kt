@@ -63,10 +63,12 @@ import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.LeagueConfig
 import com.razumly.mvp.core.data.dataTypes.Sport
+import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.divisionPriceRangeLabel
+import com.razumly.mvp.core.data.dataTypes.evergreenDateDisplayLabel
 import com.razumly.mvp.core.data.dataTypes.label
 import com.razumly.mvp.core.data.dataTypes.officialPositionSummary
 import com.razumly.mvp.core.data.dataTypes.positionSummary
@@ -229,6 +231,10 @@ fun EventDetails(
     onUpdateAssistantHostIds: (List<String>) -> Unit = {},
     onUpdateDoTeamsOfficiate: (Boolean) -> Unit = {},
     onUpdateTeamOfficialsMaySwap: (Boolean) -> Unit = {},
+    onUpdateTeamCheckInMode: (TeamCheckInMode) -> Unit = {},
+    onUpdateTeamCheckInOpenMinutesBefore: (Int) -> Unit = {},
+    onUpdateAllowMatchRosterEdits: (Boolean) -> Unit = {},
+    onUpdateAllowTemporaryMatchPlayers: (Boolean) -> Unit = {},
     onAddOfficialId: (String) -> Unit = {},
     onRemoveOfficialId: (String) -> Unit = {},
     onUpdateOfficialSchedulingMode: (OfficialSchedulingMode) -> Unit = {},
@@ -1591,10 +1597,15 @@ fun EventDetails(
     val endDateTime = remember(event.end, eventTimeZone) {
         event.end.toLocalDateTime(eventTimeZone)
     }
-    val eventMetaLine = remember(event.location, startDateTime) {
+    val evergreenDateText = remember(event.scheduleText, event.dateDisplayMode, event.dateDisplayText) {
+        event.evergreenDateDisplayLabel()
+    }
+    val eventMetaLine = remember(event.location, startDateTime, evergreenDateText) {
         val dateText = startDateTime.date.format(dateFormat)
         val timeText = startDateTime.time.format(timeFormat)
-        listOf(event.location, "$dateText - $timeText").filter { it.isNotBlank() }.joinToString(" - ")
+        listOf(event.location, evergreenDateText ?: "$dateText - $timeText")
+            .filter { it.isNotBlank() }
+            .joinToString(" - ")
     }
     val eventSportName = remember(eventWithRelations.sport, sports, event.sportId) {
         eventWithRelations.sport?.name
@@ -1753,9 +1764,19 @@ fun EventDetails(
     val sameDayDateRange = remember(startDateTime, endDateTime) {
         startDateTime.date == endDateTime.date
     }
-    val readOnlyDateRows = remember(startDateTime, endDateTime, startDateLabel, endDateLabel, sameDayDateRange) {
-        if (sameDayDateRange) {
-            listOf(
+    val readOnlyDateRows = remember(
+        startDateTime,
+        endDateTime,
+        startDateLabel,
+        endDateLabel,
+        sameDayDateRange,
+        evergreenDateText,
+    ) {
+        when {
+            evergreenDateText != null -> listOf(
+                DetailRowSpec(label = "Schedule", value = evergreenDateText),
+            )
+            sameDayDateRange -> listOf(
                 DetailRowSpec(
                     label = "Start Date & Time",
                     value = startDateTime.format(dateTimeFormat),
@@ -1765,15 +1786,14 @@ fun EventDetails(
                     value = endDateTime.time.format(timeFormat),
                 ),
             )
-        } else {
-            listOf(
+            else -> listOf(
                 DetailRowSpec(label = "Start Date", value = startDateLabel),
                 DetailRowSpec(label = "End Date", value = endDateLabel),
             )
         }
     }
-    val basicDateSummary = remember(startDateLabel, endDateLabel, startDateTime, endDateTime, sameDayDateRange) {
-        if (sameDayDateRange) {
+    val basicDateSummary = remember(startDateLabel, endDateLabel, startDateTime, endDateTime, sameDayDateRange, evergreenDateText) {
+        evergreenDateText ?: if (sameDayDateRange) {
             "$startDateLabel, ${startDateTime.time.format(timeFormat)}-${endDateTime.time.format(timeFormat)}"
         } else {
             "$startDateLabel - $endDateLabel"
@@ -1849,6 +1869,18 @@ fun EventDetails(
             DropdownOption(
                 value = mode.name,
                 label = mode.label(),
+            )
+        }
+    }
+    val teamCheckInModeOptions = remember {
+        TeamCheckInMode.entries.map { mode ->
+            DropdownOption(
+                value = mode.name,
+                label = when (mode) {
+                    TeamCheckInMode.OFF -> "Off"
+                    TeamCheckInMode.EVENT -> "Event check-in"
+                    TeamCheckInMode.MATCH -> "Match check-in"
+                },
             )
         }
     }
@@ -2381,6 +2413,7 @@ fun EventDetails(
                         assistantHostIds = assistantHostIds,
                         officialPositionSummary = officialPositionSummary,
                         officialSchedulingModeOptions = officialSchedulingModeOptions,
+                        teamCheckInModeOptions = teamCheckInModeOptions,
                         officialPositionsExpanded = officialPositionsExpanded,
                         canLoadOfficialPositionDefaults = selectedSportForOfficialDefaults != null,
                         staffSearchQuery = staffSearchQuery,
@@ -2403,6 +2436,10 @@ fun EventDetails(
                         onDisabledClick = ::showSelectSportMessage,
                         onUpdateDoTeamsOfficiate = onUpdateDoTeamsOfficiate,
                         onUpdateTeamOfficialsMaySwap = onUpdateTeamOfficialsMaySwap,
+                        onUpdateTeamCheckInMode = onUpdateTeamCheckInMode,
+                        onUpdateTeamCheckInOpenMinutesBefore = onUpdateTeamCheckInOpenMinutesBefore,
+                        onUpdateAllowMatchRosterEdits = onUpdateAllowMatchRosterEdits,
+                        onUpdateAllowTemporaryMatchPlayers = onUpdateAllowTemporaryMatchPlayers,
                         onUpdateOfficialSchedulingMode = onUpdateOfficialSchedulingMode,
                         onToggleOfficialPositionsExpanded = {
                             officialPositionsExpanded = !officialPositionsExpanded

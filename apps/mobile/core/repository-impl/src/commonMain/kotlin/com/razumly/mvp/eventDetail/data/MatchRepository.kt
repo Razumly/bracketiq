@@ -21,7 +21,14 @@ import com.razumly.mvp.core.network.dto.BulkMatchCreateEntryDto
 import com.razumly.mvp.core.network.dto.BulkMatchUpdateEntryDto
 import com.razumly.mvp.core.network.dto.BulkMatchUpdateRequestDto
 import com.razumly.mvp.core.network.dto.BulkMatchesResponseDto
+import com.razumly.mvp.core.network.dto.MatchRosterAddPlayerRequestDto
+import com.razumly.mvp.core.network.dto.MatchRosterDto
+import com.razumly.mvp.core.network.dto.MatchRosterOperationRequestDto
+import com.razumly.mvp.core.network.dto.MatchRosterPlayerRequestDto
+import com.razumly.mvp.core.network.dto.MatchRosterResponseDto
+import com.razumly.mvp.core.network.dto.MatchRostersResponseDto
 import com.razumly.mvp.core.network.dto.MatchApiDto
+import com.razumly.mvp.core.network.dto.MatchActionOperationDto
 import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
 import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
 import com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto
@@ -32,6 +39,10 @@ import com.razumly.mvp.core.network.dto.MatchScoreSetDto
 import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.core.network.dto.MatchUpdateDto
 import com.razumly.mvp.core.network.dto.MatchesResponseDto
+import com.razumly.mvp.core.network.dto.TeamCheckInDto
+import com.razumly.mvp.core.network.dto.TeamCheckInRequestDto
+import com.razumly.mvp.core.network.dto.TeamCheckInResponseDto
+import com.razumly.mvp.core.network.dto.TeamCheckInsResponseDto
 import com.razumly.mvp.core.network.dto.toBulkMatchCreateEntryDto
 import com.razumly.mvp.core.network.dto.toBulkMatchUpdateEntryDto
 import com.razumly.mvp.core.network.dto.toMatchOperationsJsonObject
@@ -86,6 +97,7 @@ interface IMatchRepository : IMVPRepository {
         segmentOperations: List<MatchSegmentOperationDto>? = null,
         incidentOperations: List<MatchIncidentOperationDto>? = null,
         officialCheckIn: MatchOfficialCheckInOperationDto? = null,
+        matchAction: MatchActionOperationDto? = null,
         finalize: Boolean = false,
         time: Instant? = null,
     ): Result<MatchMVP>
@@ -117,6 +129,32 @@ interface IMatchRepository : IMVPRepository {
         rangeStart: Instant? = null,
         rangeEnd: Instant? = null,
     ): Result<List<MatchMVP>>
+    suspend fun getEventTeamCheckIns(eventId: String): Result<TeamCheckInsResponseDto>
+    suspend fun checkInEventTeam(eventId: String, eventTeamId: String): Result<TeamCheckInDto>
+    suspend fun getMatchTeamCheckIns(eventId: String, matchId: String): Result<TeamCheckInsResponseDto>
+    suspend fun checkInMatchTeam(eventId: String, matchId: String, eventTeamId: String): Result<TeamCheckInDto>
+    suspend fun getMatchRosters(eventId: String, matchId: String): Result<MatchRostersResponseDto>
+    suspend fun removeMatchRosterPlayer(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+        userId: String,
+    ): Result<MatchRosterDto>
+    suspend fun restoreMatchRosterPlayer(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+        userId: String,
+    ): Result<MatchRosterDto>
+    suspend fun addTemporaryMatchRosterPlayer(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+        firstName: String?,
+        lastName: String?,
+        email: String? = null,
+        entryId: String? = null,
+    ): Result<MatchRosterDto>
     suspend fun deleteMatchesOfTournament(tournamentId: String): Result<Unit>
     suspend fun subscribeToMatches(eventId: String): Result<Unit>
     suspend fun unsubscribeFromRealtime(): Result<Unit>
@@ -535,17 +573,57 @@ class MatchRepository(
             true
         } catch (error: CancellationException) {
             throw error
+        } catch (error: ApiException) {
+            if (isTerminalMatchActionConflict(operation, error)) {
+                runCatching { fetchRemoteMatch(operation.eventId, operation.matchId) }
+                    .onSuccess { remoteMatch -> upsertRemoteMatchPreservingPendingIncidents(remoteMatch) }
+                    .onFailure { fetchError ->
+                        Napier.w(
+                            "Terminal match action conflict for ${operation.id}; acking without refresh: ${fetchError.message}",
+                        )
+                    }
+                dao.markAcked(operation.id, Clock.System.now().toString())
+                Napier.i("Acked terminal match action conflict for ${operation.id}.")
+                true
+            } else {
+                markOutboxOperationFailed(dao, operation, error)
+                false
+            }
         } catch (error: Throwable) {
-            val message = error.message ?: error::class.simpleName ?: "Match operation sync failed"
-            dao.markFailed(
-                id = operation.id,
-                error = message,
-                failedAt = Clock.System.now().toString(),
-                status = MATCH_OPERATION_STATUS_FAILED,
-            )
-            Napier.w("Failed to sync match operation ${operation.id}: $message")
+            markOutboxOperationFailed(dao, operation, error)
             false
         }
+    }
+
+    private suspend fun markOutboxOperationFailed(
+        dao: com.razumly.mvp.core.data.dataTypes.daos.MatchOperationOutboxDao,
+        operation: MatchOperationOutboxEntry,
+        error: Throwable,
+    ) {
+        val message = error.message ?: error::class.simpleName ?: "Match operation sync failed"
+        dao.markFailed(
+            id = operation.id,
+            error = message,
+            failedAt = Clock.System.now().toString(),
+            status = MATCH_OPERATION_STATUS_FAILED,
+        )
+        Napier.w("Failed to sync match operation ${operation.id}: $message")
+    }
+
+    private fun isTerminalMatchActionConflict(
+        operation: MatchOperationOutboxEntry,
+        error: ApiException,
+    ): Boolean {
+        if (operation.operationKind != MATCH_OPERATION_KIND_UPDATE) return false
+        if (error.statusCode != 409) return false
+        val responseBody = error.responseBody.orEmpty()
+        if (!responseBody.contains("Completed or cancelled matches cannot be changed from match actions", ignoreCase = true)) {
+            return false
+        }
+        return runCatching {
+            jsonMVP.parseToJsonElement(operation.payloadJson)
+                .jsonObject["matchAction"] is JsonObject
+        }.getOrDefault(false)
     }
 
     private suspend fun sendOutboxOperation(operation: MatchOperationOutboxEntry): MatchMVP {
@@ -785,6 +863,7 @@ class MatchRepository(
         segmentOperations: List<MatchSegmentOperationDto>?,
         incidentOperations: List<MatchIncidentOperationDto>?,
         officialCheckIn: MatchOfficialCheckInOperationDto?,
+        matchAction: MatchActionOperationDto?,
         finalize: Boolean,
         time: Instant?,
     ): Result<MatchMVP> = runCatching {
@@ -795,6 +874,7 @@ class MatchRepository(
                 segmentOperations = segmentOperations,
                 incidentOperations = incidentOperations,
                 officialCheckIn = officialCheckIn,
+                matchAction = matchAction,
                 finalize = finalize,
                 time = time?.toString(),
             ),
@@ -1028,6 +1108,132 @@ class MatchRepository(
         }
         dedupedMatches
     }
+
+    override suspend fun getEventTeamCheckIns(eventId: String): Result<TeamCheckInsResponseDto> = runCatching {
+        val normalizedEventId = normalizeOptionalToken(eventId)
+            ?: error("Event check-ins require an event id")
+        api.get("api/events/$normalizedEventId/team-check-ins")
+    }
+
+    override suspend fun checkInEventTeam(eventId: String, eventTeamId: String): Result<TeamCheckInDto> = runCatching {
+        val normalizedEventId = normalizeOptionalToken(eventId)
+            ?: error("Event check-in requires an event id")
+        val normalizedEventTeamId = normalizeOptionalToken(eventTeamId)
+            ?: error("Event check-in requires an event team id")
+        api.post<TeamCheckInRequestDto, TeamCheckInResponseDto>(
+            path = "api/events/$normalizedEventId/team-check-ins",
+            body = TeamCheckInRequestDto(eventTeamId = normalizedEventTeamId),
+        ).checkIn ?: error("Event check-in response missing check-in")
+    }
+
+    override suspend fun getMatchTeamCheckIns(eventId: String, matchId: String): Result<TeamCheckInsResponseDto> =
+        runCatching {
+            val normalizedEventId = normalizeOptionalToken(eventId)
+                ?: error("Match check-ins require an event id")
+            val normalizedMatchId = normalizeOptionalToken(matchId)
+                ?: error("Match check-ins require a match id")
+            api.get("api/events/$normalizedEventId/matches/$normalizedMatchId/team-check-ins")
+        }
+
+    override suspend fun checkInMatchTeam(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+    ): Result<TeamCheckInDto> = runCatching {
+        val normalizedEventId = normalizeOptionalToken(eventId)
+            ?: error("Match check-in requires an event id")
+        val normalizedMatchId = normalizeOptionalToken(matchId)
+            ?: error("Match check-in requires a match id")
+        val normalizedEventTeamId = normalizeOptionalToken(eventTeamId)
+            ?: error("Match check-in requires an event team id")
+        api.post<TeamCheckInRequestDto, TeamCheckInResponseDto>(
+            path = "api/events/$normalizedEventId/matches/$normalizedMatchId/team-check-ins",
+            body = TeamCheckInRequestDto(eventTeamId = normalizedEventTeamId),
+        ).checkIn ?: error("Match check-in response missing check-in")
+    }
+
+    override suspend fun getMatchRosters(eventId: String, matchId: String): Result<MatchRostersResponseDto> =
+        runCatching {
+            val normalizedEventId = normalizeOptionalToken(eventId)
+                ?: error("Match rosters require an event id")
+            val normalizedMatchId = normalizeOptionalToken(matchId)
+                ?: error("Match rosters require a match id")
+            api.get("api/events/$normalizedEventId/matches/$normalizedMatchId/roster")
+        }
+
+    override suspend fun removeMatchRosterPlayer(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+        userId: String,
+    ): Result<MatchRosterDto> = updateMatchRoster(
+        eventId = eventId,
+        matchId = matchId,
+    ) {
+        MatchRosterOperationRequestDto(
+            eventTeamId = requireRosterEventTeamId(eventTeamId),
+            removePlayer = MatchRosterPlayerRequestDto(userId = requireRosterUserId(userId)),
+        )
+    }
+
+    override suspend fun restoreMatchRosterPlayer(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+        userId: String,
+    ): Result<MatchRosterDto> = updateMatchRoster(
+        eventId = eventId,
+        matchId = matchId,
+    ) {
+        MatchRosterOperationRequestDto(
+            eventTeamId = requireRosterEventTeamId(eventTeamId),
+            restorePlayer = MatchRosterPlayerRequestDto(userId = requireRosterUserId(userId)),
+        )
+    }
+
+    override suspend fun addTemporaryMatchRosterPlayer(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+        firstName: String?,
+        lastName: String?,
+        email: String?,
+        entryId: String?,
+    ): Result<MatchRosterDto> = updateMatchRoster(
+        eventId = eventId,
+        matchId = matchId,
+    ) {
+        MatchRosterOperationRequestDto(
+            eventTeamId = requireRosterEventTeamId(eventTeamId),
+            addPlayer = MatchRosterAddPlayerRequestDto(
+                firstName = firstName?.trim()?.takeIf(String::isNotEmpty),
+                lastName = lastName?.trim()?.takeIf(String::isNotEmpty),
+                email = email?.trim()?.takeIf(String::isNotEmpty),
+                entryId = entryId?.trim()?.takeIf(String::isNotEmpty),
+            ),
+        )
+    }
+
+    private suspend fun updateMatchRoster(
+        eventId: String,
+        matchId: String,
+        buildOperation: () -> MatchRosterOperationRequestDto,
+    ): Result<MatchRosterDto> = runCatching {
+        val normalizedEventId = normalizeOptionalToken(eventId)
+            ?: error("Match roster update requires an event id")
+        val normalizedMatchId = normalizeOptionalToken(matchId)
+            ?: error("Match roster update requires a match id")
+        api.post<MatchRosterOperationRequestDto, MatchRosterResponseDto>(
+            path = "api/events/$normalizedEventId/matches/$normalizedMatchId/roster",
+            body = buildOperation(),
+        ).roster ?: error("Match roster response missing roster")
+    }
+
+    private fun requireRosterEventTeamId(eventTeamId: String): String =
+        normalizeOptionalToken(eventTeamId) ?: error("Match roster update requires an event team id")
+
+    private fun requireRosterUserId(userId: String): String =
+        normalizeOptionalToken(userId) ?: error("Match roster update requires a user id")
 
     override suspend fun deleteMatchesOfTournament(tournamentId: String): Result<Unit> = runCatching {
         val normalizedId = tournamentId.trim()

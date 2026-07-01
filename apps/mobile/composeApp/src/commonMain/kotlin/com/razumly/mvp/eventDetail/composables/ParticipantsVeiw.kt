@@ -76,6 +76,7 @@ import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.RegistrationQuestionAnswerSummary
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.network.apiBaseUrl
+import com.razumly.mvp.core.network.dto.TeamCheckInDto
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
 import com.razumly.mvp.core.presentation.composables.MoneyInputField
@@ -104,6 +105,12 @@ import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
 
 private const val MOBILE_BREAKPOINT_DP = 600
+
+private fun TeamCheckInDto?.isCheckedIn(): Boolean {
+    if (this == null) return false
+    return status?.equals("CHECKED_IN", ignoreCase = true) == true ||
+        !checkedInAt.isNullOrBlank()
+}
 
 enum class ParticipantsSection(val label: String) {
     TEAMS("Teams"),
@@ -339,12 +346,50 @@ private fun TeamWithPlayers.resolveParticipantDivisionOption(
 }
 
 @Composable
+private fun EventTeamCheckInBadge(checkedIn: Boolean) {
+    val backgroundColor = if (checkedIn) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant
+    }
+    val contentColor = if (checkedIn) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(backgroundColor, MaterialTheme.shapes.small)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (checkedIn) {
+            Icon(
+                imageVector = Icons.Default.Check,
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+        Text(
+            text = if (checkedIn) "Checked in" else "Not checked in",
+            style = MaterialTheme.typography.labelMedium,
+            color = contentColor,
+        )
+    }
+}
+
+@Composable
 fun ParticipantsView(
     showFab: (Boolean) -> Unit,
     section: ParticipantsSection = ParticipantsSection.TEAMS,
     onNavigateToChat: (UserData) -> Unit,
     manageMode: Boolean = false,
     canManageParticipants: Boolean = false,
+    showEventCheckInBadges: Boolean = false,
     topContentPadding: Dp = 0.dp,
     selectedDivisionId: String? = null,
     divisionOptions: List<EventDetailDivisionOption> = emptyList(),
@@ -359,6 +404,7 @@ fun ParticipantsView(
     val teamComplianceSummaries by component.teamComplianceSummaries.collectAsState()
     val userComplianceSummaries by component.userComplianceSummaries.collectAsState()
     val participantComplianceLoading by component.participantComplianceLoading.collectAsState()
+    val eventTeamCheckIns by component.eventTeamCheckIns.collectAsState()
     val participants = selectedEvent.players
     val teamSignup = selectedEvent.event.teamSignup
     val eventTeams = remember(selectedEvent.event.eventType, teamSignup, selectedEvent.teams) {
@@ -1016,17 +1062,24 @@ fun ParticipantsView(
     fun ParticipantCardContent(card: ParticipantAnimatedCard) {
         when (card) {
             is ParticipantAnimatedCard.TeamEntry -> {
-                TeamCard(
-                    team = card.team,
-                    modifier = Modifier.clickable {
-                        if (manageMode && canManageParticipants) {
-                            managementTarget = teamManagementTarget(card.team)
-                        } else {
-                            selectedTeam = card.team
-                            showTeamDialog = true
-                        }
-                    },
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TeamCard(
+                        team = card.team,
+                        modifier = Modifier.clickable {
+                            if (manageMode && canManageParticipants) {
+                                managementTarget = teamManagementTarget(card.team)
+                            } else {
+                                selectedTeam = card.team
+                                showTeamDialog = true
+                            }
+                        },
+                    )
+                    if (showEventCheckInBadges) {
+                        EventTeamCheckInBadge(
+                            checkedIn = eventTeamCheckIns[card.team.team.id].isCheckedIn(),
+                        )
+                    }
+                }
             }
             is ParticipantAnimatedCard.UserEntry -> {
                 if (

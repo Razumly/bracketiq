@@ -11,6 +11,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_ONLINE
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
+import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.buildEventOfficialRecordId
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.isManualRegistrationPaymentMode
@@ -74,6 +75,9 @@ data class EventDTO(
     val leagueScoringConfigId: String? = null,
     val organizationId: String? = null,
     val affiliateUrl: String? = null,
+    val scheduleText: String? = null,
+    val dateDisplayMode: String? = null,
+    val dateDisplayText: String? = null,
     val registrationPaymentMode: String = REGISTRATION_PAYMENT_MODE_ONLINE,
     val manualPaymentLinks: List<ManualPaymentLink> = emptyList(),
     val manualPaymentInstructions: String? = null,
@@ -91,6 +95,10 @@ data class EventDTO(
     val setsPerMatch: Int? = null,
     val doTeamsOfficiate: Boolean? = null,
     val teamOfficialsMaySwap: Boolean? = null,
+    val teamCheckInMode: TeamCheckInMode = TeamCheckInMode.OFF,
+    val teamCheckInOpenMinutesBefore: Int = 60,
+    val allowMatchRosterEdits: Boolean = false,
+    val allowTemporaryMatchPlayers: Boolean = false,
     val matchRulesOverride: MatchRulesConfigMVP? = null,
     val autoCreatePointMatchIncidents: Boolean = false,
     val resolvedMatchRules: ResolvedMatchRulesMVP? = null,
@@ -174,6 +182,9 @@ data class EventDTO(
             leagueScoringConfigId = leagueScoringConfigId,
             organizationId = organizationId,
             affiliateUrl = affiliateUrl?.trim()?.takeIf(String::isNotBlank),
+            scheduleText = scheduleText?.trim()?.takeIf(String::isNotBlank),
+            dateDisplayMode = dateDisplayMode?.trim()?.takeIf(String::isNotBlank),
+            dateDisplayText = dateDisplayText?.trim()?.takeIf(String::isNotBlank),
             registrationPaymentMode = resolvedRegistrationPaymentMode,
             manualPaymentLinks = if (manualPaymentsEnabled) {
                 normalizeManualPaymentLinks(manualPaymentLinks)
@@ -205,6 +216,10 @@ data class EventDTO(
             setsPerMatch = setsPerMatch,
             doTeamsOfficiate = effectiveDoTeamsOfficiate,
             teamOfficialsMaySwap = if (effectiveDoTeamsOfficiate == true) teamOfficialsMaySwap else false,
+            teamCheckInMode = if (teamSignup) teamCheckInMode else TeamCheckInMode.OFF,
+            teamCheckInOpenMinutesBefore = teamCheckInOpenMinutesBefore.coerceAtLeast(0),
+            allowMatchRosterEdits = teamSignup && allowMatchRosterEdits,
+            allowTemporaryMatchPlayers = teamSignup && allowMatchRosterEdits && allowTemporaryMatchPlayers,
             matchRulesOverride = matchRulesOverride,
             autoCreatePointMatchIncidents = autoCreatePointMatchIncidents,
             resolvedMatchRules = resolvedMatchRules,

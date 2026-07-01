@@ -40,6 +40,7 @@ import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
+import com.razumly.mvp.core.network.dto.TeamCheckInDto
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
@@ -74,6 +75,10 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val errorState: StateFlow<ErrorMessage?>
     val eventWithRelations: StateFlow<EventWithFullRelations>
     val currentUser: StateFlow<UserData>
+    val eventTeamCheckIns: StateFlow<Map<String, TeamCheckInDto>>
+    val showEventTeamCheckInDialog: StateFlow<Boolean>
+    val eventTeamCheckInSaving: StateFlow<Boolean>
+    val currentUserManagedEventTeamId: StateFlow<String?>
     val scheduleTrackedUserIds: StateFlow<Set<String>>
     val validTeams: StateFlow<List<TeamWithPlayers>>
     val isHost: StateFlow<Boolean>
@@ -129,6 +134,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
 
 
     fun onNavigateToChat(user: UserData)
+    fun dismissEventTeamCheckInDialog()
+    fun confirmEventTeamCheckIn()
     fun matchSelected(selectedMatch: MatchWithRelations)
     fun updateEventRegistrationQuestionAnswer(questionId: String, answer: String)
     fun toggleEventRegistrationQuestionsExpanded()

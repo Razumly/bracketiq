@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
@@ -70,6 +72,22 @@ internal fun ExpandedMatchDetailsPanel(
     actualEndDraft: Instant?,
     actualTimeError: String?,
     matchTimeSaving: Boolean,
+    canEditRoster: Boolean,
+    onEditRoster: () -> Unit,
+    showMatchTeamCheckIns: Boolean,
+    team1Name: String,
+    team1CheckedIn: Boolean,
+    team2Name: String,
+    team2CheckedIn: Boolean,
+    canUseMatchStatusActions: Boolean,
+    canUsePreStartMatchActions: Boolean,
+    canSuspendMatch: Boolean,
+    canResumeMatch: Boolean,
+    matchActionSaving: Boolean,
+    onForfeitClick: () -> Unit,
+    onCancelMatchClick: () -> Unit,
+    onSuspendMatchClick: () -> Unit,
+    onResumeMatchClick: () -> Unit,
     onEditActualTimes: () -> Unit,
     onActualStartSelected: (Instant) -> Unit,
     onActualEndSelected: (Instant) -> Unit,
@@ -106,6 +124,31 @@ internal fun ExpandedMatchDetailsPanel(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 MatchStatusSection(match = match)
+                if (showMatchTeamCheckIns) {
+                    MatchDetailsTeamCheckInSection(
+                        team1Name = team1Name,
+                        team1CheckedIn = team1CheckedIn,
+                        team2Name = team2Name,
+                        team2CheckedIn = team2CheckedIn,
+                    )
+                }
+                if (canUseMatchStatusActions) {
+                    MatchDetailsActionsSection(
+                        canUsePreStartMatchActions = canUsePreStartMatchActions,
+                        canSuspendMatch = canSuspendMatch,
+                        canResumeMatch = canResumeMatch,
+                        matchActionSaving = matchActionSaving,
+                        onForfeitClick = onForfeitClick,
+                        onCancelMatchClick = onCancelMatchClick,
+                        onSuspendMatchClick = onSuspendMatchClick,
+                        onResumeMatchClick = onResumeMatchClick,
+                    )
+                }
+                if (canEditRoster) {
+                    Button(onClick = onEditRoster) {
+                        Text("Edit roster")
+                    }
+                }
                 MatchActualTimesSection(
                     match = match,
                     isOfficial = isOfficial,
@@ -145,6 +188,137 @@ internal fun ExpandedMatchDetailsPanel(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun MatchDetailsTeamCheckInSection(
+    team1Name: String,
+    team1CheckedIn: Boolean,
+    team2Name: String,
+    team2CheckedIn: Boolean,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = "Team check-ins",
+            style = MaterialTheme.typography.titleSmall,
+        )
+        MatchDetailsTeamCheckInRow(teamName = team1Name, checkedIn = team1CheckedIn)
+        MatchDetailsTeamCheckInRow(teamName = team2Name, checkedIn = team2CheckedIn)
+    }
+}
+
+@Composable
+private fun MatchDetailsTeamCheckInRow(
+    teamName: String,
+    checkedIn: Boolean,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = if (checkedIn) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
+        },
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = teamName,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = if (checkedIn) "Checked in" else "Not checked in",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (checkedIn) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun MatchDetailsActionsSection(
+    canUsePreStartMatchActions: Boolean,
+    canSuspendMatch: Boolean,
+    canResumeMatch: Boolean,
+    matchActionSaving: Boolean,
+    onForfeitClick: () -> Unit,
+    onCancelMatchClick: () -> Unit,
+    onSuspendMatchClick: () -> Unit,
+    onResumeMatchClick: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = "Match actions",
+            style = MaterialTheme.typography.titleSmall,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (canUsePreStartMatchActions) {
+                MatchDetailsActionButton(
+                    label = "Forfeit",
+                    onClick = onForfeitClick,
+                    enabled = !matchActionSaving,
+                    modifier = Modifier.weight(1f),
+                )
+                MatchDetailsActionButton(
+                    label = "Cancel",
+                    onClick = onCancelMatchClick,
+                    enabled = !matchActionSaving,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            if (canSuspendMatch) {
+                MatchDetailsActionButton(
+                    label = "Suspend",
+                    onClick = onSuspendMatchClick,
+                    enabled = !matchActionSaving,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            if (canResumeMatch) {
+                MatchDetailsActionButton(
+                    label = "Resume",
+                    onClick = onResumeMatchClick,
+                    enabled = !matchActionSaving,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MatchDetailsActionButton(
+    label: String,
+    onClick: () -> Unit,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.heightIn(min = 48.dp),
+    ) {
+        Text(
+            text = label,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

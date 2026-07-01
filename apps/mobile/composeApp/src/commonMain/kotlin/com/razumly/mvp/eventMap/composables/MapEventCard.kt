@@ -508,7 +508,8 @@ private fun EventCardContent(
                 contentDescription = "${event.name} image",
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(96.dp),
+                    .height(96.dp)
+                    .background(Color.Black),
                 contentScale = ContentScale.Crop,
             )
         } else if (imageModel != null) {
@@ -517,7 +518,8 @@ private fun EventCardContent(
                 contentDescription = "${event.name} image",
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(96.dp),
+                    .height(96.dp)
+                    .background(Color.Black),
                 contentScale = ContentScale.Crop,
             )
         }

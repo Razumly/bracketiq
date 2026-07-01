@@ -9,6 +9,8 @@ When writing complex features or significant refactors, use an ExecPlan (as desc
 ## Backend & Data Contract Source of Truth
 The backend and database definitions live in `mvp-site`. On Windows for this workspace, use `C:\Users\samue\Documents\Code\mvp-site\`. From WSL, use `/mnt/c/Users/samue/Documents/Code/mvp-site/`. On macOS, use `/Users/elesesy/StudioProjects/mvp-site/`. For all API endpoint usage and request/response data types in this repo, reference that project as the source of truth. Do not invent or drift endpoint paths, payloads, or shared data models without first aligning with `mvp-site`.
 
+When live DigitalOcean Postgres commands from `mvp-site` time out or fail to connect, the likely cause is that this machine's current public IP is missing from the DigitalOcean managed database firewall. Use the DigitalOcean MCP database firewall tools to add the current IP while preserving existing App Platform and IP rules, then retry the live DB operation.
+
 ## Local Data Flow
 Room is the mobile app's local source of truth for fetched API data. Repository methods that refresh remote data should write API results into Room first, and screens/components should observe Room flows for rendered state instead of rendering directly from one-off network responses. Keep this pattern for new list/detail fetches unless a feature is explicitly transient and documented as such.
 

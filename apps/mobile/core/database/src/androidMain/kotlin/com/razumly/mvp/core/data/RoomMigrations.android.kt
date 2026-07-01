@@ -43,6 +43,20 @@ val MIGRATION_3_4_USER_PRIVACY_FIELDS = object : Migration(3, 4) {
     }
 }
 
+val MIGRATION_28_29_EVENT_DATE_DISPLAY = object : Migration(28, 29) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        migrationSql28To29.forEach(db::execSQL)
+    }
+
+    override fun migrate(connection: SQLiteConnection) {
+        migrationSql28To29.forEach { sql ->
+            connection.prepare(sql).use { statement ->
+                statement.step()
+            }
+        }
+    }
+}
+
 val MIGRATION_80_81 = object : Migration(80, 81) {
     override fun migrate(db: SupportSQLiteDatabase) {
         migrationSql80To81.forEach(db::execSQL)
@@ -168,6 +182,12 @@ private val migrationSql3To4 = listOf(
     "ALTER TABLE `UserData` ADD COLUMN `privacyDisplayName` TEXT",
     "ALTER TABLE `UserData` ADD COLUMN `isMinor` INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE `UserData` ADD COLUMN `isIdentityHidden` INTEGER NOT NULL DEFAULT 0",
+)
+
+private val migrationSql28To29 = listOf(
+    "ALTER TABLE `Event` ADD COLUMN `scheduleText` TEXT",
+    "ALTER TABLE `Event` ADD COLUMN `dateDisplayMode` TEXT",
+    "ALTER TABLE `Event` ADD COLUMN `dateDisplayText` TEXT",
 )
 
 private val migrationSql81To82 = listOf(

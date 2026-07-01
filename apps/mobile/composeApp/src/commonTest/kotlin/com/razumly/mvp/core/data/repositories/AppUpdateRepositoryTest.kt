@@ -80,7 +80,73 @@ class AppUpdateRepositoryTest {
             listOf("Adds update prompts.", "Improves mobile scheduling."),
             prompt.changes,
         )
+        assertEquals(listOf("1.5.7"), prompt.releases.map { it.versionName })
         assertFalse(prompt.updateRequired)
+    }
+
+    @Test
+    fun checkForUpdate_returns_release_sections_for_every_newer_release() = runTest {
+        val repository = repositoryWithResponse(
+            response = """
+                {
+                  "updateAvailable": true,
+                  "updateRequired": false,
+                  "latestVersion": {
+                    "platform": "ANDROID",
+                    "versionName": "1.5.8",
+                    "buildNumber": 42,
+                    "changes": ["Adds richer update history."],
+                    "hasBreakingChanges": false,
+                    "updateUrl": "https://play.google.com/store/apps/details?id=com.razumly.mvp"
+                  },
+                  "releases": [
+                    {
+                      "platform": "ANDROID",
+                      "versionName": "1.5.6",
+                      "buildNumber": 40,
+                      "changes": ["Improves event detail division controls."],
+                      "hasBreakingChanges": false,
+                      "updateUrl": "https://play.google.com/store/apps/details?id=com.razumly.mvp"
+                    },
+                    {
+                      "platform": "ANDROID",
+                      "versionName": "1.5.7",
+                      "buildNumber": 41,
+                      "changes": ["Improves update prompts."],
+                      "hasBreakingChanges": false,
+                      "updateUrl": "https://play.google.com/store/apps/details?id=com.razumly.mvp"
+                    },
+                    {
+                      "platform": "ANDROID",
+                      "versionName": "1.5.8",
+                      "buildNumber": 42,
+                      "changes": ["Adds richer update history."],
+                      "hasBreakingChanges": false,
+                      "updateUrl": "https://play.google.com/store/apps/details?id=com.razumly.mvp"
+                    }
+                  ]
+                }
+            """.trimIndent(),
+        )
+
+        val prompt = repository.checkForUpdate().getOrThrow()
+
+        assertNotNull(prompt)
+        assertEquals("1.5.8", prompt.versionName)
+        assertEquals(42, prompt.buildNumber)
+        assertEquals(
+            listOf("1.5.6", "1.5.7", "1.5.8"),
+            prompt.releases.map { it.versionName },
+        )
+        assertEquals(
+            listOf(
+                "Improves event detail division controls.",
+                "Improves update prompts.",
+                "Adds richer update history.",
+            ),
+            prompt.changes,
+        )
+        assertEquals("ANDROID:1.5.8:42", prompt.releaseKey)
     }
 
     @Test

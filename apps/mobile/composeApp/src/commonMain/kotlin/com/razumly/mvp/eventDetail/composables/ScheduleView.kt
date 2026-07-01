@@ -891,7 +891,7 @@ private fun ScheduleEventCard(
                     modifier = Modifier
                         .fillMaxHeight()
                         .width(EVENT_CARD_IMAGE_WIDTH_DP.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                        .background(Color.Black),
                     contentAlignment = Alignment.Center
                 ) {
                     if (eventImageUrl == null) {

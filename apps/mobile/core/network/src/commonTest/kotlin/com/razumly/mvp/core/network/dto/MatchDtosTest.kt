@@ -80,6 +80,42 @@ class MatchDtosTest {
     }
 
     @Test
+    fun match_api_dto_decodes_object_segment_metadata() {
+        val response = jsonMVP.decodeFromString<MatchResponseDto>(
+            """
+            {
+              "match": {
+                "id": "match-4",
+                "matchId": 4,
+                "eventId": "event-4",
+                "segments": [
+                  {
+                    "id": "segment-1",
+                    "matchId": "match-4",
+                    "sequence": 1,
+                    "metadata": {
+                      "source": "mobile",
+                      "clientOperation": {
+                        "id": "op-1",
+                        "sequence": 6
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+            """.trimIndent(),
+        )
+
+        val match = response.match?.toMatchOrNull()
+
+        assertNotNull(match)
+        val metadata = match.segments.single().metadata
+        assertEquals("mobile", metadata?.get("source"))
+        assertTrue(metadata?.get("clientOperation")?.contains("\"id\":\"op-1\"") == true)
+    }
+
+    @Test
     fun embedded_field_dto_only_maps_to_field_when_required_field_data_exists() {
         val partialField = MatchEmbeddedFieldDto(
             id = "field-7",

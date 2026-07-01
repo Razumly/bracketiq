@@ -15,6 +15,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_ONLINE
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
+import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TimeSlotDTO
 import com.razumly.mvp.core.data.dataTypes.buildEventOfficialRecordId
@@ -114,6 +115,9 @@ data class EventApiDto(
     val leagueScoringConfig: LeagueScoringConfigDTO? = null,
     val organizationId: String? = null,
     val affiliateUrl: String? = null,
+    val scheduleText: String? = null,
+    val dateDisplayMode: String? = null,
+    val dateDisplayText: String? = null,
     val registrationPaymentMode: String? = null,
     val manualPaymentLinks: List<ManualPaymentLink>? = null,
     val manualPaymentInstructions: String? = null,
@@ -145,6 +149,10 @@ data class EventApiDto(
     val setsPerMatch: Int? = null,
     val doTeamsOfficiate: Boolean? = null,
     val teamOfficialsMaySwap: Boolean? = null,
+    val teamCheckInMode: TeamCheckInMode? = null,
+    val teamCheckInOpenMinutesBefore: Int? = null,
+    val allowMatchRosterEdits: Boolean? = null,
+    val allowTemporaryMatchPlayers: Boolean? = null,
     val matchRulesOverride: MatchRulesConfigMVP? = null,
     val autoCreatePointMatchIncidents: Boolean? = null,
     val resolvedMatchRules: ResolvedMatchRulesMVP? = null,
@@ -176,6 +184,9 @@ data class EventApiDto(
         val resolvedStart = start
         val resolvedEnd = end
         val resolvedAffiliateUrl = affiliateUrl?.trim()?.takeIf(String::isNotBlank)
+        val resolvedScheduleText = scheduleText?.trim()?.takeIf(String::isNotBlank)
+        val resolvedDateDisplayMode = dateDisplayMode?.trim()?.takeIf(String::isNotBlank)
+        val resolvedDateDisplayText = dateDisplayText?.trim()?.takeIf(String::isNotBlank)
         if (resolvedId.isNullOrBlank() || resolvedName.isNullOrBlank()) return null
         if (resolvedHostId.isNullOrBlank() && resolvedAffiliateUrl == null) return null
         if (resolvedStart.isNullOrBlank()) return null
@@ -374,6 +385,9 @@ data class EventApiDto(
             leagueScoringConfigId = leagueScoringConfigId,
             organizationId = organizationId,
             affiliateUrl = resolvedAffiliateUrl,
+            scheduleText = resolvedScheduleText,
+            dateDisplayMode = resolvedDateDisplayMode,
+            dateDisplayText = resolvedDateDisplayText,
             registrationPaymentMode = resolvedRegistrationPaymentMode,
             manualPaymentLinks = if (manualPaymentsEnabled) {
                 normalizeManualPaymentLinks(manualPaymentLinks)
@@ -409,6 +423,10 @@ data class EventApiDto(
             setsPerMatch = setsPerMatch,
             doTeamsOfficiate = effectiveDoTeamsOfficiate,
             teamOfficialsMaySwap = if (effectiveDoTeamsOfficiate == true) teamOfficialsMaySwap else false,
+            teamCheckInMode = if (teamSignup != false) teamCheckInMode ?: TeamCheckInMode.OFF else TeamCheckInMode.OFF,
+            teamCheckInOpenMinutesBefore = (teamCheckInOpenMinutesBefore ?: 60).coerceAtLeast(0),
+            allowMatchRosterEdits = teamSignup != false && allowMatchRosterEdits == true,
+            allowTemporaryMatchPlayers = teamSignup != false && allowMatchRosterEdits == true && allowTemporaryMatchPlayers == true,
             matchRulesOverride = matchRulesOverride,
             autoCreatePointMatchIncidents = autoCreatePointMatchIncidents ?: false,
             resolvedMatchRules = resolvedMatchRules,
@@ -840,6 +858,10 @@ data class EventUpdateDto(
     val eventType: String? = null,
     val doTeamsOfficiate: Boolean? = null,
     val teamOfficialsMaySwap: Boolean? = null,
+    val teamCheckInMode: TeamCheckInMode? = null,
+    val teamCheckInOpenMinutesBefore: Int? = null,
+    val allowMatchRosterEdits: Boolean? = null,
+    val allowTemporaryMatchPlayers: Boolean? = null,
     val matchRulesOverride: MatchRulesConfigMVP? = null,
     val autoCreatePointMatchIncidents: Boolean? = null,
     @Transient val officialIds: List<String>? = null,
@@ -1052,6 +1074,7 @@ fun Event.toUpdateDto(
     val normalizedPlayoffDivisionDetailsForPayload = tournamentPoolBracketDetails.map(::normalizeDivisionDetailForPayload)
 
     val effectiveDoTeamsOfficiate = if (officialSchedulingMode.requiresTeamOfficials()) true else doTeamsOfficiate
+    val effectiveTeamSignup = teamSignup
     val resolvedRegistrationPaymentMode = normalizeRegistrationPaymentMode(registrationPaymentMode)
     val manualPaymentsEnabled = isManualRegistrationPaymentMode(resolvedRegistrationPaymentMode)
 
@@ -1133,6 +1156,10 @@ fun Event.toUpdateDto(
         eventType = eventType.name,
         doTeamsOfficiate = effectiveDoTeamsOfficiate,
         teamOfficialsMaySwap = if (effectiveDoTeamsOfficiate == true) teamOfficialsMaySwap else false,
+        teamCheckInMode = if (effectiveTeamSignup) teamCheckInMode else TeamCheckInMode.OFF,
+        teamCheckInOpenMinutesBefore = teamCheckInOpenMinutesBefore.coerceAtLeast(0),
+        allowMatchRosterEdits = effectiveTeamSignup && allowMatchRosterEdits,
+        allowTemporaryMatchPlayers = effectiveTeamSignup && allowMatchRosterEdits && allowTemporaryMatchPlayers,
         matchRulesOverride = matchRulesOverride,
         autoCreatePointMatchIncidents = autoCreatePointMatchIncidents,
         allowPaymentPlans = allowPaymentPlans,

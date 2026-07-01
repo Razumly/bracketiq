@@ -15,6 +15,7 @@ import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_MANUAL
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.evergreenDateDisplayLabel
 import com.razumly.mvp.core.data.dataTypes.resolvedDivisionPriceCents
 import com.razumly.mvp.core.data.dataTypes.toEventDTO
 import com.razumly.mvp.core.util.jsonMVP
@@ -1118,6 +1119,33 @@ class EventDtosTest {
         assertEquals("org_partner", event.organizationId)
         assertEquals("https://partner.example.com/register", event.affiliateUrl)
         assertEquals(EventType.LEAGUE, event.eventType)
+    }
+
+    @Test
+    fun event_api_dto_preserves_evergreen_date_display_fields() {
+        val dto = EventApiDto(
+            id = "event-affiliate-evergreen-1",
+            name = "Partner Program",
+            hostId = null,
+            organizationId = "org_partner",
+            affiliateUrl = "https://partner.example.com/register",
+            eventType = EventType.LEAGUE.name,
+            start = "2099-01-01T00:00:00Z",
+            end = "2099-01-01T00:00:00Z",
+            scheduleText = "Call for availability",
+            dateDisplayMode = " NO_FIXED_DATE ",
+            dateDisplayText = "Ongoing registration",
+        )
+
+        val event = dto.toEventOrNull()
+
+        assertNotNull(event)
+        assertEquals("Call for availability", event.scheduleText)
+        assertEquals("NO_FIXED_DATE", event.dateDisplayMode)
+        assertEquals("Ongoing registration", event.dateDisplayText)
+        assertEquals("Ongoing registration", event.evergreenDateDisplayLabel())
+        assertEquals("NO_FIXED_DATE", event.toEventDTO().dateDisplayMode)
+        assertEquals("Ongoing registration", event.toEventDTO().dateDisplayText)
     }
 
     @Test

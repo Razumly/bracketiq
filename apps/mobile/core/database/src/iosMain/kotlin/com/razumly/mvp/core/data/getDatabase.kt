@@ -35,6 +35,7 @@ fun getDatabase(): RoomDatabase.Builder<MVPDatabaseService> {
                 MIGRATION_1_2_NO_OP,
                 MIGRATION_2_3_MATCH_START_NULLABLE,
                 MIGRATION_3_4_USER_PRIVACY_FIELDS,
+                MIGRATION_28_29_EVENT_DATE_DISPLAY,
             )
             .fallbackToDestructiveMigrationOnDowngrade(true)
 
@@ -323,6 +324,22 @@ private val MIGRATION_3_4_USER_PRIVACY_FIELDS = object : Migration(3, 4) {
             "ALTER TABLE `UserData` ADD COLUMN `privacyDisplayName` TEXT",
             "ALTER TABLE `UserData` ADD COLUMN `isMinor` INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE `UserData` ADD COLUMN `isIdentityHidden` INTEGER NOT NULL DEFAULT 0",
+        )
+
+        migrationSql.forEach { sql ->
+            connection.prepare(sql).use { statement ->
+                statement.step()
+            }
+        }
+    }
+}
+
+private val MIGRATION_28_29_EVENT_DATE_DISPLAY = object : Migration(28, 29) {
+    override fun migrate(connection: SQLiteConnection) {
+        val migrationSql = listOf(
+            "ALTER TABLE `Event` ADD COLUMN `scheduleText` TEXT",
+            "ALTER TABLE `Event` ADD COLUMN `dateDisplayMode` TEXT",
+            "ALTER TABLE `Event` ADD COLUMN `dateDisplayText` TEXT",
         )
 
         migrationSql.forEach { sql ->

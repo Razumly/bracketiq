@@ -28,6 +28,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.label
 import com.razumly.mvp.core.data.dataTypes.usesTeamOfficialScheduling
@@ -47,6 +48,12 @@ import com.razumly.mvp.eventDetail.staff.StaffAssignmentCard
 import com.razumly.mvp.eventDetail.staff.StaffAssignmentCardModel
 import com.razumly.mvp.eventDetail.staff.userDisplayName
 
+private fun TeamCheckInMode.label(): String = when (this) {
+    TeamCheckInMode.OFF -> "Off"
+    TeamCheckInMode.EVENT -> "Event check-in"
+    TeamCheckInMode.MATCH -> "Match check-in"
+}
+
 internal data class EventDetailsStaffState(
     val readOnlySection: ReadOnlySectionModel,
     val sectionExpansionStates: SnapshotStateMap<String, Boolean>,
@@ -61,6 +68,7 @@ internal data class EventDetailsStaffState(
     val assistantHostIds: List<String>,
     val officialPositionSummary: String,
     val officialSchedulingModeOptions: List<DropdownOption>,
+    val teamCheckInModeOptions: List<DropdownOption>,
     val officialPositionsExpanded: Boolean,
     val canLoadOfficialPositionDefaults: Boolean,
     val staffSearchQuery: String,
@@ -84,6 +92,10 @@ internal data class EventDetailsStaffActions(
     val onDisabledClick: () -> Unit,
     val onUpdateDoTeamsOfficiate: (Boolean) -> Unit,
     val onUpdateTeamOfficialsMaySwap: (Boolean) -> Unit,
+    val onUpdateTeamCheckInMode: (TeamCheckInMode) -> Unit,
+    val onUpdateTeamCheckInOpenMinutesBefore: (Int) -> Unit,
+    val onUpdateAllowMatchRosterEdits: (Boolean) -> Unit,
+    val onUpdateAllowTemporaryMatchPlayers: (Boolean) -> Unit,
     val onUpdateOfficialSchedulingMode: (OfficialSchedulingMode) -> Unit,
     val onToggleOfficialPositionsExpanded: () -> Unit,
     val onLoadOfficialPositionDefaults: () -> Unit,
@@ -145,6 +157,23 @@ internal fun LazyListScope.eventDetailsStaffSection(
                             ),
                         )
                     }
+                    if (state.event.teamSignup) {
+                        add(DetailRowSpec("Team check-in", state.event.teamCheckInMode.label()))
+                        if (state.event.teamCheckInMode != TeamCheckInMode.OFF) {
+                            add(
+                                DetailRowSpec(
+                                    "Check-in opens",
+                                    "${state.event.teamCheckInOpenMinutesBefore.coerceAtLeast(0)} minutes before start",
+                                ),
+                            )
+                        }
+                        add(
+                            DetailRowSpec(
+                                "Match roster edits",
+                                if (state.event.allowMatchRosterEdits) "Enabled" else "Disabled",
+                            ),
+                        )
+                    }
                     add(DetailRowSpec("Primary host", state.resolvedHostDisplay))
                     add(DetailRowSpec("Assistant hosts", state.assistantHostIds.size.toString()))
                     add(DetailRowSpec("Officials", state.event.officialIds.size.toString()))
@@ -170,6 +199,52 @@ internal fun LazyListScope.eventDetailsStaffSection(
                     label = "Team officials may swap",
                     onCheckedChange = actions.onUpdateTeamOfficialsMaySwap,
                 )
+            }
+            if (state.editEvent.teamSignup) {
+                FormSectionDivider()
+                Text(
+                    text = "Team check-in and match rosters",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = Color(localImageScheme.current.onSurface),
+                )
+                PlatformDropdown(
+                    selectedValue = state.editEvent.teamCheckInMode.name,
+                    onSelectionChange = { selectedMode ->
+                        TeamCheckInMode.entries
+                            .firstOrNull { mode -> mode.name == selectedMode }
+                            ?.let(actions.onUpdateTeamCheckInMode)
+                    },
+                    options = state.teamCheckInModeOptions,
+                    label = "Check-in mode",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (state.editEvent.teamCheckInMode != TeamCheckInMode.OFF) {
+                    NumberInputField(
+                        value = state.editEvent.teamCheckInOpenMinutesBefore.coerceAtLeast(0).toString(),
+                        label = "Opens before start (minutes)",
+                        isError = false,
+                        onValueChange = { newValue ->
+                            if (newValue.all(Char::isDigit)) {
+                                actions.onUpdateTeamCheckInOpenMinutesBefore(
+                                    newValue.toIntOrNull()?.coerceAtLeast(0) ?: 0,
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                LabeledCheckboxRow(
+                    checked = state.editEvent.allowMatchRosterEdits,
+                    label = "Allow match roster edits",
+                    onCheckedChange = actions.onUpdateAllowMatchRosterEdits,
+                )
+                if (state.editEvent.allowMatchRosterEdits) {
+                    LabeledCheckboxRow(
+                        checked = state.editEvent.allowTemporaryMatchPlayers,
+                        label = "Allow temporary match players",
+                        onCheckedChange = actions.onUpdateAllowTemporaryMatchPlayers,
+                    )
+                }
             }
             Text(
                 text = "Official scheduling",

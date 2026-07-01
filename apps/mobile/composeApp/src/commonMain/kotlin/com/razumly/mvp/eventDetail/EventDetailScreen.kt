@@ -103,6 +103,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.divisionPriceRange
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -958,6 +959,9 @@ fun EventDetailScreen(
     val sports by component.sports.collectAsState()
     val divisionTypeParameters by component.divisionTypeParameters.collectAsState()
     val currentUser by component.currentUser.collectAsState()
+    val showEventTeamCheckInDialog by component.showEventTeamCheckInDialog.collectAsState()
+    val eventTeamCheckInSaving by component.eventTeamCheckInSaving.collectAsState()
+    val currentUserManagedEventTeamId by component.currentUserManagedEventTeamId.collectAsState()
     val playerInteractionComponent = remember {
         getKoin().get<PlayerInteractionComponent> { parametersOf(component) }
     }
@@ -1127,6 +1131,24 @@ fun EventDetailScreen(
     val showScheduleMatchManagement = canManageMatchEditingFromDock &&
         shouldShowScheduleMatchManagement(eventType)
     val canManageParticipantsFromDock = canManageTemplate
+    val showEventCheckInBadges = remember(
+        selectedEvent.event.teamSignup,
+        selectedEvent.event.teamCheckInMode,
+        canManageParticipantsFromDock,
+        isEventOfficial,
+    ) {
+        selectedEvent.event.teamSignup &&
+            selectedEvent.event.teamCheckInMode.name == "EVENT" &&
+            (canManageParticipantsFromDock || isEventOfficial)
+    }
+    val currentUserManagedEventTeam = remember(
+        currentUserManagedEventTeamId,
+        selectedEvent.teams,
+    ) {
+        selectedEvent.teams.firstOrNull { team ->
+            team.team.id == currentUserManagedEventTeamId
+        }
+    }
 
     var showTeamSelectionDialog by remember { mutableStateOf(false) }
     var showFab by remember { mutableStateOf(false) }
@@ -2129,6 +2151,31 @@ fun EventDetailScreen(
                                 component.editEventField {
                                     copy(
                                         teamOfficialsMaySwap = if (usesTeamOfficialScheduling()) teamOfficialsMaySwap else false,
+                                    )
+                                }
+                            },
+                            onUpdateTeamCheckInMode = { mode ->
+                                component.editEventField {
+                                    copy(teamCheckInMode = if (teamSignup) mode else TeamCheckInMode.OFF)
+                                }
+                            },
+                            onUpdateTeamCheckInOpenMinutesBefore = { minutes ->
+                                component.editEventField {
+                                    copy(teamCheckInOpenMinutesBefore = minutes.coerceAtLeast(0))
+                                }
+                            },
+                            onUpdateAllowMatchRosterEdits = { enabled ->
+                                component.editEventField {
+                                    copy(
+                                        allowMatchRosterEdits = teamSignup && enabled,
+                                        allowTemporaryMatchPlayers = teamSignup && enabled && allowTemporaryMatchPlayers,
+                                    )
+                                }
+                            },
+                            onUpdateAllowTemporaryMatchPlayers = { enabled ->
+                                component.editEventField {
+                                    copy(
+                                        allowTemporaryMatchPlayers = teamSignup && allowMatchRosterEdits && enabled,
                                     )
                                 }
                             },
@@ -3205,6 +3252,7 @@ fun EventDetailScreen(
                                             onNavigateToChat = component::onNavigateToChat,
                                             manageMode = isManagingParticipants,
                                             canManageParticipants = canManageParticipantsFromDock,
+                                            showEventCheckInBadges = showEventCheckInBadges,
                                             topContentPadding = tabContentTopOffset,
                                             selectedDivisionId = selectedParticipantsDivisionId
                                                 ?: selectedDivision,
@@ -3688,6 +3736,38 @@ fun EventDetailScreen(
                         showTeamSelectionDialog = false
                     },
                     onCreateTeam = { component.createNewTeam() },
+                )
+            }
+            if (showEventTeamCheckInDialog) {
+                val teamName = currentUserManagedEventTeam
+                    ?.team
+                    ?.name
+                    ?.takeIf(String::isNotBlank)
+                    ?: "your team"
+                AlertDialog(
+                    onDismissRequest = {
+                        if (!eventTeamCheckInSaving) {
+                            component.dismissEventTeamCheckInDialog()
+                        }
+                    },
+                    title = { Text("Check in for event?") },
+                    text = { Text("Check in $teamName for this event.") },
+                    confirmButton = {
+                        Button(
+                            onClick = component::confirmEventTeamCheckIn,
+                            enabled = !eventTeamCheckInSaving,
+                        ) {
+                            Text(if (eventTeamCheckInSaving) "Saving..." else "Check in")
+                        }
+                    },
+                    dismissButton = {
+                        Button(
+                            onClick = component::dismissEventTeamCheckInDialog,
+                            enabled = !eventTeamCheckInSaving,
+                        ) {
+                            Text("Not now")
+                        }
+                    },
                 )
             }
             joinChoiceDialog?.let {

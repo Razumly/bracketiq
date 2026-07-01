@@ -46,6 +46,7 @@ import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.divisionPriceRangeLabel
+import com.razumly.mvp.core.data.dataTypes.evergreenDateDisplayLabel
 import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
 import com.razumly.mvp.core.data.dataTypes.isDraftLikeState
 import com.razumly.mvp.core.data.dataTypes.isPrivateState
@@ -96,7 +97,7 @@ fun EventCard(
     var mapButtonOffset by remember { mutableStateOf(Offset.Zero) }
 
     val eventTimeZone = remember(event.timeZone) { event.resolvedTimeZone() }
-    val dateRangeText = remember(event.start, event.end, eventTimeZone) {
+    val scheduledDateRangeText = remember(event.start, event.end, eventTimeZone) {
         val startDate = event.start.toLocalDateTime(eventTimeZone).date
         val endDate = event.end.toLocalDateTime(eventTimeZone).date
 
@@ -108,6 +109,14 @@ fun EventCard(
         } else {
             startStr
         }
+    }
+    val dateRangeText = remember(
+        event.scheduleText,
+        event.dateDisplayMode,
+        event.dateDisplayText,
+        scheduledDateRangeText,
+    ) {
+        event.evergreenDateDisplayLabel() ?: scheduledDateRangeText
     }
     val prizeText = remember(event.prize) {
         event.prize.trim().takeIf { it.isNotEmpty() }
@@ -138,7 +147,12 @@ fun EventCard(
     }
 
 
-    Box(Modifier.fillMaxWidth().clipToBounds()) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clipToBounds()
+            .background(Color.Black)
+    ) {
         AsyncImage(model = imageModel,
             contentDescription = "Event Image",
             modifier = Modifier

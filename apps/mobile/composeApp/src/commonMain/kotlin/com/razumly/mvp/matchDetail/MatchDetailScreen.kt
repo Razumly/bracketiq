@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -81,6 +82,8 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
 import com.razumly.mvp.core.data.dataTypes.normalizedOfficialAssignments
+import com.razumly.mvp.core.network.dto.MatchRosterDto
+import com.razumly.mvp.core.network.dto.MatchRosterEntryDto
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.guides.EventGuideIds
 import com.razumly.mvp.core.presentation.guides.EventGuideTargets
@@ -157,6 +160,14 @@ internal data class MatchParticipantOption(
 
 private data class MatchIncidentDialogTarget(
     val eventTeamId: String?,
+)
+
+private data class MatchActionDialogTarget(
+    val action: String,
+    val forfeitingEventTeamId: String? = null,
+    val title: String,
+    val message: String,
+    val confirmLabel: String,
 )
 
 internal data class MatchOfficialDetailRow(
@@ -446,10 +457,20 @@ fun MatchDetailScreen(
     val officialCheckInSaving by component.officialCheckInSaving.collectAsState()
     val matchStartSaving by component.matchStartSaving.collectAsState()
     val matchTimeSaving by component.matchTimeSaving.collectAsState()
+    val matchActionSaving by component.matchActionSaving.collectAsState()
     val segmentConfirmSaving by component.segmentConfirmSaving.collectAsState()
     val showOfficialCheckInDialog by component.showOfficialCheckInDialog.collectAsState()
+    val matchTeamCheckIns by component.matchTeamCheckIns.collectAsState()
+    val showTeamCheckInDialog by component.showTeamCheckInDialog.collectAsState()
+    val teamCheckInSaving by component.teamCheckInSaving.collectAsState()
+    val currentUserManagedMatchTeamId by component.currentUserManagedMatchTeamId.collectAsState()
+    val matchRosters by component.matchRosters.collectAsState()
+    val matchRosterLoading by component.matchRosterLoading.collectAsState()
+    val matchRosterSaving by component.matchRosterSaving.collectAsState()
+    val showMatchRosterDialog by component.showMatchRosterDialog.collectAsState()
     val currentSet by component.currentSet.collectAsState()
     val matchFinished by component.matchFinished.collectAsState()
+    val canManageMatchActions by component.canManageMatchActions.collectAsState()
     val assignedTeamOfficialPendingCheckIn by component.assignedTeamOfficialPendingCheckIn.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
     val currentLocation by mapComponent.currentLocation.collectAsState()
@@ -463,6 +484,21 @@ fun MatchDetailScreen(
     val bottomDockBottomPadding = maxOf(navBottomPadding, safeBottomPadding) + MatchDetailBottomDockLift
     val team1 = match.team1
     val team2 = match.team2
+    val currentUserManagedMatchTeam = remember(currentUserManagedMatchTeamId, team1, team2) {
+        when (currentUserManagedMatchTeamId) {
+            team1?.team?.id -> team1
+            team2?.team?.id -> team2
+            else -> null
+        }
+    }
+    val currentUserManagedMatchRoster = remember(matchRosters, currentUserManagedMatchTeamId) {
+        matchRosters?.rosters?.firstOrNull { roster -> roster.eventTeamId == currentUserManagedMatchTeamId }
+    }
+    val canEditMatchRoster = event?.teamSignup == true &&
+        event?.allowMatchRosterEdits == true &&
+        (matchFinished || event?.let { isTeamCheckInWindowOpen(match.match, it) } == true) &&
+        currentUserManagedMatchTeamId != null
+    val matchCheckInEnabled = event?.teamSignup == true && event?.teamCheckInMode?.name == "MATCH"
     val incidentDefinitionsByCode = remember(rules.incidentTypeDefinitions) {
         rules.incidentTypeDefinitions.associateBy { definition ->
             definition.code.trim().uppercase()
@@ -485,6 +521,8 @@ fun MatchDetailScreen(
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
     var showMatchDetails by remember { mutableStateOf(false) }
     var pendingIncidentTarget by remember(match.match.id) { mutableStateOf<MatchIncidentDialogTarget?>(null) }
+    var pendingMatchAction by remember(match.match.id) { mutableStateOf<MatchActionDialogTarget?>(null) }
+    var showForfeitTeamDialog by remember(match.match.id) { mutableStateOf(false) }
     var incidentType by remember(match.match.id) { mutableStateOf("") }
     var incidentParticipantId by remember(match.match.id) { mutableStateOf<String?>(null) }
     var incidentMinute by remember(match.match.id) { mutableStateOf("") }
@@ -634,8 +672,10 @@ fun MatchDetailScreen(
     val delayThresholdPassed = match.match.start?.let { scheduledStart ->
         delayPromptNowMillis >= (scheduledStart + 5.minutes).toEpochMilliseconds()
     } == true
+    val officialMatchWindowOpen = isOfficialMatchWindowOpen(match.match)
     val delayPromptEligible = isOfficial &&
         officialCheckedIn &&
+        officialMatchWindowOpen &&
         !matchFinished &&
         !showOfficialCheckInDialog &&
         !match.match.isDelayedStatus() &&
@@ -657,12 +697,14 @@ fun MatchDetailScreen(
         match.match.status,
         isOfficial,
         officialCheckedIn,
+        officialMatchWindowOpen,
         matchFinished,
         showOfficialCheckInDialog,
     ) {
         while (
             isOfficial &&
             officialCheckedIn &&
+            officialMatchWindowOpen &&
             !matchFinished &&
             !showOfficialCheckInDialog &&
             !match.match.isDelayedStatus() &&
@@ -676,6 +718,7 @@ fun MatchDetailScreen(
     val canAdjustScore = showOfficialScoreControls &&
         !matchFinished &&
         officialCheckedIn &&
+        !match.match.actualStart.isNullOrBlank() &&
         activeSegment?.status != "COMPLETE"
     val canIncrementScore = canAdjustScore &&
         canIncrementCurrentSegment(match.match, rules, event, currentSet)
@@ -731,6 +774,7 @@ fun MatchDetailScreen(
     }
     val canConfirmResult = showOfficialScoreControls &&
         officialCheckedIn &&
+        !match.match.actualStart.isNullOrBlank() &&
         !matchFinished &&
         activeSegment?.status != "COMPLETE"
     val confirmResultEnabled = canConfirmResult &&
@@ -738,11 +782,13 @@ fun MatchDetailScreen(
         canConfirmCurrentSegment(match.match, rules, event, currentSet)
     val canStartMatch = showOfficialScoreControls &&
         officialCheckedIn &&
+        officialMatchWindowOpen &&
         !matchFinished &&
         activeSegment?.status != "COMPLETE" &&
         activeSegment?.startedAt.isNullOrBlank()
     val canResetMatchTimer = showOfficialScoreControls &&
         officialCheckedIn &&
+        officialMatchWindowOpen &&
         !matchFinished &&
         hasMatchClock &&
         activeSegment?.status != "COMPLETE" &&
@@ -847,6 +893,15 @@ fun MatchDetailScreen(
         }
     }.value
 
+    val canUseMatchStatusActions = (canManageMatchActions || (isOfficial && officialCheckedIn && officialMatchWindowOpen)) &&
+        !matchFinished
+    val matchSuspended = match.match.status.equals("SUSPENDED", ignoreCase = true)
+    val canUsePreStartMatchActions = canUseMatchStatusActions &&
+        match.match.actualStart.isNullOrBlank() &&
+        !matchSuspended
+    val canSuspendMatch = canUseMatchStatusActions && !matchSuspended
+    val canResumeMatch = canUseMatchStatusActions && matchSuspended
+
     if (showOfficialCheckInDialog && !shouldGateOfficialCheckInDialog) {
         val message = if (isOfficial) {
             stringResource(Res.string.official_checkin_message)
@@ -894,6 +949,84 @@ fun MatchDetailScreen(
         )
     }
 
+    if (showTeamCheckInDialog) {
+        val teamName = currentUserManagedMatchTeam?.team?.name?.takeIf(String::isNotBlank) ?: "your team"
+        AlertDialog(
+            onDismissRequest = {
+                if (!teamCheckInSaving) {
+                    component.dismissTeamCheckInDialog()
+                }
+            },
+            title = { Text("Check in for match?") },
+            text = { Text("Check in $teamName for this match.") },
+            confirmButton = {
+                Button(
+                    onClick = { component.confirmTeamCheckIn() },
+                    enabled = !teamCheckInSaving,
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (teamCheckInSaving) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                            )
+                        }
+                        Text(if (teamCheckInSaving) "Saving..." else "Check in")
+                    }
+                }
+            },
+            dismissButton = {
+                Button(
+                    onClick = { component.dismissTeamCheckInDialog() },
+                    enabled = !teamCheckInSaving,
+                ) {
+                    Text("Not now")
+                }
+            },
+        )
+    }
+
+    val managedRosterTeamId = currentUserManagedMatchTeamId
+    if (showMatchRosterDialog && managedRosterTeamId != null) {
+        MatchRosterDialog(
+            teamName = currentUserManagedMatchTeam?.team?.name?.takeIf(String::isNotBlank) ?: "Team",
+            eventTeamId = managedRosterTeamId,
+            roster = currentUserManagedMatchRoster,
+            loading = matchRosterLoading,
+            saving = matchRosterSaving,
+            completed = matchFinished,
+            allowTemporaryMatchPlayers = matchRosters?.allowTemporaryMatchPlayers == true,
+            onRemovePlayer = { userId ->
+                component.removeMatchRosterPlayer(managedRosterTeamId, userId)
+            },
+            onRestorePlayer = { userId ->
+                component.restoreMatchRosterPlayer(managedRosterTeamId, userId)
+            },
+            onAddTemporaryPlayer = { firstName, lastName, email ->
+                component.addTemporaryMatchRosterPlayer(
+                    eventTeamId = managedRosterTeamId,
+                    firstName = firstName,
+                    lastName = lastName,
+                    email = email,
+                )
+            },
+            onLinkTemporaryPlayer = { entryId, email ->
+                component.addTemporaryMatchRosterPlayer(
+                    eventTeamId = managedRosterTeamId,
+                    firstName = null,
+                    lastName = null,
+                    email = email,
+                    entryId = entryId,
+                )
+            },
+            onDismiss = component::dismissMatchRoster,
+        )
+    }
+
     if (showDelayPrompt) {
         AlertDialog(
             onDismissRequest = {
@@ -933,6 +1066,114 @@ fun MatchDetailScreen(
                         deniedDelayPromptKey = delayPromptKey
                     },
                     enabled = !matchTimeSaving,
+                ) {
+                    Text("No")
+                }
+            },
+        )
+    }
+
+    if (showForfeitTeamDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!matchActionSaving) {
+                    showForfeitTeamDialog = false
+                }
+            },
+            title = { Text("Forfeit match") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("Choose the team that is forfeiting this match.")
+                    match.match.team1Id?.takeIf(String::isNotBlank)?.let { teamId ->
+                        Button(
+                            onClick = {
+                                component.forfeitTeam(teamId)
+                                showForfeitTeamDialog = false
+                            },
+                            enabled = !matchActionSaving,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                text = "Forfeit $team1Text",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    match.match.team2Id?.takeIf(String::isNotBlank)?.let { teamId ->
+                        Button(
+                            onClick = {
+                                component.forfeitTeam(teamId)
+                                showForfeitTeamDialog = false
+                            },
+                            enabled = !matchActionSaving,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                text = "Forfeit $team2Text",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                Button(
+                    onClick = { showForfeitTeamDialog = false },
+                    enabled = !matchActionSaving,
+                ) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
+    pendingMatchAction?.let { actionTarget ->
+        AlertDialog(
+            onDismissRequest = {
+                if (!matchActionSaving) {
+                    pendingMatchAction = null
+                }
+            },
+            title = { Text(actionTarget.title) },
+            text = { Text(actionTarget.message) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        when (actionTarget.action) {
+                            "FORFEIT" -> actionTarget.forfeitingEventTeamId?.let(component::forfeitTeam)
+                            "CANCEL" -> component.cancelMatch()
+                            "SUSPEND" -> component.suspendMatch()
+                            "RESUME" -> component.resumeMatch()
+                        }
+                        pendingMatchAction = null
+                    },
+                    enabled = !matchActionSaving,
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (matchActionSaving) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                            )
+                        }
+                        Text(if (matchActionSaving) "Saving..." else actionTarget.confirmLabel)
+                    }
+                }
+            },
+            dismissButton = {
+                Button(
+                    onClick = { pendingMatchAction = null },
+                    enabled = !matchActionSaving,
                 ) {
                     Text("No")
                 }
@@ -1371,6 +1612,49 @@ fun MatchDetailScreen(
                 actualEndDraft = actualEndDraft,
                 actualTimeError = actualTimeError,
                 matchTimeSaving = matchTimeSaving,
+                canEditRoster = canEditMatchRoster,
+                onEditRoster = component::openMatchRoster,
+                showMatchTeamCheckIns = matchCheckInEnabled,
+                team1Name = team1Text,
+                team1CheckedIn = match.match.team1Id
+                    ?.let { teamId -> matchTeamCheckIns[teamId]?.status?.equals("CHECKED_IN", ignoreCase = true) == true }
+                    == true,
+                team2Name = team2Text,
+                team2CheckedIn = match.match.team2Id
+                    ?.let { teamId -> matchTeamCheckIns[teamId]?.status?.equals("CHECKED_IN", ignoreCase = true) == true }
+                    == true,
+                canUseMatchStatusActions = canUseMatchStatusActions,
+                canUsePreStartMatchActions = canUsePreStartMatchActions &&
+                    !match.match.team1Id.isNullOrBlank() &&
+                    !match.match.team2Id.isNullOrBlank(),
+                canSuspendMatch = canSuspendMatch,
+                canResumeMatch = canResumeMatch,
+                matchActionSaving = matchActionSaving,
+                onForfeitClick = { showForfeitTeamDialog = true },
+                onCancelMatchClick = {
+                    pendingMatchAction = MatchActionDialogTarget(
+                        action = "CANCEL",
+                        title = "Cancel match?",
+                        message = "This match will be cancelled and no winner will be recorded.",
+                        confirmLabel = "Cancel match",
+                    )
+                },
+                onSuspendMatchClick = {
+                    pendingMatchAction = MatchActionDialogTarget(
+                        action = "SUSPEND",
+                        title = "Suspend match?",
+                        message = "This match will be suspended and can be resumed later.",
+                        confirmLabel = "Suspend",
+                    )
+                },
+                onResumeMatchClick = {
+                    pendingMatchAction = MatchActionDialogTarget(
+                        action = "RESUME",
+                        title = "Resume match?",
+                        message = "This match will be reopened from its suspended state.",
+                        confirmLabel = "Resume",
+                    )
+                },
                 onEditActualTimes = {
                     actualStartDraft = parseMatchInstant(match.match.actualStart)
                     actualEndDraft = parseMatchInstant(match.match.actualEnd)
@@ -1709,6 +1993,232 @@ internal fun MatchSegmentScoreTracker(
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                         )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun matchRosterEntryName(entry: MatchRosterEntryDto): String =
+    listOfNotNull(entry.firstName, entry.lastName)
+        .joinToString(" ")
+        .trim()
+        .takeIf(String::isNotBlank)
+        ?: entry.userName?.trim()?.takeIf(String::isNotBlank)
+        ?: entry.email?.trim()?.takeIf(String::isNotBlank)
+        ?: entry.userId?.trim()?.takeIf(String::isNotBlank)
+        ?: "Temporary player"
+
+@Composable
+private fun MatchRosterDialog(
+    teamName: String,
+    eventTeamId: String,
+    roster: MatchRosterDto?,
+    loading: Boolean,
+    saving: Boolean,
+    completed: Boolean,
+    allowTemporaryMatchPlayers: Boolean,
+    onRemovePlayer: (String) -> Unit,
+    onRestorePlayer: (String) -> Unit,
+    onAddTemporaryPlayer: (String, String, String?) -> Unit,
+    onLinkTemporaryPlayer: (String, String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var firstName by remember(eventTeamId) { mutableStateOf("") }
+    var lastName by remember(eventTeamId) { mutableStateOf("") }
+    var email by remember(eventTeamId) { mutableStateOf("") }
+    var linkEmailByEntryId by remember(eventTeamId) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    val entries = roster?.entries.orEmpty()
+
+    AlertDialog(
+        onDismissRequest = {
+            if (!saving) {
+                onDismiss()
+            }
+        },
+        title = { Text("$teamName match roster") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                when {
+                    loading -> Text("Loading roster...", style = MaterialTheme.typography.bodyMedium)
+                    entries.isEmpty() -> Text("No roster entries found.", style = MaterialTheme.typography.bodyMedium)
+                    else -> entries.forEach { entry ->
+                        MatchRosterEntryRow(
+                            entry = entry,
+                            saving = saving,
+                            completed = completed,
+                            linkEmail = linkEmailByEntryId[entry.id.orEmpty()] ?: entry.email.orEmpty(),
+                            onLinkEmailChange = { value ->
+                                entry.id?.let { entryId ->
+                                    linkEmailByEntryId = linkEmailByEntryId + (entryId to value)
+                                }
+                            },
+                            onRemovePlayer = onRemovePlayer,
+                            onRestorePlayer = onRestorePlayer,
+                            onLinkTemporaryPlayer = { entryId, linkEmail ->
+                                onLinkTemporaryPlayer(entryId, linkEmail.trim().takeIf(String::isNotBlank))
+                            },
+                        )
+                    }
+                }
+                if (!completed && allowTemporaryMatchPlayers) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = "Add temporary player",
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                OutlinedTextField(
+                                    value = firstName,
+                                    onValueChange = { firstName = it },
+                                    label = { Text("First") },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                OutlinedTextField(
+                                    value = lastName,
+                                    onValueChange = { lastName = it },
+                                    label = { Text("Last") },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            OutlinedTextField(
+                                value = email,
+                                onValueChange = { email = it },
+                                label = { Text("Email") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Button(
+                                onClick = {
+                                    onAddTemporaryPlayer(
+                                        firstName.trim(),
+                                        lastName.trim(),
+                                        email.trim().takeIf(String::isNotBlank),
+                                    )
+                                    firstName = ""
+                                    lastName = ""
+                                    email = ""
+                                },
+                                enabled = !saving && firstName.isNotBlank() && lastName.isNotBlank(),
+                                modifier = Modifier.align(Alignment.End),
+                            ) {
+                                Text(if (saving) "Saving..." else "Add player")
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss, enabled = !saving) {
+                Text("Close")
+            }
+        },
+    )
+}
+
+@Composable
+private fun MatchRosterEntryRow(
+    entry: MatchRosterEntryDto,
+    saving: Boolean,
+    completed: Boolean,
+    linkEmail: String,
+    onLinkEmailChange: (String) -> Unit,
+    onRemovePlayer: (String) -> Unit,
+    onRestorePlayer: (String) -> Unit,
+    onLinkTemporaryPlayer: (String, String) -> Unit,
+) {
+    val removed = entry.status?.equals("REMOVED", ignoreCase = true) == true
+    val temporary = entry.source?.equals("TEMPORARY", ignoreCase = true) == true
+    val entryUserId = entry.userId?.trim()?.takeIf(String::isNotBlank)
+    val entryId = entry.id?.trim()?.takeIf(String::isNotBlank)
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer { alpha = if (removed) 0.58f else 1f },
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = matchRosterEntryName(entry),
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (temporary) {
+                            Text("Temporary", style = MaterialTheme.typography.labelSmall)
+                        }
+                        if (entry.noAccount == true) {
+                            Text("No account", style = MaterialTheme.typography.labelSmall)
+                        }
+                        if (removed) {
+                            Text("Removed", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+                if (!completed && !temporary && entryUserId != null) {
+                    Button(
+                        onClick = {
+                            if (removed) {
+                                onRestorePlayer(entryUserId)
+                            } else {
+                                onRemovePlayer(entryUserId)
+                            }
+                        },
+                        enabled = !saving,
+                    ) {
+                        Text(if (removed) "Add" else "Remove")
+                    }
+                }
+            }
+            if (temporary && entryUserId == null && entryId != null) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedTextField(
+                        value = linkEmail,
+                        onValueChange = onLinkEmailChange,
+                        label = { Text("Link email") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Button(
+                        onClick = { onLinkTemporaryPlayer(entryId, linkEmail) },
+                        enabled = !saving && linkEmail.isNotBlank(),
+                    ) {
+                        Text("Link")
                     }
                 }
             }

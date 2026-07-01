@@ -8,11 +8,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -193,9 +195,11 @@ private fun GuideCard(
     onDismiss: () -> Unit,
 ) {
     val density = LocalDensity.current
-    val cardOffset = remember(step.id, targetBounds, rootSize, density) {
+    val statusBarTopPx = WindowInsets.statusBars.getTop(density).toFloat()
+    val cardOffset = remember(step.id, targetBounds, rootSize, density, statusBarTopPx) {
         with(density) {
             val marginPx = GUIDE_CARD_MARGIN.toPx()
+            val minCardTopPx = statusBarTopPx + marginPx
             val maxCardWidthPx = GUIDE_CARD_MAX_WIDTH.toPx()
             val cardWidthPx = minOf(maxCardWidthPx, rootSize.width - (marginPx * 2)).coerceAtLeast(0f)
             val estimatedCardHeightPx = GUIDE_CARD_ESTIMATED_HEIGHT.toPx()
@@ -205,7 +209,10 @@ private fun GuideCard(
                 preferredYBelow
             } else {
                 preferredYAbove
-            }.coerceIn(marginPx, (rootSize.height - estimatedCardHeightPx - marginPx).coerceAtLeast(marginPx))
+            }.coerceIn(
+                minCardTopPx,
+                (rootSize.height - estimatedCardHeightPx - marginPx).coerceAtLeast(minCardTopPx),
+            )
 
             val x = targetBounds.left.coerceIn(
                 marginPx,

@@ -10,10 +10,17 @@ import io.ktor.http.encodeURLQueryComponent
 
 private const val APP_UPDATE_LOG_TAG = "AppUpdate"
 
+data class AppUpdateRelease(
+    val versionName: String,
+    val buildNumber: Int?,
+    val changes: List<String>,
+)
+
 data class AppUpdatePrompt(
     val versionName: String,
     val buildNumber: Int?,
     val changes: List<String>,
+    val releases: List<AppUpdateRelease>,
     val updateRequired: Boolean,
     val updateUrl: String,
     val releaseKey: String,
@@ -31,14 +38,12 @@ class AppUpdateRepository(
 ) : IAppUpdateRepository {
     override suspend fun checkForUpdate(): Result<AppUpdatePrompt?> = runCatching {
         val response = api.get<AppVersionCheckResponseDto>(versionCheckPath())
-        val latestVersion = response.latestVersion ?: return@runCatching null
 
         if (!response.updateAvailable) {
             return@runCatching null
         }
 
-        val prompt = latestVersion.toPrompt(updateRequired = response.updateRequired)
-            ?: return@runCatching null
+        val prompt = response.toPrompt() ?: return@runCatching null
         val dismissedReleaseKey = currentUserDataSource.getDismissedAppReleaseKeyNow().trim()
 
         if (!prompt.updateRequired && dismissedReleaseKey == prompt.releaseKey) {
@@ -71,29 +76,51 @@ class AppUpdateRepository(
 
     private fun platformValue(): String = if (Platform.isIOS) "IOS" else "ANDROID"
 
-    private fun AppVersionDto.toPrompt(updateRequired: Boolean): AppUpdatePrompt? {
+    private fun AppVersionCheckResponseDto.toPrompt(): AppUpdatePrompt? {
+        val latest = latestVersion ?: return null
+        val latestRelease = latest.toReleaseSummary() ?: return null
+        val normalizedUrl = latest.updateUrl?.trim()?.takeIf(String::isNotBlank) ?: return null
+        val normalizedPlatform = latest.platform.trim().uppercase().takeIf(String::isNotBlank) ?: platformValue()
+        val responseReleaseSections = releases
+            .mapNotNull { release -> release.toReleaseSummary() }
+        val releaseSections = when {
+            responseReleaseSections.isEmpty() -> listOf(latestRelease)
+            responseReleaseSections.any { release -> release.matches(latestRelease) } -> responseReleaseSections
+            else -> responseReleaseSections + latestRelease
+        }
+        val releaseKey = buildString {
+            append(normalizedPlatform)
+            append(":")
+            append(latestRelease.versionName)
+            append(":")
+            append(latestRelease.buildNumber ?: "none")
+        }
+
+        return AppUpdatePrompt(
+            versionName = latestRelease.versionName,
+            buildNumber = latestRelease.buildNumber,
+            changes = releaseSections.flatMap(AppUpdateRelease::changes),
+            releases = releaseSections,
+            updateRequired = updateRequired,
+            updateUrl = normalizedUrl,
+            releaseKey = releaseKey,
+        )
+    }
+
+    private fun AppUpdateRelease.matches(other: AppUpdateRelease): Boolean =
+        versionName == other.versionName && buildNumber == other.buildNumber
+
+    private fun AppVersionDto.toReleaseSummary(): AppUpdateRelease? {
         val normalizedVersion = versionName.trim().takeIf(String::isNotBlank) ?: return null
-        val normalizedUrl = updateUrl?.trim()?.takeIf(String::isNotBlank) ?: return null
         val normalizedChanges = changes
             .map { change -> change.trim() }
             .filter(String::isNotBlank)
             .ifEmpty { listOf("This release includes the latest Bracket IQ improvements.") }
-        val normalizedPlatform = platform.trim().uppercase().takeIf(String::isNotBlank) ?: platformValue()
-        val releaseKey = buildString {
-            append(normalizedPlatform)
-            append(":")
-            append(normalizedVersion)
-            append(":")
-            append(buildNumber ?: "none")
-        }
 
-        return AppUpdatePrompt(
+        return AppUpdateRelease(
             versionName = normalizedVersion,
             buildNumber = buildNumber,
             changes = normalizedChanges,
-            updateRequired = updateRequired,
-            updateUrl = normalizedUrl,
-            releaseKey = releaseKey,
         )
     }
 }

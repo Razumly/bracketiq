@@ -15,9 +15,11 @@ import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.isActive
 import com.razumly.mvp.core.data.dataTypes.isCaptainOrManager
 import com.razumly.mvp.core.data.dataTypes.isUserAssignedToOfficialSlot
 import com.razumly.mvp.core.data.dataTypes.isUserCheckedInForOfficialSlot
+import com.razumly.mvp.core.data.dataTypes.normalizedRole
 import com.razumly.mvp.core.data.dataTypes.normalizedOfficialAssignments
 import com.razumly.mvp.core.data.dataTypes.updateOfficialAssignmentCheckIn
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
@@ -26,7 +28,11 @@ import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.eventDetail.data.IMatchRepository
+import com.razumly.mvp.core.network.dto.MatchRosterDto
+import com.razumly.mvp.core.network.dto.MatchRostersResponseDto
+import com.razumly.mvp.core.network.dto.TeamCheckInDto
 import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
+import com.razumly.mvp.core.network.dto.MatchActionOperationDto
 import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
 import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.eventDetail.resolveEventMatchRules
@@ -50,6 +56,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlin.time.Clock
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
@@ -63,9 +70,21 @@ private const val INCIDENT_CONFIRM_NO_PROGRESS_TIMEOUT_MS = 10_000L
 private const val DIRECT_SCORE_DEBOUNCE_MS = 500L
 private const val MATCH_DETAIL_CLEANUP_KEY = "Cleanup_MatchDetail"
 private const val MATCH_DETAIL_REALTIME_PAUSE_PREFIX = "match-detail-open:"
+private const val OFFICIAL_MATCH_OPEN_MINUTES_BEFORE = 60
 
 private fun incidentRetryDelayMs(attempt: Int): Long =
     INCIDENT_RETRY_DELAYS_MS[attempt.coerceIn(0, INCIDENT_RETRY_DELAYS_MS.lastIndex)]
+
+internal fun isOfficialMatchWindowOpen(match: MatchMVP, now: Instant = Clock.System.now()): Boolean {
+    val start = match.start ?: return true
+    return now >= start - OFFICIAL_MATCH_OPEN_MINUTES_BEFORE.minutes
+}
+
+internal fun isTeamCheckInWindowOpen(match: MatchMVP, event: Event, now: Instant = Clock.System.now()): Boolean {
+    val start = match.start ?: return true
+    val openMinutes = event.teamCheckInOpenMinutesBefore.coerceAtLeast(0)
+    return now >= start - openMinutes.minutes
+}
 
 interface MatchContentComponent {
     val matchWithTeams: StateFlow<MatchWithTeams>
@@ -77,19 +96,47 @@ interface MatchContentComponent {
     val officialCheckInSaving: StateFlow<Boolean>
     val matchStartSaving: StateFlow<Boolean>
     val matchTimeSaving: StateFlow<Boolean>
+    val matchActionSaving: StateFlow<Boolean>
     val segmentConfirmSaving: StateFlow<Boolean>
     val currentSet: StateFlow<Int>
     val isOfficial: StateFlow<Boolean>
+    val canManageMatchActions: StateFlow<Boolean>
     val assignedTeamOfficialPendingCheckIn: StateFlow<Boolean>
     val showOfficialCheckInDialog: StateFlow<Boolean>
+    val matchTeamCheckIns: StateFlow<Map<String, TeamCheckInDto>>
+    val showTeamCheckInDialog: StateFlow<Boolean>
+    val teamCheckInSaving: StateFlow<Boolean>
+    val currentUserManagedMatchTeamId: StateFlow<String?>
+    val matchRosters: StateFlow<MatchRostersResponseDto?>
+    val matchRosterLoading: StateFlow<Boolean>
+    val matchRosterSaving: StateFlow<Boolean>
+    val showMatchRosterDialog: StateFlow<Boolean>
     val showSetConfirmDialog: StateFlow<Boolean>
     val errorState: StateFlow<String?>
 
     fun dismissSetDialog()
     fun dismissOfficialDialog()
+    fun dismissTeamCheckInDialog()
+    fun confirmTeamCheckIn()
+    fun openMatchRoster()
+    fun dismissMatchRoster()
+    fun refreshMatchRosters()
+    fun removeMatchRosterPlayer(eventTeamId: String, userId: String)
+    fun restoreMatchRosterPlayer(eventTeamId: String, userId: String)
+    fun addTemporaryMatchRosterPlayer(
+        eventTeamId: String,
+        firstName: String?,
+        lastName: String?,
+        email: String?,
+        entryId: String? = null,
+    )
     fun checkOfficialStatus()
     fun confirmOfficialCheckIn()
     fun markMatchDelayed()
+    fun forfeitTeam(eventTeamId: String)
+    fun cancelMatch()
+    fun suspendMatch()
+    fun resumeMatch()
     fun startMatch()
     fun resetMatchTimer()
     fun updateActualTimes(actualStart: Instant?, actualEnd: Instant?)
@@ -154,6 +201,19 @@ private fun TeamWithRelations.isCurrentUserTeam(userId: String): Boolean {
         team.coachIds.any { coachId -> coachId.trim() == normalizedUserId } ||
         team.headCoachId?.trim() == normalizedUserId ||
         players.any { player -> player.id.trim() == normalizedUserId }
+}
+
+private fun TeamWithRelations.isCurrentUserManagerOrCoach(userId: String): Boolean {
+    val normalizedUserId = userId.trim()
+    if (normalizedUserId.isBlank()) return false
+    return team.managerId?.trim() == normalizedUserId ||
+        team.headCoachId?.trim() == normalizedUserId ||
+        team.coachIds.any { coachId -> coachId.trim() == normalizedUserId } ||
+        team.staffAssignments.any { assignment ->
+            assignment.userId.trim() == normalizedUserId &&
+                assignment.isActive() &&
+                assignment.normalizedRole() in setOf("MANAGER", "HEAD_COACH", "ASSISTANT_COACH")
+        }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -258,6 +318,9 @@ class DefaultMatchContentComponent(
     private val _matchTimeSaving = MutableStateFlow(false)
     override val matchTimeSaving: StateFlow<Boolean> = _matchTimeSaving.asStateFlow()
 
+    private val _matchActionSaving = MutableStateFlow(false)
+    override val matchActionSaving: StateFlow<Boolean> = _matchActionSaving.asStateFlow()
+
     private val _segmentConfirmSaving = MutableStateFlow(false)
     override val segmentConfirmSaving: StateFlow<Boolean> = _segmentConfirmSaving.asStateFlow()
 
@@ -267,6 +330,9 @@ class DefaultMatchContentComponent(
     private val _isOfficial = MutableStateFlow(false)
     override val isOfficial = _isOfficial.asStateFlow()
 
+    private val _canManageMatchActions = MutableStateFlow(false)
+    override val canManageMatchActions = _canManageMatchActions.asStateFlow()
+
     private val _assignedTeamOfficialPendingCheckIn = MutableStateFlow(false)
     override val assignedTeamOfficialPendingCheckIn = _assignedTeamOfficialPendingCheckIn.asStateFlow()
 
@@ -274,6 +340,34 @@ class DefaultMatchContentComponent(
     override val showOfficialCheckInDialog = _showOfficialCheckInDialog.asStateFlow()
     private val shownOfficialCheckInPromptKeys = mutableSetOf<String>()
     private val confirmedOfficialCheckInPromptKeys = mutableSetOf<String>()
+
+    private val _matchTeamCheckIns = MutableStateFlow<Map<String, TeamCheckInDto>>(emptyMap())
+    override val matchTeamCheckIns = _matchTeamCheckIns.asStateFlow()
+
+    private val _showTeamCheckInDialog = MutableStateFlow(false)
+    override val showTeamCheckInDialog = _showTeamCheckInDialog.asStateFlow()
+
+    private val _teamCheckInSaving = MutableStateFlow(false)
+    override val teamCheckInSaving = _teamCheckInSaving.asStateFlow()
+
+    private val _currentUserManagedMatchTeamId = MutableStateFlow<String?>(null)
+    override val currentUserManagedMatchTeamId = _currentUserManagedMatchTeamId.asStateFlow()
+
+    private val _matchRosters = MutableStateFlow<MatchRostersResponseDto?>(null)
+    override val matchRosters = _matchRosters.asStateFlow()
+
+    private val _matchRosterLoading = MutableStateFlow(false)
+    override val matchRosterLoading = _matchRosterLoading.asStateFlow()
+
+    private val _matchRosterSaving = MutableStateFlow(false)
+    override val matchRosterSaving = _matchRosterSaving.asStateFlow()
+
+    private val _showMatchRosterDialog = MutableStateFlow(false)
+    override val showMatchRosterDialog = _showMatchRosterDialog.asStateFlow()
+
+    private val shownTeamCheckInPromptKeys = mutableSetOf<String>()
+    private val confirmedTeamCheckInPromptKeys = mutableSetOf<String>()
+    private var lastLoadedMatchCheckInKey: String? = null
 
     private val _showSetConfirmDialog = MutableStateFlow(false)
     override val showSetConfirmDialog = _showSetConfirmDialog.asStateFlow()
@@ -356,6 +450,10 @@ class DefaultMatchContentComponent(
                     _currentSet.value = resolveCurrentSegmentIndex(normalizedMatch)
                 }
                 checkOfficialStatus()
+                updateMatchActionAccess()
+                updateCurrentUserManagedMatchTeam()
+                refreshMatchCheckInsIfAllowed()
+                evaluateTeamCheckInPrompt()
             }
         }
         scope.launch {
@@ -366,11 +464,18 @@ class DefaultMatchContentComponent(
                     _currentSet.value = resolveCurrentSegmentIndex(normalizedMatch)
                 }
                 checkOfficialStatus()
+                updateMatchActionAccess()
+                updateCurrentUserManagedMatchTeam()
+                refreshMatchCheckInsIfAllowed()
+                evaluateTeamCheckInPrompt()
             }
         }
         scope.launch {
             _currentUserTeams.collect {
                 checkOfficialStatus()
+                updateMatchActionAccess()
+                updateCurrentUserManagedMatchTeam()
+                evaluateTeamCheckInPrompt()
             }
         }
     }
@@ -383,6 +488,152 @@ class DefaultMatchContentComponent(
         _showOfficialCheckInDialog.value = false
     }
 
+    override fun dismissTeamCheckInDialog() {
+        _showTeamCheckInDialog.value = false
+        if (canOpenMatchRoster()) {
+            openMatchRoster()
+        }
+    }
+
+    override fun confirmTeamCheckIn() {
+        if (_teamCheckInSaving.value) return
+        val currentEvent = event.value ?: return
+        val currentMatch = matchWithTeams.value.match
+        val eventTeamId = _currentUserManagedMatchTeamId.value ?: resolveCurrentUserManagedMatchTeamId()
+        if (!isMatchTeamCheckInEnabled(currentEvent) || eventTeamId.isNullOrBlank()) {
+            _showTeamCheckInDialog.value = false
+            return
+        }
+        if (!isTeamCheckInWindowOpen(currentMatch, currentEvent)) {
+            _showTeamCheckInDialog.value = false
+            _errorState.value = "Team check-in is not open yet."
+            return
+        }
+        _teamCheckInSaving.value = true
+        scope.launch {
+            try {
+                matchRepository.checkInMatchTeam(
+                    eventId = currentEvent.id,
+                    matchId = currentMatch.id,
+                    eventTeamId = eventTeamId,
+                ).onSuccess { checkIn ->
+                    confirmedTeamCheckInPromptKeys += teamCheckInPromptKey(currentMatch.id, eventTeamId)
+                    _matchTeamCheckIns.value = _matchTeamCheckIns.value + (eventTeamId to checkIn)
+                    _showTeamCheckInDialog.value = false
+                    if (canOpenMatchRoster()) {
+                        openMatchRoster()
+                    }
+                }.onFailure { error ->
+                    _errorState.value = "Failed to check in team: ${error.userMessage()}"
+                }
+            } finally {
+                _teamCheckInSaving.value = false
+            }
+        }
+    }
+
+    override fun openMatchRoster() {
+        if (!canOpenMatchRoster()) return
+        _showMatchRosterDialog.value = true
+        refreshMatchRosters()
+    }
+
+    override fun dismissMatchRoster() {
+        _showMatchRosterDialog.value = false
+    }
+
+    override fun refreshMatchRosters() {
+        val currentEvent = event.value ?: return
+        val currentMatch = matchWithTeams.value.match
+        if (!canOpenMatchRoster()) return
+        if (_matchRosterLoading.value) return
+        _matchRosterLoading.value = true
+        scope.launch {
+            try {
+                matchRepository.getMatchRosters(
+                    eventId = currentEvent.id,
+                    matchId = currentMatch.id,
+                ).onSuccess { rosters ->
+                    _matchRosters.value = rosters
+                }.onFailure { error ->
+                    _errorState.value = "Failed to load match roster: ${error.userMessage()}"
+                }
+            } finally {
+                _matchRosterLoading.value = false
+            }
+        }
+    }
+
+    override fun removeMatchRosterPlayer(eventTeamId: String, userId: String) {
+        updateRoster {
+            matchRepository.removeMatchRosterPlayer(
+                eventId = event.value?.id.orEmpty(),
+                matchId = matchWithTeams.value.match.id,
+                eventTeamId = eventTeamId,
+                userId = userId,
+            )
+        }
+    }
+
+    override fun restoreMatchRosterPlayer(eventTeamId: String, userId: String) {
+        updateRoster {
+            matchRepository.restoreMatchRosterPlayer(
+                eventId = event.value?.id.orEmpty(),
+                matchId = matchWithTeams.value.match.id,
+                eventTeamId = eventTeamId,
+                userId = userId,
+            )
+        }
+    }
+
+    override fun addTemporaryMatchRosterPlayer(
+        eventTeamId: String,
+        firstName: String?,
+        lastName: String?,
+        email: String?,
+        entryId: String?,
+    ) {
+        updateRoster {
+            matchRepository.addTemporaryMatchRosterPlayer(
+                eventId = event.value?.id.orEmpty(),
+                matchId = matchWithTeams.value.match.id,
+                eventTeamId = eventTeamId,
+                firstName = firstName,
+                lastName = lastName,
+                email = email,
+                entryId = entryId,
+            )
+        }
+    }
+
+    private fun updateRoster(updateCall: suspend () -> Result<MatchRosterDto>) {
+        if (_matchRosterSaving.value) return
+        _matchRosterSaving.value = true
+        scope.launch {
+            try {
+                updateCall().onSuccess { roster ->
+                    mergeRoster(roster)
+                }.onFailure { error ->
+                    _errorState.value = "Failed to update match roster: ${error.userMessage()}"
+                }
+            } finally {
+                _matchRosterSaving.value = false
+            }
+        }
+    }
+
+    private fun mergeRoster(roster: MatchRosterDto) {
+        val existing = _matchRosters.value
+        _matchRosters.value = if (existing == null) {
+            MatchRostersResponseDto(rosters = listOf(roster))
+        } else {
+            existing.copy(
+                rosters = existing.rosters
+                    .filterNot { it.eventTeamId == roster.eventTeamId } + roster,
+            )
+        }
+    }
+
     override fun checkOfficialStatus() {
         val currentMatch = matchWithTeams.value.match
         val teamOfficialId = normalizeOptionalId(currentMatch.teamOfficialId)
@@ -392,7 +643,8 @@ class DefaultMatchContentComponent(
                 matchWithTeams.value.teamOfficial?.isCurrentUserTeam(currentUser.id) == true
             )
         val isAssignedUserOfficial = currentMatch.isUserAssignedToOfficialSlot(currentUser.id)
-        val canCheckIn = canCheckIntoMatch(currentMatch)
+        val officialWindowOpen = isOfficialMatchWindowOpen(currentMatch)
+        val canCheckIn = canCheckIntoMatch(currentMatch) && officialWindowOpen
         val rawCheckedIn = when {
             isAssignedUserOfficial -> currentMatch.isUserCheckedInForOfficialSlot(currentUser.id)
             else -> currentMatch.officialCheckedIn == true
@@ -513,6 +765,11 @@ class DefaultMatchContentComponent(
                     _errorState.value = "Officials can only check in after both teams are assigned."
                     return@launch
                 }
+                if (!isOfficialMatchWindowOpen(currentMatch)) {
+                    dismissOfficialDialog()
+                    _errorState.value = "Official check-in opens one hour before the scheduled match start."
+                    return@launch
+                }
                 val checkedIn = when {
                     isAssignedUserOfficial -> currentMatch.isUserCheckedInForOfficialSlot(currentUser.id)
                     else -> currentMatch.officialCheckedIn == true
@@ -582,7 +839,9 @@ class DefaultMatchContentComponent(
 
     override fun markMatchDelayed() {
         if (_matchTimeSaving.value) return
-        if (!isOfficial.value || officialCheckedIn.value != true || _matchFinished.value) {
+        if (!isOfficial.value || officialCheckedIn.value != true || _matchFinished.value ||
+            !isOfficialMatchWindowOpen(matchWithTeams.value.match)
+        ) {
             return
         }
 
@@ -611,11 +870,115 @@ class DefaultMatchContentComponent(
         }
     }
 
+    override fun forfeitTeam(eventTeamId: String) {
+        applyMatchAction("FORFEIT", forfeitingEventTeamId = eventTeamId)
+    }
+
+    override fun cancelMatch() {
+        applyMatchAction("CANCEL")
+    }
+
+    override fun suspendMatch() {
+        applyMatchAction("SUSPEND")
+    }
+
+    override fun resumeMatch() {
+        applyMatchAction("RESUME")
+    }
+
+    private fun applyMatchAction(
+        action: String,
+        forfeitingEventTeamId: String? = null,
+    ) {
+        if (_matchActionSaving.value) return
+        if (!canApplyMatchAction()) {
+            return
+        }
+        val currentMatchWithTeams = matchWithTeams.value
+        val currentMatch = currentMatchWithTeams.match
+        val teamIds = listOfNotNull(
+            normalizeOptionalId(currentMatch.team1Id),
+            normalizeOptionalId(currentMatch.team2Id),
+        )
+        val normalizedForfeitingTeamId = normalizeOptionalId(forfeitingEventTeamId)
+        val winnerEventTeamId = when (action) {
+            "FORFEIT" -> teamIds.firstOrNull { teamId -> teamId != normalizedForfeitingTeamId }
+            else -> null
+        }
+        if (action == "FORFEIT" && winnerEventTeamId == null) {
+            _errorState.value = "Choose a team to forfeit."
+            return
+        }
+
+        _matchActionSaving.value = true
+        scope.launch {
+            try {
+                val now = Clock.System.now().toString()
+                val updatedMatch = when (action) {
+                    "FORFEIT" -> currentMatch.copy(
+                        status = "COMPLETE",
+                        resultStatus = "FINAL",
+                        resultType = "FORFEIT",
+                        winnerEventTeamId = winnerEventTeamId,
+                        actualEnd = currentMatch.actualEnd?.takeIf(String::isNotBlank) ?: now,
+                        locked = true,
+                    )
+                    "CANCEL" -> currentMatch.copy(
+                        status = "CANCELLED",
+                        resultStatus = "NO_CONTEST",
+                        resultType = "NO_CONTEST",
+                        winnerEventTeamId = null,
+                        actualEnd = currentMatch.actualEnd?.takeIf(String::isNotBlank) ?: now,
+                        statusReason = "Cancelled",
+                        locked = true,
+                    )
+                    "SUSPEND" -> currentMatch.copy(
+                        status = "SUSPENDED",
+                        statusReason = "Suspended",
+                    )
+                    "RESUME" -> currentMatch.copy(
+                        status = if (currentMatch.actualStart.isNullOrBlank()) "READY" else "IN_PROGRESS",
+                        statusReason = null,
+                    )
+                    else -> currentMatch
+                }
+                _optimisticMatch.value = currentMatchWithTeams.copy(match = updatedMatch)
+                matchRepository.updateMatchOperations(
+                    match = updatedMatch,
+                    matchAction = MatchActionOperationDto(
+                        action = action,
+                        forfeitingEventTeamId = normalizedForfeitingTeamId,
+                        winnerEventTeamId = winnerEventTeamId,
+                    ),
+                ).onSuccess { remoteMatch ->
+                    val syncedMatch = remoteMatch.copy(
+                        status = remoteMatch.status ?: updatedMatch.status,
+                        resultStatus = remoteMatch.resultStatus ?: updatedMatch.resultStatus,
+                        resultType = remoteMatch.resultType ?: updatedMatch.resultType,
+                        winnerEventTeamId = remoteMatch.winnerEventTeamId ?: updatedMatch.winnerEventTeamId,
+                        actualEnd = remoteMatch.actualEnd ?: updatedMatch.actualEnd,
+                        statusReason = remoteMatch.statusReason ?: updatedMatch.statusReason,
+                        locked = remoteMatch.locked || updatedMatch.locked,
+                    )
+                    _optimisticMatch.value = currentMatchWithTeams.copy(match = syncedMatch)
+                    persistMatchLocally(syncedMatch, clearOptimisticOnSuccess = true)
+                }.onFailure { error ->
+                    _optimisticMatch.value = null
+                    _errorState.value = "Failed to update match: ${error.userMessage()}"
+                }
+            } finally {
+                _matchActionSaving.value = false
+            }
+        }
+    }
+
     override fun startMatch() {
         if (_matchStartSaving.value) return
         val currentMatchWithTeams = matchWithTeams.value
         val currentMatch = updateMatchStructureForCurrentContext(currentMatchWithTeams.match)
-        if (!isOfficial.value || officialCheckedIn.value != true || _matchFinished.value) {
+        if (!isOfficial.value || officialCheckedIn.value != true || _matchFinished.value ||
+            !isOfficialMatchWindowOpen(currentMatch)
+        ) {
             return
         }
         val segmentIndex = currentSet.value.coerceIn(0, (currentMatch.segments.size - 1).coerceAtLeast(0))
@@ -686,7 +1049,9 @@ class DefaultMatchContentComponent(
         if (_matchStartSaving.value) return
         val currentMatchWithTeams = matchWithTeams.value
         val currentMatch = updateMatchStructureForCurrentContext(currentMatchWithTeams.match)
-        if (!isOfficial.value || officialCheckedIn.value != true || _matchFinished.value) {
+        if (!isOfficial.value || officialCheckedIn.value != true || _matchFinished.value ||
+            !isOfficialMatchWindowOpen(currentMatch)
+        ) {
             return
         }
         val segmentIndex = currentSet.value.coerceIn(0, (currentMatch.segments.size - 1).coerceAtLeast(0))
@@ -756,7 +1121,9 @@ class DefaultMatchContentComponent(
 
     override fun updateActualTimes(actualStart: Instant?, actualEnd: Instant?) {
         if (_matchTimeSaving.value) return
-        if (!isOfficial.value || officialCheckedIn.value != true) {
+        if (!isOfficial.value || officialCheckedIn.value != true ||
+            !isOfficialMatchWindowOpen(matchWithTeams.value.match)
+        ) {
             return
         }
         if (actualStart != null && actualEnd != null && actualEnd <= actualStart) {
@@ -807,6 +1174,108 @@ class DefaultMatchContentComponent(
         return (repositoryTeamIds + profileTeamIds).distinct()
     }
 
+    private fun updateCurrentUserManagedMatchTeam() {
+        _currentUserManagedMatchTeamId.value = resolveCurrentUserManagedMatchTeamId()
+    }
+
+    private fun resolveCurrentUserManagedMatchTeamId(): String? {
+        val currentMatch = matchWithTeams.value
+        val currentUserId = currentUser.id.trim()
+        if (currentUserId.isBlank()) return null
+        return listOf(currentMatch.team1, currentMatch.team2)
+            .firstOrNull { team ->
+                team != null &&
+                    team.team.id in setOfNotNull(
+                        normalizeOptionalId(currentMatch.match.team1Id),
+                        normalizeOptionalId(currentMatch.match.team2Id),
+                    ) &&
+                    team.isCurrentUserManagerOrCoach(currentUserId)
+            }
+            ?.team
+            ?.id
+    }
+
+    private fun isMatchTeamCheckInEnabled(event: Event): Boolean =
+        event.teamSignup && event.teamCheckInMode.name == "MATCH"
+
+    private fun canOpenMatchRoster(): Boolean {
+        val currentEvent = event.value ?: return false
+        val currentMatch = matchWithTeams.value.match
+        return currentEvent.teamSignup &&
+            currentEvent.allowMatchRosterEdits &&
+            (_matchFinished.value || isTeamCheckInWindowOpen(currentMatch, currentEvent)) &&
+            !resolveCurrentUserManagedMatchTeamId().isNullOrBlank()
+    }
+
+    private fun teamCheckInPromptKey(matchId: String, eventTeamId: String): String =
+        "${matchId.trim()}:${eventTeamId.trim()}"
+
+    private fun teamHasCheckedIntoMatch(matchId: String, eventTeamId: String): Boolean {
+        val promptKey = teamCheckInPromptKey(matchId, eventTeamId)
+        if (promptKey in confirmedTeamCheckInPromptKeys) return true
+        val checkIn = _matchTeamCheckIns.value[eventTeamId] ?: return false
+        return checkIn.status?.trim()?.uppercase().orEmpty() in setOf("", "CHECKED_IN")
+    }
+
+    private fun isTeamCheckInWindowOpen(match: MatchMVP, event: Event): Boolean {
+        return isTeamCheckInWindowOpen(match, event, Clock.System.now())
+    }
+
+    private fun refreshMatchCheckInsIfAllowed() {
+        val currentEvent = event.value ?: return
+        val currentMatch = matchWithTeams.value.match
+        if (!isMatchTeamCheckInEnabled(currentEvent)) {
+            lastLoadedMatchCheckInKey = null
+            _matchTeamCheckIns.value = emptyMap()
+            return
+        }
+        if (!isOfficial.value) {
+            return
+        }
+        val loadKey = "${currentEvent.id}:${currentMatch.id}"
+        if (lastLoadedMatchCheckInKey == loadKey) {
+            return
+        }
+        lastLoadedMatchCheckInKey = loadKey
+        scope.launch {
+            matchRepository.getMatchTeamCheckIns(
+                eventId = currentEvent.id,
+                matchId = currentMatch.id,
+            ).onSuccess { response ->
+                _matchTeamCheckIns.value = response.checkIns
+                    .mapNotNull { checkIn ->
+                        val eventTeamId = checkIn.eventTeamId?.trim()?.takeIf(String::isNotBlank)
+                        eventTeamId?.let { it to checkIn }
+                    }
+                    .toMap()
+            }.onFailure {
+                // Managers/coaches are allowed to POST check-ins but the read route is host/official-only.
+            }
+        }
+    }
+
+    private fun evaluateTeamCheckInPrompt() {
+        val currentEvent = event.value ?: return
+        val currentMatch = matchWithTeams.value.match
+        if (
+            !isMatchTeamCheckInEnabled(currentEvent) ||
+            _matchFinished.value ||
+            !isTeamCheckInWindowOpen(currentMatch, currentEvent)
+        ) {
+            _showTeamCheckInDialog.value = false
+            return
+        }
+        val eventTeamId = _currentUserManagedMatchTeamId.value ?: resolveCurrentUserManagedMatchTeamId()
+        if (eventTeamId.isNullOrBlank() || teamHasCheckedIntoMatch(currentMatch.id, eventTeamId)) {
+            _showTeamCheckInDialog.value = false
+            return
+        }
+        val promptKey = teamCheckInPromptKey(currentMatch.id, eventTeamId)
+        if (shownTeamCheckInPromptKeys.add(promptKey)) {
+            _showTeamCheckInDialog.value = true
+        }
+    }
+
     private fun resolveCurrentUserParticipatingTeamId(match: MatchMVP): String? {
         val participantTeamIds = setOfNotNull(
             normalizeOptionalId(match.team1Id),
@@ -838,6 +1307,9 @@ class DefaultMatchContentComponent(
         if (!canCheckIntoMatch(match)) {
             return false
         }
+        if (!isOfficialMatchWindowOpen(match)) {
+            return false
+        }
         if (event.value?.doTeamsOfficiate != true) {
             return false
         }
@@ -854,6 +1326,22 @@ class DefaultMatchContentComponent(
     private fun canCheckIntoMatch(match: MatchMVP): Boolean {
         return normalizeOptionalId(match.team1Id) != null &&
             normalizeOptionalId(match.team2Id) != null
+    }
+
+    private fun updateMatchActionAccess() {
+        val currentUserId = currentUser.id.trim()
+        val currentEvent = event.value
+        _canManageMatchActions.value = currentUserId.isNotBlank() && currentEvent != null && (
+            currentEvent.hostId.trim() == currentUserId ||
+                currentEvent.assistantHostIds.any { userId -> userId.trim() == currentUserId }
+            )
+    }
+
+    private fun canApplyMatchAction(): Boolean {
+        if (_matchFinished.value) return false
+        if (_canManageMatchActions.value) return true
+        return isOfficial.value && officialCheckedIn.value == true &&
+            isOfficialMatchWindowOpen(matchWithTeams.value.match)
     }
 
     private fun normalizeOptionalId(rawId: String?): String? {
@@ -879,6 +1367,9 @@ class DefaultMatchContentComponent(
         }
         val currentMatch = matchWithTeams.value
         val scoringMatch = updateMatchStructureForCurrentContext(currentMatch.match)
+        if (scoringMatch.actualStart.isNullOrBlank()) {
+            return
+        }
         val activeRules = resolveActiveRules(scoringMatch, event.value)
         if (increment && shouldRequireScoringIncident(activeRules, event.value)) {
             _errorState.value = "Scoring details are required for this match."
@@ -970,6 +1461,9 @@ class DefaultMatchContentComponent(
         val normalizedIncidentType = incidentType.trim().takeIf(String::isNotBlank) ?: "NOTE"
         val activeRules = resolveActiveRules(scoringMatch, event.value)
         val scoringIncident = isScoringIncidentType(normalizedIncidentType)
+        if (scoringIncident && scoringMatch.actualStart.isNullOrBlank()) {
+            return
+        }
         val normalizedEventTeamId = eventTeamId?.trim()?.takeIf(String::isNotBlank)
         if (scoringIncident && normalizedEventTeamId == null) {
             return
@@ -1412,6 +1906,15 @@ class DefaultMatchContentComponent(
     }
 
     private fun isMatchOver(match: MatchMVP): Boolean {
+        val lifecycleStatus = match.status?.trim()?.uppercase().orEmpty()
+        val resultType = match.resultType?.trim()?.uppercase().orEmpty()
+        if (
+            lifecycleStatus in setOf("COMPLETE", "CANCELLED") ||
+            resultType in setOf("FORFEIT", "NO_CONTEST") ||
+            !match.actualEnd.isNullOrBlank()
+        ) {
+            return true
+        }
         val rules = resolveActiveRules(match, event.value)
         val segmentWinnerIds = match.segments
             .filter { segment -> segment.status == "COMPLETE" || !segment.winnerEventTeamId.isNullOrBlank() }

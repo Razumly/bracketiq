@@ -68,6 +68,9 @@ data class Event(
     val leagueScoringConfigId: String? = null,
     val organizationId: String? = null,
     val affiliateUrl: String? = null,
+    val scheduleText: String? = null,
+    val dateDisplayMode: String? = null,
+    val dateDisplayText: String? = null,
     val registrationPaymentMode: String = REGISTRATION_PAYMENT_MODE_ONLINE,
     val manualPaymentLinks: List<ManualPaymentLink> = emptyList(),
     val manualPaymentInstructions: String? = null,
@@ -89,6 +92,10 @@ data class Event(
     val setsPerMatch: Int? = null,
     val doTeamsOfficiate: Boolean? = null,
     val teamOfficialsMaySwap: Boolean? = null,
+    val teamCheckInMode: TeamCheckInMode = TeamCheckInMode.OFF,
+    val teamCheckInOpenMinutesBefore: Int = 60,
+    val allowMatchRosterEdits: Boolean = false,
+    val allowTemporaryMatchPlayers: Boolean = false,
     val matchRulesOverride: MatchRulesConfigMVP? = null,
     val autoCreatePointMatchIncidents: Boolean = false,
     val resolvedMatchRules: ResolvedMatchRulesMVP? = null,
@@ -144,6 +151,13 @@ data class Event(
 }
 
 const val DEFAULT_EVENT_SEED_COLOR_ARGB: Int = -9781761
+
+@Serializable
+enum class TeamCheckInMode {
+    OFF,
+    EVENT,
+    MATCH,
+}
 
 data class EventPriceRange(
     val minPriceCents: Int,
@@ -256,6 +270,20 @@ fun Event.normalizedAffiliateUrl(): String? =
 
 fun Event.isAffiliateEvent(): Boolean = normalizedAffiliateUrl() != null
 
+fun Event.normalizedDateDisplayMode(): String =
+    dateDisplayMode?.trim()?.uppercase().orEmpty()
+
+fun Event.isEvergreenDateDisplay(): Boolean =
+    normalizedDateDisplayMode() == "NO_FIXED_DATE" || normalizedDateDisplayMode() == "ONGOING"
+
+fun Event.evergreenDateDisplayLabel(): String? {
+    if (!isEvergreenDateDisplay()) return null
+
+    return dateDisplayText?.trim()?.takeIf(String::isNotBlank)
+        ?: scheduleText?.trim()?.takeIf(String::isNotBlank)
+        ?: "No fixed start date"
+}
+
 fun Event.normalizedRegistrationPaymentMode(): String =
     normalizeRegistrationPaymentMode(registrationPaymentMode)
 
@@ -318,6 +346,9 @@ fun Event.toEventDTO(): EventDTO {
         leagueScoringConfigId = leagueScoringConfigId,
         organizationId = organizationId,
         affiliateUrl = affiliateUrl,
+        scheduleText = scheduleText,
+        dateDisplayMode = dateDisplayMode,
+        dateDisplayText = dateDisplayText,
         registrationPaymentMode = normalizedRegistrationPaymentMode(),
         manualPaymentLinks = if (usesManualRegistrationPayments()) {
             normalizeManualPaymentLinks(manualPaymentLinks)
@@ -348,6 +379,10 @@ fun Event.toEventDTO(): EventDTO {
         setsPerMatch = setsPerMatch,
         doTeamsOfficiate = effectiveDoTeamsOfficiate,
         teamOfficialsMaySwap = if (effectiveDoTeamsOfficiate == true) teamOfficialsMaySwap else false,
+        teamCheckInMode = if (teamSignup) teamCheckInMode else TeamCheckInMode.OFF,
+        teamCheckInOpenMinutesBefore = teamCheckInOpenMinutesBefore.coerceAtLeast(0),
+        allowMatchRosterEdits = teamSignup && allowMatchRosterEdits,
+        allowTemporaryMatchPlayers = teamSignup && allowMatchRosterEdits && allowTemporaryMatchPlayers,
         matchRulesOverride = matchRulesOverride,
         autoCreatePointMatchIncidents = autoCreatePointMatchIncidents,
         resolvedMatchRules = resolvedMatchRules,

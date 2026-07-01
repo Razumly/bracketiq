@@ -7,6 +7,7 @@ data class AppVersionCheckResponseDto(
     val updateAvailable: Boolean = false,
     val updateRequired: Boolean = false,
     val latestVersion: AppVersionDto? = null,
+    val releases: List<AppVersionDto> = emptyList(),
 )
 
 @Serializable

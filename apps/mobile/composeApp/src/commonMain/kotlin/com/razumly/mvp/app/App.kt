@@ -321,13 +321,28 @@ private fun AppUpdateDialog(
                         .fillMaxWidth()
                         .heightIn(max = 220.dp)
                         .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    prompt.changes.forEach { change ->
-                        Text(
-                            text = "- $change",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
+                    val showReleaseHeaders = prompt.releases.size > 1
+                    prompt.releases.forEach { release ->
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            if (showReleaseHeaders) {
+                                Text(
+                                    text = "Version ${release.versionName}",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                            release.changes.forEach { change ->
+                                Text(
+                                    text = "- $change",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                            }
+                        }
                     }
                 }
 

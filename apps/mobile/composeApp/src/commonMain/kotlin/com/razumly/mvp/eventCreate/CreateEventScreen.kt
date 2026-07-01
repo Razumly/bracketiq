@@ -35,6 +35,7 @@ import com.materialkolor.ktx.DynamicScheme
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.addOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
@@ -205,6 +206,37 @@ fun CreateEventScreen(
     val onUpdateDoTeamsOfficiate: (Boolean) -> Unit = remember(component) { component::updateDoTeamsOfficiate }
     val onUpdateTeamOfficialsMaySwap: (Boolean) -> Unit =
         remember(component) { component::updateTeamOfficialsMaySwap }
+    val onUpdateTeamCheckInMode = remember(component) {
+        { mode: TeamCheckInMode ->
+            component.updateEventField {
+                copy(teamCheckInMode = if (teamSignup) mode else TeamCheckInMode.OFF)
+            }
+        }
+    }
+    val onUpdateTeamCheckInOpenMinutesBefore = remember(component) {
+        { minutes: Int ->
+            component.updateEventField {
+                copy(teamCheckInOpenMinutesBefore = minutes.coerceAtLeast(0))
+            }
+        }
+    }
+    val onUpdateAllowMatchRosterEdits = remember(component) {
+        { enabled: Boolean ->
+            component.updateEventField {
+                copy(
+                    allowMatchRosterEdits = teamSignup && enabled,
+                    allowTemporaryMatchPlayers = teamSignup && enabled && allowTemporaryMatchPlayers,
+                )
+            }
+        }
+    }
+    val onUpdateAllowTemporaryMatchPlayers = remember(component) {
+        { enabled: Boolean ->
+            component.updateEventField {
+                copy(allowTemporaryMatchPlayers = teamSignup && allowMatchRosterEdits && enabled)
+            }
+        }
+    }
     val onAddOfficialId: (String) -> Unit = remember(component) { component::addOfficialId }
     val onRemoveOfficialId: (String) -> Unit = remember(component) { component::removeOfficialId }
     val onUpdateOfficialSchedulingMode: (OfficialSchedulingMode) -> Unit =
@@ -466,6 +498,10 @@ fun CreateEventScreen(
                             onUpdateAssistantHostIds = onUpdateAssistantHostIds,
                             onUpdateDoTeamsOfficiate = onUpdateDoTeamsOfficiate,
                             onUpdateTeamOfficialsMaySwap = onUpdateTeamOfficialsMaySwap,
+                            onUpdateTeamCheckInMode = onUpdateTeamCheckInMode,
+                            onUpdateTeamCheckInOpenMinutesBefore = onUpdateTeamCheckInOpenMinutesBefore,
+                            onUpdateAllowMatchRosterEdits = onUpdateAllowMatchRosterEdits,
+                            onUpdateAllowTemporaryMatchPlayers = onUpdateAllowTemporaryMatchPlayers,
                             onAddOfficialId = onAddOfficialId,
                             onRemoveOfficialId = onRemoveOfficialId,
                             onUpdateOfficialSchedulingMode = onUpdateOfficialSchedulingMode,
