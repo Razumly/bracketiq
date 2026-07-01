@@ -7,7 +7,6 @@ import com.razumly.mvp.core.network.userMessage
 
 internal enum class PurchaseIntentProcessingAction {
     WAITING_FOR_SIGNATURE,
-    SHOWING_FEE_BREAKDOWN,
     LAUNCHING_PAYMENT_SHEET,
 }
 
@@ -72,7 +71,6 @@ internal class EventPurchaseIntentCoordinator(
         intent: PurchaseIntent,
         saveRegistrationProgress: (registrationId: String?, holdExpiresAt: String) -> Unit,
         launchPaymentSheet: (PurchaseIntent) -> Unit,
-        launchPendingPaymentSheet: () -> Unit,
         setError: (String) -> Unit,
         logWarning: (String) -> Unit,
     ): PurchaseIntentProcessingAction {
@@ -87,15 +85,6 @@ internal class EventPurchaseIntentCoordinator(
                 registrationFlowCoordinator.setRegistrationHoldExpiresAt(holdExpiresAt)
                 saveRegistrationProgress(intent.registrationId, holdExpiresAt)
             }
-
-        val feeBreakdown = intent.feeBreakdown
-        if (feeBreakdown != null) {
-            registrationFlowCoordinator.setPendingPaymentSheetIntent(intent)
-            registrationFlowCoordinator.showFeeBreakdown(feeBreakdown) {
-                launchPendingPaymentSheet()
-            }
-            return PurchaseIntentProcessingAction.SHOWING_FEE_BREAKDOWN
-        }
 
         launchPaymentSheet(intent)
         return PurchaseIntentProcessingAction.LAUNCHING_PAYMENT_SHEET

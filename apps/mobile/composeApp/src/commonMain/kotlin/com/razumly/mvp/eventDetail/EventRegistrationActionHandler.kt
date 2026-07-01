@@ -12,7 +12,6 @@ import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
-import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
 import com.razumly.mvp.core.data.repositories.SignerContext
@@ -307,21 +306,6 @@ internal class EventRegistrationActionHandler(
             action = EventWithdrawalExecutionAction.LEAVE,
             targetUserId = targetUserId,
         )
-    }
-
-    fun showFeeBreakdown(feeBreakdown: FeeBreakdown, onConfirm: () -> Unit) {
-        registrationFlowCoordinator.showFeeBreakdown(
-            feeBreakdown = feeBreakdown,
-            onConfirm = onConfirm,
-        )
-    }
-
-    fun dismissFeeBreakdown() {
-        registrationFlowCoordinator.dismissFeeBreakdown()
-    }
-
-    fun confirmFeeBreakdown() {
-        registrationFlowCoordinator.confirmFeeBreakdown()?.invoke()
     }
 
     fun dismissPaymentPlanPreviewDialog() {
@@ -759,7 +743,21 @@ internal class EventRegistrationActionHandler(
                 },
                 createPurchaseIntent = { targetEvent, priceCents, occurrence, divisionId ->
                     val discountCode = registrationFlowCoordinator.requestDiscountCode(
-                        description = "Enter a discount code for this event registration, or continue without one.",
+                        title = "Price preview",
+                        description = "Review the registration price before checkout. Add a discount code here if you have one.",
+                        originalAmountCents = priceCents,
+                        onPreview = { code ->
+                            scope.launch {
+                                val preview = billingRepository.previewEventRegistrationDiscount(
+                                    event = targetEvent,
+                                    priceCents = priceCents,
+                                    occurrence = occurrence,
+                                    divisionId = divisionId,
+                                    discountCode = code,
+                                )
+                                registrationFlowCoordinator.updateDiscountCodePreview(preview)
+                            }
+                        },
                     )
                     createPurchaseIntentWithRegistrationAnswers(
                         targetEvent,
@@ -830,7 +828,22 @@ internal class EventRegistrationActionHandler(
                 },
                 createPurchaseIntent = { targetEvent, teamId, priceCents, occurrence, divisionId ->
                     val discountCode = registrationFlowCoordinator.requestDiscountCode(
-                        description = "Enter a discount code for this team event registration, or continue without one.",
+                        title = "Price preview",
+                        description = "Review the team registration price before checkout. Add a discount code here if you have one.",
+                        originalAmountCents = priceCents,
+                        onPreview = { code ->
+                            scope.launch {
+                                val preview = billingRepository.previewEventRegistrationDiscount(
+                                    event = targetEvent,
+                                    teamId = teamId,
+                                    priceCents = priceCents,
+                                    occurrence = occurrence,
+                                    divisionId = divisionId,
+                                    discountCode = code,
+                                )
+                                registrationFlowCoordinator.updateDiscountCodePreview(preview)
+                            }
+                        },
                     )
                     createPurchaseIntentWithRegistrationAnswers(
                         targetEvent,
@@ -915,9 +928,6 @@ internal class EventRegistrationActionHandler(
             },
             launchPaymentSheet = { purchaseIntent ->
                 scope.launch { showPaymentSheet(purchaseIntent) }
-            },
-            launchPendingPaymentSheet = {
-                scope.launch { showPendingPaymentSheet() }
             },
             setError = setError,
             logWarning = { message -> Napier.w(message) },

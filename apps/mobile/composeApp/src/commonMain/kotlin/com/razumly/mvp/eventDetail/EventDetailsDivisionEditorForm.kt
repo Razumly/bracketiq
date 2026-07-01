@@ -77,7 +77,6 @@ internal data class EventDetailsDivisionEditorFormActions(
     val onAddSelfToEventChange: (Boolean) -> Unit,
     val onAddCurrentUser: (Boolean) -> Unit,
     val onDivisionInputsExpandedChange: (Boolean) -> Unit,
-    val onShowPriceBreakdown: (PricePreviewBreakdown) -> Unit,
 )
 
 @Composable

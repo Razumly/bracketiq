@@ -36,7 +36,6 @@ import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckoutRequest
-import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.SignStep
@@ -86,8 +85,6 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val isEventFull: StateFlow<Boolean>
     val editedEvent: StateFlow<Event>
     val backCallback: BackCallback
-    val showFeeBreakdown: StateFlow<Boolean>
-    val currentFeeBreakdown: StateFlow<FeeBreakdown?>
     val isUserInWaitlist: StateFlow<Boolean>
     val isUserFreeAgent: StateFlow<Boolean>
     val isUserCaptain: StateFlow<Boolean>
@@ -133,7 +130,6 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
 
     fun onNavigateToChat(user: UserData)
     fun matchSelected(selectedMatch: MatchWithRelations)
-    fun showFeeBreakdown(feeBreakdown: FeeBreakdown, onConfirm: () -> Unit, onCancel: () -> Unit)
     fun updateEventRegistrationQuestionAnswer(questionId: String, answer: String)
     fun toggleEventRegistrationQuestionsExpanded()
     fun dismissEventRegistrationQuestionDialog()
@@ -227,8 +223,6 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun removeLeagueTimeSlot(index: Int)
     fun checkIsUserWaitListed(event: Event): Boolean
     fun checkIsUserFreeAgent(event: Event): Boolean
-    fun dismissFeeBreakdown()
-    fun confirmFeeBreakdown()
     fun startEditingMatches()
     fun cancelEditingMatches()
     fun commitMatchChanges()
@@ -257,6 +251,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun submitBillingAddress(address: BillingAddressDraft)
     fun dismissBillingAddressPrompt()
     fun continueFromDiscountCodePrompt(code: String?)
+    fun applyDiscountCodePrompt(code: String)
     fun dismissDiscountCodePrompt()
     fun onUploadSelected(photo: GalleryPhotoResult)
     fun deleteImage(imageId: String)

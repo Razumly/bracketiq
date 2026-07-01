@@ -36,7 +36,6 @@ import com.razumly.mvp.core.data.dataTypes.isPaymentPending
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.repositories.FamilyChild
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
@@ -551,9 +550,6 @@ class DefaultEventDetailComponent(
     private var eventDetailHydrationJob: Job? = null
     private var weeklyOccurrenceSummaryPrefetchJob: Job? = null
 
-    override val showFeeBreakdown = registrationFlowCoordinator.showFeeBreakdown
-    override val currentFeeBreakdown = registrationFlowCoordinator.currentFeeBreakdown
-
     private val _userTeams = currentUser.flatMapLatest {
         teamRepository.getTeamsWithPlayersFlow(it.id).map { result ->
             result.getOrElse {
@@ -826,6 +822,10 @@ class DefaultEventDetailComponent(
 
     override fun continueFromDiscountCodePrompt(code: String?) {
         registrationFlowCoordinator.continueFromDiscountCodePrompt(code)
+    }
+
+    override fun applyDiscountCodePrompt(code: String) {
+        registrationFlowCoordinator.applyDiscountCodePrompt(code)
     }
 
     override fun dismissDiscountCodePrompt() {
@@ -2893,23 +2893,6 @@ class DefaultEventDetailComponent(
 
     private fun currentUserTeamIds(): Set<String> {
         return membershipCoordinator.currentUserTeamIds(currentUser.value.teamIds)
-    }
-
-    override fun showFeeBreakdown(
-        feeBreakdown: FeeBreakdown, onConfirm: () -> Unit, onCancel: () -> Unit
-    ) {
-        registrationActionHandler.showFeeBreakdown(
-            feeBreakdown = feeBreakdown,
-            onConfirm = onConfirm,
-        )
-    }
-
-    override fun dismissFeeBreakdown() {
-        registrationActionHandler.dismissFeeBreakdown()
-    }
-
-    override fun confirmFeeBreakdown() {
-        registrationActionHandler.confirmFeeBreakdown()
     }
 
     override fun dismissPaymentPlanPreviewDialog() {

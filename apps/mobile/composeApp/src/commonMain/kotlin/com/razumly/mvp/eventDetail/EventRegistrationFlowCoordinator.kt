@@ -8,8 +8,8 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
-import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
+import com.razumly.mvp.core.data.repositories.DiscountPreview
 import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
@@ -93,6 +93,10 @@ data class DiscountCodePromptState(
     val title: String = "Discount code",
     val description: String = "Enter a discount code for this checkout, or continue without one.",
     val initialCode: String = "",
+    val originalAmountCents: Int? = null,
+    val preview: DiscountPreview? = null,
+    val error: String? = null,
+    val loading: Boolean = false,
 )
 
 internal enum class WithdrawalActionKind {
@@ -159,12 +163,6 @@ internal class EventRegistrationFlowCoordinator {
     private val _holdExpiresAt = MutableStateFlow<String?>(null)
     val holdExpiresAt = _holdExpiresAt.asStateFlow()
 
-    private val _showFeeBreakdown = MutableStateFlow(false)
-    val showFeeBreakdown = _showFeeBreakdown.asStateFlow()
-
-    private val _currentFeeBreakdown = MutableStateFlow<FeeBreakdown?>(null)
-    val currentFeeBreakdown = _currentFeeBreakdown.asStateFlow()
-
     private val _startingTeamRegistrationId = MutableStateFlow<String?>(null)
     val startingTeamRegistrationId = _startingTeamRegistrationId.asStateFlow()
 
@@ -200,10 +198,10 @@ internal class EventRegistrationFlowCoordinator {
     private var pendingPaymentPlanPreviewAction: (() -> Unit)? = null
     private var pendingBillingAddressAction: (() -> Unit)? = null
     private var pendingDiscountCodeAction: ((String?) -> Unit)? = null
+    private var pendingDiscountCodePreviewAction: ((String) -> Unit)? = null
     private var pendingJoinableChildren: List<JoinChildOption> = emptyList()
     private var pendingTeamJoinQuestionTeam: TeamWithPlayers? = null
     private var pendingJoinConfirmationTarget: JoinConfirmationTarget? = null
-    private var pendingFeeBreakdownAction: (() -> Unit)? = null
     private var pendingTeamRegistration: TeamWithPlayers? = null
     private var pendingPaymentSheetIntent: PurchaseIntent? = null
     private var pendingSignatureSteps: List<SignStep> = emptyList()
@@ -235,23 +233,31 @@ internal class EventRegistrationFlowCoordinator {
         title: String = "Discount code",
         description: String = "Enter a discount code for this checkout, or continue without one.",
         initialCode: String = "",
+        originalAmountCents: Int? = null,
+        onPreview: ((String) -> Unit)? = null,
         onContinue: (String?) -> Unit,
     ) {
         pendingDiscountCodeAction = onContinue
+        pendingDiscountCodePreviewAction = onPreview
         _discountCodePrompt.value = DiscountCodePromptState(
             title = title,
             description = description,
             initialCode = initialCode,
+            originalAmountCents = originalAmountCents,
         )
     }
 
     suspend fun requestDiscountCode(
         title: String = "Discount code",
         description: String = "Enter a discount code for this checkout, or continue without one.",
+        originalAmountCents: Int? = null,
+        onPreview: ((String) -> Unit)? = null,
     ): String? = suspendCancellableCoroutine { continuation ->
         showDiscountCodePrompt(
             title = title,
             description = description,
+            originalAmountCents = originalAmountCents,
+            onPreview = onPreview,
         ) { code ->
             if (continuation.isActive) {
                 continuation.resume(code?.trim()?.takeIf(String::isNotBlank))
@@ -259,13 +265,55 @@ internal class EventRegistrationFlowCoordinator {
         }
         continuation.invokeOnCancellation {
             pendingDiscountCodeAction = null
+            pendingDiscountCodePreviewAction = null
             _discountCodePrompt.value = null
+        }
+    }
+
+    fun applyDiscountCodePrompt(code: String) {
+        val normalizedCode = code.trim()
+        if (normalizedCode.isBlank()) {
+            _discountCodePrompt.value = _discountCodePrompt.value?.copy(
+                preview = null,
+                error = "Enter a discount code to apply.",
+                loading = false,
+            )
+            return
+        }
+        _discountCodePrompt.value = _discountCodePrompt.value?.copy(
+            preview = null,
+            error = null,
+            loading = true,
+        )
+        pendingDiscountCodePreviewAction?.invoke(normalizedCode)
+    }
+
+    fun updateDiscountCodePreview(result: Result<DiscountPreview>) {
+        _discountCodePrompt.value = _discountCodePrompt.value?.let { state ->
+            result.fold(
+                onSuccess = { preview ->
+                    state.copy(
+                        initialCode = preview.code ?: state.initialCode,
+                        preview = preview,
+                        error = null,
+                        loading = false,
+                    )
+                },
+                onFailure = { error ->
+                    state.copy(
+                        preview = null,
+                        error = error.message ?: "Unable to apply discount code.",
+                        loading = false,
+                    )
+                },
+            )
         }
     }
 
     fun continueFromDiscountCodePrompt(code: String?) {
         val action = pendingDiscountCodeAction
         pendingDiscountCodeAction = null
+        pendingDiscountCodePreviewAction = null
         _discountCodePrompt.value = null
         action?.invoke(code?.trim()?.takeIf(String::isNotBlank))
     }
@@ -444,30 +492,6 @@ internal class EventRegistrationFlowCoordinator {
 
     fun setRegistrationHoldExpiresAt(holdExpiresAt: String?) {
         _holdExpiresAt.value = holdExpiresAt?.trim()?.takeIf(String::isNotBlank)
-    }
-
-    fun showFeeBreakdown(
-        feeBreakdown: FeeBreakdown,
-        onConfirm: () -> Unit,
-    ) {
-        _currentFeeBreakdown.value = feeBreakdown
-        _showFeeBreakdown.value = true
-        pendingFeeBreakdownAction = onConfirm
-    }
-
-    fun dismissFeeBreakdown() {
-        _showFeeBreakdown.value = false
-        _currentFeeBreakdown.value = null
-        pendingFeeBreakdownAction = null
-        clearPendingPaymentSheetIntent()
-    }
-
-    fun confirmFeeBreakdown(): (() -> Unit)? {
-        val action = pendingFeeBreakdownAction
-        _showFeeBreakdown.value = false
-        _currentFeeBreakdown.value = null
-        pendingFeeBreakdownAction = null
-        return action
     }
 
     fun showPaymentPlanPreviewDialog(

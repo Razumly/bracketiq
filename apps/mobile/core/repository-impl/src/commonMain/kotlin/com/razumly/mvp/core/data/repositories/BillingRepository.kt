@@ -438,6 +438,14 @@ private fun discountTargetCacheKey(ownerType: String, ownerIdKey: String, itemTy
     listOf(ownerType.trim().uppercase(), ownerIdKey, itemType.trim().uppercase(), targetId).joinToString("|")
 
 interface IBillingRepository : IMVPRepository {
+    suspend fun previewEventRegistrationDiscount(
+        event: Event,
+        teamId: String? = null,
+        priceCents: Int? = null,
+        occurrence: EventOccurrenceSelection? = null,
+        divisionId: String? = null,
+        discountCode: String,
+    ): Result<DiscountPreview> = Result.failure(UnsupportedOperationException("Discount preview is not supported."))
     suspend fun createPurchaseIntent(
         event: Event,
         teamId: String? = null,
@@ -743,6 +751,53 @@ class BillingRepository(
                 event.organizationId?.trim()?.takeIf(String::isNotBlank)?.let { put("organization_id", it) }
             },
         )
+        response
+    }
+
+    override suspend fun previewEventRegistrationDiscount(
+        event: Event,
+        teamId: String?,
+        priceCents: Int?,
+        occurrence: EventOccurrenceSelection?,
+        divisionId: String?,
+        discountCode: String,
+    ): Result<DiscountPreview> = runCatching {
+        val user = userRepository.currentUser.value.getOrThrow()
+        val email = userRepository.currentAccount.value.getOrNull()?.email
+        val effectivePriceCents = priceCents
+            ?.takeIf { value -> value >= 0 }
+            ?: throw IllegalArgumentException("Set a price for this division before previewing a discount.")
+        val normalizedCode = discountCode.trim().takeIf(String::isNotBlank)
+            ?: throw IllegalArgumentException("Enter a discount code to apply.")
+        val normalizedTeamId = teamId
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+        val normalizedDivisionId = divisionId
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+
+        val response = api.post<PurchaseIntentRequestDto, DiscountPreview>(
+            path = "api/billing/discount-preview",
+            body = PurchaseIntentRequestDto(
+                user = BillingUserRefDto(id = user.id, email = email),
+                event = BillingEventRefDto(
+                    id = event.id,
+                    eventType = event.eventType.name,
+                    priceCents = effectivePriceCents,
+                    hostId = event.hostId,
+                    organizationId = event.organizationId,
+                ),
+                team = normalizedTeamId?.let { BillingTeamRefDto(id = it) },
+                divisionId = normalizedDivisionId,
+                slotId = occurrence?.slotId?.trim()?.takeIf(String::isNotBlank),
+                occurrenceDate = occurrence?.occurrenceDate?.trim()?.takeIf(String::isNotBlank),
+                discountCode = normalizedCode,
+            ),
+        )
+
+        if (!response.error.isNullOrBlank()) {
+            throw Exception(response.error)
+        }
         response
     }
 
@@ -3311,6 +3366,18 @@ data class PurchaseIntent(
             ?: false
     }
 }
+
+@Serializable
+data class DiscountPreview(
+    val code: String? = null,
+    val applied: Boolean = false,
+    val originalAmountCents: Int = 0,
+    val discountAmountCents: Int = 0,
+    val discountedAmountCents: Int = 0,
+    val discountId: String? = null,
+    val discountCodeId: String? = null,
+    val error: String? = null,
+)
 
 @Serializable
 data class FeeBreakdown(

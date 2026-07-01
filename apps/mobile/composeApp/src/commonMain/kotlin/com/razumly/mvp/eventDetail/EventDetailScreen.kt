@@ -969,8 +969,6 @@ fun EventDetailScreen(
     val eventMatchesLoading by component.eventMatchesLoading.collectAsState()
     val editedEvent by component.editedEvent.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
-    val showFeeBreakdown by component.showFeeBreakdown.collectAsState()
-    val currentFeeBreakdown by component.currentFeeBreakdown.collectAsState()
     val editableMatches by component.editableMatches.collectAsState()
     val eventFields by component.eventFields.collectAsState()
     val selectedDivision by component.selectedDivision.collectAsState()
@@ -4012,18 +4010,16 @@ fun EventDetailScreen(
                 )
             }
 
-            if (showFeeBreakdown && currentFeeBreakdown != null) {
-                FeeBreakdownDialog(
-                    feeBreakdown = currentFeeBreakdown!!,
-                    onConfirm = { component.confirmFeeBreakdown() },
-                    onCancel = { component.dismissFeeBreakdown() })
-            }
-
             discountCodePrompt?.let { prompt ->
                 DiscountCodeDialog(
                     title = prompt.title,
                     description = prompt.description,
                     initialCode = prompt.initialCode,
+                    originalAmountCents = prompt.originalAmountCents,
+                    preview = prompt.preview,
+                    error = prompt.error,
+                    loading = prompt.loading,
+                    onApply = component::applyDiscountCodePrompt,
                     onContinue = component::continueFromDiscountCodePrompt,
                     onDismiss = component::dismissDiscountCodePrompt,
                 )

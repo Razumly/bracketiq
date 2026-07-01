@@ -1163,6 +1163,66 @@ class BillingRepositoryHttpTest {
     }
 
     @Test
+    fun previewEventRegistrationDiscount_posts_and_parses_amounts() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/billing/discount-preview", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "code": "SAVE10",
+                      "applied": true,
+                      "originalAmountCents": 2500,
+                      "discountAmountCents": 1000,
+                      "discountedAmountCents": 1500
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val event = Event(id = "e1", hostId = "h1", priceCents = 2500, eventType = EventType.EVENT)
+        val preview = repo.previewEventRegistrationDiscount(
+            event = event,
+            teamId = "team_1",
+            priceCents = 2500,
+            occurrence = EventOccurrenceSelection(slotId = "slot_1", occurrenceDate = "2026-07-04"),
+            divisionId = "division_1",
+            discountCode = " save10 ",
+        ).getOrThrow()
+
+        assertTrue(capturedBody.contains("\"discountCode\":\"save10\""))
+        assertTrue(capturedBody.contains("\"team\":{\"id\":\"team_1\""))
+        assertTrue(capturedBody.contains("\"divisionId\":\"division_1\""))
+        assertTrue(capturedBody.contains("\"slotId\":\"slot_1\""))
+        assertEquals("SAVE10", preview.code)
+        assertTrue(preview.applied)
+        assertEquals(2500, preview.originalAmountCents)
+        assertEquals(1000, preview.discountAmountCents)
+        assertEquals(1500, preview.discountedAmountCents)
+    }
+
+    @Test
     fun createPurchaseIntent_with_teamId_includes_team_reference() = runTest {
         val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
         val userRepo = BillingRepositoryHttp_FakeUserRepository(

@@ -2,7 +2,6 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.network.userMessage
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,8 +44,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.window.Dialog
@@ -91,12 +88,10 @@ import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
-import com.razumly.mvp.core.presentation.composables.calculateIncludedFeesFromTotalPrice
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.presentation.util.getScreenHeight
-import com.razumly.mvp.core.presentation.util.moneyFormat
 import com.razumly.mvp.core.presentation.util.toEnumTitleCase
 import com.razumly.mvp.core.presentation.util.toNameCase
 import com.razumly.mvp.core.presentation.util.timeFormat
@@ -309,7 +304,6 @@ fun EventDetails(
     var draftInviteOfficial by rememberSaveable { mutableStateOf(false) }
     var draftInviteAssistantHost by rememberSaveable { mutableStateOf(false) }
     var staffEditorError by remember { mutableStateOf<String?>(null) }
-    var pricePreviewBreakdown by remember { mutableStateOf<PricePreviewBreakdown?>(null) }
     var officialPositionsExpanded by rememberSaveable(editEvent.id, editView) { mutableStateOf(false) }
     var assignedStaffExpanded by rememberSaveable(editEvent.id, editView) { mutableStateOf(false) }
     var divisionInputsExpanded by rememberSaveable(editEvent.id, editView) { mutableStateOf(true) }
@@ -2535,7 +2529,6 @@ fun EventDetails(
                                 onAddSelfToEventChange = { addSelfToEvent = it },
                                 onAddCurrentUser = onAddCurrentUser,
                                 onDivisionInputsExpandedChange = { divisionInputsExpanded = it },
-                                onShowPriceBreakdown = { pricePreviewBreakdown = it },
                             ),
                         )
 
@@ -2731,13 +2724,6 @@ fun EventDetails(
         initialDate = divisionInstallmentInitialDate,
     )
 
-    pricePreviewBreakdown?.let { breakdown ->
-        PriceWithFeesPreviewDialog(
-            breakdown = breakdown,
-            onDismiss = { pricePreviewBreakdown = null },
-        )
-    }
-
     // ImagePickerKMP Integration
     if (showUploadImagePicker) {
         GalleryPickerLauncher(
@@ -2828,147 +2814,3 @@ fun EventDetails(
         }
     }
 }
-
-internal data class PricePreviewBreakdown(
-    val baseLabel: String,
-    val amountCents: Int,
-    val hostReceivesCents: Int,
-    val processingFeeCents: Int,
-    val mvpFeeCents: Int,
-    val taxable: Boolean,
-) {
-    val totalDisplayValue: String
-        get() = if (amountCents <= 0) {
-            amountCents.formatCents()
-        } else if (taxable) {
-            "${amountCents.formatCents()} + Taxes"
-        } else {
-            amountCents.formatCents()
-        }
-}
-
-@Composable
-internal fun PriceWithFeesPreviewSupportingText(
-    amountCents: Int,
-    eventType: EventType,
-    baseLabel: String,
-    taxable: Boolean = false,
-    onShowBreakdown: (PricePreviewBreakdown) -> Unit,
-) {
-    val breakdown = remember(amountCents, eventType, baseLabel, taxable) {
-        calculatePricePreviewBreakdown(
-            amountCents = amountCents,
-            eventType = eventType,
-            baseLabel = baseLabel,
-            taxable = taxable,
-        )
-    }
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "Total: ${breakdown.totalDisplayValue}",
-            style = MaterialTheme.typography.bodySmall,
-            color = Color(localImageScheme.current.onSurfaceVariant),
-        )
-        Text(
-            text = "Breakdown",
-            modifier = Modifier.clickable { onShowBreakdown(breakdown) },
-            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-            color = Color(localImageScheme.current.primary),
-        )
-    }
-}
-
-@Composable
-private fun PriceWithFeesPreviewDialog(
-    breakdown: PricePreviewBreakdown,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Payment Breakdown") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "Review the expected charges before saving this price.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                HorizontalDivider()
-                FeePreviewRow(breakdown.baseLabel, breakdown.amountCents.formatCents())
-                if (breakdown.taxable) {
-                    FeePreviewRow("Tax", "Calculated at checkout")
-                }
-                HorizontalDivider()
-                FeePreviewRow("Total", breakdown.totalDisplayValue, isTotal = true)
-            }
-        },
-        confirmButton = {
-            Button(onClick = onDismiss) {
-                Text("Done")
-            }
-        },
-    )
-}
-
-@Composable
-private fun FeePreviewRow(
-    label: String,
-    value: String,
-    isTotal: Boolean = false,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = label,
-            modifier = Modifier.weight(1f),
-            style = if (isTotal) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall,
-            fontWeight = if (isTotal) FontWeight.SemiBold else FontWeight.Normal,
-        )
-        Text(
-            text = value,
-            modifier = Modifier.weight(1f),
-            style = if (isTotal) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall,
-            fontWeight = if (isTotal) FontWeight.SemiBold else FontWeight.Medium,
-            textAlign = TextAlign.End,
-        )
-    }
-}
-
-private fun calculatePricePreviewBreakdown(
-    amountCents: Int,
-    eventType: EventType,
-    baseLabel: String,
-    taxable: Boolean,
-): PricePreviewBreakdown {
-    val normalizedAmountCents = amountCents.coerceAtLeast(0)
-    val feeBreakdown = calculateIncludedFeesFromTotalPrice(normalizedAmountCents)
-
-    if (normalizedAmountCents == 0) {
-        return PricePreviewBreakdown(
-            baseLabel = baseLabel,
-            amountCents = 0,
-            hostReceivesCents = 0,
-            processingFeeCents = 0,
-            mvpFeeCents = 0,
-            taxable = taxable,
-        )
-    }
-
-    return PricePreviewBreakdown(
-        baseLabel = baseLabel,
-        amountCents = feeBreakdown.totalPriceCents,
-        hostReceivesCents = feeBreakdown.hostReceivesCents,
-        processingFeeCents = feeBreakdown.processingFeeCents,
-        mvpFeeCents = feeBreakdown.platformFeeCents,
-        taxable = taxable,
-    )
-}
-
-private fun Int.formatCents(): String = (this / 100.0).moneyFormat()

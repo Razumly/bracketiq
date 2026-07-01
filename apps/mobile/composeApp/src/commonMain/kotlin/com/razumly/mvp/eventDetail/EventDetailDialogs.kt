@@ -37,7 +37,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
-import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import kotlin.math.round
@@ -283,48 +282,6 @@ private fun Int.centsToDollars(): String {
     } else {
         "$wholePart.$decimalPart"
     }
-}
-
-@Composable
-fun FeeBreakdownDialog(
-    feeBreakdown: FeeBreakdown,
-    onConfirm: () -> Unit,
-    onCancel: () -> Unit,
-) {
-    val visibleTaxAmount = feeBreakdown.taxAmount?.takeIf { it > 0 }
-    val visibleTotal = feeBreakdown.eventPrice + (visibleTaxAmount ?: 0)
-    val totalDisplayValue = "$${visibleTotal.centsToDollars()}"
-
-    AlertDialog(onDismissRequest = onCancel, title = { Text("Payment Breakdown") }, text = {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                "Review the charges before proceeding:", style = MaterialTheme.typography.bodyMedium
-            )
-
-            HorizontalDivider()
-
-            FeeRow("Price", "$${feeBreakdown.eventPrice.centsToDollars()}")
-            visibleTaxAmount?.let { taxAmount ->
-                FeeRow("Tax", "$${taxAmount.centsToDollars()}")
-            }
-
-            HorizontalDivider()
-
-            FeeRow(
-                "Total", totalDisplayValue, isTotal = true
-            )
-        }
-    }, confirmButton = {
-        Button(onClick = onConfirm) {
-            Text("Proceed to Payment")
-        }
-    }, dismissButton = {
-        Button(onClick = onCancel) {
-            Text("Cancel")
-        }
-    })
 }
 
 @Composable

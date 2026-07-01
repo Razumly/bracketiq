@@ -71,7 +71,6 @@ import com.razumly.mvp.core.util.toTimeZoneOrUtc
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventDetail.TextSignatureDialog
-import com.razumly.mvp.eventDetail.FeeBreakdownDialog
 import com.razumly.mvp.eventSearch.RentalConfirmationContent
 import com.razumly.mvp.eventSearch.RentalDetailsContent
 import com.razumly.mvp.eventSearch.RentalDetailsStep
@@ -127,7 +126,6 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
     val webSignaturePrompt by component.webSignaturePrompt.collectAsState()
     val discountCodePrompt by component.discountCodePrompt.collectAsState()
-    val currentFeeBreakdown by component.currentFeeBreakdown.collectAsState()
     val isReservingRental by component.isReservingRental.collectAsState()
     val completedRentalReservation by component.completedRentalReservation.collectAsState()
 
@@ -667,14 +665,6 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
             initialCode = prompt.initialCode,
             onContinue = component::continueFromDiscountCodePrompt,
             onDismiss = component::dismissDiscountCodePrompt,
-        )
-    }
-
-    currentFeeBreakdown?.let { feeBreakdown ->
-        FeeBreakdownDialog(
-            feeBreakdown = feeBreakdown,
-            onConfirm = component::confirmFeeBreakdown,
-            onCancel = component::dismissFeeBreakdown,
         )
     }
 
