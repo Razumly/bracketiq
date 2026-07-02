@@ -97,12 +97,6 @@ fun eventScheduleTabGuide(guideId: String): AppGuide = AppGuide(
     id = guideId,
     steps = listOf(
         AppGuideStep(
-            id = "event_tabs",
-            targetId = EventGuideTargets.DetailTabs,
-            title = "Event tabs",
-            body = "Schedules are one part of the event view. You can return to participants, standings, or brackets from here.",
-        ),
-        AppGuideStep(
             id = "schedule_content",
             targetId = EventGuideTargets.ScheduleContent,
             title = "Schedule",
@@ -121,12 +115,6 @@ fun eventBracketTabGuide(guideId: String): AppGuide = AppGuide(
     id = guideId,
     steps = listOf(
         AppGuideStep(
-            id = "event_tabs",
-            targetId = EventGuideTargets.DetailTabs,
-            title = "Event tabs",
-            body = "Brackets live beside the schedule and standings so you can move between event views quickly.",
-        ),
-        AppGuideStep(
             id = "bracket_content",
             targetId = EventGuideTargets.BracketContent,
             title = "Bracket",
@@ -144,12 +132,6 @@ fun eventBracketTabGuide(guideId: String): AppGuide = AppGuide(
 fun eventStandingsTabGuide(guideId: String): AppGuide = AppGuide(
     id = guideId,
     steps = listOf(
-        AppGuideStep(
-            id = "event_tabs",
-            targetId = EventGuideTargets.DetailTabs,
-            title = "Event tabs",
-            body = "Standings are part of the event view and can be checked alongside schedules and brackets.",
-        ),
         AppGuideStep(
             id = "standings_content",
             targetId = EventGuideTargets.StandingsContent,

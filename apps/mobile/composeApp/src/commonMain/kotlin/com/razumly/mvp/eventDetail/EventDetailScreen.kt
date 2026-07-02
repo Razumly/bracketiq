@@ -199,6 +199,16 @@ internal data class WeeklySessionOption(
     val divisionLabel: String,
 )
 
+internal fun eventDetailTabGuideRequiredTargetIds(
+    selectedTab: DetailTab,
+    selectedTabContentTarget: String,
+): Set<String> =
+    if (selectedTab == DetailTab.PARTICIPANTS) {
+        setOf(EventGuideTargets.DetailTabs, selectedTabContentTarget)
+    } else {
+        setOf(selectedTabContentTarget)
+    }
+
 internal fun DivisionDetail.isPlayoffDivisionKind(): Boolean =
     kind?.trim()?.equals("PLAYOFF", ignoreCase = true) == true
 
@@ -2917,6 +2927,12 @@ fun EventDetailScreen(
                                 guideController?.hasTarget(selectedTabContentTarget) == true
                             val hasDivisionSelectorTarget =
                                 guideController?.hasTarget(EventGuideTargets.DetailDivisionSelector) == true
+                            val selectedTabGuideRequiredTargets = remember(selectedTab, selectedTabContentTarget) {
+                                eventDetailTabGuideRequiredTargetIds(
+                                    selectedTab = selectedTab,
+                                    selectedTabContentTarget = selectedTabContentTarget,
+                                )
+                            }
                             LaunchedEffect(
                                 guideController,
                                 guideEventId,
@@ -2930,6 +2946,7 @@ fun EventDetailScreen(
                                 hasDetailTabsTarget,
                                 hasSelectedTabContentTarget,
                                 hasDivisionSelectorTarget,
+                                selectedTabGuideRequiredTargets,
                             ) {
                                 val controller = guideController ?: return@LaunchedEffect
                                 if (guideEventId.isBlank()) return@LaunchedEffect
@@ -2937,10 +2954,7 @@ fun EventDetailScreen(
 
                                 controller.maybeStartGuide(
                                     guide = selectedTabGuide,
-                                    requiredTargetIds = setOf(
-                                        EventGuideTargets.DetailTabs,
-                                        selectedTabContentTarget,
-                                    ),
+                                    requiredTargetIds = selectedTabGuideRequiredTargets,
                                 )
                             }
                             EventDetailTabStrip(
