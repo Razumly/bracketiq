@@ -398,6 +398,40 @@ class MatchContentComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun given_single_set_score_with_three_set_rules_when_building_segment_tracker_then_match_score_count_wins() {
+        val rules = ResolvedMatchRulesMVP(
+            scoringModel = "SETS",
+            segmentCount = 3,
+            segmentLabel = "Set",
+        )
+        val segments = listOf(
+            createSegment(sequence = 1, team1Score = 15, team2Score = 10),
+        )
+
+        val showSegmentBreakdown = shouldShowMatchSegmentBreakdown(
+            rules = rules,
+            segments = segments,
+            team1Scores = listOf(15),
+            team2Scores = listOf(10),
+        )
+        val trackerEntries = buildMatchSegmentTrackerEntries(
+            rules = rules,
+            segmentBaseLabel = rules.segmentLabel,
+            segments = segments,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            team1Scores = listOf(15),
+            team2Scores = listOf(10),
+            currentSegmentIndex = 0,
+        )
+
+        assertFalse(showSegmentBreakdown)
+        assertEquals(1, trackerEntries.size)
+        assertEquals(15, trackerEntries.single().team1Score)
+        assertEquals(10, trackerEntries.single().team2Score)
+    }
+
+    @Test
     fun given_non_set_scoring_when_building_segment_tracker_then_it_is_hidden() {
         val trackerEntries = buildMatchSegmentTrackerEntries(
             rules = ResolvedMatchRulesMVP(
@@ -1361,7 +1395,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_playoff_match_with_stale_single_segment_rules_when_loading_detail_then_event_best_of_count_wins() = runTest(testDispatcher) {
+    fun given_playoff_match_with_single_score_shape_when_loading_detail_then_match_score_count_wins() = runTest(testDispatcher) {
         val user = createUser(id = "user-1", teamIds = listOf("team-c"))
         val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(
             eventType = EventType.LEAGUE,
@@ -1413,10 +1447,57 @@ class MatchContentComponentTest : MainDispatcherTest() {
         advance()
 
         assertFalse(harness.component.matchFinished.value)
-        assertEquals(1, harness.component.currentSet.value)
-        assertEquals(3, harness.component.matchWithTeams.value.match.segments.size)
-        assertEquals(listOf(21, 0, 0), harness.component.matchWithTeams.value.match.team1Points)
-        assertEquals(listOf(18, 0, 0), harness.component.matchWithTeams.value.match.team2Points)
+        assertEquals(0, harness.component.currentSet.value)
+        assertEquals(1, harness.component.matchWithTeams.value.match.segments.size)
+        assertEquals(listOf(21), harness.component.matchWithTeams.value.match.team1Points)
+        assertEquals(listOf(18), harness.component.matchWithTeams.value.match.team2Points)
+    }
+
+    @Test
+    fun given_loser_match_with_one_score_and_three_set_rules_when_loading_detail_then_match_score_count_wins() = runTest(testDispatcher) {
+        val user = createUser(id = "user-1", teamIds = listOf("team-c"))
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(
+            eventType = EventType.TOURNAMENT,
+            usesSets = true,
+            winnerSetCount = 3,
+            loserSetCount = 1,
+            winnerBracketPointsToVictory = listOf(21, 21, 15),
+            loserBracketPointsToVictory = listOf(25),
+            doubleElimination = true,
+        )
+        val match = createMatch(
+            eventId = event.id,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = true,
+        ).copy(
+            losersBracket = true,
+            resolvedMatchRules = ResolvedMatchRulesMVP(
+                scoringModel = "SETS",
+                segmentCount = 3,
+                segmentLabel = "Set",
+            ),
+            team1Points = listOf(0),
+            team2Points = listOf(0),
+            setResults = listOf(0),
+        )
+        val harness = MatchDetailHarness(
+            event = event,
+            initialMatch = match,
+            currentUser = user,
+            teams = listOf(
+                createTeam(id = "team-a", captainId = "captain-a"),
+                createTeam(id = "team-b", captainId = "captain-b"),
+                createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
+            ),
+        )
+
+        advance()
+
+        assertEquals(1, harness.component.matchWithTeams.value.match.segments.size)
+        assertEquals(listOf(0), harness.component.matchWithTeams.value.match.team1Points)
+        assertEquals(listOf(0), harness.component.matchWithTeams.value.match.team2Points)
     }
 
     @Test

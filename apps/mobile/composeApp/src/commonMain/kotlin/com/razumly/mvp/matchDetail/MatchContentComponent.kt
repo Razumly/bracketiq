@@ -1993,17 +1993,16 @@ class DefaultMatchContentComponent(
 
     private fun resolveExpectedSetCount(match: MatchMVP): Int {
         val rules = resolveActiveRules(match, event.value)
-        val fallbackSetCount = listOf(
+        val matchScoreSetCount = listOf(
             match.segments.size,
             match.setResults.size,
             match.team1Points.size,
             match.team2Points.size,
-            1,
-        ).maxOrNull() ?: 1
+        ).maxOrNull() ?: 0
 
         return when (rules.scoringModel) {
             "POINTS_ONLY" -> 1
-            else -> maxOf(rules.segmentCount.coerceAtLeast(1), fallbackSetCount)
+            else -> matchScoreSetCount.takeIf { it > 0 } ?: rules.segmentCount.coerceAtLeast(1)
         }
     }
 

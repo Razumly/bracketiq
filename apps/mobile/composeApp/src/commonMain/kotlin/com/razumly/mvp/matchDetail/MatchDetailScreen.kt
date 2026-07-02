@@ -327,13 +327,14 @@ internal fun matchDetailSegmentCount(
     segments: List<MatchSegmentMVP>,
     team1Scores: List<Int>,
     team2Scores: List<Int>,
-): Int = listOf(
-    rules.segmentCount,
-    segments.size,
-    team1Scores.size,
-    team2Scores.size,
-    1,
-).max()
+): Int {
+    val matchScoreSegmentCount = listOf(
+        segments.size,
+        team1Scores.size,
+        team2Scores.size,
+    ).maxOrNull() ?: 0
+    return matchScoreSegmentCount.takeIf { it > 0 } ?: rules.segmentCount.coerceAtLeast(1)
+}
 
 internal fun shouldShowMatchSegmentBreakdown(
     rules: ResolvedMatchRulesMVP,

@@ -100,7 +100,7 @@ class MatchCardScoreDisplayTest {
     }
 
     @Test
-    fun set_match_pads_missing_set_scores_to_display_count() {
+    fun set_match_uses_persisted_score_count_before_event_count() {
         val event = Event(
             id = "event_1",
             eventType = EventType.LEAGUE,
@@ -128,8 +128,98 @@ class MatchCardScoreDisplayTest {
             scoringModel = scoreDisplay.scoringModel,
         )
 
+        assertEquals(MatchCardScoreDisplay(scoringModel = "SETS", displaySetCount = 1), scoreDisplay)
+        assertEquals(listOf(12), points)
+    }
+
+    @Test
+    fun loser_bracket_set_match_uses_persisted_score_count_before_loser_event_count() {
+        val event = Event(
+            id = "event_1",
+            usesSets = true,
+            loserSetCount = 3,
+            winnerSetCount = 3,
+        )
+        val match = match(
+            losersBracket = true,
+            segments = listOf(
+                segment(sequence = 1, scores = mapOf("team_a" to 15, "team_b" to 10)),
+            ),
+        )
+        val scoreDisplay = resolveMatchCardScoreDisplay(
+            event = event,
+            sport = null,
+            match = match,
+        )
+
+        val points = displayPointsForTeam(
+            event = event,
+            match = match,
+            teamId = "team_a",
+            legacyPoints = match.team1Points,
+            displaySetCount = scoreDisplay.displaySetCount,
+            scoringModel = scoreDisplay.scoringModel,
+        )
+
+        assertEquals(MatchCardScoreDisplay(scoringModel = "SETS", displaySetCount = 1), scoreDisplay)
+        assertEquals(listOf(15), points)
+    }
+
+    @Test
+    fun loser_bracket_set_match_uses_persisted_score_count_before_rule_segment_count() {
+        val event = Event(
+            id = "event_1",
+            usesSets = true,
+            loserSetCount = 1,
+            winnerSetCount = 3,
+        )
+        val match = match(
+            losersBracket = true,
+            team1Points = listOf(15),
+            team2Points = listOf(10),
+            setResults = listOf(1),
+            resolvedMatchRules = ResolvedMatchRulesMVP(
+                scoringModel = "SETS",
+                segmentCount = 3,
+            ),
+        )
+        val scoreDisplay = resolveMatchCardScoreDisplay(
+            event = event,
+            sport = null,
+            match = match,
+        )
+
+        val points = displayPointsForTeam(
+            event = event,
+            match = match,
+            teamId = "team_a",
+            legacyPoints = match.team1Points,
+            displaySetCount = scoreDisplay.displaySetCount,
+            scoringModel = scoreDisplay.scoringModel,
+        )
+
+        assertEquals(MatchCardScoreDisplay(scoringModel = "SETS", displaySetCount = 1), scoreDisplay)
+        assertEquals(listOf(15), points)
+    }
+
+    @Test
+    fun set_match_without_scores_uses_configured_display_count() {
+        val event = Event(
+            id = "event_1",
+            eventType = EventType.LEAGUE,
+            usesSets = true,
+            setsPerMatch = 3,
+            winnerSetCount = 2,
+        )
+        val match = match()
+
+        val scoreDisplay = resolveMatchCardScoreDisplay(
+            event = event,
+            sport = null,
+            match = match,
+        )
+
         assertEquals(MatchCardScoreDisplay(scoringModel = "SETS", displaySetCount = 3), scoreDisplay)
-        assertEquals(listOf(12, 0, 0), points)
     }
 
     @Test
@@ -176,7 +266,10 @@ class MatchCardScoreDisplayTest {
     private fun match(
         segments: List<MatchSegmentMVP> = emptyList(),
         team1Points: List<Int> = emptyList(),
+        team2Points: List<Int> = emptyList(),
+        setResults: List<Int> = emptyList(),
         resolvedMatchRules: ResolvedMatchRulesMVP? = null,
+        losersBracket: Boolean = false,
     ): MatchMVP = MatchMVP(
         matchId = 1,
         team1Id = "team_a",
@@ -184,7 +277,10 @@ class MatchCardScoreDisplayTest {
         eventId = "event_1",
         segments = segments,
         team1Points = team1Points,
+        team2Points = team2Points,
+        setResults = setResults,
         resolvedMatchRules = resolvedMatchRules,
+        losersBracket = losersBracket,
         id = "match_1",
     )
 

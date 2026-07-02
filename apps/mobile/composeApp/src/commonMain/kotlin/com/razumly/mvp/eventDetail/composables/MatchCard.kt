@@ -689,26 +689,25 @@ internal fun resolveMatchCardScoreDisplay(
         )
     }
 
-    val fallbackSetCount = listOf(
+    val matchScoreSetCount = listOf(
         match.segments.size,
         match.setResults.size,
         match.team1Points.size,
         match.team2Points.size,
-        1,
-    ).maxOrNull() ?: 1
-    val contextualSetCount = when {
-        match.losersBracket -> event.loserSetCount.coerceAtLeast(1)
-        event.eventType == EventType.LEAGUE && !isBracketMatch(match) ->
-            (event.setsPerMatch ?: fallbackSetCount).coerceAtLeast(1)
-        else -> event.winnerSetCount.coerceAtLeast(1)
-    }
-    val displaySetCount = listOfNotNull(
-        contextualSetCount,
+    ).maxOrNull() ?: 0
+    val fallbackSetCount = listOfNotNull(
         match.matchRulesSnapshot?.segmentCount?.takeIf { it > 0 },
         match.resolvedMatchRules?.segmentCount?.takeIf { it > 0 },
         eventRules?.segmentCount?.takeIf { it > 0 },
-        fallbackSetCount,
+        when {
+            match.losersBracket -> event.loserSetCount.coerceAtLeast(1)
+            event.eventType == EventType.LEAGUE && !isBracketMatch(match) ->
+                (event.setsPerMatch ?: matchScoreSetCount).coerceAtLeast(1)
+            else -> event.winnerSetCount.coerceAtLeast(1)
+        },
+        1,
     ).maxOrNull()?.coerceAtLeast(1) ?: 1
+    val displaySetCount = matchScoreSetCount.takeIf { it > 0 } ?: fallbackSetCount
 
     return MatchCardScoreDisplay(
         scoringModel = scoringModel,
