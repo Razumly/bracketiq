@@ -69,7 +69,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -77,6 +76,8 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
@@ -610,12 +611,6 @@ fun EventSearchScreen(
         DiscoverTab.TEAMS -> teamsScrollingUp
         DiscoverTab.RENTALS -> rentalsScrollingUp
     }
-    val currentListState = when (selectedTab) {
-        DiscoverTab.EVENTS -> eventsListState
-        DiscoverTab.ORGANIZATIONS -> organizationsListState
-        DiscoverTab.TEAMS -> teamsListState
-        DiscoverTab.RENTALS -> rentalsListState
-    }
     val isRefreshingCurrentTab = when (selectedTab) {
         DiscoverTab.EVENTS -> isLoadingMore
         DiscoverTab.ORGANIZATIONS -> isLoadingOrganizations
@@ -721,17 +716,6 @@ fun EventSearchScreen(
         if (selectedTab != DiscoverTab.EVENTS) {
             showingFilter = false
         }
-    }
-
-    LaunchedEffect(showingFilter, selectedTab, currentListState) {
-        if (!showingFilter) return@LaunchedEffect
-
-        snapshotFlow { currentListState.isScrollInProgress }
-            .collect { isScrolling ->
-                if (isScrolling) {
-                    filterDismissRequest += 1
-                }
-            }
     }
 
     LaunchedEffect(showingFilter, showLocationPicker, locationQuery) {
@@ -935,6 +919,18 @@ fun EventSearchScreen(
                         Box(
                             Modifier
                                 .fillMaxSize()
+                                .pointerInput(showingFilter) {
+                                    if (!showingFilter) return@pointerInput
+
+                                    awaitPointerEventScope {
+                                        while (true) {
+                                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                                            if (event.changes.any { it.changedToDownIgnoreConsumed() }) {
+                                                filterDismissRequest += 1
+                                            }
+                                        }
+                                    }
+                                }
                         ) {
                             when (selectedTab) {
                                 DiscoverTab.EVENTS -> {

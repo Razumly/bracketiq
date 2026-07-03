@@ -491,7 +491,7 @@ private fun EventCardContent(
                 ?: fallbackImageId
                     ?.trim()
                     ?.takeIf { it.isNotBlank() }
-            imageId?.let { getImageUrl(fileId = it, width = 560, height = 220) }
+            imageId?.let { getImageUrl(fileId = it, width = 560) }
         } else {
             null
         }
@@ -510,7 +510,7 @@ private fun EventCardContent(
                     .fillMaxWidth()
                     .height(96.dp)
                     .background(Color.Black),
-                contentScale = ContentScale.Crop,
+                contentScale = ContentScale.Fit,
             )
         } else if (imageModel != null) {
             AsyncImage(
@@ -520,7 +520,7 @@ private fun EventCardContent(
                     .fillMaxWidth()
                     .height(96.dp)
                     .background(Color.Black),
-                contentScale = ContentScale.Crop,
+                contentScale = ContentScale.Fit,
             )
         }
         Column(

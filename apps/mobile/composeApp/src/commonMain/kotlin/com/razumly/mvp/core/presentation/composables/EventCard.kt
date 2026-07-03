@@ -164,7 +164,7 @@ fun EventCard(
                         Modifier
                     }
                 ),
-            contentScale = ContentScale.Crop,
+            contentScale = ContentScale.Fit,
             onState = { state ->
                 isImageReady = when (state) {
                     is AsyncImagePainter.State.Loading -> false
