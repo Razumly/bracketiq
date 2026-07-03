@@ -13,6 +13,8 @@ internal data class EventDetailHydrationRequest(
     val eventId: String,
     val token: Long,
     val showDetailsOnSuccess: Boolean,
+    val showLoading: Boolean,
+    val reportErrors: Boolean,
 )
 
 internal class EventDetailHydrationCoordinator {
@@ -21,6 +23,8 @@ internal class EventDetailHydrationCoordinator {
     fun beginMobileHydration(
         event: Event,
         showDetailsOnSuccess: Boolean,
+        showLoading: Boolean,
+        reportErrors: Boolean,
         setParticipantLoading: (Boolean) -> Unit,
         setMatchesLoading: (Boolean) -> Unit,
         showDetails: () -> Unit,
@@ -34,12 +38,16 @@ internal class EventDetailHydrationCoordinator {
         }
 
         hydrationToken += 1
-        setParticipantLoading(true)
-        setMatchesLoading(true)
+        if (showLoading) {
+            setParticipantLoading(true)
+            setMatchesLoading(true)
+        }
         return EventDetailHydrationRequest(
             eventId = eventId,
             token = hydrationToken,
             showDetailsOnSuccess = showDetailsOnSuccess,
+            showLoading = showLoading,
+            reportErrors = reportErrors,
         )
     }
 
@@ -192,6 +200,7 @@ internal class EventDetailHydrationCoordinator {
         occurrence: EventOccurrenceSelection?,
         isWeeklyParentEvent: (Event) -> Boolean,
         getEvent: suspend (String) -> Result<Event>,
+        syncCurrentUserRegistrationCacheForEvent: suspend (String) -> Result<*>,
         syncEventParticipants: suspend (Event, EventOccurrenceSelection?) -> Result<EventParticipantsSyncResult>,
         refreshMatches: suspend (String) -> Result<List<MatchMVP>>,
         applyParticipantSyncResult: (EventParticipantsSyncResult) -> Unit,
@@ -212,13 +221,18 @@ internal class EventDetailHydrationCoordinator {
             val refreshedEvent = getEvent(request.eventId)
                 .onFailure { throwable ->
                     if (!isCurrentHydrationRequest(request)) return@onFailure
-                    setError(
-                        ErrorMessage(
-                            throwable.userMessage("Failed to load teams and participants."),
+                    if (request.reportErrors) {
+                        setError(
+                            ErrorMessage(
+                                throwable.userMessage("Failed to load teams and participants."),
+                            )
                         )
-                    )
+                    }
                 }
                 .getOrElse { fallbackEvent }
+            if (!isCurrentHydrationRequest(request)) return
+
+            syncCurrentUserRegistrationCacheForEvent(request.eventId)
             if (!isCurrentHydrationRequest(request)) return
 
             syncEventParticipants(refreshedEvent, occurrence)
@@ -236,30 +250,36 @@ internal class EventDetailHydrationCoordinator {
                 }
                 .onFailure { throwable ->
                     if (!isCurrentHydrationRequest(request)) return@onFailure
-                    setError(
-                        ErrorMessage(
-                            throwable.userMessage("Failed to load teams and participants."),
+                    if (request.reportErrors) {
+                        setError(
+                            ErrorMessage(
+                                throwable.userMessage("Failed to load teams and participants."),
+                            )
                         )
-                    )
+                    }
                 }
 
-            setParticipantLoading(false)
+            if (request.showLoading) {
+                setParticipantLoading(false)
+            }
 
             refreshMatches(request.eventId)
                 .onFailure { throwable ->
                     if (!isCurrentHydrationRequest(request)) return@onFailure
-                    setError(
-                        ErrorMessage(
-                            throwable.userMessage("Failed to load schedule matches."),
+                    if (request.reportErrors) {
+                        setError(
+                            ErrorMessage(
+                                throwable.userMessage("Failed to load schedule matches."),
+                            )
                         )
-                    )
+                    }
                 }
 
             if (request.showDetailsOnSuccess && isCurrentHydrationRequest(request)) {
                 showDetails()
             }
         } finally {
-            if (isCurrentHydrationRequest(request)) {
+            if (request.showLoading && isCurrentHydrationRequest(request)) {
                 setParticipantLoading(false)
                 setMatchesLoading(false)
             }

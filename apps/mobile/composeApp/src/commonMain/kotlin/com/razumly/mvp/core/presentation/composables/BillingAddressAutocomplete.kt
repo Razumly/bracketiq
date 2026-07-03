@@ -1,16 +1,16 @@
 package com.razumly.mvp.core.presentation.composables
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -23,11 +23,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupProperties
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.network.createMvpHttpClient
 import io.github.aakira.napier.Napier
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
@@ -56,6 +58,7 @@ internal data class BillingAddressSuggestion(
 internal class GooglePlacesBillingAddressProvider(
     private val httpClient: HttpClient = createMvpHttpClient(),
     private val apiKey: String = billingAddressPlacesApiKey(),
+    private val requestHeaders: Map<String, String> = billingAddressPlacesRequestHeaders(),
 ) {
     suspend fun findSuggestions(query: String): Result<List<BillingAddressSuggestion>> = runCatching {
         val normalizedQuery = query.trim()
@@ -64,8 +67,7 @@ internal class GooglePlacesBillingAddressProvider(
         }
 
         val response = httpClient.post(AutocompleteUrl) {
-            header(PlacesApiKeyHeader, apiKey)
-            header(PlacesFieldMaskHeader, SuggestionFieldMask)
+            applyGooglePlacesHeaders(SuggestionFieldMask)
             setBody(GooglePlacesAutocompleteRequest(input = normalizedQuery))
         }.body<GooglePlacesAutocompleteResponse>()
 
@@ -104,8 +106,7 @@ internal class GooglePlacesBillingAddressProvider(
         require(apiKey.isNotBlank()) { "Google Places API key is missing." }
 
         val details = httpClient.get("https://places.googleapis.com/v1/places/$normalizedPlaceId") {
-            header(PlacesApiKeyHeader, apiKey)
-            header(PlacesFieldMaskHeader, DetailsFieldMask)
+            applyGooglePlacesHeaders(DetailsFieldMask)
         }.body<GooglePlaceDetails>()
 
         details.toBillingAddressDraft().normalized()
@@ -113,6 +114,18 @@ internal class GooglePlacesBillingAddressProvider(
 
     fun close() {
         httpClient.close()
+    }
+
+    private fun HttpRequestBuilder.applyGooglePlacesHeaders(fieldMask: String) {
+        header(PlacesApiKeyHeader, apiKey)
+        header(PlacesFieldMaskHeader, fieldMask)
+        requestHeaders.forEach { (name, value) ->
+            val normalizedName = name.trim()
+            val normalizedValue = value.trim()
+            if (normalizedName.isNotBlank() && normalizedValue.isNotBlank()) {
+                header(normalizedName, normalizedValue)
+            }
+        }
     }
 }
 
@@ -159,7 +172,7 @@ internal fun BillingAddressAutocompleteField(
         isLoadingSuggestions = false
     }
 
-    Column(modifier = modifier.fillMaxWidth()) {
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
         StandardTextField(
             value = value,
             onValueChange = { nextValue ->
@@ -172,7 +185,6 @@ internal fun BillingAddressAutocompleteField(
             isError = isError,
             supportingText = when {
                 isResolvingSuggestion -> "Filling address..."
-                isLoadingSuggestions -> "Loading suggestions..."
                 suggestionError != null -> suggestionError.orEmpty()
                 else -> ""
             },
@@ -188,52 +200,45 @@ internal fun BillingAddressAutocompleteField(
             },
         )
 
-        if (suggestions.isNotEmpty()) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp),
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 2.dp,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    suggestions.forEachIndexed { index, suggestion ->
-                        AddressSuggestionRow(
-                            suggestion = suggestion,
-                            enabled = !isResolvingSuggestion,
-                            onClick = {
-                                suggestions = emptyList()
-                                isResolvingSuggestion = true
-                                suggestionError = null
-                                scope.launch {
-                                    provider.resolveAddress(suggestion.placeId)
-                                        .onSuccess { address ->
-                                            suppressedQuery = address.line1.trim()
-                                            onAddressSelected(address)
-                                        }
-                                        .onFailure { error ->
-                                            suggestionError = "Unable to fill address from that suggestion."
-                                            Napier.w("Billing address details lookup failed: ${error.message}", error)
-                                        }
-                                    isResolvingSuggestion = false
+        DropdownMenu(
+            expanded = suggestions.isNotEmpty(),
+            onDismissRequest = { suggestions = emptyList() },
+            modifier = Modifier.width(maxWidth),
+            properties = PopupProperties(focusable = false),
+        ) {
+            suggestions.forEachIndexed { index, suggestion ->
+                AddressSuggestionRow(
+                    suggestion = suggestion,
+                    enabled = !isResolvingSuggestion,
+                    onClick = {
+                        suggestions = emptyList()
+                        isResolvingSuggestion = true
+                        suggestionError = null
+                        scope.launch {
+                            provider.resolveAddress(suggestion.placeId)
+                                .onSuccess { address ->
+                                    suppressedQuery = address.line1.trim()
+                                    onAddressSelected(address)
                                 }
-                            },
-                        )
-                        if (index < suggestions.lastIndex) {
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                                .onFailure { error ->
+                                    suggestionError = "Unable to fill address from that suggestion."
+                                    Napier.w("Billing address details lookup failed: ${error.message}", error)
+                                }
+                            isResolvingSuggestion = false
                         }
                     }
+                )
+                if (index < suggestions.lastIndex) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Text(
-                        text = "Powered by Google",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
                 }
             }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Text(
+                text = "Powered by Google",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            )
         }
     }
 }
@@ -429,4 +434,3 @@ internal data class GoogleAddressComponent(
     val shortText: String = "",
     val types: List<String> = emptyList(),
 )
-

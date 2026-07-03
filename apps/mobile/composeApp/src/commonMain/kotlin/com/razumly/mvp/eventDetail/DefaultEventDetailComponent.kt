@@ -663,7 +663,7 @@ class DefaultEventDetailComponent(
     override val showDetails = _showDetails.asStateFlow()
 
     private val participantManagementCoordinator = EventParticipantManagementCoordinator(
-        eventTeamsAndParticipantsLoadingInitially = event.id.isNotBlank() && event.eventType != EventType.WEEKLY_EVENT,
+        eventTeamsAndParticipantsLoadingInitially = false,
     )
     override val eventTeamsAndParticipantsLoading = participantManagementCoordinator.eventTeamsAndParticipantsLoading
     override val participantManagementSnapshot = participantManagementCoordinator.participantManagementSnapshot
@@ -818,6 +818,13 @@ class DefaultEventDetailComponent(
         selectedEvent = { selectedEvent.value },
         selectedDivision = { selectedDivision.value },
         currentUser = { currentUser.value },
+        canManageSelectedEvent = { event, user ->
+            canManageParticipantData(
+                event = event,
+                user = user,
+                organization = eventWithRelations.value.organization,
+            )
+        },
         currentAccountEmail = { _currentAccount.value.email },
         isEventFull = { isEventFull.value },
         currentWeeklyOccurrenceSelection = ::currentWeeklyOccurrenceSelection,
@@ -995,6 +1002,11 @@ class DefaultEventDetailComponent(
                 .map { selected -> selected.id.trim() }
                 .distinctUntilChanged()
                 .collectLatest { eventId ->
+                    hydrateEventDetailForMobile(
+                        showDetailsOnSuccess = false,
+                        showLoading = false,
+                        reportErrors = false,
+                    )
                     loadAvailableRentalResources(eventId)
                 }
         }
@@ -1052,24 +1064,6 @@ class DefaultEventDetailComponent(
                 }
         }
         scope.launch {
-            selectedEvent
-                .map { selected -> selected.id.trim() to isWeeklyParentEvent(selected) }
-                .distinctUntilChanged()
-                .collectLatest { (eventId, weeklyParent) ->
-                    if (eventId.isEmpty() || weeklyParent) {
-                        participantManagementCoordinator.setEventTeamsAndParticipantsLoading(false)
-                        return@collectLatest
-                    }
-                    weeklyOccurrenceCoordinator.clearOverviewParticipantSummary()
-                    participantManagementCoordinator.setEventTeamsAndParticipantsLoading(true)
-                    try {
-                        prefetchNonWeeklyParticipants(selectedEvent.value)
-                    } finally {
-                        participantManagementCoordinator.setEventTeamsAndParticipantsLoading(false)
-                    }
-                }
-        }
-        scope.launch {
             weeklyOccurrenceCoordinator.selectedWeeklyOccurrence
                 .collectLatest { selectedOccurrence ->
                     val targetEvent = selectedEvent.value
@@ -1079,12 +1073,10 @@ class DefaultEventDetailComponent(
                     )
                     if (!isWeeklyParentEvent(targetEvent)) return@collectLatest
                     refreshCurrentUserMembershipState(targetEvent)
-                    participantManagementCoordinator.setEventTeamsAndParticipantsLoading(true)
-                    try {
-                        syncSelectedWeeklyOccurrenceParticipants(targetEvent)
-                    } finally {
-                        participantManagementCoordinator.setEventTeamsAndParticipantsLoading(false)
-                    }
+                    syncSelectedWeeklyOccurrenceParticipants(
+                        event = targetEvent,
+                        reportErrors = false,
+                    )
                 }
         }
         scope.launch {
@@ -2039,14 +2031,24 @@ class DefaultEventDetailComponent(
     }
 
     override fun refreshEventDetails() {
-        hydrateEventDetailForMobile(showDetailsOnSuccess = false)
+        hydrateEventDetailForMobile(
+            showDetailsOnSuccess = false,
+            showLoading = true,
+            reportErrors = true,
+        )
     }
 
-    private fun hydrateEventDetailForMobile(showDetailsOnSuccess: Boolean) {
+    private fun hydrateEventDetailForMobile(
+        showDetailsOnSuccess: Boolean,
+        showLoading: Boolean,
+        reportErrors: Boolean,
+    ) {
         val event = selectedEvent.value
         val request = detailHydrationCoordinator.beginMobileHydration(
             event = event,
             showDetailsOnSuccess = showDetailsOnSuccess,
+            showLoading = showLoading,
+            reportErrors = reportErrors,
             setParticipantLoading = participantManagementCoordinator::setEventTeamsAndParticipantsLoading,
             setMatchesLoading = { loading -> _eventMatchesLoading.value = loading },
             showDetails = { _showDetails.value = true },
@@ -2060,6 +2062,7 @@ class DefaultEventDetailComponent(
                 occurrence = currentWeeklyOccurrenceSelection(),
                 isWeeklyParentEvent = ::isWeeklyParentEvent,
                 getEvent = eventRepository::getEvent,
+                syncCurrentUserRegistrationCacheForEvent = eventRepository::syncCurrentUserRegistrationCacheForEvent,
                 syncEventParticipants = eventRepository::syncEventParticipants,
                 refreshMatches = matchRepository::getMatchesOfTournament,
                 applyParticipantSyncResult = ::applyParticipantSyncResult,

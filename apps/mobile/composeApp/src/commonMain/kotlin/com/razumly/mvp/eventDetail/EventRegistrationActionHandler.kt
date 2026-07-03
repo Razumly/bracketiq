@@ -43,6 +43,7 @@ internal class EventRegistrationActionHandler(
     private val selectedEvent: () -> Event,
     private val selectedDivision: () -> String?,
     private val currentUser: () -> UserData,
+    private val canManageSelectedEvent: (Event, UserData) -> Boolean,
     private val currentAccountEmail: () -> String,
     private val isEventFull: () -> Boolean,
     private val currentWeeklyOccurrenceSelection: () -> EventOccurrenceSelection?,
@@ -211,22 +212,24 @@ internal class EventRegistrationActionHandler(
             membershipCoordinator.setUsersTeam(team, currentUser().id)
             registrationFlowCoordinator.clearJoinDialogs()
 
-            buildPaymentPlanPreviewDialogState(
-                event = selectedEvent(),
-                ownerLabel = team.team.name.trim().ifBlank { "Your team" },
-                forTeamJoin = true,
-                preferredDivisionId = selectedDivision(),
-                currentUserIsMinor = currentUser().isMinor,
-                isEventFull = isEventFull(),
-            )?.let { preview ->
-                showPaymentPlanPreviewDialog(preview) {
-                    scope.launch {
-                        runActionAfterRequiredSigning {
-                            executeJoinEventAsTeam(team)
+            if (!canManageSelectedEvent(selectedEvent(), currentUser())) {
+                buildPaymentPlanPreviewDialogState(
+                    event = selectedEvent(),
+                    ownerLabel = team.team.name.trim().ifBlank { "Your team" },
+                    forTeamJoin = true,
+                    preferredDivisionId = selectedDivision(),
+                    currentUserIsMinor = currentUser().isMinor,
+                    isEventFull = isEventFull(),
+                )?.let { preview ->
+                    showPaymentPlanPreviewDialog(preview) {
+                        scope.launch {
+                            runActionAfterRequiredSigning {
+                                executeJoinEventAsTeam(team)
+                            }
                         }
                     }
+                    return@launch
                 }
-                return@launch
             }
 
             runActionAfterRequiredSigning {
@@ -572,7 +575,7 @@ internal class EventRegistrationActionHandler(
         ) {
             return
         }
-        if (!skipPaymentPlanPreview) {
+        if (!skipPaymentPlanPreview && !canManageSelectedEvent(selectedEvent(), currentUser())) {
             buildPaymentPlanPreviewDialogState(
                 event = selectedEvent(),
                 ownerLabel = "You",
@@ -713,10 +716,12 @@ internal class EventRegistrationActionHandler(
             null
         }
         try {
+            val currentUserCanManageEvent = canManageSelectedEvent(event, currentUser())
             joinExecutionCoordinator.executeSelfJoin(
                 event = event,
                 currentUserId = currentUser().id,
                 currentUserIsMinor = currentUser().isMinor,
+                currentUserCanManageEvent = currentUserCanManageEvent,
                 selectedDivisionId = selectedDivision(),
                 isEventFull = isEventFull(),
                 weeklyOccurrence = weeklyOccurrence,
@@ -798,10 +803,12 @@ internal class EventRegistrationActionHandler(
             null
         }
         try {
+            val currentUserCanManageEvent = canManageSelectedEvent(event, currentUser())
             joinExecutionCoordinator.executeTeamJoin(
                 event = event,
                 team = team,
                 currentUserIsMinor = currentUser().isMinor,
+                currentUserCanManageEvent = currentUserCanManageEvent,
                 selectedDivisionId = selectedDivision(),
                 isEventFull = isEventFull(),
                 weeklyOccurrence = weeklyOccurrence,

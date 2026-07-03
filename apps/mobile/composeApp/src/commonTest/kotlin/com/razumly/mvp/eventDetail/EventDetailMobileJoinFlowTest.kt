@@ -1212,7 +1212,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
     }
 
     @Test
-    fun non_weekly_team_prefetch_populates_division_teams_without_manual_reload() = runTest(testDispatcher) {
+    fun non_weekly_team_relations_use_cached_event_team_ids_without_prefetch() = runTest(testDispatcher) {
         val host = mobileUser(id = "league_host_team_sync", firstName = "League", lastName = "Host")
         val currentUser = mobileUser(id = "league_joiner_team_sync", firstName = "League", lastName = "Joiner")
         val team = Team(
@@ -1250,7 +1250,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
         val initialEvent = Event(
             id = "league_team_event_sync",
             name = "League Team Sync",
-            description = "Eager roster sync should populate teams before opening detail.",
+            description = "Cached roster ids should populate teams before opening detail.",
             hostId = host.id,
             coordinates = listOf(-80.1918, 25.7617),
             location = "League Arena",
@@ -1263,9 +1263,9 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             divisions = listOf("open"),
             fieldIds = listOf(field.id),
             timeSlotIds = listOf(slot.id),
+            teamIds = listOf(team.id),
             maxParticipants = 8,
         )
-        val syncedEvent = initialEvent.copy(teamIds = listOf(team.id))
 
         val eventRepository = EventDetailFakeEventRepository(
             initialEvent = initialEvent,
@@ -1274,13 +1274,6 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             players = emptyList(),
             teams = emptyList(),
             staffInvites = emptyList(),
-            defaultSyncSnapshot = FakeParticipantSyncSnapshot(
-                event = syncedEvent,
-                players = listOf(host, currentUser),
-                teams = listOf(team),
-                participantCount = 1,
-                participantCapacity = initialEvent.maxParticipants,
-            ),
         )
         val teamRepository = EventDetailFakeTeamRepository(
             teams = listOf(team),
@@ -1310,14 +1303,12 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
         )
         component.setLoadingHandler(EventDetailTestLoadingHandler())
 
-        assertTrue(component.eventTeamsAndParticipantsLoading.value)
+        assertFalse(component.eventTeamsAndParticipantsLoading.value)
 
         advance()
 
         assertEquals(1, eventRepository.syncCallCount)
         assertFalse(component.eventTeamsAndParticipantsLoading.value)
-        assertEquals(1, component.overviewParticipantSummary.value?.participantCount)
-        assertEquals(initialEvent.maxParticipants, component.overviewParticipantSummary.value?.participantCapacity)
         assertTrue(teamRepository.getTeamsRequests.isEmpty())
         assertTrue(teamRepository.getTeamsFlowRequests.any { request -> request == listOf(team.id) })
         assertEquals(listOf(team.id), component.eventWithRelations.value.teams.map { it.team.id })
@@ -1975,7 +1966,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
     }
 
     @Test
-    fun eventEntryLoadsRegistrationDetailsAndManageModeReusesThemUntilRefresh() = runTest(testDispatcher) {
+    fun eventEntryLoadsRegistrationDetailsSilentlyAndReusesThemUntilRefresh() = runTest(testDispatcher) {
         val host = mobileUser(id = "host_1", firstName = "Host", lastName = "User")
         val event = Event(
             id = "event_1",

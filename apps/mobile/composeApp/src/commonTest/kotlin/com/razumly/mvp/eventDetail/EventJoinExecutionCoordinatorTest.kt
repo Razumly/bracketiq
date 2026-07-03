@@ -102,6 +102,35 @@ class EventJoinExecutionCoordinatorTest {
     }
 
     @Test
+    fun execute_team_join_for_event_manager_joins_directly_without_billing_address() = runTest {
+        val registrationFlow = EventRegistrationFlowCoordinator()
+        val coordinator = EventJoinExecutionCoordinator(registrationFlow)
+        val events = mutableListOf<String>()
+        val targetEvents = mutableListOf<JoinConfirmationTarget>()
+
+        coordinator.executeTeamJoinForTest(
+            event = paidPurchaseIntentEvent(),
+            team = team(),
+            registrationFlow = registrationFlow,
+            currentUserCanManageEvent = true,
+            targetEvents = targetEvents,
+            events = events,
+        )
+
+        assertEquals(
+            listOf(
+                "show:Joining Event ...",
+                "add-team:event-1:team-1:open:null",
+                "show:Reloading Event",
+                "refresh:event-1:Failed to refresh event after team join.",
+                "clear-progress",
+            ),
+            events,
+        )
+        assertEquals(emptyList(), targetEvents)
+    }
+
+    @Test
     fun execute_self_join_reports_missing_division_price_without_repository_calls() = runTest {
         val registrationFlow = EventRegistrationFlowCoordinator()
         val coordinator = EventJoinExecutionCoordinator(registrationFlow)
@@ -201,6 +230,7 @@ class EventJoinExecutionCoordinatorTest {
     private suspend fun EventJoinExecutionCoordinator.executeSelfJoinForTest(
         event: Event,
         registrationFlow: EventRegistrationFlowCoordinator,
+        currentUserCanManageEvent: Boolean = false,
         billResult: Result<PaymentPlanBillStatus> = Result.success(PaymentPlanBillStatus.CREATED),
         events: MutableList<String>,
     ) {
@@ -208,6 +238,7 @@ class EventJoinExecutionCoordinatorTest {
             event = event,
             currentUserId = "user-1",
             currentUserIsMinor = false,
+            currentUserCanManageEvent = currentUserCanManageEvent,
             selectedDivisionId = "open",
             isEventFull = false,
             weeklyOccurrence = null,
@@ -253,6 +284,7 @@ class EventJoinExecutionCoordinatorTest {
         event: Event,
         team: TeamWithPlayers,
         registrationFlow: EventRegistrationFlowCoordinator,
+        currentUserCanManageEvent: Boolean = false,
         targetEvents: MutableList<JoinConfirmationTarget>,
         events: MutableList<String>,
     ) {
@@ -260,14 +292,16 @@ class EventJoinExecutionCoordinatorTest {
             event = event,
             team = team,
             currentUserIsMinor = false,
+            currentUserCanManageEvent = currentUserCanManageEvent,
             selectedDivisionId = "open",
             isEventFull = false,
             weeklyOccurrence = null,
             submitMinorJoinRequest = {
                 events += "minor-request"
             },
-            addTeamToEvent = { _, _, _, _ ->
-                error("Team should not be directly added")
+            addTeamToEvent = { targetEvent, targetTeam, divisionId, occurrence ->
+                events += "add-team:${targetEvent.id}:${targetTeam.id}:$divisionId:${occurrence?.slotId}"
+                Result.success(Unit)
             },
             createPaymentPlanBill = { _, _, _, _ ->
                 error("Payment plan should not be created")

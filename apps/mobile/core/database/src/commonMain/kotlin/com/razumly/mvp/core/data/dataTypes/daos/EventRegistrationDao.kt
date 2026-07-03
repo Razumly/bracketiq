@@ -18,6 +18,9 @@ interface EventRegistrationDao {
     @Query("SELECT * FROM current_user_event_registrations WHERE eventId = :eventId")
     suspend fun getRegistrationsForEvent(eventId: String): List<EventRegistrationCacheEntry>
 
+    @Query("DELETE FROM current_user_event_registrations WHERE eventId = :eventId")
+    suspend fun deleteRegistrationsForEvent(eventId: String)
+
     @Query("DELETE FROM current_user_event_registrations")
     suspend fun clearAll()
 }

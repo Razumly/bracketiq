@@ -91,6 +91,7 @@ internal class EventJoinExecutionCoordinator(
         event: Event,
         currentUserId: String,
         currentUserIsMinor: Boolean,
+        currentUserCanManageEvent: Boolean = false,
         selectedDivisionId: String?,
         isEventFull: Boolean,
         weeklyOccurrence: EventOccurrenceSelection?,
@@ -126,7 +127,9 @@ internal class EventJoinExecutionCoordinator(
             event = event,
             preferredDivisionId = selectedDivisionId,
         )
-        when (
+        val action = if (currentUserCanManageEvent && !currentUserIsMinor) {
+            JoinExecutionAction.JOIN_DIRECTLY
+        } else {
             registrationFlowCoordinator.determineJoinExecutionAction(
                 paymentPlan = paymentPlan,
                 currentUserIsMinor = currentUserIsMinor,
@@ -135,7 +138,8 @@ internal class EventJoinExecutionCoordinator(
                 forTeamJoin = false,
                 manualPayment = event.usesManualRegistrationPayments(),
             )
-        ) {
+        }
+        when (action) {
             JoinExecutionAction.REQUEST_PARENT_APPROVAL -> {
                 submitMinorJoinRequest()
             }
@@ -215,6 +219,7 @@ internal class EventJoinExecutionCoordinator(
         event: Event,
         team: TeamWithPlayers,
         currentUserIsMinor: Boolean,
+        currentUserCanManageEvent: Boolean = false,
         selectedDivisionId: String?,
         isEventFull: Boolean,
         weeklyOccurrence: EventOccurrenceSelection?,
@@ -252,7 +257,9 @@ internal class EventJoinExecutionCoordinator(
             event = event,
             preferredDivisionId = selectedDivisionId,
         )
-        when (
+        val action = if (currentUserCanManageEvent && !currentUserIsMinor) {
+            JoinExecutionAction.JOIN_DIRECTLY
+        } else {
             registrationFlowCoordinator.determineJoinExecutionAction(
                 paymentPlan = paymentPlan,
                 currentUserIsMinor = currentUserIsMinor,
@@ -261,7 +268,8 @@ internal class EventJoinExecutionCoordinator(
                 forTeamJoin = true,
                 manualPayment = event.usesManualRegistrationPayments(),
             )
-        ) {
+        }
+        when (action) {
             JoinExecutionAction.REQUEST_PARENT_APPROVAL -> {
                 submitMinorJoinRequest()
             }

@@ -1,10 +1,74 @@
 package com.razumly.mvp.core.presentation.composables
 
+import com.razumly.mvp.core.util.jsonMVP
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
+import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class BillingAddressAutocompleteTest {
+    @Test
+    fun givenRestrictedKeyHeaders_whenFindingSuggestions_thenSendsGooglePlacesIdentityHeaders() = runTest {
+        var packageHeader: String? = null
+        var certHeader: String? = null
+        val client = HttpClient(
+            MockEngine { request ->
+                packageHeader = request.headers["X-Android-Package"]
+                certHeader = request.headers["X-Android-Cert"]
+                respond(
+                    content = """
+                        {
+                          "suggestions": [
+                            {
+                              "placePrediction": {
+                                "placeId": "place_123",
+                                "text": { "text": "1600 Amphitheatre Parkway, Mountain View, CA" },
+                                "structuredFormat": {
+                                  "mainText": { "text": "1600 Amphitheatre Parkway" },
+                                  "secondaryText": { "text": "Mountain View, CA" }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            },
+        ) {
+            install(ContentNegotiation) {
+                json(jsonMVP)
+            }
+        }
+        val provider = GooglePlacesBillingAddressProvider(
+            httpClient = client,
+            apiKey = "test-key",
+            requestHeaders = mapOf(
+                "X-Android-Package" to "com.razumly.mvp",
+                "X-Android-Cert" to "ABC123",
+            ),
+        )
+
+        val result = provider.findSuggestions("1600 Amphitheatre").getOrThrow()
+
+        assertEquals("com.razumly.mvp", packageHeader)
+        assertEquals("ABC123", certHeader)
+        assertEquals(1, result.size)
+        assertEquals("1600 Amphitheatre Parkway", result.single().primaryText)
+        assertNotNull(result.single().placeId)
+    }
+
     @Test
     fun givenGooglePlaceDetails_whenConverted_thenBuildsCompleteUsBillingAddress() {
         val details = GooglePlaceDetails(
@@ -82,4 +146,3 @@ class BillingAddressAutocompleteTest {
         types = types.toList(),
     )
 }
-

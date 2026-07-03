@@ -120,6 +120,8 @@ class EventDetailHydrationCoordinatorTest {
         val request = coordinator.beginMobileHydration(
             event = event,
             showDetailsOnSuccess = true,
+            showLoading = true,
+            reportErrors = true,
             setParticipantLoading = { loading -> events += "participant-loading:$loading" },
             setMatchesLoading = { loading -> events += "matches-loading:$loading" },
             showDetails = { events += "show-details" },
@@ -135,6 +137,10 @@ class EventDetailHydrationCoordinatorTest {
             getEvent = { eventId ->
                 events += "get:$eventId"
                 Result.success(Event(id = eventId))
+            },
+            syncCurrentUserRegistrationCacheForEvent = { eventId ->
+                events += "sync-registrations:$eventId"
+                Result.success(Unit)
             },
             syncEventParticipants = { targetEvent, targetOccurrence ->
                 events += "sync:${targetEvent.id}:${targetOccurrence?.slotId}"
@@ -173,6 +179,7 @@ class EventDetailHydrationCoordinatorTest {
                 "participant-loading:true",
                 "matches-loading:true",
                 "get:event-1",
+                "sync-registrations:event-1",
                 "sync:event-1:slot-1",
                 "apply:5",
                 "selected:slot-1:false:5:12",

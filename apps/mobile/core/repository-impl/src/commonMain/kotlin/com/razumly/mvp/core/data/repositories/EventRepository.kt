@@ -278,6 +278,7 @@ interface IEventRepository : IMVPRepository {
     ): Result<Unit>
     suspend fun getMySchedule(): Result<UserScheduleSnapshot> = Result.success(UserScheduleSnapshot())
     suspend fun syncCurrentUserRegistrationCache(): Result<Unit> = Result.success(Unit)
+    suspend fun syncCurrentUserRegistrationCacheForEvent(eventId: String): Result<Unit> = Result.success(Unit)
     fun observeCurrentUserRegistrationsForEvent(eventId: String): Flow<List<EventRegistrationCacheEntry>> =
         flowOf(emptyList())
     suspend fun clearCurrentUserRegistrationCache(): Result<Unit> = Result.success(Unit)
@@ -1178,12 +1179,25 @@ class EventRepository(
         return res.events.mapNotNull { it.toEventOrNull() }
     }
 
-    private suspend fun fetchCurrentUserRegistrations(updatedAfter: Instant?): List<EventRegistrationCacheEntry> {
+    private suspend fun fetchCurrentUserRegistrations(
+        updatedAfter: Instant?,
+        eventId: String? = null,
+    ): List<EventRegistrationCacheEntry> {
+        val queryParams = mutableListOf<String>()
+        updatedAfter?.let { timestamp ->
+            queryParams += "updatedAfter=${timestamp.toString().encodeURLQueryComponent()}"
+        }
+        eventId
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?.let { normalizedEventId ->
+                queryParams += "eventId=${normalizedEventId.encodeURLQueryComponent()}"
+            }
         val path = buildString {
             append("api/profile/registrations")
-            updatedAfter?.let { timestamp ->
-                append("?updatedAfter=")
-                append(timestamp.toString().encodeURLQueryComponent())
+            if (queryParams.isNotEmpty()) {
+                append("?")
+                append(queryParams.joinToString("&"))
             }
         }
         val response = api.get<CurrentUserEventRegistrationsResponseDto>(path)
@@ -1711,6 +1725,29 @@ class EventRepository(
         )
 
         val registrations = fetchCurrentUserRegistrations(updatedAfter = updatedAfter)
+        if (registrations.isNotEmpty()) {
+            databaseService.getEventRegistrationDao.upsertRegistrations(registrations)
+        }
+    }
+
+    override suspend fun syncCurrentUserRegistrationCacheForEvent(eventId: String): Result<Unit> = runCatching {
+        val normalizedEventId = eventId.trim()
+        if (normalizedEventId.isBlank()) {
+            return@runCatching
+        }
+
+        val dataSource = currentUserDataSource ?: return@runCatching
+        val currentUserId = dataSource.getUserIdNow().trim()
+        if (currentUserId.isBlank()) {
+            databaseService.getEventRegistrationDao.deleteRegistrationsForEvent(normalizedEventId)
+            return@runCatching
+        }
+
+        val registrations = fetchCurrentUserRegistrations(
+            updatedAfter = null,
+            eventId = normalizedEventId,
+        )
+        databaseService.getEventRegistrationDao.deleteRegistrationsForEvent(normalizedEventId)
         if (registrations.isNotEmpty()) {
             databaseService.getEventRegistrationDao.upsertRegistrations(registrations)
         }

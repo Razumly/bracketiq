@@ -270,7 +270,12 @@ class DefaultEventSearchComponent(
 
         observeCachedEvents()
         loadSports()
-        refreshEvents(force = true)
+        refreshEvents(
+            force = true,
+            showLoading = false,
+            clearExisting = false,
+            reportErrors = false,
+        )
         refreshOrganizations(force = false)
         refreshRentals(force = false)
         refreshTeams(force = false)
@@ -399,10 +404,19 @@ class DefaultEventSearchComponent(
     }
 
     override fun loadMoreEvents() {
+        loadMoreEvents(showLoading = true, reportErrors = true)
+    }
+
+    private fun loadMoreEvents(
+        showLoading: Boolean,
+        reportErrors: Boolean,
+    ) {
         if (_isLoadingMore.value || !_hasMoreEvents.value || _isLoading.value) return
 
         scope.launch {
-            _isLoadingMore.value = true
+            if (showLoading) {
+                _isLoadingMore.value = true
+            }
             try {
                 val activeFilter = _filter.value
                 val currentLocation = activeSearchLocation()
@@ -430,31 +444,60 @@ class DefaultEventSearchComponent(
                         _events.value = applyEventFilter(_rawEvents.value, activeFilter)
                     }
                     .onFailure { e ->
-                        _errorState.value = ErrorMessage("Failed to load more events: ${e.userMessage()}")
+                        if (reportErrors) {
+                            _errorState.value = ErrorMessage("Failed to load more events: ${e.userMessage()}")
+                        } else {
+                            Napier.w("Failed to refresh discover events in background: ${e.message}")
+                        }
                     }
             } finally {
-                _isLoadingMore.value = false
+                if (showLoading) {
+                    _isLoadingMore.value = false
+                }
             }
         }
     }
 
     override fun refreshEvents(force: Boolean) {
+        refreshEvents(
+            force = force,
+            showLoading = true,
+            clearExisting = true,
+            reportErrors = true,
+        )
+    }
+
+    private fun refreshEvents(
+        force: Boolean,
+        showLoading: Boolean,
+        clearExisting: Boolean,
+        reportErrors: Boolean,
+    ) {
         if (!force && _isLoadingMore.value) return
         if (shouldWaitForLocationBeforeEventSearch()) {
             isAwaitingInitialEventLocation = true
-            _isLoadingMore.value = true
+            if (showLoading) {
+                _isLoadingMore.value = true
+            }
             return
         }
         if (isAwaitingInitialEventLocation) {
             isAwaitingInitialEventLocation = false
-            _isLoadingMore.value = false
+            if (showLoading) {
+                _isLoadingMore.value = false
+            }
         }
         _hasMoreEvents.value = true
         eventOffset = 0
-        _rawEvents.value = emptyList()
-        _events.value = emptyList()
+        if (clearExisting) {
+            _rawEvents.value = emptyList()
+            _events.value = emptyList()
+        }
         eventRepository.resetCursor()
-        loadMoreEvents()
+        loadMoreEvents(
+            showLoading = showLoading,
+            reportErrors = reportErrors,
+        )
     }
 
     override fun updateFilter(update: EventFilter.() -> EventFilter) {
@@ -633,7 +676,13 @@ class DefaultEventSearchComponent(
 
     private fun reconcileVisibleEventsWithCache(cachedEvents: List<Event>) {
         val currentEvents = _rawEvents.value
-        if (currentEvents.isEmpty()) return
+        if (currentEvents.isEmpty()) {
+            if (cachedEvents.isNotEmpty()) {
+                _rawEvents.value = cachedEvents
+                _events.value = applyEventFilter(cachedEvents, _filter.value)
+            }
+            return
+        }
 
         val cachedById = cachedEvents.associateBy { it.id }
         val reconciledEvents = currentEvents.mapNotNull { current ->
