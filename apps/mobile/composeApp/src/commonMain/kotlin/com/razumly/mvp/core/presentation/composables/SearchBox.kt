@@ -92,6 +92,7 @@ fun SearchBox(
     rowAction: (@Composable RowScope.() -> Unit)? = null,
     filterExtraContent: (@Composable (() -> Unit))? = null,
     filterMaxHeight: Dp? = null,
+    filterDismissSignal: Int = 0,
 ) {
     var searchInput by remember { mutableStateOf("") }
     var isSearchFieldFocused by remember { mutableStateOf(false) }
@@ -100,6 +101,16 @@ fun SearchBox(
 
     LaunchedEffect(showFilterDropdown) {
         onToggleFilter(showFilterDropdown)
+    }
+    LaunchedEffect(filterDismissSignal) {
+        if (filterDismissSignal > 0) {
+            showFilterDropdown = false
+        }
+    }
+    LaunchedEffect(filter, currentFilter) {
+        if (!filter || currentFilter == null) {
+            showFilterDropdown = false
+        }
     }
     LaunchedEffect(isSearchFieldFocused, searchInput) {
         onFocusChange(isSearchFieldFocused || searchInput.isNotEmpty())

@@ -105,6 +105,7 @@ import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
 
 private const val MOBILE_BREAKPOINT_DP = 600
+private const val MISSING_PLACEHOLDERS_WARNING_CODE = "MISSING_PLACEHOLDERS"
 
 private fun TeamCheckInDto?.isCheckedIn(): Boolean {
     if (this == null) return false
@@ -145,6 +146,32 @@ internal fun hasParticipantDivisionFilter(
     divisionOptions: List<EventDetailDivisionOption>,
     selectedDivisionId: String?,
 ): Boolean = selectedParticipantDivisionOption(event, divisionOptions, selectedDivisionId) != null
+
+internal fun visibleParticipantDivisionWarnings(
+    section: ParticipantsSection,
+    teamSignup: Boolean,
+    event: Event,
+    divisionOptions: List<EventDetailDivisionOption>,
+    selectedDivisionId: String?,
+    divisionWarnings: List<EventParticipantDivisionWarning>,
+): List<EventParticipantDivisionWarning> {
+    if (section != ParticipantsSection.TEAMS || !teamSignup) {
+        return emptyList()
+    }
+
+    val participantWarnings = divisionWarnings.filterNot { warning ->
+        warning.code.equals(MISSING_PLACEHOLDERS_WARNING_CODE, ignoreCase = true)
+    }
+    val selectedOption = selectedParticipantDivisionOption(
+        event = event,
+        divisionOptions = divisionOptions,
+        selectedDivisionId = selectedDivisionId,
+    ) ?: return participantWarnings
+
+    return participantWarnings.filter { warning ->
+        selectedOption.matchesDivisionIdentifier(warning.divisionId)
+    }
+}
 
 private fun selectedParticipantDivisionOption(
     event: Event,
@@ -486,28 +513,20 @@ fun ParticipantsView(
         selectedDivisionId,
         divisionWarnings,
     ) {
-        if (section != ParticipantsSection.TEAMS || !teamSignup) {
-            emptyList()
-        } else {
-            val selectedOption = selectedParticipantDivisionOption(
-                event = selectedEvent.event,
-                divisionOptions = divisionOptions,
-                selectedDivisionId = selectedDivisionId,
-            )
-            if (selectedOption == null) {
-                divisionWarnings
-            } else {
-                divisionWarnings.filter { warning ->
-                    selectedOption.matchesDivisionIdentifier(warning.divisionId)
-                }
-            }
-        }
+        visibleParticipantDivisionWarnings(
+            section = section,
+            teamSignup = teamSignup,
+            event = selectedEvent.event,
+            divisionOptions = divisionOptions,
+            selectedDivisionId = selectedDivisionId,
+            divisionWarnings = divisionWarnings,
+        )
     }
     val participantCardListState = remember(
         section,
         participantCardsDivisionKey,
         teamSignup,
-        visibleDivisionTeams,
+        participantTeams,
         freeAgentUsers,
         visibleParticipants,
     ) {
@@ -515,7 +534,7 @@ fun ParticipantsView(
             ParticipantsSection.TEAMS -> ParticipantCardListState(
                 animationKey = "${section.name}:$participantCardsDivisionKey",
                 cards = if (teamSignup) {
-                    visibleDivisionTeams.map { team ->
+                    participantTeams.map { team ->
                         ParticipantAnimatedCard.TeamEntry(team)
                     }
                 } else {

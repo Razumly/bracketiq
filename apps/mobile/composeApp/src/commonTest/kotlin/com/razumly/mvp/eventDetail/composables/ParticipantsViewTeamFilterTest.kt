@@ -6,10 +6,12 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.repositories.EventParticipantDivisionWarning
 import com.razumly.mvp.eventDetail.buildRegistrationDivisionOptions
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class ParticipantsViewTeamFilterTest {
     @Test
@@ -142,6 +144,75 @@ class ParticipantsViewTeamFilterTest {
 
         assertEquals(listOf("open-team", "competitive-team"), visibleTeamIds)
         assertFalse(hasParticipantDivisionFilter(event, divisionOptions, selectedDivisionId = "open"))
+    }
+
+    @Test
+    fun givenMissingPlaceholderWarning_whenBuildingParticipantWarnings_thenWarningIsHidden() {
+        val event = Event(
+            eventType = EventType.LEAGUE,
+            teamSignup = true,
+            singleDivision = false,
+            divisions = listOf("open"),
+            divisionDetails = listOf(DivisionDetail(id = "open", name = "Open")),
+        )
+        val warnings = listOf(
+            EventParticipantDivisionWarning(
+                divisionId = "open",
+                code = "MISSING_PLACEHOLDERS",
+                message = "This division has 0 team slots for an 8-team max.",
+                filledCount = 0,
+                slotCount = 0,
+                maxTeams = 8,
+            )
+        )
+
+        val visibleWarnings = visibleParticipantDivisionWarnings(
+            section = ParticipantsSection.TEAMS,
+            teamSignup = true,
+            event = event,
+            divisionOptions = buildRegistrationDivisionOptions(event),
+            selectedDivisionId = "open",
+            divisionWarnings = warnings,
+        )
+
+        assertTrue(visibleWarnings.isEmpty())
+    }
+
+    @Test
+    fun givenOverCapacityWarning_whenBuildingParticipantWarnings_thenSelectedDivisionWarningRemains() {
+        val event = Event(
+            eventType = EventType.LEAGUE,
+            teamSignup = true,
+            singleDivision = false,
+            divisions = listOf("open", "competitive"),
+            divisionDetails = listOf(
+                DivisionDetail(id = "open", name = "Open"),
+                DivisionDetail(id = "competitive", name = "Competitive"),
+            ),
+        )
+        val warnings = listOf(
+            EventParticipantDivisionWarning(
+                divisionId = "open",
+                code = "OVER_CAPACITY",
+                message = "Open is over capacity.",
+            ),
+            EventParticipantDivisionWarning(
+                divisionId = "competitive",
+                code = "OVER_CAPACITY",
+                message = "Competitive is over capacity.",
+            ),
+        )
+
+        val visibleWarnings = visibleParticipantDivisionWarnings(
+            section = ParticipantsSection.TEAMS,
+            teamSignup = true,
+            event = event,
+            divisionOptions = buildRegistrationDivisionOptions(event),
+            selectedDivisionId = "competitive",
+            divisionWarnings = warnings,
+        )
+
+        assertEquals(listOf("competitive"), visibleWarnings.map { warning -> warning.divisionId })
     }
 
     private fun buildTeamWithPlayers(

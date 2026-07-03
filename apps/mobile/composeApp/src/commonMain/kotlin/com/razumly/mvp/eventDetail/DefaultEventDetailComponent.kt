@@ -2955,19 +2955,30 @@ class DefaultEventDetailComponent(
             _errorState.value = ErrorMessage(directionsPlan.message)
             return
         }
-        val directionsUrl = (directionsPlan as EventDirectionsPlan.OpenUrl).url
+        val directionsUrls = (directionsPlan as EventDirectionsPlan.OpenUrl).let { plan ->
+            listOf(plan.url) + plan.fallbackUrls
+        }
 
         scope.launch {
-            val result = urlHandler?.openUrlInWebView(directionsUrl)
-            if (result == null) {
+            val handler = urlHandler
+            if (handler == null) {
                 _errorState.value = ErrorMessage("Unable to open directions.")
                 return@launch
             }
-            result.onFailure { throwable ->
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Unable to open directions."),
-                )
+
+            var lastFailure: Throwable? = null
+            for (directionsUrl in directionsUrls) {
+                val result = handler.openUrlInWebView(directionsUrl)
+                if (result.isSuccess) {
+                    return@launch
+                }
+                lastFailure = result.exceptionOrNull()
             }
+
+            _errorState.value = ErrorMessage(
+                lastFailure?.userMessage("Unable to open directions.")
+                    ?: "Unable to open directions.",
+            )
         }
     }
 

@@ -255,9 +255,13 @@ private func loadRemoteImage(
         DispatchQueue.main.async {
             imageView.image = image
             if tracksMarkerView {
-                marker?.tracksViewChanges = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    marker?.tracksViewChanges = false
+                }
             } else {
-                marker?.tracksInfoWindowChanges = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    marker?.tracksInfoWindowChanges = false
+                }
             }
         }
     }.resume()
@@ -275,14 +279,24 @@ private func makeMarkerIconView(
     outerView.layer.cornerRadius = size / 2
     outerView.layer.borderWidth = imageURL == nil ? 0 : 3
     outerView.layer.borderColor = color.cgColor
-    outerView.layer.shadowColor = UIColor.black.cgColor
-    outerView.layer.shadowOffset = CGSize(width: 0, height: 3)
-    outerView.layer.shadowOpacity = 0.25
-    outerView.layer.shadowRadius = 6
 
     if let imageURL = imageURL {
+        let fallbackView = UIView(frame: CGRect(x: 5, y: 5, width: 40, height: 40))
+        fallbackView.backgroundColor = color
+        fallbackView.layer.cornerRadius = 20
+        fallbackView.clipsToBounds = true
+        outerView.addSubview(fallbackView)
+
+        let fallbackLabel = UILabel(frame: fallbackView.bounds.insetBy(dx: 4, dy: 4))
+        fallbackLabel.text = markerInitials(name)
+        fallbackLabel.textAlignment = .center
+        fallbackLabel.textColor = .white
+        fallbackLabel.font = UIFont.boldSystemFont(ofSize: 14)
+        fallbackLabel.adjustsFontSizeToFitWidth = true
+        fallbackView.addSubview(fallbackLabel)
+
         let imageView = UIImageView(frame: CGRect(x: 5, y: 5, width: 40, height: 40))
-        imageView.backgroundColor = .black
+        imageView.backgroundColor = .clear
         imageView.contentMode = .scaleAspectFill
         imageView.layer.cornerRadius = 20
         imageView.clipsToBounds = true
@@ -311,10 +325,6 @@ private func makeEventClusterIconView(count: Int) -> UIView {
     outerView.layer.cornerRadius = size / 2
     outerView.layer.borderWidth = 4
     outerView.layer.borderColor = UIColor.white.cgColor
-    outerView.layer.shadowColor = UIColor.black.cgColor
-    outerView.layer.shadowOffset = CGSize(width: 0, height: 3)
-    outerView.layer.shadowOpacity = 0.25
-    outerView.layer.shadowRadius = 6
 
     let label = UILabel(frame: outerView.bounds.insetBy(dx: 4, dy: 4))
     label.text = "\(max(count, 2))"

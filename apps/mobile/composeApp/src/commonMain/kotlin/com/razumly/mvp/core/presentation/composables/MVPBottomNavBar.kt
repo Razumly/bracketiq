@@ -3,6 +3,7 @@ package com.razumly.mvp.core.presentation.composables
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -184,7 +185,11 @@ private fun RowScope.BottomNavIconButton(
         modifier = Modifier
             .weight(1f)
             .fillMaxHeight()
-            .clickable(onClick = onClick),
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Box(
@@ -307,7 +312,11 @@ private fun CenterNavButton(
             modifier = Modifier
                 .fillMaxSize()
                 .clip(CircleShape)
-                .clickable(onClick = onClick),
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onClick,
+                ),
             shape = CircleShape,
             color = when (action) {
                 CenterNavAction.CreateEvent -> MaterialTheme.colorScheme.onSurface

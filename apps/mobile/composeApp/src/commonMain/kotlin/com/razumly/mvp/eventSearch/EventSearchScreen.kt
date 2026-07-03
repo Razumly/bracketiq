@@ -45,6 +45,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.Button
@@ -53,6 +55,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.Scaffold
@@ -66,6 +69,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -225,32 +229,74 @@ private fun DiscoverFilterSportSection(
     onSportToggled: (Sport) -> Unit,
 ) {
     if (sports.isEmpty()) return
+    var sportsExpanded by rememberSaveable { mutableStateOf(selectedSportIds.isNotEmpty()) }
+    val selectedSports = remember(sports, selectedSportIds) {
+        sports.filter { sport -> sport.id in selectedSportIds }
+    }
+    val selectedSummary = when {
+        selectedSports.isEmpty() -> "Any sport"
+        selectedSports.size == 1 -> selectedSports.first().name
+        else -> "${selectedSports.size} sports selected"
+    }
 
     Column(
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text(
-            text = "Sports",
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.fillMaxWidth(),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { sportsExpanded = !sportsExpanded }
+                .padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            sports.forEach { sport ->
-                FilterChip(
-                    selected = sport.id in selectedSportIds,
-                    onClick = { onSportToggled(sport) },
-                    label = {
-                        Text(
-                            text = sport.name,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Sports",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Text(
+                    text = selectedSummary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            IconButton(onClick = { sportsExpanded = !sportsExpanded }) {
+                Icon(
+                    imageVector = if (sportsExpanded) {
+                        Icons.Default.KeyboardArrowUp
+                    } else {
+                        Icons.Default.KeyboardArrowDown
+                    },
+                    contentDescription = if (sportsExpanded) "Collapse sports" else "Expand sports",
+                )
+            }
+        }
+        AnimatedVisibility(
+            visible = sportsExpanded,
+            enter = expandVertically(animationSpec = tween(180)) + fadeIn(),
+            exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(),
+        ) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                sports.forEach { sport ->
+                    FilterChip(
+                        selected = sport.id in selectedSportIds,
+                        onClick = { onSportToggled(sport) },
+                        label = {
+                            Text(
+                                text = sport.name,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                    )
+                }
             }
         }
     }
@@ -457,6 +503,7 @@ fun EventSearchScreen(
     var showFab by remember { mutableStateOf(true) }
     var showFloatingSearch by remember { mutableStateOf(true) }
     var showingFilter by remember { mutableStateOf(false) }
+    var filterDismissRequest by remember { mutableStateOf(0) }
     var showLocationPicker by remember { mutableStateOf(false) }
     var locationQuery by remember { mutableStateOf("") }
     var locationSuggestions by remember { mutableStateOf<List<MVPPlace>>(emptyList()) }
@@ -563,6 +610,12 @@ fun EventSearchScreen(
         DiscoverTab.TEAMS -> teamsScrollingUp
         DiscoverTab.RENTALS -> rentalsScrollingUp
     }
+    val currentListState = when (selectedTab) {
+        DiscoverTab.EVENTS -> eventsListState
+        DiscoverTab.ORGANIZATIONS -> organizationsListState
+        DiscoverTab.TEAMS -> teamsListState
+        DiscoverTab.RENTALS -> rentalsListState
+    }
     val isRefreshingCurrentTab = when (selectedTab) {
         DiscoverTab.EVENTS -> isLoadingMore
         DiscoverTab.ORGANIZATIONS -> isLoadingOrganizations
@@ -668,6 +721,17 @@ fun EventSearchScreen(
         if (selectedTab != DiscoverTab.EVENTS) {
             showingFilter = false
         }
+    }
+
+    LaunchedEffect(showingFilter, selectedTab, currentListState) {
+        if (!showingFilter) return@LaunchedEffect
+
+        snapshotFlow { currentListState.isScrollInProgress }
+            .collect { isScrolling ->
+                if (isScrolling) {
+                    filterDismissRequest += 1
+                }
+            }
     }
 
     LaunchedEffect(showingFilter, showLocationPicker, locationQuery) {
@@ -1066,6 +1130,7 @@ fun EventSearchScreen(
                         showingFilter = showFilter
                     },
                     filterMaxHeight = filterDropdownMaxHeight,
+                    filterDismissSignal = filterDismissRequest,
                     filterExtraContent = if (selectedTab == DiscoverTab.EVENTS) {
                         {
                             DiscoverFilterSportSection(

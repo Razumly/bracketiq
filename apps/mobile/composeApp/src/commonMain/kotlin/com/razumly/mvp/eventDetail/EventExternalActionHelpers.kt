@@ -4,7 +4,6 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
 import com.razumly.mvp.core.presentation.util.createEventUrl
 import com.razumly.mvp.core.presentation.util.getEventQrCodePath
-import io.ktor.http.encodeURLQueryComponent
 
 internal data class EventDeletePlan(
     val loadingMessage: String,
@@ -24,9 +23,19 @@ internal data class EventQrCodeSharePayload(
 )
 
 internal sealed class EventDirectionsPlan {
-    data class OpenUrl(val url: String) : EventDirectionsPlan()
+    data class OpenUrl(
+        val url: String,
+        val fallbackUrls: List<String> = emptyList(),
+    ) : EventDirectionsPlan()
     data class Unavailable(val message: String) : EventDirectionsPlan()
 }
+
+internal data class EventDirectionsUrls(
+    val primaryUrl: String,
+    val fallbackUrls: List<String> = emptyList(),
+)
+
+internal expect fun eventDirectionsUrls(destinationQuery: String): EventDirectionsUrls
 
 internal fun eventDeletePlan(event: Event): EventDeletePlan {
     val isTemplateEvent = event.state.equals("TEMPLATE", ignoreCase = true)
@@ -70,7 +79,9 @@ internal fun eventDirectionsPlan(event: Event): EventDirectionsPlan {
         )
     }
 
+    val urls = eventDirectionsUrls(destinationQuery)
     return EventDirectionsPlan.OpenUrl(
-        "geo:0,0?q=${destinationQuery.encodeURLQueryComponent()}"
+        url = urls.primaryUrl,
+        fallbackUrls = urls.fallbackUrls,
     )
 }
