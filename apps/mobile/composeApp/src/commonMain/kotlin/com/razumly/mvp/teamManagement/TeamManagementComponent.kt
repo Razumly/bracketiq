@@ -1,6 +1,7 @@
 package com.razumly.mvp.teamManagement
 
 import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.essenty.backhandler.BackCallback
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Sport
@@ -97,6 +98,12 @@ class DefaultTeamManagementComponent(
     private var loadingHandler: LoadingHandler? = null
 
     override val onBack = navigationHandler::navigateBack
+    private val teamEditorBackCallback = BackCallback(
+        isEnabled = false,
+        priority = BackCallback.PRIORITY_MAX,
+    ) {
+        deselectTeam()
+    }
     private val _errorState = MutableStateFlow<String?>(null)
     private val _divisionTypeParameters = MutableStateFlow(DivisionTypeParameters())
     override val divisionTypeParameters = _divisionTypeParameters.asStateFlow()
@@ -226,6 +233,7 @@ class DefaultTeamManagementComponent(
     }.stateIn(scope, SharingStarted.Eagerly, false)
 
     init {
+        backHandler.register(teamEditorBackCallback)
         scope.launch {
             currentUserState
                 .map { user -> user.friendIds }
@@ -256,11 +264,15 @@ class DefaultTeamManagementComponent(
         }
         scope.launch {
             currentTeams.collect { teams ->
-                if (_selectedTeam.value != null) {
-                    val updatedSelectedTeam =
-                        teams.find { team -> team.team.id == _selectedTeam.value!!.team.id }
-                    _selectedTeam.value = updatedSelectedTeam
-                    refreshSelectedTeamStaffUsers(updatedSelectedTeam)
+                val selectedTeam = _selectedTeam.value
+                if (selectedTeam != null) {
+                    val updatedSelectedTeam = teams.find { team -> team.team.id == selectedTeam.team.id }
+                    if (updatedSelectedTeam != null) {
+                        _selectedTeam.value = updatedSelectedTeam
+                        refreshSelectedTeamStaffUsers(updatedSelectedTeam)
+                    } else {
+                        refreshSelectedTeamStaffUsers(selectedTeam)
+                    }
                 }
             }
         }
@@ -275,6 +287,7 @@ class DefaultTeamManagementComponent(
             Team(currentUser.id), currentUser, listOf(currentUser), listOf()
         )
         _selectedTeam.value = resolvedTeam
+        teamEditorBackCallback.isEnabled = true
         refreshSelectedTeamStaffUsers(resolvedTeam)
     }
 
@@ -416,6 +429,7 @@ class DefaultTeamManagementComponent(
 
     override fun deselectTeam() {
         _selectedTeam.value = null
+        teamEditorBackCallback.isEnabled = false
         _staffUsersById.value = emptyMap()
     }
 

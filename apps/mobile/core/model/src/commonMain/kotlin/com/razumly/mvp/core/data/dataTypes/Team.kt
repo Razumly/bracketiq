@@ -4,11 +4,7 @@ import androidx.room.Entity
 import androidx.room.Ignore
 import androidx.room.PrimaryKey
 import com.razumly.mvp.core.data.dataTypes.dtos.TeamDTO
-import com.razumly.mvp.core.data.util.DEFAULT_AGE_DIVISION
-import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
-import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
 import com.razumly.mvp.core.data.util.normalizeDivisionLabel
-import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.util.newId
 import kotlinx.serialization.Serializable
 
@@ -62,12 +58,8 @@ data class Team(
 
     companion object {
         operator fun invoke(captainId: String): Team {
-            val defaultSkillDivisionTypeId = DEFAULT_DIVISION
-            val defaultAgeDivisionTypeId = DEFAULT_AGE_DIVISION
-            val defaultSkillDivisionTypeName = defaultSkillDivisionTypeId.toDivisionDisplayLabel()
-            val defaultAgeDivisionTypeName = defaultAgeDivisionTypeId.toDivisionDisplayLabel()
             return Team(
-                division = DEFAULT_DIVISION,
+                division = "",
                 name = "",
                 playerIds = listOf(captainId),
                 playerRegistrationIds = emptyList(),
@@ -80,15 +72,12 @@ data class Team(
                 staffAssignmentIds = emptyList(),
                 profileImageId = null,
                 sport = null,
-                divisionTypeId = buildCombinedDivisionTypeId(
-                    skillDivisionTypeId = defaultSkillDivisionTypeId,
-                    ageDivisionTypeId = defaultAgeDivisionTypeId,
-                ),
-                skillDivisionTypeId = defaultSkillDivisionTypeId,
-                skillDivisionTypeName = defaultSkillDivisionTypeName,
-                ageDivisionTypeId = defaultAgeDivisionTypeId,
-                ageDivisionTypeName = defaultAgeDivisionTypeName,
-                divisionGender = "C",
+                divisionTypeId = null,
+                skillDivisionTypeId = null,
+                skillDivisionTypeName = null,
+                ageDivisionTypeId = null,
+                ageDivisionTypeName = null,
+                divisionGender = null,
                 organizationId = null,
                 createdBy = captainId,
                 joinPolicy = "CLOSED",

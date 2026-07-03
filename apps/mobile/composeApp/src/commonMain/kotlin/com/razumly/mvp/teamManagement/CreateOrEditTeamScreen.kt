@@ -149,6 +149,12 @@ private val TeamJoinPolicyOptions = listOf(
     DropdownOption(TEAM_JOIN_POLICY_REQUEST_TO_JOIN, "Request to join"),
 )
 
+private val TeamDivisionGenderOptions = listOf(
+    DropdownOption("M", "Men's"),
+    DropdownOption("F", "Women's"),
+    DropdownOption("C", "Coed"),
+)
+
 private fun String.isOpenTeamRegistrationPolicy(): Boolean =
     normalizeTeamJoinPolicyInput(this, openRegistration = false) == TEAM_JOIN_POLICY_OPEN_REGISTRATION
 
@@ -157,6 +163,12 @@ private fun String.isRequestToJoinPolicy(): Boolean =
 
 private fun String.allowsRegistrationCostLabel(): Boolean =
     isOpenTeamRegistrationPolicy() || isRequestToJoinPolicy()
+
+internal fun shouldRequireTeamDivision(joinPolicy: String): Boolean =
+    normalizeTeamJoinPolicyInput(joinPolicy, openRegistration = false).allowsRegistrationCostLabel()
+
+internal fun shouldShowTeamDivisionFields(joinPolicy: String, sportInput: String): Boolean =
+    shouldRequireTeamDivision(joinPolicy) && sportInput.trim().isNotBlank()
 
 internal fun syncedRegistrationInputs(
     registrationSettingsEdited: Boolean,
@@ -209,7 +221,7 @@ private fun formatGenderDivisionLabel(value: String): String {
     return when (value.trim().uppercase()) {
         "M" -> "Men's"
         "F" -> "Women's"
-        "C" -> "CoEd"
+        "C" -> "Coed"
         else -> value.toDivisionDisplayLabel()
     }
 }
@@ -222,7 +234,7 @@ private fun parseLegacyTeamDivisionLabels(rawDivision: String): ReadOnlyTeamDivi
     if (tokens.isEmpty()) return null
 
     val gender = when (tokens.first().trim().lowercase()) {
-        "coed", "co-ed" -> "CoEd"
+        "coed", "co-ed" -> "Coed"
         "mens", "men", "men's" -> "Men's"
         "womens", "women", "women's" -> "Women's"
         else -> null
@@ -508,82 +520,18 @@ fun CreateOrEditTeamScreen(
             emptyList()
         }
     }
-    val genderOptions = remember(divisionTypeParameters, eventDivisionOptions, inferredTeamDivisionDetail.gender) {
-        val options = linkedMapOf<String, String>()
-        fun addOption(id: String?, label: String? = null) {
-            val normalizedId = id?.trim()?.uppercase().orEmpty()
-            if (normalizedId.isBlank()) return
-            options[normalizedId] = label?.trim()?.takeIf(String::isNotBlank)
-                ?: normalizedId.toDivisionDisplayLabel()
-        }
-
-        divisionTypeParameters.genders.toDropdownOptions().forEach { option ->
-            addOption(option.value, option.label)
-        }
-        eventDivisionOptions.forEach { detail ->
-            addOption(detail.gender)
-        }
-        addOption(inferredTeamDivisionDetail.gender)
-        options.map { (value, label) -> DropdownOption(value = value, label = label) }
-    }
+    val genderOptions = TeamDivisionGenderOptions
     val skillDivisionOptions = remember(
         divisionTypeParameters,
         selectedSportIdForDivisionTypes,
-        eventDivisionOptions,
-        inferredTeamDivisionDetail.skillDivisionTypeId,
-        inferredTeamDivisionDetail.skillDivisionTypeName,
     ) {
-        val options = linkedMapOf<String, String>()
-        fun addOption(id: String, label: String? = null) {
-            val normalizedId = id.normalizeDivisionIdentifier()
-            if (normalizedId.isBlank()) return
-            options[normalizedId] = label?.trim()?.takeIf(String::isNotBlank)
-                ?: normalizedId.toDivisionDisplayLabel()
-        }
-
         divisionTypeParameters.skillsForSport(selectedSportIdForDivisionTypes)
             .toDropdownOptions()
-            .forEach { option -> addOption(option.value, option.label) }
-        eventDivisionOptions.forEach { detail ->
-            addOption(
-                id = detail.skillDivisionTypeId,
-                label = detail.skillDivisionTypeName,
-            )
-        }
-        addOption(
-            id = inferredTeamDivisionDetail.skillDivisionTypeId,
-            label = inferredTeamDivisionDetail.skillDivisionTypeName,
-        )
-        options.map { (value, label) -> DropdownOption(value = value, label = label) }
     }
     val ageDivisionOptions = remember(
         divisionTypeParameters,
-        eventDivisionOptions,
-        inferredTeamDivisionDetail.ageDivisionTypeId,
-        inferredTeamDivisionDetail.ageDivisionTypeName,
     ) {
-        val options = linkedMapOf<String, String>()
-        fun addOption(id: String, label: String? = null) {
-            val normalizedId = id.normalizeDivisionIdentifier()
-            if (normalizedId.isBlank()) return
-            options[normalizedId] = label?.trim()?.takeIf(String::isNotBlank)
-                ?: normalizedId.toDivisionDisplayLabel()
-        }
-
-        divisionTypeParameters.ages.toDropdownOptions().forEach { option ->
-            addOption(option.value, option.label)
-        }
-        eventDivisionOptions.forEach { detail ->
-            addOption(
-                id = detail.ageDivisionTypeId,
-                label = detail.ageDivisionTypeName,
-            )
-        }
-        addOption(
-            id = inferredTeamDivisionDetail.ageDivisionTypeId,
-            label = inferredTeamDivisionDetail.ageDivisionTypeName,
-        )
-        options.map { (value, label) -> DropdownOption(value = value, label = label) }
+        divisionTypeParameters.ages.toDropdownOptions()
     }
     val skillDivisionOptionById = remember(skillDivisionOptions) {
         skillDivisionOptions.associateBy(
@@ -611,12 +559,17 @@ fun CreateOrEditTeamScreen(
     val normalizedSportName = sportInput.trim()
     val normalizedSkillDivisionTypeId = skillDivisionTypeInput.normalizeDivisionIdentifier()
     val normalizedAgeDivisionTypeId = ageDivisionTypeInput.normalizeDivisionIdentifier()
+    val requiresTeamDivision = shouldRequireTeamDivision(joinPolicyInput)
+    val showTeamDivisionFields = shouldShowTeamDivisionFields(joinPolicyInput, normalizedSportName)
     val genderOptionValues = remember(genderOptions) {
         genderOptions.map { option -> option.value.trim().uppercase() }.toSet()
     }
-    val isTeamDivisionValid = normalizedDivisionGender in genderOptionValues &&
-        normalizedSkillDivisionTypeId.isNotBlank() &&
-        normalizedAgeDivisionTypeId.isNotBlank()
+    val isTeamDivisionValid = !requiresTeamDivision || (
+        showTeamDivisionFields &&
+            normalizedDivisionGender in genderOptionValues &&
+            normalizedSkillDivisionTypeId.isNotBlank() &&
+            normalizedAgeDivisionTypeId.isNotBlank()
+        )
     val resolvedSkillDivisionTypeName = skillDivisionOptionById[normalizedSkillDivisionTypeId]
         ?: inferredTeamDivisionDetail.skillDivisionTypeName.takeIf(String::isNotBlank)
         ?: normalizedSkillDivisionTypeId.toDivisionDisplayLabel()
@@ -678,7 +631,14 @@ fun CreateOrEditTeamScreen(
         genderOptions,
         skillDivisionOptions,
         ageDivisionOptions,
+        requiresTeamDivision,
     ) {
+        if (!requiresTeamDivision || divisionSportInput.isBlank()) {
+            if (divisionGenderInput.isNotBlank()) divisionGenderInput = ""
+            if (skillDivisionTypeInput.isNotBlank()) skillDivisionTypeInput = ""
+            if (ageDivisionTypeInput.isNotBlank()) ageDivisionTypeInput = ""
+            return@LaunchedEffect
+        }
         val hasSelectedGenderOption = genderOptions.any { option ->
             option.value.trim().uppercase() == divisionGenderInput.trim().uppercase()
         }
@@ -839,18 +799,19 @@ fun CreateOrEditTeamScreen(
                 )
             }
         }
+        val shouldPersistDivision = shouldRequireTeamDivision(joinPolicyInput)
 
         return syncedTeam.copy(
             name = resolvedName,
             sport = normalizedSportName.ifBlank { null },
             teamSize = resolvedSize,
-            division = resolvedDivisionToken,
-            divisionTypeId = resolvedDivisionTypeId,
-            skillDivisionTypeId = normalizedSkillDivisionTypeId,
-            skillDivisionTypeName = resolvedSkillDivisionTypeName,
-            ageDivisionTypeId = normalizedAgeDivisionTypeId,
-            ageDivisionTypeName = resolvedAgeDivisionTypeName,
-            divisionGender = normalizedDivisionGender,
+            division = if (shouldPersistDivision) resolvedDivisionToken else "",
+            divisionTypeId = if (shouldPersistDivision) resolvedDivisionTypeId else null,
+            skillDivisionTypeId = if (shouldPersistDivision) normalizedSkillDivisionTypeId else null,
+            skillDivisionTypeName = if (shouldPersistDivision) resolvedSkillDivisionTypeName else null,
+            ageDivisionTypeId = if (shouldPersistDivision) normalizedAgeDivisionTypeId else null,
+            ageDivisionTypeName = if (shouldPersistDivision) resolvedAgeDivisionTypeName else null,
+            divisionGender = if (shouldPersistDivision) normalizedDivisionGender else null,
             captainId = resolvedCaptainId,
             playerIds = activePlayerIds,
             pending = invitedPlayerIds,
@@ -928,88 +889,38 @@ fun CreateOrEditTeamScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                StandardTextField(
-                    value = teamSizeInput,
-                    onValueChange = { teamSizeInput = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "Team Size",
-                    keyboardType = "number",
-                    inputFilter = { value -> value.filter(Char::isDigit) },
-                    readOnly = !canEditFields,
-                    isError = !isTeamSizeValid,
-                    supportingText = if (!isTeamSizeValid) {
-                        "Enter a team size greater than 0."
-                    } else {
-                        ""
-                    },
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-                PlatformDropdown(
-                    selectedValue = sportInput,
-                    onSelectionChange = { value -> sportInput = value },
-                    options = sportOptions,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "Sport",
-                    placeholder = "Select sport",
-                    enabled = canEditFields,
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-                Text("Team Division")
-                Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.Top,
                 ) {
-                    PlatformDropdown(
-                        selectedValue = divisionGenderInput,
-                        onSelectionChange = { value ->
-                            divisionGenderInput = value
-                        },
-                        options = genderOptions,
+                    StandardTextField(
+                        value = teamSizeInput,
+                        onValueChange = { teamSizeInput = it },
                         modifier = Modifier.weight(1f),
-                        label = "Gender",
-                        placeholder = "Select gender",
-                        enabled = canEditFields,
+                        label = "Team Size",
+                        keyboardType = "number",
+                        inputFilter = { value -> value.filter(Char::isDigit) },
+                        readOnly = !canEditFields,
+                        isError = !isTeamSizeValid,
+                        supportingText = if (!isTeamSizeValid) {
+                            "Enter a team size greater than 0."
+                        } else {
+                            ""
+                        },
                     )
                     PlatformDropdown(
-                        selectedValue = skillDivisionTypeInput,
-                        onSelectionChange = { value ->
-                            skillDivisionTypeInput = value
-                        },
-                        options = skillDivisionOptions,
+                        selectedValue = sportInput,
+                        onSelectionChange = { value -> sportInput = value },
+                        options = sportOptions,
                         modifier = Modifier.weight(1f),
-                        label = "Skill Division",
-                        placeholder = "Select skill",
+                        label = "Sport",
+                        placeholder = "Select sport",
                         enabled = canEditFields,
                     )
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-                PlatformDropdown(
-                    selectedValue = ageDivisionTypeInput,
-                    onSelectionChange = { value ->
-                        ageDivisionTypeInput = value
-                    },
-                    options = ageDivisionOptions,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "Age Division",
-                    placeholder = "Select age",
-                    enabled = canEditFields,
-                )
-                if (!isTeamDivisionValid) {
-                    Text(
-                        text = "Select gender, skill division, and age division.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
-            }
 
-            Spacer(modifier = Modifier.height(12.dp))
-            if (showEditDetails) {
+                Spacer(modifier = Modifier.height(12.dp))
                 PlatformDropdown(
                     selectedValue = joinPolicyInput,
                     onSelectionChange = { value ->
@@ -1032,34 +943,88 @@ fun CreateOrEditTeamScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                InclusivePriceInput(
-                    totalPriceCents = registrationPriceCentsInput,
-                    onTotalPriceChange = { nextCents ->
-                        registrationSettingsEdited = true
-                        registrationCostInput = nextCents
-                            .coerceAtLeast(0)
-                            .takeIf { it > 0 }
-                            ?.toString()
-                            .orEmpty()
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    totalLabel = "Registration price",
-                    enabled = canEditFields &&
-                        joinPolicyInput.allowsRegistrationCostLabel() &&
-                        !(isOpenRegistrationInput && !canChargeRegistration),
-                )
-                Text(
-                    text = when {
-                        isRequestToJoinInput -> "Request-only prices are labels. Players are not prompted for payment until you send a bill."
-                        !joinPolicyInput.allowsRegistrationCostLabel() -> "Choose open registration or request to join to set a price."
-                        canChargeRegistration -> "Leave blank for free registration."
-                        else -> "Connect Stripe to charge for open registration. Free registration is still available."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
+
+                if (joinPolicyInput.allowsRegistrationCostLabel()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    InclusivePriceInput(
+                        totalPriceCents = registrationPriceCentsInput,
+                        onTotalPriceChange = { nextCents ->
+                            registrationSettingsEdited = true
+                            registrationCostInput = nextCents
+                                .coerceAtLeast(0)
+                                .takeIf { it > 0 }
+                                ?.toString()
+                                .orEmpty()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        totalLabel = "Registration price",
+                        enabled = canEditFields && !(isOpenRegistrationInput && !canChargeRegistration),
+                    )
+                    Text(
+                        text = when {
+                            isRequestToJoinInput -> "Request-only prices are labels. Players are not prompted for payment until you send a bill."
+                            canChargeRegistration -> "Leave blank for free registration."
+                            else -> "Connect Stripe to charge for open registration. Free registration is still available."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+
+                if (showTeamDivisionFields) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Team Division")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        PlatformDropdown(
+                            selectedValue = divisionGenderInput,
+                            onSelectionChange = { value ->
+                                divisionGenderInput = value
+                            },
+                            options = genderOptions,
+                            modifier = Modifier.weight(1f),
+                            label = "Gender",
+                            placeholder = "Select gender",
+                            enabled = canEditFields,
+                        )
+                        PlatformDropdown(
+                            selectedValue = skillDivisionTypeInput,
+                            onSelectionChange = { value ->
+                                skillDivisionTypeInput = value
+                            },
+                            options = skillDivisionOptions,
+                            modifier = Modifier.weight(1f),
+                            label = "Skill Division",
+                            placeholder = "Select skill",
+                            enabled = canEditFields,
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    PlatformDropdown(
+                        selectedValue = ageDivisionTypeInput,
+                        onSelectionChange = { value ->
+                            ageDivisionTypeInput = value
+                        },
+                        options = ageDivisionOptions,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = "Age Division",
+                        placeholder = "Select age",
+                        enabled = canEditFields,
+                    )
+                    if (!isTeamDivisionValid) {
+                        Text(
+                            text = "Select gender, skill division, and age division.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                }
             } else {
                 ReadOnlyLabeledValue(
                     label = "Join mode",
@@ -1211,6 +1176,7 @@ fun CreateOrEditTeamScreen(
                 ExpandableReadOnlyTeamDetails(
                     teamSize = teamSizeInput.trim().ifBlank { syncedTeam.teamSize.toString() },
                     sport = sportInput.trim().ifBlank { "Unassigned" },
+                    showDivisionDetails = showTeamDivisionFields,
                     gender = readOnlyDivisionLabels.gender,
                     skillDivision = readOnlyDivisionLabels.skillDivision,
                     ageDivision = readOnlyDivisionLabels.ageDivision,
@@ -2050,6 +2016,7 @@ private fun JerseyNumberReadOnlyView(value: String) {
 private fun ExpandableReadOnlyTeamDetails(
     teamSize: String,
     sport: String,
+    showDivisionDetails: Boolean,
     gender: String,
     skillDivision: String,
     ageDivision: String,
@@ -2061,10 +2028,15 @@ private fun ExpandableReadOnlyTeamDetails(
     val details = listOf(
         "Team Size" to teamSize,
         "Sport" to sport,
-        "Gender" to gender,
-        "Skill Division" to skillDivision,
-        "Age Division" to ageDivision,
-    )
+    ) + if (showDivisionDetails) {
+        listOf(
+            "Gender" to gender,
+            "Skill Division" to skillDivision,
+            "Age Division" to ageDivision,
+        )
+    } else {
+        emptyList()
+    }
 
     Column(modifier = modifier.fillMaxWidth()) {
         Card(

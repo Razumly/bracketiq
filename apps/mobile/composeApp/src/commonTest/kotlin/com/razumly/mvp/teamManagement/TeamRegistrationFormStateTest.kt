@@ -71,4 +71,12 @@ class TeamRegistrationFormStateTest {
             ),
         )
     }
+
+    @Test
+    fun shouldShowTeamDivisionFields_only_when_joinable_team_has_sport() {
+        assertEquals(false, shouldShowTeamDivisionFields(TEAM_JOIN_POLICY_CLOSED, "Volleyball"))
+        assertEquals(false, shouldShowTeamDivisionFields(TEAM_JOIN_POLICY_OPEN_REGISTRATION, ""))
+        assertEquals(true, shouldShowTeamDivisionFields(TEAM_JOIN_POLICY_OPEN_REGISTRATION, "Volleyball"))
+        assertEquals(true, shouldShowTeamDivisionFields(TEAM_JOIN_POLICY_REQUEST_TO_JOIN, "Soccer"))
+    }
 }
