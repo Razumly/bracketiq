@@ -124,6 +124,9 @@ internal fun visibleParticipantTeams(
     teams: Iterable<TeamWithPlayers>,
 ): List<TeamWithPlayers> = event.visibleTeams(teams.toList())
 
+internal fun shouldShowParticipantTeamPlayerCount(team: TeamWithPlayers): Boolean =
+    team.team.withSynchronizedMembership().openRegistration
+
 internal fun visibleParticipantTeamsForDivision(
     event: Event,
     teams: Iterable<TeamWithPlayers>,
@@ -1084,6 +1087,7 @@ fun ParticipantsView(
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     TeamCard(
                         team = card.team,
+                        showPlayerCount = shouldShowParticipantTeamPlayerCount(card.team),
                         modifier = Modifier.clickable {
                             if (manageMode && canManageParticipants) {
                                 managementTarget = teamManagementTarget(card.team)

@@ -124,7 +124,6 @@ interface ITeamRepository : IMVPRepository {
         userId: String? = null,
         email: String? = null,
         roleInviteType: String = "player",
-        eventTeamIds: List<String> = emptyList(),
     ): Result<Unit> = userId
         ?.takeIf(String::isNotBlank)
         ?.let { createTeamInvite(teamId = teamId, userId = it, createdBy = "", inviteType = roleInviteType) }
@@ -1066,7 +1065,6 @@ class TeamRepository(
         userId: String?,
         email: String?,
         roleInviteType: String,
-        eventTeamIds: List<String>,
     ): Result<Unit> = runCatching {
         val normalizedTeamId = teamId.trim().takeIf(String::isNotBlank)
             ?: error("Team id is required.")
@@ -1082,7 +1080,6 @@ class TeamRepository(
                 userId = normalizedUserId,
                 email = normalizedEmail,
                 role = roleInviteType.trim().ifBlank { "player" },
-                eventTeamIds = eventTeamIds.map(String::trim).filter(String::isNotBlank).distinct(),
             ),
         )
         response.team?.toTeamOrNull()?.let { updatedTeam ->

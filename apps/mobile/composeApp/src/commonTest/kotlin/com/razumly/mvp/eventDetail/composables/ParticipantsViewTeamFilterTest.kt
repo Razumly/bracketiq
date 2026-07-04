@@ -147,6 +147,37 @@ class ParticipantsViewTeamFilterTest {
     }
 
     @Test
+    fun givenParticipantTeam_whenCheckingPlayerCountVisibility_thenOnlyOpenRegistrationTeamsShowIt() {
+        assertTrue(
+            shouldShowParticipantTeamPlayerCount(
+                buildTeamWithPlayers(
+                    teamId = "open-team",
+                    openRegistration = true,
+                    joinPolicy = "OPEN_REGISTRATION",
+                )
+            )
+        )
+        assertFalse(
+            shouldShowParticipantTeamPlayerCount(
+                buildTeamWithPlayers(
+                    teamId = "closed-team",
+                    openRegistration = false,
+                    joinPolicy = "CLOSED",
+                )
+            )
+        )
+        assertFalse(
+            shouldShowParticipantTeamPlayerCount(
+                buildTeamWithPlayers(
+                    teamId = "request-team",
+                    openRegistration = false,
+                    joinPolicy = "REQUEST_TO_JOIN",
+                )
+            )
+        )
+    }
+
+    @Test
     fun givenMissingPlaceholderWarning_whenBuildingParticipantWarnings_thenWarningIsHidden() {
         val event = Event(
             eventType = EventType.LEAGUE,
@@ -222,6 +253,8 @@ class ParticipantsViewTeamFilterTest {
         captainId: String = "captain-$teamId",
         division: String = "open",
         divisionTypeId: String? = null,
+        openRegistration: Boolean = false,
+        joinPolicy: String = if (openRegistration) "OPEN_REGISTRATION" else "CLOSED",
     ): TeamWithPlayers = TeamWithPlayers(
         team = Team(
             division = division,
@@ -231,6 +264,8 @@ class ParticipantsViewTeamFilterTest {
             parentTeamId = parentTeamId,
             divisionTypeId = divisionTypeId,
             teamSize = 6,
+            openRegistration = openRegistration,
+            joinPolicy = joinPolicy,
             id = teamId,
         ),
         captain = UserData().copy(id = captainId),

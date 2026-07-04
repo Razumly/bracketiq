@@ -75,7 +75,6 @@ interface TeamManagementComponent {
         teamId: String,
         userId: String?,
         roleInviteType: String,
-        eventTeamIds: List<String> = emptyList(),
         email: String? = null,
     )
     suspend fun ensureUserByEmail(email: String): Result<UserData>
@@ -456,7 +455,6 @@ class DefaultTeamManagementComponent(
         teamId: String,
         userId: String?,
         roleInviteType: String,
-        eventTeamIds: List<String>,
         email: String?,
     ) {
         scope.launch {
@@ -465,7 +463,6 @@ class DefaultTeamManagementComponent(
                 userId = userId,
                 email = email,
                 roleInviteType = roleInviteType,
-                eventTeamIds = eventTeamIds,
             ).onFailure {
                 _errorState.value = it.userMessage()
                 return@launch

@@ -73,18 +73,17 @@ class TeamDtosTest {
     }
 
     @Test
-    fun team_member_invite_request_serializes_event_team_ids() {
+    fun team_member_invite_request_serializes_canonical_team_invite() {
         val serialized = jsonMVP.encodeToString(
             TeamMemberInviteRequestDto(
                 userId = "user-1",
                 role = "player",
-                eventTeamIds = listOf("event-team-1", "event-team-2"),
             ),
         )
 
         assertTrue(serialized.contains("\"userId\":\"user-1\""))
         assertTrue(serialized.contains("\"role\":\"player\""))
-        assertTrue(serialized.contains("\"eventTeamIds\":[\"event-team-1\",\"event-team-2\"]"))
+        assertFalse(serialized.contains("eventTeamIds"))
     }
 
     @Test

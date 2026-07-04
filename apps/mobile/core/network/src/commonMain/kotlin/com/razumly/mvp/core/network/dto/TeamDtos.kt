@@ -180,7 +180,6 @@ data class TeamMemberInviteRequestDto(
     val userId: String? = null,
     val email: String? = null,
     val role: String = "player",
-    val eventTeamIds: List<String> = emptyList(),
 )
 
 @Serializable

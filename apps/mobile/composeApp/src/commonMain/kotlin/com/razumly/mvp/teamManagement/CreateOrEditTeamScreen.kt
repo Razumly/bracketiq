@@ -76,7 +76,6 @@ import com.razumly.mvp.core.data.repositories.EventComplianceRequiredDocument
 import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.RegistrationQuestionAnswerSummary
-import com.razumly.mvp.core.data.repositories.TeamInviteEventTeamOption
 import com.razumly.mvp.core.data.repositories.TeamInviteFreeAgentContext
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeName
@@ -313,7 +312,6 @@ fun CreateOrEditTeamScreen(
         teamId: String,
         userId: String?,
         inviteType: String,
-        eventTeamIds: List<String>,
         email: String?,
     ) -> Unit)? = null,
 ) {
@@ -1362,7 +1360,7 @@ fun CreateOrEditTeamScreen(
             playerCapacityMessage = playerCapacityMessage,
             onSearch = onSearch,
             onDismiss = { showSearchDialog = false },
-            onInvite = { selectedUser, email, eventTeamIds ->
+            onInvite = { selectedUser, email ->
                 inviteError = null
                 val inviteType = inviteTarget.inviteType ?: return@TeamInviteDialog
                 if (inviteTarget == TeamInviteTarget.PLAYER && !canInvitePlayer) {
@@ -1383,7 +1381,6 @@ fun CreateOrEditTeamScreen(
                     team.team.id,
                     selectedUser?.id,
                     inviteType,
-                    eventTeamIds,
                     email,
                 )
                 showSearchDialog = false
@@ -1411,7 +1408,7 @@ internal fun TeamInviteDialog(
     playerCapacityMessage: String = "",
     onSearch: (String) -> Unit,
     onDismiss: () -> Unit,
-    onInvite: (selectedUser: UserData?, email: String?, eventTeamIds: List<String>) -> Unit,
+    onInvite: (selectedUser: UserData?, email: String?) -> Unit,
 ) {
     var mode by remember(inviteTarget) {
         mutableStateOf(
@@ -1421,7 +1418,6 @@ internal fun TeamInviteDialog(
     }
     var query by remember { mutableStateOf("") }
     var selectedUser by remember { mutableStateOf<UserData?>(null) }
-    var selectedEventTeamIds by remember { mutableStateOf<List<String>>(emptyList()) }
 
     LaunchedEffect(mode, query) {
         if (mode == TeamInviteDialogMode.InviteUser && query.trim().length >= 2) {
@@ -1451,17 +1447,11 @@ internal fun TeamInviteDialog(
         if (normalizedQuery.length >= 2) suggestions else friends
     }
     val canSendEmail = normalizedQuery.isProbablyEmail()
-    val showEventTeams = inviteTarget == TeamInviteTarget.PLAYER && inviteFreeAgentContext.eventTeams.isNotEmpty()
     val playerInviteBlocked = inviteTarget == TeamInviteTarget.PLAYER && !canInvitePlayer
 
-    fun chooseUser(user: UserData, precheckFreeAgentEvents: Boolean) {
+    fun chooseUser(user: UserData) {
         if (playerInviteBlocked) return
         selectedUser = user
-        selectedEventTeamIds = if (precheckFreeAgentEvents) {
-            inviteFreeAgentContext.freeAgentEventTeamIdsByUserId[user.id].orEmpty()
-        } else {
-            emptyList()
-        }
     }
 
     AlertDialog(
@@ -1477,7 +1467,6 @@ internal fun TeamInviteDialog(
                                 mode = tab
                                 query = ""
                                 selectedUser = null
-                                selectedEventTeamIds = emptyList()
                             },
                             enabled = tab != TeamInviteDialogMode.FreeAgents || inviteTarget == TeamInviteTarget.PLAYER,
                             text = { Text(tab.label) },
@@ -1490,9 +1479,6 @@ internal fun TeamInviteDialog(
                     onValueChange = {
                         query = it
                         selectedUser = null
-                        if (mode != TeamInviteDialogMode.FreeAgents) {
-                            selectedEventTeamIds = emptyList()
-                        }
                     },
                     modifier = Modifier.fillMaxWidth(),
                     label = when (mode) {
@@ -1535,7 +1521,7 @@ internal fun TeamInviteDialog(
                                         supportingText = eventNames.joinToString(", ").ifBlank { "Free agent" },
                                         selected = selectedUser?.id == user.id,
                                         enabled = !playerInviteBlocked,
-                                        onClick = { chooseUser(user, precheckFreeAgentEvents = true) },
+                                        onClick = { chooseUser(user) },
                                     )
                                 }
                             }
@@ -1550,7 +1536,7 @@ internal fun TeamInviteDialog(
                                     supportingText = user.publicHandle.orEmpty(),
                                     selected = selectedUser?.id == user.id,
                                     enabled = !playerInviteBlocked,
-                                    onClick = { chooseUser(user, precheckFreeAgentEvents = false) },
+                                    onClick = { chooseUser(user) },
                                 )
                             }
                         }
@@ -1566,21 +1552,14 @@ internal fun TeamInviteDialog(
                     )
                 }
 
-                if (showEventTeams) {
-                    EventTeamCheckboxes(
-                        options = inviteFreeAgentContext.eventTeams,
-                        selectedIds = selectedEventTeamIds,
-                        onSelectedIdsChange = { selectedEventTeamIds = it },
-                    )
-                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
                     when (mode) {
-                        TeamInviteDialogMode.InviteByEmail -> onInvite(null, normalizedQuery.lowercase(), selectedEventTeamIds)
-                        else -> selectedUser?.let { user -> onInvite(user, null, selectedEventTeamIds) }
+                        TeamInviteDialogMode.InviteByEmail -> onInvite(null, normalizedQuery.lowercase())
+                        else -> selectedUser?.let { user -> onInvite(user, null) }
                     }
                 },
                 enabled = when (mode) {
@@ -1633,49 +1612,6 @@ private fun UserInviteRow(
                 enabled = enabled,
                 onCheckedChange = { if (enabled) onClick() },
             )
-        }
-    }
-}
-
-@Composable
-private fun EventTeamCheckboxes(
-    options: List<TeamInviteEventTeamOption>,
-    selectedIds: List<String>,
-    onSelectedIdsChange: (List<String>) -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = "Update your team in upcoming events",
-            style = MaterialTheme.typography.titleSmall,
-        )
-        options.forEach { option ->
-            val selected = option.eventTeamId in selectedIds
-            val updateSelection: (Boolean) -> Unit = { checked ->
-                onSelectedIdsChange(
-                    if (checked) {
-                        (selectedIds + option.eventTeamId).distinct()
-                    } else {
-                        selectedIds - option.eventTeamId
-                    }
-                )
-            }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .semantics { contentDescription = "Toggle ${option.eventName} ${option.teamName}" }
-                    .clickable { updateSelection(!selected) },
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Checkbox(
-                    checked = selected,
-                    onCheckedChange = updateSelection,
-                )
-                Text(
-                    text = "${option.eventName} - ${option.teamName}",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
         }
     }
 }
