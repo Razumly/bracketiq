@@ -1030,26 +1030,47 @@ class UserRepository(
         }
     }
 
-    override suspend fun listInvites(userId: String, type: String?): Result<List<Invite>> = runCatching {
-        val normalizedUserId = userId.trim().takeIf(String::isNotBlank) ?: error("User id is required")
-        val params = buildList {
-            add("userId=${normalizedUserId.encodeURLQueryComponent()}")
-            type?.trim()?.takeIf(String::isNotBlank)?.let { inviteType ->
-                add("type=${inviteType.encodeURLQueryComponent()}")
-            }
-        }.joinToString("&")
+    override suspend fun listInvites(userId: String, type: String?): Result<List<Invite>> {
+        val normalizedUserId = userId.trim().takeIf(String::isNotBlank)
+            ?: return Result.failure(IllegalArgumentException("User id is required"))
+        val normalizedType = type?.trim()?.takeIf(String::isNotBlank)
 
-        api.get<InvitesResponseDto>("api/invites?$params").invites
+        return runCatching {
+            val params = buildList {
+                add("userId=${normalizedUserId.encodeURLQueryComponent()}")
+                normalizedType?.let { inviteType ->
+                    add("type=${inviteType.encodeURLQueryComponent()}")
+                }
+            }.joinToString("&")
+
+            val invites = api.get<InvitesResponseDto>("api/invites?$params")
+                .invites
+                .map { invite -> invite.withFallbackInviteUserId(normalizedUserId) }
+            cacheInvitesForUser(
+                userId = normalizedUserId,
+                type = normalizedType,
+                invites = invites,
+            )
+            invites
+        }.recoverCatching { throwable ->
+            val cachedInvites = getCachedInvitesForUser(
+                userId = normalizedUserId,
+                type = normalizedType,
+            )
+            if (cachedInvites.isNotEmpty()) cachedInvites else throw throwable
+        }
     }
 
     override suspend fun acceptInvite(inviteId: String): Result<Unit> = runCatching {
         val normalizedInviteId = inviteId.trim().takeIf(String::isNotBlank) ?: error("Invite id is required")
         api.postNoResponse("api/invites/${normalizedInviteId.encodeURLQueryComponent()}/accept")
+        deleteCachedInvite(normalizedInviteId)
     }
 
     override suspend fun declineInvite(inviteId: String): Result<Unit> = runCatching {
         val normalizedInviteId = inviteId.trim().takeIf(String::isNotBlank) ?: error("Invite id is required")
         api.postNoResponse("api/invites/${normalizedInviteId.encodeURLQueryComponent()}/decline")
+        updateCachedInviteStatus(normalizedInviteId, "DECLINED")
     }
 
     override suspend fun isCurrentUserChild(minorAgeThreshold: Int): Result<Boolean> = runCatching {
@@ -1584,7 +1605,49 @@ class UserRepository(
             getChatTermsConsentState()
         }
     }
+
+    private suspend fun cacheInvitesForUser(
+        userId: String,
+        type: String?,
+        invites: List<Invite>,
+    ) {
+        runCatching {
+            databaseService.getInviteDao.replaceInvitesForUser(
+                userId = userId,
+                type = type,
+                invites = invites.map { invite -> invite.withFallbackInviteUserId(userId) },
+            )
+        }.onFailure { throwable ->
+            Napier.w("Failed to cache invites for user $userId: ${throwable.message}")
+        }
+    }
+
+    private suspend fun getCachedInvitesForUser(userId: String, type: String?): List<Invite> =
+        runCatching {
+            databaseService.getInviteDao.getInvitesForUser(userId, type)
+        }.onFailure { throwable ->
+            Napier.w("Failed to read cached invites for user $userId: ${throwable.message}")
+        }.getOrDefault(emptyList())
+
+    private suspend fun deleteCachedInvite(inviteId: String) {
+        runCatching {
+            databaseService.getInviteDao.deleteInviteById(inviteId)
+        }.onFailure { throwable ->
+            Napier.w("Failed to delete cached invite $inviteId: ${throwable.message}")
+        }
+    }
+
+    private suspend fun updateCachedInviteStatus(inviteId: String, status: String) {
+        runCatching {
+            databaseService.getInviteDao.updateInviteStatus(inviteId, status)
+        }.onFailure { throwable ->
+            Napier.w("Failed to update cached invite $inviteId: ${throwable.message}")
+        }
+    }
 }
+
+private fun Invite.withFallbackInviteUserId(userId: String): Invite =
+    if (this.userId.isNullOrBlank()) copy(userId = userId) else this
 
 @Serializable
 private data class SocialEmptyRequestDto(

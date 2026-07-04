@@ -54,6 +54,15 @@ extension URL {
         }
 
         let queryItems = URLComponents(url: self, resolvingAgainstBaseURL: false)?.queryItems
+        let queryScreen = queryItems?
+            .first(where: { $0.name.caseInsensitiveCompare("screen") == .orderedSame })?
+            .value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if effectiveSegments.isInviteRoute || queryScreen == "invites" {
+            return RootComponent.DeepLinkNavInvites()
+        }
+
         let queryEventId = queryItems?
             .first(where: { $0.name == "eventId" })?
             .value?
@@ -114,5 +123,17 @@ extension URL {
         default:
             return nil
         }
+    }
+}
+
+private extension Array where Element == String {
+    var isInviteRoute: Bool {
+        let segments = map { $0.lowercased() }
+        guard let first = segments.first else { return false }
+        let second = segments.count > 1 ? segments[1] : nil
+        return first == "invite"
+            || first == "invites"
+            || first == "invitations"
+            || (first == "profile" && (second == "invite" || second == "invites" || second == "invitations"))
     }
 }

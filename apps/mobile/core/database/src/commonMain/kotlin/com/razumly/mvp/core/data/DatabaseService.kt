@@ -7,6 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.EventDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventParticipantManagementDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
+import com.razumly.mvp.core.data.dataTypes.daos.InviteDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchOperationOutboxDao
 import com.razumly.mvp.core.data.dataTypes.daos.MessageDao
@@ -32,6 +33,8 @@ interface DatabaseService {
     val getRefundRequestDao: RefundRequestDao
     val getDiscountDao: DiscountDao
         get() = error("DiscountDao is not configured.")
+    val getInviteDao: InviteDao
+        get() = error("InviteDao is not configured.")
 }
 
 typealias MVPDatabaseService = com.razumly.mvp.core.db.MVPDatabaseService

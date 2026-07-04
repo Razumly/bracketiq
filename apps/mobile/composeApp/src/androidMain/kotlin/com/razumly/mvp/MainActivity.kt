@@ -52,15 +52,18 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         if (redirectWearLaunchIfNeeded()) return
 
+        val initialNotificationPayload = intent.extractNotificationPayload()
+        val initialDeepLinkNav = intent.extractDeepLinkNav()
         NotifierManager.onCreateOrOnNewIntent(intent)
         Napier.d(tag = "intent", message = intent.data.toString())
         rootComponent = handleDeepLink { uri ->
-            val deepLinkNav = uri?.extractDeepLinkNav()
+            val deepLinkNav = uri?.extractDeepLinkNav() ?: initialDeepLinkNav
             Napier.d(tag = "DeepLink", message = "Extracted DeepLinkNav: $deepLinkNav")
             retainedComponent("RootRetainedComponent") {
                 getKoin().get<RootComponent> { parametersOf(it, deepLinkNav) }
             }
         } ?: return
+        rootComponent.handleNotificationPayload(initialNotificationPayload)
 
         lifecycleScope.launch {
             rootComponent.isStartupInProgress.collect { inProgress ->
@@ -102,19 +105,15 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         NotifierManager.onCreateOrOnNewIntent(intent)
         Napier.d(tag = "intent", message = intent.data.toString())
+        rootComponent.handleNotificationPayload(intent.extractNotificationPayload())
 
         // Handle deep links when app is already open
-        intent.data?.let { uri ->
-            Napier.d(tag = "DeepLink", message = "Received deep link in onNewIntent: $uri")
-            val deepLinkNav = uri.extractDeepLinkNav()
-            if (deepLinkNav != null) {
-                Napier.d(tag = "DeepLink", message = "Extracted DeepLinkNav: $deepLinkNav")
-                rootComponent.handleDeepLink(deepLinkNav)
-            } else {
-                Napier.w(tag = "DeepLink", message = "Failed to extract DeepLinkNav from URI: $uri")
-            }
-        } ?: run {
-            Napier.d(tag = "DeepLink", message = "No URI data in intent")
+        val deepLinkNav = intent.extractDeepLinkNav()
+        if (deepLinkNav != null) {
+            Napier.d(tag = "DeepLink", message = "Extracted DeepLinkNav from intent: $deepLinkNav")
+            rootComponent.handleDeepLink(deepLinkNav)
+        } else {
+            Napier.d(tag = "DeepLink", message = "No deep link data in intent")
         }
     }
 
@@ -165,6 +164,39 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun Intent.extractDeepLinkNav(): DeepLinkNav? {
+        data?.extractDeepLinkNav()?.let { return it }
+
+        val payload = extractNotificationPayload()
+        val deepLink = payload.normalizedPayloadValue("deepLink")
+            ?: payload.normalizedPayloadValue("url")
+            ?: payload.normalizedPayloadValue("link")
+        deepLink?.let { value ->
+            runCatching { Uri.parse(value).extractDeepLinkNav() }
+                .getOrNull()
+                ?.let { return it }
+        }
+
+        return if (payload.isInviteNotificationPayload()) {
+            DeepLinkNav.Invites
+        } else {
+            null
+        }
+    }
+
+    private fun Intent.extractNotificationPayload(): Map<String, String> {
+        val extras = extras ?: return emptyMap()
+        return extras.keySet().mapNotNull { key ->
+            val normalizedKey = key.trim()
+            val normalizedValue = extras.get(key)?.toString()?.trim()?.takeIf(String::isNotBlank)
+            if (normalizedKey.isBlank() || normalizedValue == null) {
+                null
+            } else {
+                normalizedKey to normalizedValue
+            }
+        }.toMap()
+    }
+
     private fun Uri.extractDeepLinkNav(): DeepLinkNav? {
         val pathSegments = pathSegments.filter { it.isNotBlank() }
         Napier.d(tag = "DeepLink", message = "Received URI: $this")
@@ -187,6 +219,14 @@ class MainActivity : ComponentActivity() {
             segmentsWithHost
         }
         Napier.d(tag = "DeepLink", message = "Effective segments: $effectiveSegments")
+
+        if (
+            effectiveSegments.isInviteRoute() ||
+            getQueryParameter("screen")?.equals("invites", ignoreCase = true) == true
+        ) {
+            Napier.d(tag = "DeepLink", message = "Navigating to Invites")
+            return DeepLinkNav.Invites
+        }
 
         val queryEventId = getQueryParameter("eventId")?.trim().orEmpty()
         val queryMatchId = getQueryParameter("matchId")?.trim().orEmpty()
@@ -270,5 +310,30 @@ class MainActivity : ComponentActivity() {
                 null
             }
         }
+    }
+
+    private fun List<String>.isInviteRoute(): Boolean {
+        val segments = map { it.lowercase() }
+        val first = segments.firstOrNull() ?: return false
+        val second = segments.getOrNull(1)
+        return first == "invite" ||
+            first == "invites" ||
+            first == "invitations" ||
+            (first == "profile" && (second == "invite" || second == "invites" || second == "invitations"))
+    }
+
+    private fun Map<String, String>.normalizedPayloadValue(key: String): String? =
+        this[key]?.trim()?.takeIf(String::isNotBlank)
+            ?: entries.firstOrNull { (candidate, value) ->
+                candidate.equals(key, ignoreCase = true) && value.trim().isNotBlank()
+            }?.value?.trim()
+
+    private fun Map<String, String>.isInviteNotificationPayload(): Boolean {
+        val notificationType = normalizedPayloadValue("notificationType")?.lowercase()
+        val inviteId = normalizedPayloadValue("inviteId")
+        val deepLink = normalizedPayloadValue("deepLink")?.lowercase()
+        return !inviteId.isNullOrBlank() ||
+            notificationType == "invitations" ||
+            deepLink?.contains("invites") == true
     }
 }

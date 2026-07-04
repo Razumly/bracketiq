@@ -4,11 +4,14 @@ import com.mmk.kmpnotifier.notification.NotifierManager
 import com.mmk.kmpnotifier.notification.PayloadData
 import com.razumly.mvp.chat.data.IMessageRepository
 import com.razumly.mvp.core.data.CurrentUserDataSource
+import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.AuthResponseDto
+import com.razumly.mvp.core.network.dto.InvitesResponseDto
 import com.razumly.mvp.core.network.dto.MessagingTopicMessageRequestDto
 import com.razumly.mvp.core.network.dto.MessagingTopicSubscriptionDebugResponseDto
 import com.razumly.mvp.core.network.dto.MessagingTopicSubscriptionRequestDto
@@ -81,6 +84,7 @@ interface IPushNotificationsRepository {
     suspend fun addDeviceAsTarget(): Result<Unit>
     suspend fun removeDeviceAsTarget(): Result<Unit>
     suspend fun getDeviceTargetDebugStatus(syncBeforeCheck: Boolean = false): Result<PushDeviceTargetDebugStatus>
+    fun handleNotificationPayload(data: Map<String, String>) {}
 }
 
 data class PushDeviceTargetDebugStatus(
@@ -102,6 +106,7 @@ class PushNotificationsRepository(
     private val userDataSource: CurrentUserDataSource,
     private val api: MvpApiClient,
     private val messageRepository: IMessageRepository,
+    private val databaseService: DatabaseService,
 ) : IPushNotificationsRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pushTokenState =
@@ -132,6 +137,7 @@ class PushNotificationsRepository(
 
         override fun onNotificationClicked(data: PayloadData) {
             scope.launch {
+                cacheInviteNotificationPayloadIfNeeded(data.toStringPayloadMap())
                 Napier.d(
                     tag = "PushNotificationsRepository",
                     message = "Notification clicked: $data"
@@ -143,6 +149,8 @@ class PushNotificationsRepository(
             title: String?, body: String?, data: PayloadData
         ) {
             scope.launch {
+                val payloadData = data.toStringPayloadMap()
+                cacheInviteNotificationPayloadIfNeeded(payloadData)
                 val normalizedTopicId =
                     data["topicId"]?.toString()?.trim()?.takeIf(String::isNotBlank)
                         ?: data["chatId"]?.toString()?.trim()?.takeIf(String::isNotBlank)
@@ -306,6 +314,12 @@ class PushNotificationsRepository(
         activeChatId = chatGroupId
             ?.trim()
             ?.takeIf(String::isNotBlank)
+    }
+
+    override fun handleNotificationPayload(data: Map<String, String>) {
+        scope.launch {
+            cacheInviteNotificationPayloadIfNeeded(data.normalizedPayloadMap())
+        }
     }
 
     override suspend fun addDeviceAsTarget(): Result<Unit> = runCatching {
@@ -589,6 +603,80 @@ class PushNotificationsRepository(
         return userIdFromTopicId(cachedTarget)
     }
 
+    private suspend fun cacheInviteNotificationPayloadIfNeeded(data: Map<String, String>) {
+        if (!data.isInviteNotificationPayload()) return
+
+        val inviteId = data.normalizedPayloadValue("inviteId")
+        if (inviteId.isNullOrBlank()) {
+            Napier.w(
+                tag = "PushNotificationsRepository",
+                message = "Invite notification payload was missing inviteId."
+            )
+            return
+        }
+
+        val resolvedUserId = data.normalizedPayloadValue("userId")
+            ?: resolveCurrentOrCachedPushUserId()
+        val invite = Invite(
+            id = inviteId,
+            type = data.inviteTypeFromPayload(),
+            email = data.normalizedPayloadValue("email").orEmpty(),
+            status = data.normalizedPayloadValue("status") ?: "PENDING",
+            eventId = data.normalizedPayloadValue("eventId"),
+            organizationId = data.normalizedPayloadValue("organizationId"),
+            teamId = data.normalizedPayloadValue("teamId"),
+            userId = resolvedUserId,
+            createdBy = data.normalizedPayloadValue("createdBy"),
+            firstName = data.normalizedPayloadValue("firstName"),
+            lastName = data.normalizedPayloadValue("lastName"),
+            childUserId = data.normalizedPayloadValue("childUserId"),
+            childFirstName = data.normalizedPayloadValue("childFirstName"),
+            childLastName = data.normalizedPayloadValue("childLastName"),
+            childFullName = data.normalizedPayloadValue("childFullName"),
+        )
+
+        runCatching {
+            databaseService.getInviteDao.upsertInvite(invite)
+        }.onFailure { throwable ->
+            Napier.w(
+                tag = "PushNotificationsRepository",
+                message = "Failed to cache invite notification $inviteId: ${throwable.message}"
+            )
+        }
+
+        if (!resolvedUserId.isNullOrBlank()) {
+            refreshInviteCacheFromBackendIfPossible(resolvedUserId)
+        }
+    }
+
+    private suspend fun refreshInviteCacheFromBackendIfPossible(userId: String) {
+        if (!ensureAuthTokenAvailableForPushSync()) return
+
+        runCatching {
+            val params = "userId=${userId.encodeURLQueryComponent()}"
+            api.get<InvitesResponseDto>("api/invites?$params").invites
+        }.onSuccess { invites ->
+            val normalizedInvites = invites.map { invite ->
+                if (invite.userId.isNullOrBlank()) invite.copy(userId = userId) else invite
+            }
+            if (normalizedInvites.isNotEmpty()) {
+                runCatching {
+                    databaseService.getInviteDao.upsertInvites(normalizedInvites)
+                }.onFailure { throwable ->
+                    Napier.w(
+                        tag = "PushNotificationsRepository",
+                        message = "Failed to cache refreshed invites for user $userId: ${throwable.message}"
+                    )
+                }
+            }
+        }.onFailure { throwable ->
+            Napier.w(
+                tag = "PushNotificationsRepository",
+                message = "Failed to refresh invites from push for user $userId: ${throwable.message}"
+            )
+        }
+    }
+
     private suspend fun refreshChatMessagesFromPushIfNeeded(topicId: String?) {
         val chatGroupId = topicId.toChatGroupTopicIdOrNull() ?: return
         messageRepository.getMessagesInChatGroup(chatGroupId).onFailure { error ->
@@ -639,5 +727,56 @@ class PushNotificationsRepository(
         const val DEFERRED_TOKEN_SYNC_INTERVAL_MS = 2_000L
         const val DEVICE_TARGET_SYNC_ATTEMPTS = 3
         const val DEVICE_TARGET_SYNC_BASE_DELAY_MS = 1_500L
+    }
+}
+
+private fun PayloadData.toStringPayloadMap(): Map<String, String> =
+    entries.mapNotNull { (key, value) ->
+        val normalizedKey = key.trim()
+        val normalizedValue = value?.toString()?.trim()?.takeIf(String::isNotBlank)
+        if (normalizedKey.isBlank() || normalizedValue == null) {
+            null
+        } else {
+            normalizedKey to normalizedValue
+        }
+    }.toMap()
+
+private fun Map<String, String>.normalizedPayloadMap(): Map<String, String> =
+    mapNotNull { (key, value) ->
+        val normalizedKey = key.trim()
+        val normalizedValue = value.trim().takeIf(String::isNotBlank)
+        if (normalizedKey.isBlank() || normalizedValue == null) {
+            null
+        } else {
+            normalizedKey to normalizedValue
+        }
+    }.toMap()
+
+private fun Map<String, String>.normalizedPayloadValue(key: String): String? =
+    this[key]?.trim()?.takeIf(String::isNotBlank)
+        ?: entries.firstOrNull { (candidate, value) ->
+            candidate.equals(key, ignoreCase = true) && value.trim().isNotBlank()
+        }?.value?.trim()
+
+private fun Map<String, String>.isInviteNotificationPayload(): Boolean {
+    val notificationType = normalizedPayloadValue("notificationType")?.lowercase()
+    val inviteId = normalizedPayloadValue("inviteId")
+    val deepLink = normalizedPayloadValue("deepLink")?.lowercase()
+    return !inviteId.isNullOrBlank() ||
+        notificationType == "invitations" ||
+        deepLink?.contains("invites") == true
+}
+
+private fun Map<String, String>.inviteTypeFromPayload(): String {
+    val explicitInviteType = normalizedPayloadValue("inviteType")
+        ?: normalizedPayloadValue("invite_type")
+    if (!explicitInviteType.isNullOrBlank()) {
+        return explicitInviteType.uppercase()
+    }
+
+    val genericType = normalizedPayloadValue("type")?.uppercase()
+    return when (genericType) {
+        null, "INVITE", "INVITATION", "INVITATIONS" -> "TEAM"
+        else -> genericType
     }
 }

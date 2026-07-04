@@ -421,6 +421,7 @@ enum class ProfileInviteAction {
 enum class ProfileStartDestination {
     HOME,
     MY_SCHEDULE,
+    INVITES,
 }
 
 data class ProfileTextSignaturePromptState(
@@ -634,6 +635,7 @@ private sealed class ProfileConfig {
 private fun ProfileStartDestination.toProfileConfig(): ProfileConfig = when (this) {
     ProfileStartDestination.HOME -> ProfileConfig.Home
     ProfileStartDestination.MY_SCHEDULE -> ProfileConfig.MySchedule
+    ProfileStartDestination.INVITES -> ProfileConfig.Invites
 }
 
 class DefaultProfileComponent(

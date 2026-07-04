@@ -15,6 +15,7 @@ import com.razumly.mvp.core.data.dataTypes.EventRegistrationCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventTeamComplianceCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventUserComplianceCacheEntry
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOperationOutboxEntry
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
@@ -33,6 +34,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.EventDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventParticipantManagementDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
+import com.razumly.mvp.core.data.dataTypes.daos.InviteDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchOperationOutboxDao
 import com.razumly.mvp.core.data.dataTypes.daos.MessageDao
@@ -41,7 +43,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.data.util.Converters
 
-const val MVP_DATABASE_VERSION = 29
+const val MVP_DATABASE_VERSION = 30
 
 @Database(
     entities = [
@@ -66,6 +68,7 @@ const val MVP_DATABASE_VERSION = 29
         DiscountOfferCacheEntry::class,
         DiscountCodeCacheEntry::class,
         DiscountTargetCacheEntry::class,
+        Invite::class,
     ],
     version = MVP_DATABASE_VERSION,
 )
@@ -85,4 +88,5 @@ abstract class MVPDatabaseService : RoomDatabase(), DatabaseService {
     abstract override val getMessageDao: MessageDao
     abstract override val getRefundRequestDao: RefundRequestDao
     abstract override val getDiscountDao: DiscountDao
+    abstract override val getInviteDao: InviteDao
 }

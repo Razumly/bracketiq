@@ -357,6 +357,7 @@ class RootComponent(
         when (deepLinkNavVal) {
             is DeepLinkNav.Event -> navigateToDeepLinkedEvent(deepLinkNavVal.eventId)
             is DeepLinkNav.Match -> navigateToDeepLinkedMatch(deepLinkNavVal.eventId, deepLinkNavVal.matchId)
+            is DeepLinkNav.Invites -> navigateToDeepLinkedInvites()
             is DeepLinkNav.Refresh -> {
                 setDefaultNavigationDirection()
                 navigation.replaceAll(AppConfig.ProfileHome)
@@ -375,6 +376,20 @@ class RootComponent(
                 _selectedPage.value = AppConfig.Search()
             }
         }
+    }
+
+    private fun navigateToDeepLinkedInvites() {
+        setDefaultNavigationDirection()
+        navigation.replaceAll(AppConfig.ProfileInvites)
+        _selectedPage.value = AppConfig.ProfileHome
+        userRepository.currentUser.value.getOrNull()?.id
+            ?.takeIf(String::isNotBlank)
+            ?.let { userId ->
+                pendingInviteCountJob?.cancel()
+                pendingInviteCountJob = scope.launch {
+                    refreshPendingInviteCount(userId)
+                }
+            }
     }
 
     private fun navigateToDeepLinkedEvent(rawEventId: String) {
@@ -470,6 +485,10 @@ class RootComponent(
         }
     }
 
+    fun handleNotificationPayload(data: Map<String, String>) {
+        pushNotificationsRepository.handleNotificationPayload(data)
+    }
+
     fun onTabSelected(page: AppConfig) {
         setTabNavigationDirection(from = _selectedPage.value, to = page)
         _selectedPage.value = page
@@ -479,6 +498,7 @@ class RootComponent(
             is AppConfig.Create -> navigation.replaceAll(AppConfig.Create())
             AppConfig.Schedule -> navigation.replaceAll(AppConfig.Schedule)
             AppConfig.ProfileHome -> navigation.replaceAll(AppConfig.ProfileHome)
+            AppConfig.ProfileInvites -> navigation.replaceAll(AppConfig.ProfileInvites)
             else -> {}
         }
     }
@@ -866,6 +886,7 @@ class RootComponent(
         AppConfig.ChatList -> 1
         AppConfig.Schedule -> 2
         AppConfig.ProfileHome -> 3
+        AppConfig.ProfileInvites -> 3
         else -> null
     }
 
@@ -928,6 +949,16 @@ class RootComponent(
                     componentContext,
                     this@RootComponent,
                     ProfileStartDestination.HOME,
+                )
+            }
+        )
+
+        AppConfig.ProfileInvites -> Child.Profile(
+            _koin.get {
+                parametersOf(
+                    componentContext,
+                    this@RootComponent,
+                    ProfileStartDestination.INVITES,
                 )
             }
         )
@@ -995,6 +1026,7 @@ class RootComponent(
     sealed class DeepLinkNav {
         data class Event(val eventId: String) : DeepLinkNav()
         data class Match(val eventId: String, val matchId: String) : DeepLinkNav()
+        data object Invites : DeepLinkNav()
         data object Refresh : DeepLinkNav()
         data object Return : DeepLinkNav()
     }

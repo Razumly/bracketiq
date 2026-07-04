@@ -57,6 +57,20 @@ val MIGRATION_28_29_EVENT_DATE_DISPLAY = object : Migration(28, 29) {
     }
 }
 
+val MIGRATION_29_30_INVITES_CACHE = object : Migration(29, 30) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        migrationSql29To30.forEach(db::execSQL)
+    }
+
+    override fun migrate(connection: SQLiteConnection) {
+        migrationSql29To30.forEach { sql ->
+            connection.prepare(sql).use { statement ->
+                statement.step()
+            }
+        }
+    }
+}
+
 val MIGRATION_80_81 = object : Migration(80, 81) {
     override fun migrate(db: SupportSQLiteDatabase) {
         migrationSql80To81.forEach(db::execSQL)
@@ -188,6 +202,31 @@ private val migrationSql28To29 = listOf(
     "ALTER TABLE `Event` ADD COLUMN `scheduleText` TEXT",
     "ALTER TABLE `Event` ADD COLUMN `dateDisplayMode` TEXT",
     "ALTER TABLE `Event` ADD COLUMN `dateDisplayText` TEXT",
+)
+
+private val migrationSql29To30 = listOf(
+    """
+    CREATE TABLE IF NOT EXISTS `Invite` (
+        `type` TEXT NOT NULL,
+        `email` TEXT NOT NULL,
+        `status` TEXT,
+        `staffTypes` TEXT NOT NULL,
+        `eventId` TEXT,
+        `organizationId` TEXT,
+        `teamId` TEXT,
+        `userId` TEXT,
+        `createdBy` TEXT,
+        `firstName` TEXT,
+        `lastName` TEXT,
+        `childUserId` TEXT,
+        `childFirstName` TEXT,
+        `childLastName` TEXT,
+        `childFullName` TEXT,
+        `viewerCanAcceptForChild` INTEGER NOT NULL,
+        `id` TEXT NOT NULL,
+        PRIMARY KEY(`id`)
+    )
+    """.trimIndent(),
 )
 
 private val migrationSql81To82 = listOf(

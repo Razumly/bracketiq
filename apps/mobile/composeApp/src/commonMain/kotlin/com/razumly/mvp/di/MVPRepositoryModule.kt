@@ -44,7 +44,7 @@ val MVPRepositoryModule = module {
         MatchRepository(get(), get(), get())
     } bind IMatchRepository::class
     single {
-        PushNotificationsRepository(get(), get(), get())
+        PushNotificationsRepository(get(), get(), get(), get())
     } bind IPushNotificationsRepository::class
     single {
         MessageRepository(get(), get())

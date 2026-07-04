@@ -10,6 +10,7 @@ import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.MIGRATION_1_2_NO_OP
 import com.razumly.mvp.core.data.MIGRATION_2_3_MATCH_START_NULLABLE
 import com.razumly.mvp.core.data.MIGRATION_28_29_EVENT_DATE_DISPLAY
+import com.razumly.mvp.core.data.MIGRATION_29_30_INVITES_CACHE
 import com.razumly.mvp.core.data.MIGRATION_3_4_USER_PRIVACY_FIELDS
 import com.razumly.mvp.core.db.MVP_DATABASE_VERSION
 import com.razumly.mvp.core.db.MVPDatabaseService
@@ -38,6 +39,7 @@ actual val roomDBModule = module {
                     MIGRATION_2_3_MATCH_START_NULLABLE,
                     MIGRATION_3_4_USER_PRIVACY_FIELDS,
                     MIGRATION_28_29_EVENT_DATE_DISPLAY,
+                    MIGRATION_29_30_INVITES_CACHE,
                 )
                 .addCallback(object : RoomDatabase.Callback() {
                     override fun onCreate(connection: SQLiteConnection) {

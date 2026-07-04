@@ -176,6 +176,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
+        if let deepLinkUrl = notificationDeepLinkUrl(from: response.notification.request.content.userInfo) {
+            DispatchQueue.main.async {
+                AppDelegate.pendingDeepLink = deepLinkUrl
+                NotificationCenter.default.post(name: .deepLinkReceived, object: deepLinkUrl)
+            }
+        }
         completionHandler()
     }
 
@@ -199,6 +205,28 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             return
         }
         UserDefaults.standard.removeObject(forKey: AppDelegate.fcmTokenDefaultsKey)
+    }
+
+    private func notificationDeepLinkUrl(from userInfo: [AnyHashable: Any]) -> URL? {
+        let payload = userInfo.reduce(into: [String: String]()) { result, entry in
+            guard let key = entry.key as? String else { return }
+            let normalizedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalizedValue = "\(entry.value)".trimmingCharacters(in: .whitespacesAndNewlines)
+            if !normalizedKey.isEmpty && !normalizedValue.isEmpty {
+                result[normalizedKey] = normalizedValue
+            }
+        }
+
+        if let deepLink = payload.normalizedValue(for: "deepLink"),
+           let url = URL(string: deepLink) {
+            return url
+        }
+
+        if payload.isInviteNotificationPayload {
+            return URL(string: "mvp://profile/invites")
+        }
+
+        return nil
     }
 
     private func evaluateNotificationAuthorization(application: UIApplication) {
@@ -255,6 +283,27 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
 extension Notification.Name {
     static let deepLinkReceived = Notification.Name("deepLinkReceived")
+}
+
+private extension Dictionary where Key == String, Value == String {
+    func normalizedValue(for key: String) -> String? {
+        if let direct = self[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !direct.isEmpty {
+            return direct
+        }
+        return first { entry in
+            entry.key.caseInsensitiveCompare(key) == .orderedSame &&
+                !entry.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }?.value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var isInviteNotificationPayload: Bool {
+        let notificationType = normalizedValue(for: "notificationType")?.lowercased()
+        let inviteId = normalizedValue(for: "inviteId")
+        let deepLink = normalizedValue(for: "deepLink")?.lowercased()
+        return inviteId?.isEmpty == false ||
+            notificationType == "invitations" ||
+            deepLink?.contains("invites") == true
+    }
 }
 
 @main
