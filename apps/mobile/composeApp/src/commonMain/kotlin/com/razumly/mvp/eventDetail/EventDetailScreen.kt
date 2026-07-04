@@ -2324,6 +2324,170 @@ fun EventDetailScreen(
                                         )
                                     }
                                 },
+                                heroTopControls = {
+                                    if (!showMap) {
+                                        Box(
+                                            Modifier.padding(top = 64.dp, start = 16.dp)
+                                                .align(Alignment.TopStart)
+                                        ) {
+                                            IconButton(
+                                                { component.backCallback.onBack() },
+                                                modifier = Modifier.background(
+                                                    Color(imageScheme.surface).copy(alpha = 0.7f),
+                                                    shape = CircleShape
+                                                ),
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Close,
+                                                    contentDescription = "Close",
+                                                    tint = Color(imageScheme.onSurface)
+                                                )
+                                            }
+                                        }
+                                        Box(
+                                            modifier = Modifier.align(Alignment.TopEnd)
+                                                .padding(top = 64.dp, end = 16.dp)
+                                        ) {
+                                            IconButton(
+                                                onClick = { showOptionsDropdown = true },
+                                                modifier = Modifier.background(
+                                                    Color(imageScheme.surface).copy(alpha = 0.7f),
+                                                    shape = CircleShape
+                                                )
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.MoreVert,
+                                                    contentDescription = "More options",
+                                                    tint = Color(imageScheme.onSurface)
+                                                )
+                                            }
+
+                                            DropdownMenu(
+                                                expanded = showOptionsDropdown,
+                                                onDismissRequest = { showOptionsDropdown = false }) {
+                                                // Edit option
+                                                if (canEditEventDetails) {
+                                                    DropdownMenuItem(
+                                                        text = { Text("Edit") }, onClick = {
+                                                        component.startEditingEvent()
+                                                        showOptionsDropdown = false
+                                                    }, leadingIcon = {
+                                                        Icon(Icons.Default.Edit, contentDescription = null)
+                                                    }, enabled = canEditEventDetails
+                                                    )
+                                                }
+
+                                                if (canCreateTemplateFromCurrentEvent) {
+                                                    DropdownMenuItem(
+                                                        text = { Text("Create Template") },
+                                                        onClick = {
+                                                            component.createTemplateFromCurrentEvent()
+                                                            showOptionsDropdown = false
+                                                        },
+                                                        leadingIcon = {
+                                                            Icon(Icons.Default.Check, contentDescription = null)
+                                                        },
+                                                    )
+                                                }
+
+                                                if (isHost && joinOptions.isNotEmpty()) {
+                                                    DropdownMenuItem(
+                                                        text = { Text(if (isAffiliateEvent) "Register on website" else "Join Event") },
+                                                        onClick = {
+                                                            if (isAffiliateEvent) {
+                                                                component.joinEvent()
+                                                            } else {
+                                                                showJoinOptionsSheet = true
+                                                            }
+                                                            showOptionsDropdown = false
+                                                        },
+                                                        leadingIcon = {
+                                                            Icon(Icons.Default.Add, contentDescription = null)
+                                                        },
+                                                    )
+                                                }
+
+                                                DropdownMenuItem(text = { Text("Share") }, onClick = {
+                                                    component.shareEvent()
+                                                    showOptionsDropdown = false
+                                                }, leadingIcon = {
+                                                    Icon(Icons.Default.Share, contentDescription = null)
+                                                })
+
+                                                if (canShowQrCode) {
+                                                    DropdownMenuItem(
+                                                        text = { Text("QR Code") },
+                                                        onClick = {
+                                                            showQrCodeDialog = true
+                                                            showOptionsDropdown = false
+                                                        },
+                                                        leadingIcon = {
+                                                            Icon(Icons.Default.QrCode, contentDescription = null)
+                                                        },
+                                                    )
+                                                }
+
+                                                if (!isHost) {
+                                                    DropdownMenuItem(
+                                                        text = { Text("Report Event") },
+                                                        onClick = {
+                                                            showReportEventDialog = true
+                                                            showOptionsDropdown = false
+                                                        },
+                                                        leadingIcon = {
+                                                            Icon(Icons.Default.Close, contentDescription = null)
+                                                        },
+                                                    )
+                                                }
+
+                                                if (canRequestRefundAfterStart || canLeaveEvent) {
+                                                    DropdownMenuItem(
+                                                        text = { Text(leaveOrRefundActionLabel) },
+                                                        onClick = {
+                                                            showOptionsDropdown = false
+                                                            openLeaveOrRefundAction()
+                                                        },
+                                                        leadingIcon = {
+                                                            Icon(Icons.Default.Close, contentDescription = null)
+                                                        },
+                                                    )
+                                                }
+
+                                                if (isHost) {
+                                                    DropdownMenuItem(
+                                                        text = { Text("Notify Players") },
+                                                        onClick = {
+                                                            showNotifyDialog = true
+                                                            showOptionsDropdown = false
+                                                        },
+                                                        leadingIcon = {
+                                                            Icon(
+                                                                Icons.AutoMirrored.Filled.Announcement,
+                                                                contentDescription = null,
+                                                            )
+                                                        })
+                                                }
+
+                                                if (canDeleteEvent) {
+                                                    DropdownMenuItem(
+                                                        text = { Text("Delete") }, onClick = {
+                                                        showDeleteConfirmation = true
+                                                        showOptionsDropdown = false
+                                                    }, leadingIcon = {
+                                                        Icon(
+                                                            Icons.Default.Delete,
+                                                            contentDescription = null,
+                                                            tint = MaterialTheme.colorScheme.error
+                                                        )
+                                                    }, colors = MenuDefaults.itemColors(
+                                                        textColor = MaterialTheme.colorScheme.error
+                                                    )
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
                                 modifier = Modifier.guideTarget(EventGuideTargets.OverviewHeader),
                             ) { isValid ->
                             val buttonColors = ButtonColors(
@@ -2486,168 +2650,6 @@ fun EventDetailScreen(
                             }
                         }
 
-                        if (!showMap) {
-                            Box(
-                                Modifier.padding(top = 64.dp, start = 16.dp)
-                                    .align(Alignment.TopStart)
-                            ) {
-                                IconButton(
-                                    { component.backCallback.onBack() },
-                                    modifier = Modifier.background(
-                                        Color(imageScheme.surface).copy(alpha = 0.7f),
-                                        shape = CircleShape
-                                    ),
-                                ) {
-                                    Icon(
-                                        Icons.Default.Close,
-                                        contentDescription = "Close",
-                                        tint = Color(imageScheme.onSurface)
-                                    )
-                                }
-                            }
-                            Box(
-                                modifier = Modifier.align(Alignment.TopEnd)
-                                    .padding(top = 64.dp, end = 16.dp)
-                            ) {
-                                IconButton(
-                                    onClick = { showOptionsDropdown = true },
-                                    modifier = Modifier.background(
-                                        Color(imageScheme.surface).copy(alpha = 0.7f),
-                                        shape = CircleShape
-                                    )
-                                ) {
-                                    Icon(
-                                        Icons.Default.MoreVert,
-                                        contentDescription = "More options",
-                                        tint = Color(imageScheme.onSurface)
-                                    )
-                                }
-
-                                DropdownMenu(
-                                    expanded = showOptionsDropdown,
-                                    onDismissRequest = { showOptionsDropdown = false }) {
-                                    // Edit option
-                                    if (canEditEventDetails) {
-                                        DropdownMenuItem(
-                                            text = { Text("Edit") }, onClick = {
-                                            component.startEditingEvent()
-                                            showOptionsDropdown = false
-                                        }, leadingIcon = {
-                                            Icon(Icons.Default.Edit, contentDescription = null)
-                                        }, enabled = canEditEventDetails
-                                        )
-                                    }
-
-                                    if (canCreateTemplateFromCurrentEvent) {
-                                        DropdownMenuItem(
-                                            text = { Text("Create Template") },
-                                            onClick = {
-                                                component.createTemplateFromCurrentEvent()
-                                                showOptionsDropdown = false
-                                            },
-                                            leadingIcon = {
-                                                Icon(Icons.Default.Check, contentDescription = null)
-                                            },
-                                        )
-                                    }
-
-                                    if (isHost && joinOptions.isNotEmpty()) {
-                                        DropdownMenuItem(
-                                            text = { Text(if (isAffiliateEvent) "Register on website" else "Join Event") },
-                                            onClick = {
-                                                if (isAffiliateEvent) {
-                                                    component.joinEvent()
-                                                } else {
-                                                    showJoinOptionsSheet = true
-                                                }
-                                                showOptionsDropdown = false
-                                            },
-                                            leadingIcon = {
-                                                Icon(Icons.Default.Add, contentDescription = null)
-                                            },
-                                        )
-                                    }
-
-                                    DropdownMenuItem(text = { Text("Share") }, onClick = {
-                                        component.shareEvent()
-                                        showOptionsDropdown = false
-                                    }, leadingIcon = {
-                                        Icon(Icons.Default.Share, contentDescription = null)
-                                    })
-
-                                    if (canShowQrCode) {
-                                        DropdownMenuItem(
-                                            text = { Text("QR Code") },
-                                            onClick = {
-                                                showQrCodeDialog = true
-                                                showOptionsDropdown = false
-                                            },
-                                            leadingIcon = {
-                                                Icon(Icons.Default.QrCode, contentDescription = null)
-                                            },
-                                        )
-                                    }
-
-                                    if (!isHost) {
-                                        DropdownMenuItem(
-                                            text = { Text("Report Event") },
-                                            onClick = {
-                                                showReportEventDialog = true
-                                                showOptionsDropdown = false
-                                            },
-                                            leadingIcon = {
-                                                Icon(Icons.Default.Close, contentDescription = null)
-                                            },
-                                        )
-                                    }
-
-                                    if (canRequestRefundAfterStart || canLeaveEvent) {
-                                        DropdownMenuItem(
-                                            text = { Text(leaveOrRefundActionLabel) },
-                                            onClick = {
-                                                showOptionsDropdown = false
-                                                openLeaveOrRefundAction()
-                                            },
-                                            leadingIcon = {
-                                                Icon(Icons.Default.Close, contentDescription = null)
-                                            },
-                                        )
-                                    }
-
-                                    if (isHost) {
-                                        DropdownMenuItem(
-                                            text = { Text("Notify Players") },
-                                            onClick = {
-                                                showNotifyDialog = true
-                                                showOptionsDropdown = false
-                                            },
-                                            leadingIcon = {
-                                                Icon(
-                                                    Icons.AutoMirrored.Filled.Announcement,
-                                                    contentDescription = null,
-                                                )
-                                            })
-                                    }
-
-                                    if (canDeleteEvent) {
-                                        DropdownMenuItem(
-                                            text = { Text("Delete") }, onClick = {
-                                            showDeleteConfirmation = true
-                                            showOptionsDropdown = false
-                                        }, leadingIcon = {
-                                            Icon(
-                                                Icons.Default.Delete,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.error
-                                            )
-                                        }, colors = MenuDefaults.itemColors(
-                                            textColor = MaterialTheme.colorScheme.error
-                                        )
-                                        )
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
                 AnimatedVisibility(

@@ -4,6 +4,7 @@ import com.razumly.mvp.core.network.userMessage
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -263,6 +264,7 @@ fun EventDetails(
     onMapRevealCenterChange: (Offset) -> Unit = {},
     onFloatingDockVisibilityChange: (Boolean) -> Unit = {},
     onValidationChange: (Boolean, List<String>) -> Unit = { _, _ -> },
+    heroTopControls: @Composable BoxScope.() -> Unit = {},
     modifier: Modifier = Modifier,
     joinButton: @Composable (isValid: Boolean) -> Unit
 ) {
@@ -2261,16 +2263,21 @@ fun EventDetails(
 
     CompositionLocalProvider(localImageScheme provides imageScheme) {
         Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-            BackgroundImage(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(heroHeight)
                     .graphicsLayer(translationY = -heroParallaxOffset),
-                imageUrl = displayImageId
-                    .takeIf(String::isNotBlank)
-                    ?.let { imageId -> getImageUrl(fileId = imageId, width = 1600, trim = true) }
-                    .orEmpty(),
-            )
+            ) {
+                BackgroundImage(
+                    modifier = Modifier.fillMaxSize(),
+                    imageUrl = displayImageId
+                        .takeIf(String::isNotBlank)
+                        ?.let { imageId -> getImageUrl(fileId = imageId, width = 1600, trim = true) }
+                        .orEmpty(),
+                )
+                heroTopControls()
+            }
             LazyColumn(
                 state = lazyListState,
                 modifier = Modifier.fillMaxSize(),
