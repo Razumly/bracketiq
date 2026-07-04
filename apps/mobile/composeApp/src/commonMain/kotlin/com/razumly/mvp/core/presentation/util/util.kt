@@ -257,7 +257,7 @@ fun getEventQrCodeUrl(eventId: String): String =
         append(getEventQrCodePath(eventId))
     }
 
-fun getImageUrl(fileId: String, width: Int? = null, height: Int? = null): String =
+fun getImageUrl(fileId: String, width: Int? = null, height: Int? = null, trim: Boolean = false): String =
     buildString {
         append(apiBaseUrl.trimEnd('/'))
         append("/api/files/")
@@ -267,6 +267,7 @@ fun getImageUrl(fileId: String, width: Int? = null, height: Int? = null): String
         val params = buildList {
             width?.let { add("w=$it") }
             height?.let { add("h=$it") }
+            if (trim) add("trim=true")
         }
         if (params.isNotEmpty()) {
             append('?')

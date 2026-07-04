@@ -80,7 +80,7 @@ private func imagePreviewURL(imageId: String?, width: Int? = nil, height: Int? =
         return URL(string: normalizedImageId)
     }
 
-    let baseURLString = UtilKt.getImageUrl(fileId: normalizedImageId, width: nil, height: nil)
+    let baseURLString = UtilKt.getImageUrl(fileId: normalizedImageId, width: nil, height: nil, trim: false)
     guard var components = URLComponents(string: baseURLString) else {
         return URL(string: baseURLString)
     }

@@ -89,7 +89,7 @@ fun EventCard(
         event.imageId.trim()
             .ifBlank { fallbackImageId?.trim().orEmpty() }
             .takeIf { it.isNotBlank() }
-            ?.let { imageId -> getImageUrl(imageId) }
+            ?.let { imageId -> getImageUrl(fileId = imageId, width = 1400, trim = true) }
     }
     var isImageReady by remember(imageModel) { mutableStateOf(imageModel == null) }
     val hazeState = rememberHazeState()
@@ -164,7 +164,7 @@ fun EventCard(
                         Modifier
                     }
                 ),
-            contentScale = ContentScale.Fit,
+            contentScale = ContentScale.Crop,
             onState = { state ->
                 isImageReady = when (state) {
                     is AsyncImagePainter.State.Loading -> false

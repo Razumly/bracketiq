@@ -2266,7 +2266,10 @@ fun EventDetails(
                     .fillMaxWidth()
                     .height(heroHeight)
                     .graphicsLayer(translationY = -heroParallaxOffset),
-                imageUrl = displayImageId.takeIf(String::isNotBlank)?.let(::getImageUrl).orEmpty(),
+                imageUrl = displayImageId
+                    .takeIf(String::isNotBlank)
+                    ?.let { imageId -> getImageUrl(fileId = imageId, width = 1600, trim = true) }
+                    .orEmpty(),
             )
             LazyColumn(
                 state = lazyListState,
@@ -2792,7 +2795,7 @@ fun EventDetails(
 
         isColorLoaded = false
         onEditEvent { copy(imageId = imageId) }
-        val imageUrl = Url(getImageUrl(imageId))
+        val imageUrl = Url(getImageUrl(fileId = imageId, width = 1600, trim = true))
         runCatching {
             loader.load(imageUrl)
             dominantColorState.updateFrom(imageUrl)

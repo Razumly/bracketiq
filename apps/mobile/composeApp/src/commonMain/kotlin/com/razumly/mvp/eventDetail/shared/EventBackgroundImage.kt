@@ -18,7 +18,7 @@ internal fun BackgroundImage(
             AsyncImage(
                 model = imageUrl,
                 contentDescription = "Event Image",
-                contentScale = ContentScale.Fit,
+                contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
         }
