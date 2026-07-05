@@ -42,10 +42,9 @@ class TeamInviteDialogUiTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun free_agent_tab_prechecks_source_event_teams_and_sends_selected_ids() {
+    fun free_agent_tab_sends_selected_user() {
         var invitedUserId: String? = null
         var invitedEmail: String? = "unset"
-        var invitedEventTeamIds: List<String> = emptyList()
 
         composeRule.setContent {
             MaterialTheme {
@@ -58,10 +57,9 @@ class TeamInviteDialogUiTest {
                     inviteFreeAgentContext = inviteContext(),
                     onSearch = {},
                     onDismiss = {},
-                    onInvite = { selectedUser, email, eventTeamIds ->
+                    onInvite = { selectedUser, email ->
                         invitedUserId = selectedUser?.id
                         invitedEmail = email
-                        invitedEventTeamIds = eventTeamIds
                     },
                 )
             }
@@ -76,14 +74,12 @@ class TeamInviteDialogUiTest {
 
         assertEquals("user-free-agent", invitedUserId)
         assertNull(invitedEmail)
-        assertEquals(listOf("event-team-1"), invitedEventTeamIds)
     }
 
     @Test
-    fun invite_by_email_tab_sends_email_and_checked_event_team_ids() {
+    fun invite_by_email_tab_sends_email() {
         var invitedUserId: String? = "unset"
         var invitedEmail: String? = null
-        var invitedEventTeamIds: List<String> = emptyList()
 
         composeRule.setContent {
             MaterialTheme {
@@ -96,10 +92,9 @@ class TeamInviteDialogUiTest {
                     inviteFreeAgentContext = inviteContext(),
                     onSearch = {},
                     onDismiss = {},
-                    onInvite = { selectedUser, email, eventTeamIds ->
+                    onInvite = { selectedUser, email ->
                         invitedUserId = selectedUser?.id
                         invitedEmail = email
-                        invitedEventTeamIds = eventTeamIds
                     },
                 )
             }
@@ -107,12 +102,10 @@ class TeamInviteDialogUiTest {
 
         composeRule.onNodeWithText("Invite by Email").performClick()
         composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("new.player@example.com")
-        composeRule.onNodeWithContentDescription("Toggle Summer League Test team").performClick()
         composeRule.onNodeWithText("Send Player Invite").performClick()
 
         assertNull(invitedUserId)
         assertEquals("new.player@example.com", invitedEmail)
-        assertEquals(listOf("event-team-1"), invitedEventTeamIds)
     }
 
     @Test
@@ -133,7 +126,7 @@ class TeamInviteDialogUiTest {
                     playerCapacityMessage = capacityMessage,
                     onSearch = {},
                     onDismiss = {},
-                    onInvite = { _, _, _ -> inviteSubmitted = true },
+                    onInvite = { _, _ -> inviteSubmitted = true },
                 )
             }
         }
