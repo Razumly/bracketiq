@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -41,6 +42,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -2244,6 +2246,16 @@ fun EventDetails(
             }
         }
     }
+    val contentBackdropOffset by remember(lazyListState, heroSpacerHeightPx) {
+        derivedStateOf {
+            if (lazyListState.firstVisibleItemIndex == 0) {
+                (heroSpacerHeightPx - lazyListState.firstVisibleItemScrollOffset.toFloat())
+                    .coerceIn(0f, heroSpacerHeightPx)
+            } else {
+                0f
+            }
+        }
+    }
     val displayImageId = remember(
         editView,
         event.imageId,
@@ -2278,6 +2290,18 @@ fun EventDetails(
                 )
                 heroTopControls()
             }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer(translationY = contentBackdropOffset)
+                    .clip(
+                        RoundedCornerShape(
+                            topStart = roundedCornerSize,
+                            topEnd = roundedCornerSize,
+                        )
+                    )
+                    .background(MaterialTheme.colorScheme.surface)
+            )
             LazyColumn(
                 state = lazyListState,
                 modifier = Modifier.fillMaxSize(),
