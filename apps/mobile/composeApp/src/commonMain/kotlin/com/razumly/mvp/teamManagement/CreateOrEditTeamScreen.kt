@@ -1367,6 +1367,14 @@ fun CreateOrEditTeamScreen(
                     inviteError = playerCapacityMessage
                     return@TeamInviteDialog
                 }
+                if (isNewTeam && inviteTarget != TeamInviteTarget.PLAYER) {
+                    inviteError = "Save the team before inviting staff."
+                    return@TeamInviteDialog
+                }
+                if (isNewTeam && selectedUser == null) {
+                    inviteError = "Save the team before inviting by email."
+                    return@TeamInviteDialog
+                }
                 if (inviteTarget == TeamInviteTarget.PLAYER && selectedUser != null) {
                     val alreadySelected = playersInTeam.any { it.id == selectedUser.id } ||
                         invitedPlayers.any { it.id == selectedUser.id }
@@ -1377,12 +1385,14 @@ fun CreateOrEditTeamScreen(
                         }
                     }
                 }
-                onInviteTeamRole?.invoke(
-                    team.team.id,
-                    selectedUser?.id,
-                    inviteType,
-                    email,
-                )
+                if (!isNewTeam) {
+                    onInviteTeamRole?.invoke(
+                        team.team.id,
+                        selectedUser?.id,
+                        inviteType,
+                        email,
+                    )
+                }
                 showSearchDialog = false
             },
         )

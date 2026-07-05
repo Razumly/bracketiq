@@ -16,7 +16,6 @@ import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleRes
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.dto.CreateInvitesRequestDto
-import com.razumly.mvp.core.network.dto.DeleteInvitesRequestDto
 import com.razumly.mvp.core.network.dto.EventComplianceDocumentCountsDto
 import com.razumly.mvp.core.network.dto.EventCompliancePaymentSummaryDto
 import com.razumly.mvp.core.network.dto.EventComplianceRequiredDocumentDto
@@ -741,13 +740,6 @@ class TeamRepository(
             saveCall = { created ->
                 databaseService.getTeamDao.upsertTeamWithRelations(created)
                 refreshCurrentUserProfileIfAffected(currentUser.id)
-
-                syncInvitesForPendingDiff(
-                    teamId = created.id,
-                    oldPending = emptyList(),
-                    newPending = created.pending,
-                    createdBy = created.captainId,
-                )
             },
             onReturn = { created ->
                 AnalyticsTracker.capture(
@@ -814,19 +806,6 @@ class TeamRepository(
                         removedPlayers.forEach { player -> removePlayerFromTeam(newData, player) }
                     }
 
-                syncInvitesForPendingDiff(
-                    teamId = newData.id,
-                    oldPending = oldTeam.pending,
-                    newPending = newData.pending,
-                    createdBy = newData.captainId,
-                )
-            } else {
-                syncInvitesForPendingDiff(
-                    teamId = newData.id,
-                    oldPending = emptyList(),
-                    newPending = newData.pending,
-                    createdBy = newData.captainId,
-                )
             }
         },
         onReturn = { team -> team },
@@ -1366,53 +1345,4 @@ class TeamRepository(
         val includedFields: Set<String>,
     )
 
-    private suspend fun syncInvitesForPendingDiff(
-        teamId: String,
-        oldPending: List<String>,
-        newPending: List<String>,
-        createdBy: String,
-    ) {
-        val oldSet = oldPending.toSet()
-        val newSet = newPending.toSet()
-
-        val added = (newSet - oldSet).filter(String::isNotBlank)
-        if (added.isNotEmpty()) {
-            api.post<CreateInvitesRequestDto, InvitesResponseDto>(
-                path = "api/invites",
-                body = CreateInvitesRequestDto(
-                    invites = added.map { userId ->
-                        InviteCreateDto(
-                            type = "player",
-                            status = "pending",
-                            teamId = teamId,
-                            userId = userId,
-                            createdBy = createdBy,
-                        )
-                    }
-                ),
-            )
-
-            added.forEach { invitedUserId ->
-                pushNotificationRepository.sendUserNotification(
-                    userId = invitedUserId,
-                    title = "Team invite",
-                    body = "You have been invited to join a team.",
-                )
-            }
-        }
-
-        val removed = (oldSet - newSet).filter(String::isNotBlank)
-        if (removed.isNotEmpty()) {
-            removed.forEach { userId ->
-                api.deleteNoResponse(
-                    path = "api/invites",
-                    body = DeleteInvitesRequestDto(
-                        userId = userId,
-                        teamId = teamId,
-                        type = "player",
-                    )
-                )
-            }
-        }
-    }
 }
