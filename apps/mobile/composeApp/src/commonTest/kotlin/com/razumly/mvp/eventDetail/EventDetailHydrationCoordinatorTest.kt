@@ -194,4 +194,83 @@ class EventDetailHydrationCoordinatorTest {
             events,
         )
     }
+
+    @Test
+    fun mobile_hydration_marks_matches_loading_for_silent_initial_refresh() = runTest {
+        val coordinator = EventDetailHydrationCoordinator()
+        val events = mutableListOf<String>()
+        val event = Event(id = " event-1 ")
+        val request = coordinator.beginMobileHydration(
+            event = event,
+            showDetailsOnSuccess = false,
+            showLoading = false,
+            reportErrors = false,
+            setParticipantLoading = { loading -> events += "participant-loading:$loading" },
+            setMatchesLoading = { loading -> events += "matches-loading:$loading" },
+            showDetails = { events += "show-details" },
+        )
+
+        assertNotNull(request)
+
+        coordinator.hydrateMobileEventDetail(
+            request = request,
+            fallbackEvent = event,
+            occurrence = null,
+            isWeeklyParentEvent = { false },
+            getEvent = { eventId ->
+                events += "get:$eventId"
+                Result.success(Event(id = eventId))
+            },
+            syncCurrentUserRegistrationCacheForEvent = { eventId ->
+                events += "sync-registrations:$eventId"
+                Result.success(Unit)
+            },
+            syncEventParticipants = { targetEvent, targetOccurrence ->
+                events += "sync:${targetEvent.id}:${targetOccurrence?.slotId}"
+                Result.success(
+                    EventParticipantsSyncResult(
+                        event = targetEvent,
+                        participantCount = 5,
+                        participantCapacity = 12,
+                    )
+                )
+            },
+            refreshMatches = { eventId ->
+                events += "matches:$eventId"
+                Result.success(emptyList())
+            },
+            applyParticipantSyncResult = { result ->
+                events += "apply:${result.participantCount}"
+            },
+            applySelectedOccurrenceParticipantSummary = { targetOccurrence, required, count, capacity ->
+                events += "selected:${targetOccurrence?.slotId}:$required:$count:$capacity"
+            },
+            refreshParticipantManagementSnapshotIfNeeded = { targetEvent ->
+                events += "refresh-snapshot:${targetEvent.id}"
+            },
+            refreshParticipantComplianceIfNeeded = { targetEvent ->
+                events += "refresh-compliance:${targetEvent.id}"
+            },
+            setParticipantLoading = { loading -> events += "participant-loading:$loading" },
+            setMatchesLoading = { loading -> events += "matches-loading:$loading" },
+            showDetails = { events += "show-details" },
+            setError = { error -> events += "error:${error.message}" },
+        )
+
+        assertEquals(
+            listOf(
+                "matches-loading:true",
+                "get:event-1",
+                "sync-registrations:event-1",
+                "sync:event-1:null",
+                "apply:5",
+                "selected:null:false:5:12",
+                "refresh-snapshot:event-1",
+                "refresh-compliance:event-1",
+                "matches:event-1",
+                "matches-loading:false",
+            ),
+            events,
+        )
+    }
 }

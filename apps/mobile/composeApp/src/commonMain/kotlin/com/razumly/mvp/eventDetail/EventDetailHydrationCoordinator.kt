@@ -40,8 +40,8 @@ internal class EventDetailHydrationCoordinator {
         hydrationToken += 1
         if (showLoading) {
             setParticipantLoading(true)
-            setMatchesLoading(true)
         }
+        setMatchesLoading(true)
         return EventDetailHydrationRequest(
             eventId = eventId,
             token = hydrationToken,
@@ -279,8 +279,10 @@ internal class EventDetailHydrationCoordinator {
                 showDetails()
             }
         } finally {
-            if (request.showLoading && isCurrentHydrationRequest(request)) {
-                setParticipantLoading(false)
+            if (isCurrentHydrationRequest(request)) {
+                if (request.showLoading) {
+                    setParticipantLoading(false)
+                }
                 setMatchesLoading(false)
             }
         }
