@@ -1768,11 +1768,7 @@ private fun EventCompliancePaymentSummary.paymentStatusText(): String {
     return when {
         paymentPending -> "Payment pending"
         !hasBill -> "No bill yet"
-        isPaidInFull -> if (discountAmountCents > 0) {
-            "Paid in full (${paymentAmountBreakdown()})"
-        } else {
-            "Paid in full (${formatCents(discountedAmountCents)})"
-        }
+        isPaidInFull -> paidInFullSummary()
         else -> paymentAmountBreakdown()
     }
 }
@@ -1786,6 +1782,14 @@ private fun EventCompliancePaymentSummary.paymentAmountBreakdown(): String {
         ).joinToString(" • ")
     }
     return "${formatCents(paidAmountCents)} of ${formatCents(discountedAmountCents)} paid"
+}
+
+private fun EventCompliancePaymentSummary.paidInFullSummary(): String {
+    return if (discountAmountCents > 0) {
+        "Paid in full • ${paymentAmountBreakdown()}"
+    } else {
+        "Paid in full • ${formatCents(discountedAmountCents)}"
+    }
 }
 
 private fun discountLabel(discounts: List<BillDiscountSummary>): String {

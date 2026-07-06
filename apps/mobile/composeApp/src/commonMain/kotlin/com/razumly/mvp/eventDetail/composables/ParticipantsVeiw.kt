@@ -328,11 +328,7 @@ private fun EventCompliancePaymentSummary.paymentStatusText(cardType: Participan
         return if (cardType == ParticipantCardType.TEAM) "No team bill yet" else "No bill yet"
     }
     if (isPaidInFull) {
-        return if (discountAmountCents > 0) {
-            "Paid in full (${billPaidBreakdown()})"
-        } else {
-            "Paid in full (${formatCurrency(discountedAmountCents)})"
-        }
+        return paidInFullSummary()
     }
     val prefix = if (inheritedFromTeamBill) "Team bill" else "Bill"
     return "$prefix: ${billPaidBreakdown()}"
@@ -2389,6 +2385,14 @@ private fun EventCompliancePaymentSummary.billPaidBreakdown(): String {
         ).joinToString(" • ")
     }
     return "${formatCurrency(paidAmountCents)} of ${formatCurrency(discountedAmountCents)} paid"
+}
+
+private fun EventCompliancePaymentSummary.paidInFullSummary(): String {
+    return if (discountAmountCents > 0) {
+        "Paid in full • ${billPaidBreakdown()}"
+    } else {
+        "Paid in full • ${formatCurrency(discountedAmountCents)}"
+    }
 }
 
 private fun EventTeamBillingBillSnapshot.billPaidBreakdown(): String {
