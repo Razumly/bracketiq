@@ -44,7 +44,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.divisionPriceRangeLabel
+import com.razumly.mvp.core.data.dataTypes.displayPriceRangeLabel
 import com.razumly.mvp.core.data.dataTypes.evergreenDateDisplayLabel
 import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
 import com.razumly.mvp.core.data.dataTypes.isDraftLikeState
@@ -297,7 +297,7 @@ fun EventCard(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = event.divisionPriceRangeLabel(),
+                        text = event.displayPriceRangeLabel(),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.background,
                         maxLines = 1,

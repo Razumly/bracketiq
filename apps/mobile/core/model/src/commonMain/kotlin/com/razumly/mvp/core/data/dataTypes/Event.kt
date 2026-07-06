@@ -254,6 +254,23 @@ fun Event.divisionPriceRangeLabel(): String {
     }
 }
 
+fun Event.displayPriceRangeLabel(): String {
+    if (!isAffiliateEvent()) {
+        return divisionPriceRangeLabel()
+    }
+
+    val mergedDetails = mergedDivisionDetailsForPricing()
+    val hasKnownDivisionPrice = mergedDetails.any { detail -> detail.price != null }
+    val hasKnownEventPrice = priceCents > 0
+    return when {
+        mergedDetails.isEmpty() && hasKnownEventPrice -> divisionPriceRangeLabel()
+        mergedDetails.isEmpty() -> "Price not specified"
+        hasKnownDivisionPrice -> divisionPriceRangeLabel()
+        hasKnownEventPrice -> formatPriceCentsLabel(priceCents)
+        else -> "Price not specified"
+    }
+}
+
 fun Event.isDraftLikeState(): Boolean {
     return when (state.trim().uppercase()) {
         "UNPUBLISHED", "DRAFT" -> true

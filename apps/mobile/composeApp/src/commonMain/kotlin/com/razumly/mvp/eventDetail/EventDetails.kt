@@ -70,8 +70,9 @@ import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.dataTypes.divisionPriceRangeLabel
+import com.razumly.mvp.core.data.dataTypes.displayPriceRangeLabel
 import com.razumly.mvp.core.data.dataTypes.evergreenDateDisplayLabel
+import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
 import com.razumly.mvp.core.data.dataTypes.label
 import com.razumly.mvp.core.data.dataTypes.officialPositionSummary
 import com.razumly.mvp.core.data.dataTypes.positionSummary
@@ -1954,8 +1955,13 @@ fun EventDetails(
     val refundSummary = remember(event.cancellationRefundHours) {
         formatRefundSummary(event.cancellationRefundHours)
     }
-    val priceSummary = remember(event.teamSignup, event.priceCents, event.divisions, event.divisionDetails) {
-        if (event.teamSignup) "${event.divisionPriceRangeLabel()} / team" else "${event.divisionPriceRangeLabel()} / player"
+    val priceSummary = remember(event.affiliateUrl, event.teamSignup, event.priceCents, event.divisions, event.divisionDetails) {
+        val priceLabel = event.displayPriceRangeLabel()
+        when {
+            event.isAffiliateEvent() -> priceLabel
+            event.teamSignup -> "$priceLabel / team"
+            else -> "$priceLabel / player"
+        }
     }
     val basicsSummaryLine = remember(event.location, basicDateSummary, hostDisplayName) {
         listOf(hostDisplayName, event.location, basicDateSummary)

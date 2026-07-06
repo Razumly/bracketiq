@@ -139,19 +139,8 @@ private func placeImageURL(_ place: MVPPlace, width: Int? = nil, height: Int? = 
     remoteURL(place.imageUrl) ?? imagePreviewURL(imageId: place.imageRef, width: width, height: height)
 }
 
-private func priceCentsLabel(_ priceCents: Int) -> String {
-    let normalizedPriceCents = max(priceCents, 0)
-    if normalizedPriceCents == 0 {
-        return "Free"
-    }
-
-    let dollars = normalizedPriceCents / 100
-    let cents = normalizedPriceCents % 100
-    return String(format: "$%d.%02d", dollars, cents)
-}
-
 private func eventPriceLabel(for event: Event) -> String {
-    priceCentsLabel(Int(event.priceCents))
+    event.displayPriceRangeLabel()
 }
 
 private func isSyntheticPlaceId(_ id: String) -> Bool {

@@ -52,7 +52,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
-import com.razumly.mvp.core.data.dataTypes.divisionPriceRangeLabel
+import com.razumly.mvp.core.data.dataTypes.displayPriceRangeLabel
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.rememberSoftwareRenderedImageModel
 import com.razumly.mvp.core.presentation.util.eventTypeWithSportLabel
@@ -578,7 +578,7 @@ private fun EventCardContent(
 
         // Price
         Text(
-            text = event.divisionPriceRangeLabel(),
+            text = event.displayPriceRangeLabel(),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface,
