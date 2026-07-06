@@ -81,6 +81,7 @@ import com.razumly.mvp.core.network.apiBaseUrl
 import com.razumly.mvp.core.network.dto.TeamCheckInDto
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
+import com.razumly.mvp.core.presentation.composables.InclusivePriceInput
 import com.razumly.mvp.core.presentation.composables.MoneyInputField
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.PlayerAction
@@ -1665,14 +1666,13 @@ fun ParticipantsView(
                         }
                     }
 
-                    MoneyInputField(
-                        value = createBillAmount,
-                        onValueChange = { value ->
-                            createBillAmount = value.filter(Char::isDigit)
+                    InclusivePriceInput(
+                        totalPriceCents = previewEventAmountCents,
+                        onTotalPriceChange = { nextCents ->
+                            createBillAmount = nextCents.coerceAtLeast(0).toString()
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        label = "Price",
-                        placeholder = "0",
+                        totalLabel = "Bill amount",
                     )
                     MoneyInputField(
                         value = createBillTax,
