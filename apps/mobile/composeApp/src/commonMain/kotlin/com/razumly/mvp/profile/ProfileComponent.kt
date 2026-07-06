@@ -98,8 +98,18 @@ data class ProfilePaymentPlan(
     val paidAmountCents: Int
         get() = bill.paidAmountCents ?: 0
 
+    val originalAmountCents: Int
+        get() = bill.originalAmountCents ?: bill.totalAmountCents
+
+    val discountedAmountCents: Int
+        get() = bill.discountedAmountCents ?: bill.totalAmountCents
+
+    val discountAmountCents: Int
+        get() = bill.discountAmountCents
+            ?: (originalAmountCents - discountedAmountCents).coerceAtLeast(0)
+
     val remainingAmountCents: Int
-        get() = (bill.totalAmountCents - paidAmountCents).coerceAtLeast(0)
+        get() = (discountedAmountCents - paidAmountCents).coerceAtLeast(0)
 
     val processingPayment: BillPayment?
         get() = payments

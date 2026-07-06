@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.Bill
+import com.razumly.mvp.core.data.dataTypes.BillDiscountSummary
 import com.razumly.mvp.core.data.dataTypes.BillPayment
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -13,6 +14,10 @@ data class BillDTO(
     val eventId: String? = null,
     val totalAmountCents: Int,
     val paidAmountCents: Int? = null,
+    val originalAmountCents: Int? = null,
+    val discountAmountCents: Int? = null,
+    val discountedAmountCents: Int? = null,
+    val discounts: List<BillDiscountSummary> = emptyList(),
     val nextPaymentDue: String? = null,
     val nextPaymentAmountCents: Int? = null,
     val parentBillId: String? = null,
@@ -30,6 +35,10 @@ data class BillDTO(
             eventId = eventId,
             totalAmountCents = totalAmountCents,
             paidAmountCents = paidAmountCents,
+            originalAmountCents = originalAmountCents,
+            discountAmountCents = discountAmountCents,
+            discountedAmountCents = discountedAmountCents,
+            discounts = discounts,
             nextPaymentDue = nextPaymentDue,
             nextPaymentAmountCents = nextPaymentAmountCents,
             parentBillId = parentBillId,

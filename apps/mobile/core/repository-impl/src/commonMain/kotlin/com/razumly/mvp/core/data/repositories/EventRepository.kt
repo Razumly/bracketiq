@@ -2,6 +2,7 @@ package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.dataTypes.BillDiscountSummary
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
@@ -34,6 +35,7 @@ import com.razumly.mvp.core.util.jsonMVP
 import dev.icerock.moko.geo.LatLng
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.MvpApiClient
+import com.razumly.mvp.core.network.dto.BillDiscountSummaryDto
 import com.razumly.mvp.core.network.dto.CreateEventRequestDto
 import com.razumly.mvp.core.network.dto.CreateEventTemplateRequestDto
 import com.razumly.mvp.core.network.dto.CurrentUserEventRegistrationsResponseDto
@@ -403,6 +405,10 @@ data class EventCompliancePaymentSummary(
     val billId: String? = null,
     val totalAmountCents: Int = 0,
     val paidAmountCents: Int = 0,
+    val originalAmountCents: Int = totalAmountCents,
+    val discountAmountCents: Int = 0,
+    val discountedAmountCents: Int = totalAmountCents,
+    val discounts: List<BillDiscountSummary> = emptyList(),
     val status: String? = null,
     val isPaidInFull: Boolean = false,
     val paymentPending: Boolean = false,
@@ -686,12 +692,37 @@ private fun EventCompliancePaymentSummaryDto?.toCompliancePaymentSummary(): Even
         billId = billId?.trim()?.takeIf(String::isNotBlank),
         totalAmountCents = totalAmountCents ?: 0,
         paidAmountCents = paidAmountCents ?: 0,
+        originalAmountCents = originalAmountCents ?: totalAmountCents ?: 0,
+        discountAmountCents = discountAmountCents ?: 0,
+        discountedAmountCents = discountedAmountCents ?: totalAmountCents ?: 0,
+        discounts = discounts.mapNotNull(BillDiscountSummaryDto::toBillDiscountSummaryOrNull),
         status = status?.trim()?.takeIf(String::isNotBlank),
         isPaidInFull = isPaidInFull == true,
         paymentPending = paymentPending == true,
         inheritedFromTeamBill = inheritedFromTeamBill == true,
         manualPaymentProofStatus = manualPaymentProofStatus?.trim()?.takeIf(String::isNotBlank),
         manualPaymentProofCount = manualPaymentProofCount ?: 0,
+    )
+}
+
+private fun BillDiscountSummaryDto.toBillDiscountSummaryOrNull(): BillDiscountSummary? {
+    val resolvedId = id?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedDiscountId = discountId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedDiscountCodeId = discountCodeId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedCode = code?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedOriginal = originalAmountCents ?: return null
+    val resolvedDiscounted = discountedAmountCents ?: return null
+    return BillDiscountSummary(
+        id = resolvedId,
+        discountId = resolvedDiscountId,
+        discountCodeId = resolvedDiscountCodeId,
+        code = resolvedCode,
+        name = name?.trim()?.takeIf(String::isNotBlank),
+        originalAmountCents = resolvedOriginal.coerceAtLeast(0),
+        discountedAmountCents = resolvedDiscounted.coerceAtLeast(0),
+        discountAmountCents = (discountAmountCents ?: (resolvedOriginal - resolvedDiscounted)).coerceAtLeast(0),
+        paymentIntentId = paymentIntentId?.trim()?.takeIf(String::isNotBlank),
+        registrationId = registrationId?.trim()?.takeIf(String::isNotBlank),
     )
 }
 
@@ -799,6 +830,10 @@ private fun EventTeamComplianceSummary.toCacheEntry(
         paymentBillId = payment.billId,
         paymentTotalAmountCents = payment.totalAmountCents,
         paymentPaidAmountCents = payment.paidAmountCents,
+        paymentOriginalAmountCents = payment.originalAmountCents,
+        paymentDiscountAmountCents = payment.discountAmountCents,
+        paymentDiscountedAmountCents = payment.discountedAmountCents,
+        paymentDiscountsJson = jsonMVP.encodeToString(payment.discounts),
         paymentStatus = payment.status,
         paymentIsPaidInFull = payment.isPaidInFull,
         paymentPending = payment.paymentPending,
@@ -829,6 +864,10 @@ private fun EventComplianceUserSummary.toCacheEntry(
         paymentBillId = payment.billId,
         paymentTotalAmountCents = payment.totalAmountCents,
         paymentPaidAmountCents = payment.paidAmountCents,
+        paymentOriginalAmountCents = payment.originalAmountCents,
+        paymentDiscountAmountCents = payment.discountAmountCents,
+        paymentDiscountedAmountCents = payment.discountedAmountCents,
+        paymentDiscountsJson = jsonMVP.encodeToString(payment.discounts),
         paymentStatus = payment.status,
         paymentIsPaidInFull = payment.isPaidInFull,
         paymentPending = payment.paymentPending,
@@ -853,6 +892,12 @@ private fun EventTeamComplianceCacheEntry.toTeamComplianceSummary(
             billId = paymentBillId,
             totalAmountCents = paymentTotalAmountCents,
             paidAmountCents = paymentPaidAmountCents,
+            originalAmountCents = paymentOriginalAmountCents,
+            discountAmountCents = paymentDiscountAmountCents,
+            discountedAmountCents = paymentDiscountedAmountCents,
+            discounts = runCatching {
+                jsonMVP.decodeFromString<List<BillDiscountSummary>>(paymentDiscountsJson)
+            }.getOrDefault(emptyList()),
             status = paymentStatus,
             isPaidInFull = paymentIsPaidInFull,
             paymentPending = paymentPending,
@@ -883,6 +928,12 @@ private fun EventUserComplianceCacheEntry.toComplianceUserSummary(): EventCompli
             billId = paymentBillId,
             totalAmountCents = paymentTotalAmountCents,
             paidAmountCents = paymentPaidAmountCents,
+            originalAmountCents = paymentOriginalAmountCents,
+            discountAmountCents = paymentDiscountAmountCents,
+            discountedAmountCents = paymentDiscountedAmountCents,
+            discounts = runCatching {
+                jsonMVP.decodeFromString<List<BillDiscountSummary>>(paymentDiscountsJson)
+            }.getOrDefault(emptyList()),
             status = paymentStatus,
             isPaidInFull = paymentIsPaidInFull,
             paymentPending = paymentPending,

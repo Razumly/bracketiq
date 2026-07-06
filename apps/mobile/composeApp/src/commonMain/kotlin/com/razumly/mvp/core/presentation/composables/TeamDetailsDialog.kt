@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.core.data.dataTypes.TeamStaffAssignment
+import com.razumly.mvp.core.data.dataTypes.BillDiscountSummary
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -369,10 +370,40 @@ private fun EventCompliancePaymentSummary.paymentStatusText(): String {
     return when {
         paymentPending -> "Payment pending"
         !hasBill -> "No bill yet"
-        isPaidInFull -> "Paid in full ($${MoneyInputUtils.centsToDisplayValue(totalAmountCents)})"
-        else -> "$${MoneyInputUtils.centsToDisplayValue(paidAmountCents)} of $${MoneyInputUtils.centsToDisplayValue(totalAmountCents)} paid"
+        isPaidInFull -> if (discountAmountCents > 0) {
+            "Paid in full (${paymentAmountBreakdown()})"
+        } else {
+            "Paid in full (${formatCents(discountedAmountCents)})"
+        }
+        else -> paymentAmountBreakdown()
     }
 }
+
+private fun EventCompliancePaymentSummary.paymentAmountBreakdown(): String {
+    if (discountAmountCents > 0) {
+        return listOf(
+            "Original ${formatCents(originalAmountCents)}",
+            "${discountLabel(discounts)} -${formatCents(discountAmountCents)}",
+            "Paid ${formatCents(paidAmountCents)}",
+        ).joinToString(" • ")
+    }
+    return "${formatCents(paidAmountCents)} of ${formatCents(discountedAmountCents)} paid"
+}
+
+private fun discountLabel(discounts: List<BillDiscountSummary>): String {
+    val primary = discounts.firstOrNull { discount -> discount.code.isNotBlank() }
+        ?: discounts.firstOrNull { discount -> !discount.name.isNullOrBlank() }
+    val code = primary?.code?.trim().orEmpty()
+    val name = primary?.name?.trim().orEmpty()
+    return when {
+        code.isNotBlank() -> "Discount $code"
+        name.isNotBlank() -> "Discount $name"
+        discounts.size > 1 -> "Discounts"
+        else -> "Discount"
+    }
+}
+
+private fun formatCents(cents: Int): String = "$${MoneyInputUtils.centsToDisplayValue(cents)}"
 
 private fun EventComplianceDocumentCounts.documentStatusText(): String {
     return if (requiredCount <= 0) {

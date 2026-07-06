@@ -4,6 +4,7 @@ import com.razumly.mvp.core.analytics.AnalyticsEvent
 import com.razumly.mvp.core.analytics.AnalyticsTracker
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.Bill
+import com.razumly.mvp.core.data.dataTypes.BillDiscountSummary
 import com.razumly.mvp.core.data.dataTypes.BillPayment
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.BillingAddressProfile
@@ -191,6 +192,10 @@ data class EventTeamBillingBillSnapshot(
     val ownerName: String,
     val totalAmountCents: Int,
     val paidAmountCents: Int,
+    val originalAmountCents: Int = totalAmountCents,
+    val discountAmountCents: Int = 0,
+    val discountedAmountCents: Int = totalAmountCents,
+    val discounts: List<BillDiscountSummary> = emptyList(),
     val refundedAmountCents: Int,
     val refundableAmountCents: Int,
     val status: String? = null,
@@ -2696,6 +2701,20 @@ private data class EventTeamBillingPaymentDto(
 )
 
 @Serializable
+private data class BillDiscountSummaryDto(
+    val id: String? = null,
+    val discountId: String? = null,
+    val discountCodeId: String? = null,
+    val code: String? = null,
+    val name: String? = null,
+    val originalAmountCents: Int? = null,
+    val discountedAmountCents: Int? = null,
+    val discountAmountCents: Int? = null,
+    val paymentIntentId: String? = null,
+    val registrationId: String? = null,
+)
+
+@Serializable
 private data class EventTeamBillingBillDto(
     val id: String? = null,
     @SerialName("\$id") val legacyId: String? = null,
@@ -2704,6 +2723,10 @@ private data class EventTeamBillingBillDto(
     val ownerName: String? = null,
     val totalAmountCents: Int? = null,
     val paidAmountCents: Int? = null,
+    val originalAmountCents: Int? = null,
+    val discountAmountCents: Int? = null,
+    val discountedAmountCents: Int? = null,
+    val discounts: List<BillDiscountSummaryDto> = emptyList(),
     val refundedAmountCents: Int? = null,
     val refundableAmountCents: Int? = null,
     val status: String? = null,
@@ -2736,6 +2759,10 @@ private data class BillApiDto(
     val eventId: String? = null,
     val totalAmountCents: Int? = null,
     val paidAmountCents: Int? = null,
+    val originalAmountCents: Int? = null,
+    val discountAmountCents: Int? = null,
+    val discountedAmountCents: Int? = null,
+    val discounts: List<BillDiscountSummaryDto> = emptyList(),
     val nextPaymentDue: String? = null,
     val nextPaymentAmountCents: Int? = null,
     val parentBillId: String? = null,
@@ -2761,6 +2788,10 @@ private data class BillApiDto(
             eventId = eventId,
             totalAmountCents = resolvedTotal,
             paidAmountCents = paidAmountCents,
+            originalAmountCents = originalAmountCents,
+            discountAmountCents = discountAmountCents,
+            discountedAmountCents = discountedAmountCents,
+            discounts = discounts.mapNotNull { discount -> discount.toBillDiscountSummaryOrNull() },
             nextPaymentDue = nextPaymentDue,
             nextPaymentAmountCents = nextPaymentAmountCents,
             parentBillId = parentBillId,
@@ -2980,6 +3011,10 @@ private fun EventTeamBillingBillDto.toBillOrNull(): EventTeamBillingBillSnapshot
         ownerName = resolvedOwnerName,
         totalAmountCents = resolvedTotalAmount,
         paidAmountCents = resolvedPaid,
+        originalAmountCents = originalAmountCents ?: resolvedTotalAmount,
+        discountAmountCents = discountAmountCents ?: 0,
+        discountedAmountCents = discountedAmountCents ?: resolvedTotalAmount,
+        discounts = discounts.mapNotNull { discount -> discount.toBillDiscountSummaryOrNull() },
         refundedAmountCents = resolvedRefunded,
         refundableAmountCents = resolvedRefundable,
         status = status?.trim()?.takeIf(String::isNotBlank),
@@ -2994,6 +3029,27 @@ private fun EventTeamBillingBillDto.toBillOrNull(): EventTeamBillingBillSnapshot
             )
         },
         payments = payments.mapNotNull { payment -> payment.toPaymentOrNull() },
+    )
+}
+
+private fun BillDiscountSummaryDto.toBillDiscountSummaryOrNull(): BillDiscountSummary? {
+    val resolvedId = id?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedDiscountId = discountId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedDiscountCodeId = discountCodeId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedCode = code?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedOriginal = originalAmountCents ?: return null
+    val resolvedDiscounted = discountedAmountCents ?: return null
+    return BillDiscountSummary(
+        id = resolvedId,
+        discountId = resolvedDiscountId,
+        discountCodeId = resolvedDiscountCodeId,
+        code = resolvedCode,
+        name = name?.trim()?.takeIf(String::isNotBlank),
+        originalAmountCents = resolvedOriginal.coerceAtLeast(0),
+        discountedAmountCents = resolvedDiscounted.coerceAtLeast(0),
+        discountAmountCents = (discountAmountCents ?: (resolvedOriginal - resolvedDiscounted)).coerceAtLeast(0),
+        paymentIntentId = paymentIntentId?.trim()?.takeIf(String::isNotBlank),
+        registrationId = registrationId?.trim()?.takeIf(String::isNotBlank),
     )
 }
 

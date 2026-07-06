@@ -53,6 +53,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.BillDiscountSummary
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
@@ -61,6 +62,7 @@ import com.razumly.mvp.core.data.dataTypes.isCaptainOrManager
 import com.razumly.mvp.core.data.dataTypes.resolvedDivisionPriceCents
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
+import com.razumly.mvp.core.data.repositories.EventTeamBillingBillSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamBillingUserOption
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
@@ -326,10 +328,14 @@ private fun EventCompliancePaymentSummary.paymentStatusText(cardType: Participan
         return if (cardType == ParticipantCardType.TEAM) "No team bill yet" else "No bill yet"
     }
     if (isPaidInFull) {
-        return "Paid in full (${formatCurrency(totalAmountCents)})"
+        return if (discountAmountCents > 0) {
+            "Paid in full (${billPaidBreakdown()})"
+        } else {
+            "Paid in full (${formatCurrency(discountedAmountCents)})"
+        }
     }
     val prefix = if (inheritedFromTeamBill) "Team bill" else "Bill"
-    return "$prefix: ${formatCurrency(paidAmountCents)} of ${formatCurrency(totalAmountCents)} paid"
+    return "$prefix: ${billPaidBreakdown()}"
 }
 
 private fun EventComplianceDocumentCounts.documentStatusText(): String {
@@ -344,7 +350,7 @@ private fun EventComplianceDocumentCounts.needsAttention(): Boolean {
 }
 
 private fun EventCompliancePaymentSummary.needsAttention(): Boolean {
-    return paymentPending || (hasBill && !isPaidInFull && totalAmountCents > 0)
+    return paymentPending || (hasBill && !isPaidInFull && discountedAmountCents > 0)
 }
 
 private fun EventComplianceUserSummary.registrationLabel(): String {
@@ -1380,7 +1386,7 @@ fun ParticipantsView(
                                         style = MaterialTheme.typography.titleSmall,
                                     )
                                     Text(
-                                        "Total ${formatCurrency(bill.totalAmountCents)} • " +
+                                        "${bill.billPaidBreakdown()} • " +
                                             "Refundable ${formatCurrency(bill.refundableAmountCents)}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -2373,6 +2379,41 @@ private fun ComplianceDocumentRow(document: EventComplianceRequiredDocument) {
 }
 
 private fun formatCurrency(amountCents: Int): String = "$${centsToAmountText(amountCents)}"
+
+private fun EventCompliancePaymentSummary.billPaidBreakdown(): String {
+    if (discountAmountCents > 0) {
+        return listOf(
+            "Original ${formatCurrency(originalAmountCents)}",
+            "${discountLabel(discounts)} -${formatCurrency(discountAmountCents)}",
+            "Paid ${formatCurrency(paidAmountCents)}",
+        ).joinToString(" • ")
+    }
+    return "${formatCurrency(paidAmountCents)} of ${formatCurrency(discountedAmountCents)} paid"
+}
+
+private fun EventTeamBillingBillSnapshot.billPaidBreakdown(): String {
+    if (discountAmountCents > 0) {
+        return listOf(
+            "Original ${formatCurrency(originalAmountCents)}",
+            "${discountLabel(discounts)} -${formatCurrency(discountAmountCents)}",
+            "Paid ${formatCurrency(paidAmountCents)}",
+        ).joinToString(" • ")
+    }
+    return "Paid ${formatCurrency(paidAmountCents)} of ${formatCurrency(discountedAmountCents)}"
+}
+
+private fun discountLabel(discounts: List<BillDiscountSummary>): String {
+    val primary = discounts.firstOrNull { discount -> discount.code.isNotBlank() }
+        ?: discounts.firstOrNull { discount -> !discount.name.isNullOrBlank() }
+    val code = primary?.code?.trim().orEmpty()
+    val name = primary?.name?.trim().orEmpty()
+    return when {
+        code.isNotBlank() -> "Discount $code"
+        name.isNotBlank() -> "Discount $name"
+        discounts.size > 1 -> "Discounts"
+        else -> "Discount"
+    }
+}
 
 private fun centsToAmountText(amountCents: Int): String {
     val dollars = amountCents / 100.0

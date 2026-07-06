@@ -665,11 +665,29 @@ data class EventParticipantsSnapshotResponseDto(
 )
 
 @Serializable
+data class BillDiscountSummaryDto(
+    val id: String? = null,
+    val discountId: String? = null,
+    val discountCodeId: String? = null,
+    val code: String? = null,
+    val name: String? = null,
+    val originalAmountCents: Int? = null,
+    val discountedAmountCents: Int? = null,
+    val discountAmountCents: Int? = null,
+    val paymentIntentId: String? = null,
+    val registrationId: String? = null,
+)
+
+@Serializable
 data class EventCompliancePaymentSummaryDto(
     val hasBill: Boolean? = null,
     val billId: String? = null,
     val totalAmountCents: Int? = null,
     val paidAmountCents: Int? = null,
+    val originalAmountCents: Int? = null,
+    val discountAmountCents: Int? = null,
+    val discountedAmountCents: Int? = null,
+    val discounts: List<BillDiscountSummaryDto> = emptyList(),
     val status: String? = null,
     val isPaidInFull: Boolean? = null,
     val paymentPending: Boolean? = null,

@@ -3,6 +3,7 @@ package com.razumly.mvp.core.data.repositories
 import com.razumly.mvp.core.analytics.AnalyticsEvent
 import com.razumly.mvp.core.analytics.AnalyticsTracker
 import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.dataTypes.BillDiscountSummary
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
@@ -15,6 +16,7 @@ import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResp
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.ApiException
+import com.razumly.mvp.core.network.dto.BillDiscountSummaryDto
 import com.razumly.mvp.core.network.dto.CreateInvitesRequestDto
 import com.razumly.mvp.core.network.dto.EventComplianceDocumentCountsDto
 import com.razumly.mvp.core.network.dto.EventCompliancePaymentSummaryDto
@@ -370,10 +372,35 @@ private fun EventCompliancePaymentSummaryDto?.toCompliancePaymentSummary(): Even
         billId = billId?.trim()?.takeIf(String::isNotBlank),
         totalAmountCents = totalAmountCents ?: 0,
         paidAmountCents = paidAmountCents ?: 0,
+        originalAmountCents = originalAmountCents ?: totalAmountCents ?: 0,
+        discountAmountCents = discountAmountCents ?: 0,
+        discountedAmountCents = discountedAmountCents ?: totalAmountCents ?: 0,
+        discounts = discounts.mapNotNull(BillDiscountSummaryDto::toBillDiscountSummaryOrNull),
         status = status?.trim()?.takeIf(String::isNotBlank),
         isPaidInFull = isPaidInFull == true,
         paymentPending = paymentPending == true,
         inheritedFromTeamBill = inheritedFromTeamBill == true,
+    )
+}
+
+private fun BillDiscountSummaryDto.toBillDiscountSummaryOrNull(): BillDiscountSummary? {
+    val resolvedId = id?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedDiscountId = discountId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedDiscountCodeId = discountCodeId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedCode = code?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedOriginal = originalAmountCents ?: return null
+    val resolvedDiscounted = discountedAmountCents ?: return null
+    return BillDiscountSummary(
+        id = resolvedId,
+        discountId = resolvedDiscountId,
+        discountCodeId = resolvedDiscountCodeId,
+        code = resolvedCode,
+        name = name?.trim()?.takeIf(String::isNotBlank),
+        originalAmountCents = resolvedOriginal.coerceAtLeast(0),
+        discountedAmountCents = resolvedDiscounted.coerceAtLeast(0),
+        discountAmountCents = (discountAmountCents ?: (resolvedOriginal - resolvedDiscounted)).coerceAtLeast(0),
+        paymentIntentId = paymentIntentId?.trim()?.takeIf(String::isNotBlank),
+        registrationId = registrationId?.trim()?.takeIf(String::isNotBlank),
     )
 }
 

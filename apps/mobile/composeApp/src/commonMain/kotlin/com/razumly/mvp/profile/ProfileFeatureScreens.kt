@@ -2750,9 +2750,19 @@ private fun PaymentPlanCard(
             )
 
             Text(
-                text = "Total: ${formatCurrency(paymentPlan.bill.totalAmountCents)}",
+                text = if (paymentPlan.discountAmountCents > 0) {
+                    "Original: ${formatCurrency(paymentPlan.originalAmountCents)}"
+                } else {
+                    "Total: ${formatCurrency(paymentPlan.discountedAmountCents)}"
+                },
                 style = MaterialTheme.typography.bodySmall,
             )
+            if (paymentPlan.discountAmountCents > 0) {
+                Text(
+                    text = "${paymentPlan.discountLabel()}: -${formatCurrency(paymentPlan.discountAmountCents)}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             Text(
                 text = "Paid: ${formatCurrency(paymentPlan.paidAmountCents)}",
                 style = MaterialTheme.typography.bodySmall,
@@ -2871,6 +2881,19 @@ private fun MembershipCard(
 
 private fun formatCurrency(cents: Int): String {
     return "$${MoneyInputUtils.centsToDisplayValue(cents)}"
+}
+
+private fun ProfilePaymentPlan.discountLabel(): String {
+    val primary = bill.discounts.firstOrNull { discount -> discount.code.isNotBlank() }
+        ?: bill.discounts.firstOrNull { discount -> !discount.name.isNullOrBlank() }
+    val code = primary?.code?.trim().orEmpty()
+    val name = primary?.name?.trim().orEmpty()
+    return when {
+        code.isNotBlank() -> "Discount $code"
+        name.isNotBlank() -> "Discount $name"
+        bill.discounts.size > 1 -> "Discounts"
+        else -> "Discount"
+    }
 }
 
 private fun formatDateForDisplay(rawDate: String?): String {
