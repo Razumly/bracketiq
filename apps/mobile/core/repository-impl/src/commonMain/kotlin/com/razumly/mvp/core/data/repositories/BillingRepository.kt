@@ -634,9 +634,16 @@ interface IBillingRepository : IMVPRepository {
         priceCents: Int? = null,
         startDate: String? = null,
     ): Result<Subscription>
-    suspend fun listOrganizations(limit: Int = 100): Result<List<Organization>>
-    suspend fun searchOrganizations(query: String, limit: Int = 10): Result<List<Organization>> =
-        listOrganizations(limit = limit)
+    suspend fun listOrganizations(
+        limit: Int = 100,
+        includeAffiliateRentals: Boolean = false,
+    ): Result<List<Organization>>
+    suspend fun searchOrganizations(
+        query: String,
+        limit: Int = 10,
+        includeAffiliateRentals: Boolean = false,
+    ): Result<List<Organization>> =
+        listOrganizations(limit = limit, includeAffiliateRentals = includeAffiliateRentals)
     suspend fun getOrganizationsByIds(organizationIds: List<String>): Result<List<Organization>>
     suspend fun listOrganizationTemplates(organizationId: String): Result<List<OrganizationTemplateDocument>>
     suspend fun leaveAndRefundEvent(event: Event, reason: String, targetUserId: String? = null): Result<Unit>
@@ -1909,20 +1916,29 @@ class BillingRepository(
         databaseService.getDiscountDao.deleteDiscountCodeById(normalizedCodeId)
     }
 
-    override suspend fun listOrganizations(limit: Int): Result<List<Organization>> = runCatching {
+    override suspend fun listOrganizations(
+        limit: Int,
+        includeAffiliateRentals: Boolean,
+    ): Result<List<Organization>> = runCatching {
         val normalizedLimit = limit.coerceIn(1, 1000)
-        val response = api.get<OrganizationsResponseDto>(path = "api/organizations?limit=$normalizedLimit")
+        val affiliateParam = if (includeAffiliateRentals) "&includeAffiliateRentals=true" else ""
+        val response = api.get<OrganizationsResponseDto>(path = "api/organizations?limit=$normalizedLimit$affiliateParam")
         response.organizations.mapNotNull { it.toOrganizationOrNull() }
     }
 
-    override suspend fun searchOrganizations(query: String, limit: Int): Result<List<Organization>> = runCatching {
+    override suspend fun searchOrganizations(
+        query: String,
+        limit: Int,
+        includeAffiliateRentals: Boolean,
+    ): Result<List<Organization>> = runCatching {
         val normalizedQuery = query.trim()
         if (normalizedQuery.isEmpty()) return@runCatching emptyList()
 
         val normalizedLimit = limit.coerceIn(1, 100)
         val encodedQuery = normalizedQuery.encodeURLQueryComponent()
+        val affiliateParam = if (includeAffiliateRentals) "&includeAffiliateRentals=true" else ""
         val response = api.get<OrganizationsResponseDto>(
-            path = "api/organizations?query=$encodedQuery&limit=$normalizedLimit",
+            path = "api/organizations?query=$encodedQuery&limit=$normalizedLimit$affiliateParam",
         )
         response.organizations.mapNotNull { it.toOrganizationOrNull() }
     }
@@ -2498,6 +2514,9 @@ private data class RentalFacilityDto(
     val name: String? = null,
     val location: String? = null,
     val address: String? = null,
+    val coordinates: List<Double>? = null,
+    val status: String? = null,
+    val affiliateUrl: String? = null,
 )
 
 @Serializable
@@ -2966,7 +2985,16 @@ private fun RentalFacilityDto.toFacilityOrNull(): Facility? {
     val resolvedName = name?.trim()?.takeIf(String::isNotBlank)
     val resolvedLocation = location?.trim()?.takeIf(String::isNotBlank)
     val resolvedAddress = address?.trim()?.takeIf(String::isNotBlank)
-    if (resolvedId.isBlank() && resolvedName == null && resolvedLocation == null && resolvedAddress == null) {
+    val resolvedStatus = status?.trim()?.takeIf(String::isNotBlank)
+    val resolvedAffiliateUrl = affiliateUrl?.trim()?.takeIf(String::isNotBlank)
+    if (
+        resolvedId.isBlank() &&
+        resolvedName == null &&
+        resolvedLocation == null &&
+        resolvedAddress == null &&
+        coordinates.isNullOrEmpty() &&
+        resolvedAffiliateUrl == null
+    ) {
         return null
     }
     return Facility(
@@ -2975,6 +3003,9 @@ private fun RentalFacilityDto.toFacilityOrNull(): Facility? {
         name = resolvedName,
         location = resolvedLocation,
         address = resolvedAddress,
+        coordinates = coordinates,
+        status = resolvedStatus,
+        affiliateUrl = resolvedAffiliateUrl,
     )
 }
 
@@ -3247,6 +3278,7 @@ private data class OrganizationApiDto(
     val staffInvites: List<Invite>? = null,
     val staffEmailsByUserId: Map<String, String>? = null,
     val viewerPermissions: List<String>? = null,
+    val facilities: List<RentalFacilityDto>? = null,
 ) {
     fun toOrganizationOrNull(): Organization? {
         val resolvedId = id ?: legacyId
@@ -3293,6 +3325,7 @@ private data class OrganizationApiDto(
                 ?.map(String::trim)
                 ?.filter(String::isNotBlank)
                 ?: emptyList(),
+            facilities = facilities?.mapNotNull { facility -> facility.toFacilityOrNull() } ?: emptyList(),
         )
     }
 }

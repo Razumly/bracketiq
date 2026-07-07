@@ -1,6 +1,8 @@
 package com.razumly.mvp.eventDetail
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -8,21 +10,35 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshots.SnapshotStateMap
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.defaultEventTagOptions
+import com.razumly.mvp.core.data.dataTypes.eventTagIdentity
+import com.razumly.mvp.core.data.dataTypes.lockedEventTypeTagSlugs
+import com.razumly.mvp.core.data.dataTypes.normalizedEventTag
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.syncEventTypeTagsForEventType
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.StandardTextField
@@ -148,7 +164,15 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                     isError = !state.isSportValid,
                     supportingText = if (!state.isSportValid) "Select a sport to continue." else "",
                     enabled = state.sports.isNotEmpty(),
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.weight(1f),
+                )
+                EventTagsEditor(
+                    tags = state.editEvent.tags,
+                    eventType = state.editEvent.eventType,
+                    onTagsChange = { tags ->
+                        actions.onEditEvent { copy(tags = tags) }
+                    },
+                    modifier = Modifier.weight(1f),
                 )
             }
             FormSectionDivider()
@@ -263,4 +287,96 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
             }
         },
     )
+}
+
+@Composable
+private fun EventTagsEditor(
+    tags: List<EventTag>,
+    eventType: EventType,
+    onTagsChange: (List<EventTag>) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var draftTag by remember { mutableStateOf("") }
+    val normalizedTags = remember(tags, eventType) {
+        tags.syncEventTypeTagsForEventType(eventType)
+    }
+    val lockedSlugs = remember(eventType) { lockedEventTypeTagSlugs(eventType) }
+    val defaultOptions = remember(normalizedTags) {
+        val selectedSlugs = normalizedTags.map { tag -> tag.eventTagIdentity() }.toSet()
+        defaultEventTagOptions.filter { option -> option.eventTagIdentity() !in selectedSlugs }
+    }
+
+    fun addDraftTag() {
+        val tag = EventTag(name = draftTag)
+            .normalizedEventTag()
+            ?: return
+        onTagsChange((normalizedTags + tag).syncEventTypeTagsForEventType(eventType))
+        draftTag = ""
+    }
+
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        StandardTextField(
+            value = draftTag,
+            onValueChange = { draftTag = it },
+            label = "Tags",
+            placeholder = "Add a tag",
+            trailingIcon = {
+                TextButton(
+                    onClick = ::addDraftTag,
+                    enabled = draftTag.isNotBlank(),
+                ) {
+                    Text("Add")
+                }
+            },
+            imeAction = ImeAction.Done,
+            onImeAction = ::addDraftTag,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (normalizedTags.isNotEmpty()) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                normalizedTags.forEach { tag ->
+                    val identity = tag.eventTagIdentity()
+                    val locked = identity in lockedSlugs
+                    FilterChip(
+                        selected = true,
+                        enabled = !locked,
+                        onClick = {
+                            if (!locked) {
+                                onTagsChange(
+                                    normalizedTags
+                                        .filterNot { existing -> existing.eventTagIdentity() == identity }
+                                        .syncEventTypeTagsForEventType(eventType),
+                                )
+                            }
+                        },
+                        label = { Text(tag.name) },
+                    )
+                }
+            }
+        }
+        if (defaultOptions.isNotEmpty()) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                defaultOptions.forEach { option ->
+                    FilterChip(
+                        selected = false,
+                        onClick = {
+                            onTagsChange((normalizedTags + option).syncEventTypeTagsForEventType(eventType))
+                        },
+                        label = { Text(option.name) },
+                    )
+                }
+            }
+        }
+    }
 }

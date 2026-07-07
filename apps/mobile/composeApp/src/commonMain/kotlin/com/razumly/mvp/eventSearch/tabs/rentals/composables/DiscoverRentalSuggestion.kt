@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateRentalUrl
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.OrganizationVerificationBadge
 
@@ -56,8 +57,13 @@ fun DiscoverRentalSuggestion(
                 }
             }
 
+            val affiliateUrl = organization.normalizedAffiliateRentalUrl()
             val fieldCount = organization.fieldIds.size
-            val detailsText = if (fieldCount == 1) "1 rentable field" else "$fieldCount rentable fields"
+            val detailsText = when {
+                affiliateUrl != null -> "External booking"
+                fieldCount == 1 -> "1 rentable field"
+                else -> "$fieldCount rentable fields"
+            }
 
             Text(
                 text = detailsText,

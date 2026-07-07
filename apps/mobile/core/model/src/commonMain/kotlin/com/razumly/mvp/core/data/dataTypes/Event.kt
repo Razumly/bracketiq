@@ -113,6 +113,7 @@ data class Event(
     val installmentAmounts: List<Int> = emptyList(),
     val allowTeamSplitDefault: Boolean? = null,
     val requiredTemplateIds: List<String> = emptyList(),
+    val tags: List<EventTag> = emptyList(),
     @Transient val lastUpdated: Instant = Clock.System.now(),
 ) : MVPDocument {
     @Ignore

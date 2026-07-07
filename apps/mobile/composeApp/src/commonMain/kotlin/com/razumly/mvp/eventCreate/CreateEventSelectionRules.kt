@@ -2,6 +2,7 @@ package com.razumly.mvp.eventCreate
 
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.syncEventTypeTagsForEventType
 
 internal fun Event.applyCreateSelectionRules(): Event {
     val typeNormalizedEvent = when (eventType) {
@@ -34,5 +35,5 @@ internal fun Event.applyCreateSelectionRules(): Event {
                 installmentAmounts = emptyList(),
             )
         },
-    )
+    ).syncEventTypeTagsForEventType()
 }

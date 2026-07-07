@@ -9,8 +9,10 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.time.Instant
 
 class MatchDtosTest {
     @Test
@@ -77,6 +79,38 @@ class MatchDtosTest {
 
         assertNotNull(match)
         assertEquals("field-7", match.fieldId)
+    }
+
+    @Test
+    fun match_api_dto_rejects_offset_less_start_end() {
+        val dto = MatchApiDto(
+            id = "match-4",
+            matchId = 4,
+            eventId = "event-4",
+            start = "2026-07-11T09:30:00",
+            end = "2026-07-11T10:45",
+        )
+
+        assertFailsWith<IllegalArgumentException> {
+            dto.toMatchOrNull()
+        }
+    }
+
+    @Test
+    fun match_api_dto_maps_iso_start_end() {
+        val dto = MatchApiDto(
+            id = "match-4b",
+            matchId = 4,
+            eventId = "event-4",
+            start = "2026-07-11T09:30:00Z",
+            end = "2026-07-11T10:45:00Z",
+        )
+
+        val match = dto.toMatchOrNull()
+
+        assertNotNull(match)
+        assertEquals(Instant.parse("2026-07-11T09:30:00Z"), match.start)
+        assertEquals(Instant.parse("2026-07-11T10:45:00Z"), match.end)
     }
 
     @Test

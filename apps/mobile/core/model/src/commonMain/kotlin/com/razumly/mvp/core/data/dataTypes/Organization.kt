@@ -56,7 +56,14 @@ data class Organization(
     val staffInvites: List<Invite> = emptyList(),
     val staffEmailsByUserId: Map<String, String> = emptyMap(),
     val viewerPermissions: List<String> = emptyList(),
+    val facilities: List<Facility> = emptyList(),
 )
+
+fun Organization.activeAffiliateRentalFacilities(): List<Facility> =
+    facilities.filter { facility -> facility.isActiveAffiliateRental() }
+
+fun Organization.normalizedAffiliateRentalUrl(): String? =
+    activeAffiliateRentalFacilities().firstNotNullOfOrNull { facility -> facility.normalizedAffiliateUrl() }
 
 @Serializable
 data class OrganizationStaffMember(
@@ -102,6 +109,7 @@ data class OrganizationDTO(
     val staffInvites: List<Invite> = emptyList(),
     val staffEmailsByUserId: Map<String, String> = emptyMap(),
     val viewerPermissions: List<String> = emptyList(),
+    val facilities: List<Facility> = emptyList(),
 ) {
     fun toOrganization(id: String): Organization =
         Organization(
@@ -130,6 +138,7 @@ data class OrganizationDTO(
             staffInvites = staffInvites,
             staffEmailsByUserId = staffEmailsByUserId,
             viewerPermissions = viewerPermissions,
+            facilities = facilities,
         )
 }
 

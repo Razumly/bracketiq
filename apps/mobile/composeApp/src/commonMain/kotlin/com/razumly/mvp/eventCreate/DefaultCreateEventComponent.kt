@@ -26,6 +26,7 @@ import com.razumly.mvp.core.data.dataTypes.addOfficialUser
 import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.removeOfficialUser
 import com.razumly.mvp.core.data.dataTypes.shouldReplaceOfficialPositionsWithSportDefaults
+import com.razumly.mvp.core.data.dataTypes.syncEventTypeTagsForEventType
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.usesTeamOfficialScheduling
 import com.razumly.mvp.core.data.dataTypes.withDoTeamsOfficiate
@@ -763,7 +764,7 @@ class DefaultCreateEventComponent(
                     noFixedEndDateTime = false,
                     end = end.takeIf { it > start } ?: defaultEventEnd(start),
                 )
-            }
+            }.syncEventTypeTagsForEventType()
         }
         when (type) {
             EventType.LEAGUE, EventType.TOURNAMENT -> {

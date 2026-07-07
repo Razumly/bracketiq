@@ -8,11 +8,13 @@ import com.arkivanov.essenty.instancekeeper.InstanceKeeper
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Facility
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.activeAffiliateRentalFacilities
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
@@ -348,15 +350,10 @@ class DefaultEventSearchComponent(
 
         suggestOrganizationsJob?.cancel()
         suggestOrganizationsJob = scope.launch {
-            val requestLimit = if (rentalsOnly) {
-                SEARCH_SUGGESTION_LIMIT * 3
-            } else {
-                SEARCH_SUGGESTION_LIMIT
-            }
-
             val organizationsResult = billingRepository.searchOrganizations(
                 query = normalizedQuery,
-                limit = requestLimit,
+                limit = SEARCH_SUGGESTION_LIMIT,
+                includeAffiliateRentals = rentalsOnly,
             )
             if (organizationsResult.isFailure) {
                 val e = organizationsResult.exceptionOrNull()
@@ -370,7 +367,7 @@ class DefaultEventSearchComponent(
                 organizations
             }
             val baseList = if (rentalsOnly) {
-                organizationsWithResolvedFieldIds.filter { organization -> organization.fieldIds.isNotEmpty() }
+                organizationsWithResolvedFieldIds.flatMap { organization -> organization.toDiscoverRentalEntries() }
             } else {
                 organizationsWithResolvedFieldIds
             }
@@ -432,6 +429,7 @@ class DefaultEventSearchComponent(
                     dateFrom = activeFilter.date.first,
                     dateTo = activeFilter.date.second,
                     sports = selectedSportNames(activeFilter),
+                    tags = activeFilter.tagSlugs.toList(),
                     limit = EVENTS_PAGE_SIZE,
                     offset = eventOffset,
                     includeDistanceFilter = includeDistanceFilter,
@@ -507,7 +505,8 @@ class DefaultEventSearchComponent(
 
         val dateRangeChanged = previous.date != updated.date
         val sportsChanged = previous.sportIds != updated.sportIds
-        if (dateRangeChanged || sportsChanged) {
+        val tagsChanged = previous.tagSlugs != updated.tagSlugs
+        if (dateRangeChanged || sportsChanged || tagsChanged) {
             refreshEvents(force = true)
         } else {
             _events.value = applyEventFilter(_rawEvents.value, updated)
@@ -700,16 +699,19 @@ class DefaultEventSearchComponent(
         if (_isLoadingRentals.value) return
 
         _isLoadingRentals.value = true
-        val organizations = if (organizationsLoaded || !force) {
-            loadOrganizations(force = force)
-        } else {
-            loadOrganizations(force = true)
-        }
+        val organizations = billingRepository.listOrganizations(
+            limit = DISCOVER_PAGE_SIZE,
+            includeAffiliateRentals = true,
+        )
+            .onFailure { e ->
+                _errorState.value = ErrorMessage("Failed to fetch rentals: ${e.userMessage()}")
+            }
+            .getOrDefault(emptyList())
         val rentals = resolveOrganizationsWithFieldIds(
             organizations = organizations,
             forceFieldRefresh = force,
         )
-            .filter { organization -> organization.fieldIds.isNotEmpty() }
+            .flatMap { organization -> organization.toDiscoverRentalEntries() }
             .sortedBy { organization -> organization.name.lowercase() }
 
         _rentals.value = rentals
@@ -724,7 +726,7 @@ class DefaultEventSearchComponent(
 
         _isLoadingTeams.value = true
         val teams = withContext(Dispatchers.Default) {
-            teamRepository.searchOpenRegistrationTeams(limit = 100)
+            teamRepository.searchOpenRegistrationTeams(limit = DISCOVER_PAGE_SIZE)
         }
             .onFailure { e ->
                 _errorState.value = ErrorMessage("Failed to fetch teams: ${e.userMessage()}")
@@ -753,7 +755,7 @@ class DefaultEventSearchComponent(
 
         _isLoadingOrganizations.value = true
         var organizations: List<Organization> = emptyList()
-        billingRepository.listOrganizations(limit = 1000)
+        billingRepository.listOrganizations(limit = DISCOVER_PAGE_SIZE)
             .onSuccess { response ->
                 organizations = response
             }
@@ -917,8 +919,44 @@ class DefaultEventSearchComponent(
             center = LatLng(0.0, 0.0),
             radiusMiles = 0.0,
         )
-        private const val EVENTS_PAGE_SIZE = 50
+        private const val DISCOVER_PAGE_SIZE = 50
+        private const val EVENTS_PAGE_SIZE = DISCOVER_PAGE_SIZE
         private const val SEARCH_MIN_QUERY_LENGTH = 2
         private const val SEARCH_SUGGESTION_LIMIT = 50
     }
+}
+
+private fun Organization.toDiscoverRentalEntries(): List<Organization> {
+    val entries = mutableListOf<Organization>()
+    if (fieldIds.isNotEmpty()) {
+        entries += this
+    }
+    activeAffiliateRentalFacilities().forEach { facility ->
+        entries += toAffiliateRentalEntry(facility)
+    }
+    return entries
+}
+
+private fun Organization.toAffiliateRentalEntry(facility: Facility): Organization {
+    val facilityId = facility.resolvedId
+        .takeIf(String::isNotBlank)
+        ?: facility.name?.trim()?.takeIf(String::isNotBlank)
+        ?: "facility"
+    val facilityName = facility.name?.trim()?.takeIf(String::isNotBlank)
+    val facilityLocation = facility.location?.trim()?.takeIf(String::isNotBlank)
+    val facilityAddress = facility.address?.trim()?.takeIf(String::isNotBlank)
+    val descriptionParts = listOfNotNull(
+        name.trim().takeIf(String::isNotBlank),
+        description?.trim()?.takeIf(String::isNotBlank),
+    )
+    return copy(
+        id = "$id:affiliate-rental:$facilityId",
+        name = facilityName ?: name,
+        location = facilityLocation ?: location,
+        address = facilityAddress ?: address,
+        description = descriptionParts.joinToString(" - ").takeIf(String::isNotBlank),
+        coordinates = facility.coordinates ?: coordinates,
+        fieldIds = emptyList(),
+        facilities = listOf(facility),
+    )
 }

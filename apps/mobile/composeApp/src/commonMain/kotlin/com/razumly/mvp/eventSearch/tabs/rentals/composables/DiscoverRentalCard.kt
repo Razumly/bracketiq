@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateRentalUrl
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.OrganizationVerificationBadge
 import com.razumly.mvp.core.presentation.util.getImageUrl
@@ -98,11 +99,12 @@ internal fun DiscoverRentalCard(
                     )
                 }
 
+                val affiliateUrl = organization.normalizedAffiliateRentalUrl()
                 val fieldCount = organization.fieldIds.size
-                val detailsText = if (fieldCount == 1) {
-                    "1 rentable field"
-                } else {
-                    "$fieldCount rentable fields"
+                val detailsText = when {
+                    affiliateUrl != null -> "External booking"
+                    fieldCount == 1 -> "1 rentable field"
+                    else -> "$fieldCount rentable fields"
                 }
 
                 Text(

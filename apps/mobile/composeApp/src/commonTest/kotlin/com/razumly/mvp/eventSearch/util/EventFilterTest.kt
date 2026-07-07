@@ -3,6 +3,7 @@
 package com.razumly.mvp.eventSearch.util
 
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventTag
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -53,14 +54,32 @@ class EventFilterTest {
         assertFalse(filter.filter(event))
     }
 
+    @Test
+    fun givenTagFilter_whenEventTagMatches_thenFilterReturnsTrue() {
+        val filter = EventFilter(date = now to null, tagSlugs = setOf("tryouts"))
+        val event = eventAt(now + 1.days, tags = listOf(EventTag(name = "Tryouts", slug = "tryouts")))
+
+        assertTrue(filter.filter(event))
+    }
+
+    @Test
+    fun givenTagFilter_whenEventTagDiffers_thenFilterReturnsFalse() {
+        val filter = EventFilter(date = now to null, tagSlugs = setOf("tryouts"))
+        val event = eventAt(now + 1.days, tags = listOf(EventTag(name = "Tournament", slug = "tournament")))
+
+        assertFalse(filter.filter(event))
+    }
+
     private fun eventAt(
         start: Instant,
         sportId: String? = null,
+        tags: List<EventTag> = emptyList(),
     ): Event = Event(
         name = "Test League",
         start = start,
         end = start,
         sportId = sportId,
+        tags = tags,
         state = "PUBLISHED",
     )
 }

@@ -14,10 +14,20 @@ data class Facility(
     val name: String? = null,
     val location: String? = null,
     val address: String? = null,
+    val coordinates: List<Double>? = null,
+    val status: String? = null,
+    val affiliateUrl: String? = null,
 ) {
     val resolvedId: String
         get() = id.ifBlank { legacyId.orEmpty() }
 }
+
+fun Facility.normalizedAffiliateUrl(): String? =
+    affiliateUrl?.trim()?.takeIf(String::isNotBlank)
+
+fun Facility.isActiveAffiliateRental(): Boolean =
+    normalizedAffiliateUrl() != null &&
+        status?.trim()?.uppercase()?.takeIf(String::isNotBlank).let { it == null || it == "ACTIVE" }
 
 @Entity
 @Serializable

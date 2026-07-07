@@ -1806,12 +1806,14 @@ class EventRepositoryHttpTest {
                 radiusMiles = 50.0,
             ),
             sports = listOf("Volleyball", "  Soccer  ", ""),
+            tags = listOf("tryouts", "  league  ", ""),
             limit = 10,
             offset = 0,
             includeDistanceFilter = false,
         ).getOrThrow()
 
         assertTrue(capturedBody.contains("\"sports\":[\"Volleyball\",\"Soccer\"]"))
+        assertTrue(capturedBody.contains("\"tags\":[\"tryouts\",\"league\"]"))
     }
 
     @Test

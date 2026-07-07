@@ -10,6 +10,7 @@ import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
@@ -25,6 +26,7 @@ import com.razumly.mvp.core.data.dataTypes.normalizeManualPaymentInstructions
 import com.razumly.mvp.core.data.dataTypes.normalizeManualPaymentLinks
 import com.razumly.mvp.core.data.dataTypes.normalizeRegistrationPaymentMode
 import com.razumly.mvp.core.data.dataTypes.requiresTeamOfficials
+import com.razumly.mvp.core.data.dataTypes.syncEventTypeTagsForEventType
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionDetails
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
@@ -173,6 +175,7 @@ data class EventApiDto(
     val installmentAmounts: List<Int>? = null,
     val allowTeamSplitDefault: Boolean? = null,
     val requiredTemplateIds: List<String>? = null,
+    val tags: List<EventTag>? = null,
 
     val prizeTitle: String? = null, // legacy/unused; ignore if present
 ) {
@@ -444,6 +447,7 @@ data class EventApiDto(
             installmentAmounts = resolvedEventInstallmentAmounts,
             allowTeamSplitDefault = allowTeamSplitDefault,
             requiredTemplateIds = requiredTemplateIds ?: emptyList(),
+            tags = (tags ?: emptyList()).syncEventTypeTagsForEventType(resolvedEventType),
             lastUpdated = Clock.System.now(),
         )
     }
@@ -524,6 +528,7 @@ data class EventSearchFiltersDto(
     val priceMax: Int? = null,
     val eventTypes: List<String>? = null,
     val sports: List<String>? = null,
+    val tags: List<String>? = null,
     val divisions: List<String>? = null,
 )
 
@@ -890,6 +895,7 @@ data class EventUpdateDto(
     val installmentAmounts: List<Int>? = null,
     val allowTeamSplitDefault: Boolean? = null,
     val requiredTemplateIds: List<String>? = null,
+    val tags: List<EventTag>? = null,
 )
 
 @Serializable
@@ -1187,5 +1193,6 @@ fun Event.toUpdateDto(
         installmentAmounts = installmentAmounts,
         allowTeamSplitDefault = allowTeamSplitDefault,
         requiredTemplateIds = resolvedRequiredTemplateIds,
+        tags = tags.syncEventTypeTagsForEventType(eventType),
     )
 }

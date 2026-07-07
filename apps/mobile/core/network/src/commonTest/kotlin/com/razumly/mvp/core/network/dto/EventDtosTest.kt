@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_CASH_APP
@@ -149,6 +150,46 @@ class EventDtosTest {
         val dto = event.toUpdateDto()
 
         assertEquals(listOf("template-c", "template-d"), dto.requiredTemplateIds)
+    }
+
+    @Test
+    fun to_update_dto_syncs_event_type_tags() {
+        val event = Event(
+            name = "League Event",
+            eventType = EventType.LEAGUE,
+            hostId = "host-2",
+            start = Instant.fromEpochMilliseconds(1_700_000_000_000),
+            end = Instant.fromEpochMilliseconds(1_700_003_600_000),
+            tags = listOf(
+                EventTag(name = "Pickup", slug = "pickup"),
+                EventTag(name = "Tournament", slug = "tournament"),
+            ),
+        )
+
+        val dto = event.toUpdateDto()
+
+        assertEquals(listOf("Pickup", "League"), dto.tags?.map(EventTag::name))
+        assertEquals(listOf("pickup", "league"), dto.tags?.map(EventTag::slug))
+    }
+
+    @Test
+    fun event_api_dto_hydrates_tags_with_event_type_lock() {
+        val event = EventApiDto(
+            id = "event-tags-1",
+            name = "Tournament Event",
+            hostId = "host-2",
+            eventType = "TOURNAMENT",
+            start = "2026-06-01T08:00:00Z",
+            end = "2026-06-01T09:00:00Z",
+            tags = listOf(
+                EventTag(id = "tag-pickup", name = "Pickup", slug = "pickup"),
+                EventTag(id = "tag-league", name = "League", slug = "league"),
+            ),
+        ).toEventOrNull()
+
+        assertNotNull(event)
+        assertEquals(listOf("Pickup", "Tournament"), event.tags.map(EventTag::name))
+        assertEquals(listOf("pickup", "tournament"), event.tags.map(EventTag::slug))
     }
 
     @Test

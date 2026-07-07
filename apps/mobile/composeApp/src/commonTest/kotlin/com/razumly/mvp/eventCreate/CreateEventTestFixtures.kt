@@ -422,6 +422,7 @@ internal class CreateEvent_FakeEventRepository(
         dateFrom: Instant?,
         dateTo: Instant?,
         sports: List<String>,
+        tags: List<String>,
         limit: Int,
         offset: Int,
         includeDistanceFilter: Boolean,
@@ -969,7 +970,10 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
             id = "sub-test",
         )
     )
-    override suspend fun listOrganizations(limit: Int): Result<List<Organization>> = Result.success(emptyList())
+    override suspend fun listOrganizations(
+        limit: Int,
+        includeAffiliateRentals: Boolean,
+    ): Result<List<Organization>> = Result.success(emptyList())
     override suspend fun getOrganizationsByIds(organizationIds: List<String>): Result<List<Organization>> =
         Result.success(emptyList())
     override suspend fun listOrganizationTemplates(organizationId: String): Result<List<OrganizationTemplateDocument>> =

@@ -95,12 +95,17 @@ import com.kizitonwose.calendar.core.Week
 import com.kizitonwose.calendar.core.WeekDay
 import com.kizitonwose.calendar.core.WeekDayPosition
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateUrl
+import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateRentalUrl
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.defaultEventTagOptions
+import com.razumly.mvp.core.data.dataTypes.eventTagIdentity
+import com.razumly.mvp.core.data.dataTypes.normalizedEventTags
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.composables.SearchBox
@@ -304,6 +309,87 @@ private fun DiscoverFilterSportSection(
 }
 
 @Composable
+private fun DiscoverFilterTagSection(
+    tags: List<EventTag>,
+    selectedTagSlugs: Set<String>,
+    onTagToggled: (EventTag) -> Unit,
+) {
+    if (tags.isEmpty()) return
+    var tagsExpanded by rememberSaveable { mutableStateOf(selectedTagSlugs.isNotEmpty()) }
+    val selectedTags = remember(tags, selectedTagSlugs) {
+        tags.filter { tag -> tag.eventTagIdentity() in selectedTagSlugs }
+    }
+    val selectedSummary = when {
+        selectedTags.isEmpty() -> "Any tag"
+        selectedTags.size == 1 -> selectedTags.first().name
+        else -> "${selectedTags.size} tags selected"
+    }
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { tagsExpanded = !tagsExpanded }
+                .padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Tags",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = selectedSummary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            IconButton(onClick = { tagsExpanded = !tagsExpanded }) {
+                Icon(
+                    imageVector = if (tagsExpanded) {
+                        Icons.Default.KeyboardArrowUp
+                    } else {
+                        Icons.Default.KeyboardArrowDown
+                    },
+                    contentDescription = if (tagsExpanded) "Collapse tags" else "Expand tags",
+                )
+            }
+        }
+        AnimatedVisibility(
+            visible = tagsExpanded,
+            enter = expandVertically(animationSpec = tween(180)) + fadeIn(),
+            exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(),
+        ) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                tags.forEach { tag ->
+                    val tagSlug = tag.eventTagIdentity()
+                    FilterChip(
+                        selected = tagSlug in selectedTagSlugs,
+                        onClick = { onTagToggled(tag) },
+                        label = {
+                            Text(
+                                text = tag.name,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun DiscoverFilterLocationSection(
     locationLabel: String,
     pickerVisible: Boolean,
@@ -491,6 +577,11 @@ fun EventSearchScreen(
     val currentRadius by component.currentRadius.collectAsState()
     val selectedSearchLocationLabel by component.selectedSearchLocationLabel.collectAsState()
     val sports by component.sports.collectAsState()
+    val eventTagOptions = remember(events) {
+        (defaultEventTagOptions + events.flatMap { event -> event.tags })
+            .normalizedEventTags()
+            .sortedBy { tag -> tag.name.lowercase() }
+    }
 
     var selectedTab by rememberSaveable { mutableStateOf(DiscoverTab.EVENTS) }
     var searchQuery by remember { mutableStateOf("") }
@@ -640,6 +731,24 @@ fun EventSearchScreen(
                 }
         } else {
             component.viewTeam(team)
+        }
+    }
+    val openRental: (Organization) -> Unit = { organization ->
+        val affiliateUrl = organization.normalizedAffiliateRentalUrl()
+        if (affiliateUrl != null) {
+            runCatching { uriHandler.openUri(affiliateUrl) }
+                .onFailure { throwable ->
+                    popupHandler.showPopup(
+                        com.razumly.mvp.core.util.ErrorMessage(
+                            throwable.message ?: "Unable to open booking link.",
+                        )
+                    )
+                }
+        } else {
+            component.viewOrganization(
+                organization,
+                com.razumly.mvp.core.presentation.OrganizationDetailTab.RENTALS
+            )
         }
     }
 
@@ -823,10 +932,7 @@ fun EventSearchScreen(
 
                         DiscoverTab.RENTALS -> {
                             if (organization != null) {
-                                component.viewOrganization(
-                                    organization,
-                                    com.razumly.mvp.core.presentation.OrganizationDetailTab.RENTALS
-                                )
+                                openRental(organization)
                             }
                         }
 
@@ -992,10 +1098,7 @@ fun EventSearchScreen(
                                         emptyMessage = "No rentals discovered nearby yet.",
                                         firstItemGuideTargetId = DISCOVER_GUIDE_TARGET_FIRST_RESULT,
                                         onOrganizationClick = { organization ->
-                                            component.viewOrganization(
-                                                organization,
-                                                com.razumly.mvp.core.presentation.OrganizationDetailTab.RENTALS
-                                            )
+                                            openRental(organization)
                                         }
                                     )
                                 }
@@ -1140,6 +1243,21 @@ fun EventSearchScreen(
                                             sportIds + sport.id
                                         }
                                         copy(sportIds = nextSportIds)
+                                    }
+                                },
+                            )
+                            DiscoverFilterTagSection(
+                                tags = eventTagOptions,
+                                selectedTagSlugs = currentFilter.tagSlugs,
+                                onTagToggled = { tag ->
+                                    component.updateFilter {
+                                        val tagSlug = tag.eventTagIdentity()
+                                        val nextTagSlugs = if (tagSlug in tagSlugs) {
+                                            tagSlugs - tagSlug
+                                        } else {
+                                            tagSlugs + tagSlug
+                                        }
+                                        copy(tagSlugs = nextTagSlugs)
                                     }
                                 },
                             )
@@ -1313,10 +1431,7 @@ fun EventSearchScreen(
                                 DiscoverRentalSuggestion(
                                     organization = organization,
                                     onClick = {
-                                        component.viewOrganization(
-                                            organization,
-                                            com.razumly.mvp.core.presentation.OrganizationDetailTab.RENTALS
-                                        )
+                                        openRental(organization)
                                         showSearchOverlay = false
                                     }
                                 )

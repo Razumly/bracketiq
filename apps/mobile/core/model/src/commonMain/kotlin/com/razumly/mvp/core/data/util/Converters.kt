@@ -4,6 +4,7 @@ import androidx.room.TypeConverter
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
 import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
@@ -120,6 +121,15 @@ class Converters {
     @TypeConverter
     fun toEventOfficials(value: String): List<EventOfficial> =
         runCatching { Json.decodeFromString<List<EventOfficial>>(value) }
+            .getOrDefault(emptyList())
+
+    @TypeConverter
+    fun fromEventTags(value: List<EventTag>): String =
+        Json.encodeToString(value)
+
+    @TypeConverter
+    fun toEventTags(value: String): List<EventTag> =
+        runCatching { Json.decodeFromString<List<EventTag>>(value) }
             .getOrDefault(emptyList())
 
     @TypeConverter

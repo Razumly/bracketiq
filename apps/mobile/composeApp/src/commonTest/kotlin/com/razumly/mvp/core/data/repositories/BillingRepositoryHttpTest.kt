@@ -246,6 +246,7 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
         dateFrom: kotlin.time.Instant?,
         dateTo: kotlin.time.Instant?,
         sports: List<String>,
+        tags: List<String>,
         limit: Int,
         offset: Int,
         includeDistanceFilter: Boolean,
@@ -345,6 +346,7 @@ private class BillingRepositoryHttp_FakeEventRepository(
         dateFrom: kotlin.time.Instant?,
         dateTo: kotlin.time.Instant?,
         sports: List<String>,
+        tags: List<String>,
         limit: Int,
         offset: Int,
         includeDistanceFilter: Boolean,
@@ -649,6 +651,60 @@ class BillingRepositoryHttpTest {
         assertEquals("2026-04-13T20:30:00.000Z", organizations[0].verifiedAt)
         assertEquals(OrganizationVerificationReviewStatus.RESOLVED, organizations[0].verificationReviewStatus)
         assertEquals(OrganizationVerificationStatus.LEGACY_CONNECTED, organizations[1].verificationStatus)
+    }
+
+    @Test
+    fun listOrganizations_can_request_affiliate_rentals_and_maps_facilities() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/organizations", request.url.encodedPath)
+            assertEquals("limit=50&includeAffiliateRentals=true", request.url.encodedQuery)
+            assertEquals(HttpMethod.Get, request.method)
+
+            respond(
+                content = """
+                    {
+                      "organizations": [
+                        {
+                          "id": "org_affiliate",
+                          "name": "Affiliate Rentals",
+                          "facilities": [
+                            {
+                              "id": "facility_1",
+                              "name": "Affiliate Indoor Court",
+                              "location": "Vancouver, WA",
+                              "coordinates": [-122.6615, 45.6387],
+                              "status": "ACTIVE",
+                              "affiliateUrl": " https://example.com/book "
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val organizations = repo.listOrganizations(limit = 50, includeAffiliateRentals = true).getOrThrow()
+
+        val facility = organizations.single().facilities.single()
+        assertEquals("facility_1", facility.id)
+        assertEquals("Affiliate Indoor Court", facility.name)
+        assertEquals(listOf(-122.6615, 45.6387), facility.coordinates)
+        assertEquals("ACTIVE", facility.status)
+        assertEquals("https://example.com/book", facility.affiliateUrl)
     }
 
     @Test
