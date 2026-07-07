@@ -126,6 +126,7 @@ import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
+import com.razumly.mvp.core.util.Platform
 import com.razumly.mvp.eventSearch.composables.EmptyDiscoverListItem
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MAP_ACTION_BUTTON_EXTRA_DOWN_OFFSET
@@ -978,9 +979,13 @@ fun EventSearchScreen(
         CircularRevealUnderlay(
             isRevealed = isMapVisible,
             revealCenterInWindow = revealCenter,
-            modifier = Modifier
-                .fillMaxSize()
-                .hazeSource(hazeState),
+            modifier = if (Platform.isIOS) {
+                Modifier.fillMaxSize()
+            } else {
+                Modifier
+                    .fillMaxSize()
+                    .hazeSource(hazeState)
+            },
             backgroundContent = {
                 discoverMapContent()
             },
@@ -1139,12 +1144,18 @@ fun EventSearchScreen(
         )
 
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .hazeEffect(
-                    hazeState,
-                    HazeMaterials.ultraThin(NavigationBarDefaults.containerColor)
-                )
+            modifier = (if (Platform.isIOS) {
+                Modifier
+                    .fillMaxWidth()
+                    .background(NavigationBarDefaults.containerColor)
+            } else {
+                Modifier
+                    .fillMaxWidth()
+                    .hazeEffect(
+                        hazeState,
+                        HazeMaterials.ultraThin(NavigationBarDefaults.containerColor)
+                    )
+            })
                 .statusBarsPadding()
                 .align(Alignment.TopCenter),
         ) {

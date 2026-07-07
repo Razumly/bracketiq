@@ -54,6 +54,7 @@ import com.razumly.mvp.core.data.util.divisionDisplayLabels
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.eventTypeWithSportLabel
 import com.razumly.mvp.core.presentation.util.getImageUrl
+import com.razumly.mvp.core.util.Platform
 import com.razumly.mvp.core.util.resolvedTimeZone
 import dev.chrisbanes.haze.ExperimentalHazeApi
 import dev.chrisbanes.haze.HazeInputScale
@@ -72,6 +73,9 @@ private data class EventLifecycleBadge(
     val containerColor: Color,
 )
 
+private const val EVENT_CARD_IMAGE_WIDTH_PX = 1080
+private const val EVENT_CARD_IMAGE_HEIGHT_PX = 1350
+
 @OptIn(
     ExperimentalHazeMaterialsApi::class, ExperimentalHazeApi::class
 )
@@ -87,7 +91,14 @@ fun EventCard(
         event.imageId.trim()
             .ifBlank { fallbackImageId?.trim().orEmpty() }
             .takeIf { it.isNotBlank() }
-            ?.let { imageId -> getImageUrl(fileId = imageId, width = 1400, trim = true) }
+            ?.let { imageId ->
+                getImageUrl(
+                    fileId = imageId,
+                    width = EVENT_CARD_IMAGE_WIDTH_PX,
+                    height = EVENT_CARD_IMAGE_HEIGHT_PX,
+                    trim = true,
+                )
+            }
     }
     var isImageReady by remember(imageModel) { mutableStateOf(imageModel == null) }
     val hazeState = rememberHazeState()
@@ -150,11 +161,17 @@ fun EventCard(
             .clipToBounds()
             .background(Color.Black)
     ) {
-        AsyncImage(model = imageModel,
-            contentDescription = "Event Image",
-            modifier = Modifier
+        val visibleImageModifier = if (Platform.isIOS) {
+            Modifier.matchParentSize()
+        } else {
+            Modifier
                 .matchParentSize()
-                .hazeSource(hazeState, key = event.id),
+                .hazeSource(hazeState, key = event.id)
+        }
+        AsyncImage(
+            model = imageModel,
+            contentDescription = "Event Image",
+            modifier = visibleImageModifier,
             contentScale = ContentScale.Crop,
             onState = { state ->
                 isImageReady = when (state) {
@@ -170,139 +187,170 @@ fun EventCard(
                 modifier = Modifier.fillMaxWidth()
             )
         } else {
+            if (Platform.isIOS && imageModel != null) {
+                Column(
+                    modifier = Modifier
+                        .padding(navPadding)
+                        .fillMaxWidth()
+                ) {
+                    Spacer(modifier = Modifier.height(232.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(240.dp)
+                            .hazeSource(hazeState, key = "${event.id}-content")
+                    ) {
+                        AsyncImage(
+                            model = imageModel,
+                            contentDescription = null,
+                            modifier = Modifier.matchParentSize(),
+                            contentScale = ContentScale.Crop,
+                        )
+                    }
+                }
+            }
+
             val contentModifier = Modifier.hazeEffect(
                 hazeState, HazeMaterials.ultraThin(MaterialTheme.colorScheme.onBackground)
             ) {
-                inputScale = HazeInputScale.Fixed(0.5f)
-                progressive = HazeProgressive.verticalGradient(
-                    easing = FastOutSlowInEasing,
-                    startIntensity = 0f,
-                    endIntensity = 1f,
-                    startY = 200f
-                )
+                inputScale = HazeInputScale.Fixed(if (Platform.isIOS) 0.25f else 0.5f)
+                if (!Platform.isIOS) {
+                    progressive = HazeProgressive.verticalGradient(
+                        easing = FastOutSlowInEasing,
+                        startIntensity = 0f,
+                        endIntensity = 1f,
+                        startY = 200f
+                    )
+                }
             }
 
             Column(
-                modifier = contentModifier
+                modifier = Modifier
                     .padding(navPadding)
-                    .padding(horizontal = 16.dp)
                     .fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(4.dp, alignment = Alignment.Bottom)
             ) {
                 Spacer(modifier = Modifier.height(232.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween
+                Column(
+                    modifier = contentModifier
+                        .padding(horizontal = 16.dp)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp, alignment = Alignment.Bottom),
                 ) {
-                    Button(modifier = Modifier.onGloballyPositioned { layoutCoordinates ->
-                        val boundsInWindow = layoutCoordinates.boundsInWindow()
-                        mapButtonOffset = boundsInWindow.center
-                    },
-                        onClick = { onMapClick(mapButtonOffset) },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("View on Map")
-                        Icon(Icons.Default.Place, contentDescription = "View on Map Button")
+                        Button(modifier = Modifier.onGloballyPositioned { layoutCoordinates ->
+                            val boundsInWindow = layoutCoordinates.boundsInWindow()
+                            mapButtonOffset = boundsInWindow.center
+                        },
+                            onClick = { onMapClick(mapButtonOffset) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        ) {
+                            Text("View on Map")
+                            Icon(Icons.Default.Place, contentDescription = "View on Map Button")
+                        }
                     }
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = event.name,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.background,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Start,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        painter = rememberVectorPainter(Icons.Default.LocationOn),
-                        contentDescription = "Location",
-                        tint = MaterialTheme.colorScheme.background
-                    )
-                    Text(
-                        text = event.location,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.background,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = event.eventTypeWithSportLabel(),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.background,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    prizeText?.let { value ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            text = "Prize: $value",
-                            style = MaterialTheme.typography.bodyMedium,
+                            text = event.name,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.background,
-                            modifier = Modifier.weight(1f),
-                            textAlign = TextAlign.End,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                }
-                Text(
-                    text = when {
-                        event.isAffiliateEvent() -> "External registration"
-                        event.teamSignup -> "Team registration"
-                        else -> "Individual registration"
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.background,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = divisionSummaryText,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.background,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                HorizontalDivider(thickness = 2.dp)
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Start,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            painter = rememberVectorPainter(Icons.Default.LocationOn),
+                            contentDescription = "Location",
+                            tint = MaterialTheme.colorScheme.background
+                        )
+                        Text(
+                            text = event.location,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.background,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = event.eventTypeWithSportLabel(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.background,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        prizeText?.let { value ->
+                            Text(
+                                text = "Prize: $value",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.background,
+                                modifier = Modifier.weight(1f),
+                                textAlign = TextAlign.End,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
                     Text(
-                        text = dateRangeText,
+                        text = when {
+                            event.isAffiliateEvent() -> "External registration"
+                            event.teamSignup -> "Team registration"
+                            else -> "Individual registration"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.background,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = divisionSummaryText,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.background,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text(
-                        text = event.displayPriceRangeLabel(),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.background,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    HorizontalDivider(thickness = 2.dp)
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = dateRangeText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.background,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = event.displayPriceRangeLabel(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.background,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
             lifecycleBadge?.let { badge ->

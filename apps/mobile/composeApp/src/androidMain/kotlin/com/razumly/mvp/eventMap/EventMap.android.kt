@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -293,6 +294,18 @@ actual fun EventMap(
     fun overlapsExistingPlace(searchPlace: Place): Boolean =
         places.any { matchesSearchPlace(searchPlace, it) }
 
+    fun searchPlaceMarkerKey(place: Place): String {
+        val id = place.id?.trim().orEmpty()
+        if (id.isNotBlank()) return "search:$id"
+
+        val location = place.location
+        if (location != null) {
+            return "search:${location.latitude},${location.longitude}:${place.displayName.orEmpty()}"
+        }
+
+        return "search:${place.displayName.orEmpty()}:${place.formattedAddress.orEmpty()}"
+    }
+
     fun eventFallbackImageId(event: Event): String? =
         event.organizationId
             ?.trim()
@@ -528,7 +541,7 @@ actual fun EventMap(
     }
 
     LaunchedEffect(searchedPlaces) {
-        val currentSearchResultIds = searchedPlaces.mapNotNull { place -> place.id }.toSet()
+        val currentSearchResultIds = searchedPlaces.map(::searchPlaceMarkerKey).toSet()
         searchedPlaceMarkerStates.keys.removeAll { placeId -> placeId !in currentSearchResultIds }
     }
 
@@ -561,7 +574,7 @@ actual fun EventMap(
             }
             searchedPlaces.firstOrNull { matchesSearchPlace(it, selectedPlace) } != null -> {
                 val matchingSearchPlace = searchedPlaces.first { matchesSearchPlace(it, selectedPlace) }
-                searchedPlaceMarkerStates[matchingSearchPlace.id.orEmpty()]?.showInfoWindow()
+                searchedPlaceMarkerStates[searchPlaceMarkerKey(matchingSearchPlace)]?.showInfoWindow()
             }
             matchesPoi(selectedPOI, selectedPlace) -> {
                 poiMarkerState.position = LatLng(selectedPlace.latitude, selectedPlace.longitude)
@@ -659,246 +672,253 @@ actual fun EventMap(
         ) {
             if (!canClickPOI) {
                 eventMarkerGroups.forEach { group ->
-                    val markerState = eventMarkerStates.getOrPut(group.key) {
-                        MarkerState(position = group.position)
-                    }
-                    if (markerState.position != group.position) {
-                        markerState.position = group.position
-                    }
+                    key(group.key) {
+                        val markerState = eventMarkerStates.getOrPut(group.key) {
+                            MarkerState(position = group.position)
+                        }
+                        if (markerState.position != group.position) {
+                            markerState.position = group.position
+                        }
 
-                    if (group.events.size == 1) {
-                        val event = group.events.first()
-                        val fallbackImageId = remember(event.organizationId, organizationLogoIdsById) {
-                            eventFallbackImageId(event)
-                        }
-                        val markerImageRef = remember(event.imageId, fallbackImageId) {
-                            eventMarkerImageRef(event)
-                        }
-                        val markerImageUrl = remember(markerImageRef) {
-                            resolveMarkerImageUrl(markerImageRef)
-                        }
-                        val markerImage = rememberMarkerImage(markerImageUrl)
-                        val cardImageRef = event.imageId.trim().takeIf(String::isNotBlank) ?: fallbackImageId
-                        val cardImageUrl = remember(cardImageRef) {
-                            resolveMarkerImageUrl(
-                                imageRef = cardImageRef,
-                                width = MAP_EVENT_CARD_IMAGE_WIDTH_PX,
-                                height = MAP_EVENT_CARD_IMAGE_HEIGHT_PX,
-                            )
-                        }
-                        val cardImage = rememberMarkerImage(cardImageUrl)
-                        MarkerInfoWindowComposable(
-                            group.key,
-                            event.name,
-                            event.imageId,
-                            markerImage.renderKey,
-                            cardImage.renderKey,
-                            state = markerState,
-                            anchor = Offset(0.5f, 0.5f),
-                            infoWindowAnchor = Offset(0.5f, 0.0f),
-                            onClick = {
-                                eventMarkerStates.values.forEach(MarkerState::hideInfoWindow)
-                                selectedPOI = null
-                                selectedMapEvents = group.events
-                                selectedMapEventIndex = 0
-                                true
-                            },
-                            onInfoWindowClick = { onEventSelected(event) },
-                            infoContent = {
-                                MapEventCard(
-                                    event = event,
-                                    imagePainter = cardImage.painter,
-                                    loadImageInternally = false,
-                                    fallbackImageId = fallbackImageId,
-                                    modifier = Modifier.wrapContentSize(),
+                        if (group.events.size == 1) {
+                            val event = group.events.first()
+                            val fallbackImageId = remember(event.organizationId, organizationLogoIdsById) {
+                                eventFallbackImageId(event)
+                            }
+                            val markerImageRef = remember(event.imageId, fallbackImageId) {
+                                eventMarkerImageRef(event)
+                            }
+                            val markerImageUrl = remember(markerImageRef) {
+                                resolveMarkerImageUrl(markerImageRef)
+                            }
+                            val markerImage = rememberMarkerImage(markerImageUrl)
+                            val cardImageRef = event.imageId.trim().takeIf(String::isNotBlank) ?: fallbackImageId
+                            val cardImageUrl = remember(cardImageRef) {
+                                resolveMarkerImageUrl(
+                                    imageRef = cardImageRef,
+                                    width = MAP_EVENT_CARD_IMAGE_WIDTH_PX,
+                                    height = MAP_EVENT_CARD_IMAGE_HEIGHT_PX,
                                 )
-                            },
-                        ) {
-                            MapEventMarker(
-                                event = event,
-                                backgroundColor = DISCOVER_EVENT_MARKER_COLOR,
-                                imagePainter = markerImage.painter,
-                            )
-                        }
-                    } else {
-                        MarkerInfoWindowComposable(
-                            group.key,
-                            group.events.size,
-                            state = markerState,
-                            anchor = Offset(0.5f, 0.5f),
-                            infoWindowAnchor = Offset(0.5f, 0.0f),
-                            onClick = {
-                                eventMarkerStates.values.forEach(MarkerState::hideInfoWindow)
-                                selectedPOI = null
-                                selectedMapEvents = group.events
-                                selectedMapEventIndex = 0
-                                true
-                            },
-                            onInfoWindowClick = {
-                                group.events.firstOrNull()?.let(onEventSelected)
-                            },
-                            infoContent = {},
-                        ) {
-                            MapEventClusterMarker(
-                                count = group.events.size,
-                                backgroundColor = DISCOVER_EVENT_MARKER_COLOR,
-                            )
+                            }
+                            val cardImage = rememberMarkerImage(cardImageUrl)
+                            MarkerInfoWindowComposable(
+                                group.key,
+                                event.name,
+                                event.imageId,
+                                markerImage.renderKey,
+                                cardImage.renderKey,
+                                state = markerState,
+                                anchor = Offset(0.5f, 0.5f),
+                                infoWindowAnchor = Offset(0.5f, 0.0f),
+                                onClick = {
+                                    eventMarkerStates.values.forEach(MarkerState::hideInfoWindow)
+                                    selectedPOI = null
+                                    selectedMapEvents = group.events
+                                    selectedMapEventIndex = 0
+                                    true
+                                },
+                                onInfoWindowClick = { onEventSelected(event) },
+                                infoContent = {
+                                    MapEventCard(
+                                        event = event,
+                                        imagePainter = cardImage.painter,
+                                        loadImageInternally = false,
+                                        fallbackImageId = fallbackImageId,
+                                        modifier = Modifier.wrapContentSize(),
+                                    )
+                                },
+                            ) {
+                                MapEventMarker(
+                                    event = event,
+                                    backgroundColor = DISCOVER_EVENT_MARKER_COLOR,
+                                    imagePainter = markerImage.painter,
+                                )
+                            }
+                        } else {
+                            MarkerInfoWindowComposable(
+                                group.key,
+                                group.events.size,
+                                state = markerState,
+                                anchor = Offset(0.5f, 0.5f),
+                                infoWindowAnchor = Offset(0.5f, 0.0f),
+                                onClick = {
+                                    eventMarkerStates.values.forEach(MarkerState::hideInfoWindow)
+                                    selectedPOI = null
+                                    selectedMapEvents = group.events
+                                    selectedMapEventIndex = 0
+                                    true
+                                },
+                                onInfoWindowClick = {
+                                    group.events.firstOrNull()?.let(onEventSelected)
+                                },
+                                infoContent = {},
+                            ) {
+                                MapEventClusterMarker(
+                                    count = group.events.size,
+                                    backgroundColor = DISCOVER_EVENT_MARKER_COLOR,
+                                )
+                            }
                         }
                     }
                 }
             }
 
             places.forEach { place ->
-                val markerState = placeMarkerStates.getOrPut(place.id) {
-                    MarkerState(position = LatLng(place.latitude, place.longitude))
-                }
-                val newPosition = LatLng(place.latitude, place.longitude)
-                if (markerState.position != newPosition) {
-                    markerState.position = newPosition
-                }
-                val markerColor = when {
-                    sameLocation(place, distinctSelectedPlace) -> MAP_SELECTED_MARKER_COLOR
-                    sameLocation(place, originalPlace) -> MAP_ORIGINAL_MARKER_COLOR
-                    place.markerKind == MVPPlace.MARKER_KIND_RENTAL -> DISCOVER_RENTAL_MARKER_COLOR
-                    place.markerKind == MVPPlace.MARKER_KIND_ORGANIZATION -> DISCOVER_ORGANIZATION_MARKER_COLOR
-                    else -> MAP_PLACE_MARKER_COLOR
-                }
-                val markerImageUrl = remember(place.id, place.imageRef, place.imageUrl) {
-                    resolveMarkerImageUrl(place.imageRef, place.imageUrl)
-                }
-                val markerImage = rememberMarkerImage(markerImageUrl)
+                key("place:${place.id}") {
+                    val markerState = placeMarkerStates.getOrPut(place.id) {
+                        MarkerState(position = LatLng(place.latitude, place.longitude))
+                    }
+                    val newPosition = LatLng(place.latitude, place.longitude)
+                    if (markerState.position != newPosition) {
+                        markerState.position = newPosition
+                    }
+                    val markerColor = when {
+                        sameLocation(place, distinctSelectedPlace) -> MAP_SELECTED_MARKER_COLOR
+                        sameLocation(place, originalPlace) -> MAP_ORIGINAL_MARKER_COLOR
+                        place.markerKind == MVPPlace.MARKER_KIND_RENTAL -> DISCOVER_RENTAL_MARKER_COLOR
+                        place.markerKind == MVPPlace.MARKER_KIND_ORGANIZATION -> DISCOVER_ORGANIZATION_MARKER_COLOR
+                        else -> MAP_PLACE_MARKER_COLOR
+                    }
+                    val markerImageUrl = remember(place.id, place.imageRef, place.imageUrl) {
+                        resolveMarkerImageUrl(place.imageRef, place.imageUrl)
+                    }
+                    val markerImage = rememberMarkerImage(markerImageUrl)
 
-                MarkerInfoWindowComposable(
-                    place.id,
-                    place.name,
-                    place.imageRef.orEmpty(),
-                    place.imageUrl.orEmpty(),
-                    place.markerKind,
-                    markerImage.renderKey,
-                    state = markerState,
-                    anchor = Offset(0.5f, 0.5f),
-                    infoWindowAnchor = Offset(0.5f, 0.0f),
-                    onClick = {
-                        if (!canClickPOI) {
-                            false
-                        } else if (selectionRequiresConfirmation) {
+                    MarkerInfoWindowComposable(
+                        place.id,
+                        place.name,
+                        place.imageRef.orEmpty(),
+                        place.imageUrl.orEmpty(),
+                        place.markerKind,
+                        markerImage.renderKey,
+                        state = markerState,
+                        anchor = Offset(0.5f, 0.5f),
+                        infoWindowAnchor = Offset(0.5f, 0.0f),
+                        onClick = {
+                            if (!canClickPOI) {
+                                false
+                            } else if (selectionRequiresConfirmation) {
+                                selectedPOI = null
+                                armedPlaceId = null
+                                armedSearchedPlaceId = null
+                                armedPoiPlaceId = null
+                                scope.launch {
+                                    animateToSelectedLocation(newPosition)
+                                    updateRevealCenterFor(newPosition)
+                                    onPlaceSelected(place)
+                                }
+                                true
+                            } else {
+                                val isSecondTap = armedPlaceId == place.id
+                                armedPlaceId = if (isSecondTap) null else place.id
+                                armedSearchedPlaceId = null
+                                armedPoiPlaceId = null
+                                if (isSecondTap) {
+                                    updateRevealCenterFor(newPosition)
+                                    onPlaceSelected(place)
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                        },
+                        onInfoWindowClick = {
                             selectedPOI = null
                             armedPlaceId = null
                             armedSearchedPlaceId = null
                             armedPoiPlaceId = null
-                            scope.launch {
-                                animateToSelectedLocation(newPosition)
-                                updateRevealCenterFor(newPosition)
-                                onPlaceSelected(place)
-                            }
-                            true
-                        } else {
-                            val isSecondTap = armedPlaceId == place.id
-                            armedPlaceId = if (isSecondTap) null else place.id
-                            armedSearchedPlaceId = null
-                            armedPoiPlaceId = null
-                            if (isSecondTap) {
-                                updateRevealCenterFor(newPosition)
-                                onPlaceSelected(place)
-                                true
-                            } else {
-                                false
-                            }
-                        }
-                    },
-                    onInfoWindowClick = {
-                        selectedPOI = null
-                        armedPlaceId = null
-                        armedSearchedPlaceId = null
-                        armedPoiPlaceId = null
-                        updateRevealCenterFor(newPosition)
-                        onPlaceSelected(place)
-                    },
-                    infoContent = {
-                        MapPlaceCard(
+                            updateRevealCenterFor(newPosition)
+                            onPlaceSelected(place)
+                        },
+                        infoContent = {
+                            MapPlaceCard(
+                                place = place,
+                                callToAction = if (canClickPOI && !selectionRequiresConfirmation) {
+                                    placeSelectionHint
+                                } else {
+                                    null
+                                },
+                                modifier = Modifier.wrapContentSize(),
+                            )
+                        },
+                    ) {
+                        MapPlaceMarker(
                             place = place,
-                            callToAction = if (canClickPOI && !selectionRequiresConfirmation) {
-                                placeSelectionHint
-                            } else {
-                                null
-                            },
-                            modifier = Modifier.wrapContentSize(),
+                            backgroundColor = markerColor,
+                            imagePainter = markerImage.painter,
                         )
-                    },
-                ) {
-                    MapPlaceMarker(
-                        place = place,
-                        backgroundColor = markerColor,
-                        imagePainter = markerImage.painter,
-                    )
+                    }
                 }
             }
 
             searchedPlaces.forEach { place ->
                 if (overlapsExistingPlace(place)) return@forEach
-                val markerState = searchedPlaceMarkerStates.getOrPut(place.id.orEmpty()) {
-                    MarkerState(position = place.location!!)
-                }
-                val markerColor = when {
-                    matchesSearchPlace(place, distinctSelectedPlace) -> MAP_SELECTED_MARKER_COLOR
-                    matchesSearchPlace(place, originalPlace) -> MAP_ORIGINAL_MARKER_COLOR
-                    else -> MAP_PLACE_MARKER_COLOR
-                }
+                val placeMarkerKey = searchPlaceMarkerKey(place)
+                key(placeMarkerKey) {
+                    val markerState = searchedPlaceMarkerStates.getOrPut(placeMarkerKey) {
+                        MarkerState(position = place.location!!)
+                    }
+                    val markerColor = when {
+                        matchesSearchPlace(place, distinctSelectedPlace) -> MAP_SELECTED_MARKER_COLOR
+                        matchesSearchPlace(place, originalPlace) -> MAP_ORIGINAL_MARKER_COLOR
+                        else -> MAP_PLACE_MARKER_COLOR
+                    }
 
-                MarkerInfoWindowComposable(
-                    place.id.orEmpty(),
-                    place.displayName.orEmpty(),
-                    state = markerState,
-                    anchor = Offset(0.5f, 0.5f),
-                    infoWindowAnchor = Offset(0.5f, 0.0f),
-                    onClick = {
-                        if (!canClickPOI) {
-                            false
-                        } else if (selectionRequiresConfirmation) {
-                            selectedPOI = null
-                            armedPlaceId = null
-                            armedPoiPlaceId = null
-                            armedSearchedPlaceId = null
-                            scope.launch {
-                                selectSearchedPlace(place)
-                            }
-                            true
-                        } else {
-                            val isSecondTap = armedSearchedPlaceId == place.id
-                            armedPlaceId = null
-                            armedPoiPlaceId = null
-                            armedSearchedPlaceId = if (isSecondTap) null else place.id
-                            if (isSecondTap) {
+                    MarkerInfoWindowComposable(
+                        placeMarkerKey,
+                        place.displayName.orEmpty(),
+                        state = markerState,
+                        anchor = Offset(0.5f, 0.5f),
+                        infoWindowAnchor = Offset(0.5f, 0.0f),
+                        onClick = {
+                            if (!canClickPOI) {
+                                false
+                            } else if (selectionRequiresConfirmation) {
+                                selectedPOI = null
+                                armedPlaceId = null
+                                armedPoiPlaceId = null
+                                armedSearchedPlaceId = null
                                 scope.launch {
                                     selectSearchedPlace(place)
                                 }
                                 true
                             } else {
-                                false
+                                val isSecondTap = armedSearchedPlaceId == placeMarkerKey
+                                armedPlaceId = null
+                                armedPoiPlaceId = null
+                                armedSearchedPlaceId = if (isSecondTap) null else placeMarkerKey
+                                if (isSecondTap) {
+                                    scope.launch {
+                                        selectSearchedPlace(place)
+                                    }
+                                    true
+                                } else {
+                                    false
+                                }
                             }
-                        }
-                    },
-                    onInfoWindowClick = {
-                        selectedPOI = null
-                        armedPlaceId = null
-                        armedSearchedPlaceId = null
-                        armedPoiPlaceId = null
-                        scope.launch {
-                            selectSearchedPlace(place)
-                        }
-                    },
-                    infoContent = {
-                        MapPOICard(
+                        },
+                        onInfoWindowClick = {
+                            selectedPOI = null
+                            armedPlaceId = null
+                            armedSearchedPlaceId = null
+                            armedPoiPlaceId = null
+                            scope.launch {
+                                selectSearchedPlace(place)
+                            }
+                        },
+                        infoContent = {
+                            MapPOICard(
+                                name = place.displayName ?: "Unknown Place",
+                                callToAction = if (selectionRequiresConfirmation) null else placeSelectionHint,
+                                modifier = Modifier.wrapContentSize(),
+                            )
+                        },
+                    ) {
+                        MapInitialsMarker(
                             name = place.displayName ?: "Unknown Place",
-                            callToAction = if (selectionRequiresConfirmation) null else placeSelectionHint,
-                            modifier = Modifier.wrapContentSize(),
+                            backgroundColor = markerColor,
                         )
-                    },
-                ) {
-                    MapInitialsMarker(
-                        name = place.displayName ?: "Unknown Place",
-                        backgroundColor = markerColor,
-                    )
+                    }
                 }
             }
 
@@ -972,55 +992,57 @@ actual fun EventMap(
                         matchesPoi(selectedPOI, place)
 
                 if (shouldRenderOriginalPlaceMarker && !hasExistingOriginalMarker) {
-                    originalPlaceMarkerState.position = LatLng(place.latitude, place.longitude)
-                    val markerImageUrl = remember(place.id, place.imageRef, place.imageUrl) {
-                        resolveMarkerImageUrl(place.imageRef, place.imageUrl)
-                    }
-                    val markerImage = rememberMarkerImage(markerImageUrl)
-                    MarkerInfoWindowComposable(
-                        place.id,
-                        place.name,
-                        place.imageRef.orEmpty(),
-                        place.imageUrl.orEmpty(),
-                        markerImage.renderKey,
-                        state = originalPlaceMarkerState,
-                        anchor = Offset(0.5f, 0.5f),
-                        infoWindowAnchor = Offset(0.5f, 0.0f),
-                        onClick = {
-                            if (!canClickPOI) {
-                                false
-                            } else if (selectionRequiresConfirmation) {
-                                scope.launch {
-                                    animateToSelectedLocation(originalPlaceMarkerState.position)
-                                    updateRevealCenterFor(originalPlaceMarkerState.position)
-                                    onPlaceSelected(place)
+                    key("original:${place.id}:${place.latitude},${place.longitude}") {
+                        originalPlaceMarkerState.position = LatLng(place.latitude, place.longitude)
+                        val markerImageUrl = remember(place.id, place.imageRef, place.imageUrl) {
+                            resolveMarkerImageUrl(place.imageRef, place.imageUrl)
+                        }
+                        val markerImage = rememberMarkerImage(markerImageUrl)
+                        MarkerInfoWindowComposable(
+                            place.id,
+                            place.name,
+                            place.imageRef.orEmpty(),
+                            place.imageUrl.orEmpty(),
+                            markerImage.renderKey,
+                            state = originalPlaceMarkerState,
+                            anchor = Offset(0.5f, 0.5f),
+                            infoWindowAnchor = Offset(0.5f, 0.0f),
+                            onClick = {
+                                if (!canClickPOI) {
+                                    false
+                                } else if (selectionRequiresConfirmation) {
+                                    scope.launch {
+                                        animateToSelectedLocation(originalPlaceMarkerState.position)
+                                        updateRevealCenterFor(originalPlaceMarkerState.position)
+                                        onPlaceSelected(place)
+                                    }
+                                    true
+                                } else {
+                                    false
                                 }
-                                true
-                            } else {
-                                false
-                            }
-                        },
-                        onInfoWindowClick = {
-                            if (canClickPOI && selectionRequiresConfirmation) {
-                                scope.launch {
-                                    animateToSelectedLocation(originalPlaceMarkerState.position)
-                                    updateRevealCenterFor(originalPlaceMarkerState.position)
-                                    onPlaceSelected(place)
+                            },
+                            onInfoWindowClick = {
+                                if (canClickPOI && selectionRequiresConfirmation) {
+                                    scope.launch {
+                                        animateToSelectedLocation(originalPlaceMarkerState.position)
+                                        updateRevealCenterFor(originalPlaceMarkerState.position)
+                                        onPlaceSelected(place)
+                                    }
                                 }
-                            }
-                        },
-                        infoContent = {
-                            MapPlaceCard(
+                            },
+                            infoContent = {
+                                MapPlaceCard(
+                                    place = place,
+                                    modifier = Modifier.wrapContentSize(),
+                                )
+                            },
+                        ) {
+                            MapPlaceMarker(
                                 place = place,
-                                modifier = Modifier.wrapContentSize(),
+                                backgroundColor = MAP_ORIGINAL_MARKER_COLOR,
+                                imagePainter = markerImage.painter,
                             )
-                        },
-                    ) {
-                        MapPlaceMarker(
-                            place = place,
-                            backgroundColor = MAP_ORIGINAL_MARKER_COLOR,
-                            imagePainter = markerImage.painter,
-                        )
+                        }
                     }
                 }
             }
@@ -1034,34 +1056,36 @@ actual fun EventMap(
                         matchesPoi(selectedPOI, place)
 
                 if (shouldRenderSelectedPlaceMarker && !hasExistingSelectedMarker) {
-                    selectedPlaceMarkerState.position = LatLng(place.latitude, place.longitude)
-                    val markerImageUrl = remember(place.id, place.imageRef, place.imageUrl) {
-                        resolveMarkerImageUrl(place.imageRef, place.imageUrl)
-                    }
-                    val markerImage = rememberMarkerImage(markerImageUrl)
-                    MarkerInfoWindowComposable(
-                        place.id,
-                        place.name,
-                        place.imageRef.orEmpty(),
-                        place.imageUrl.orEmpty(),
-                        markerImage.renderKey,
-                        state = selectedPlaceMarkerState,
-                        anchor = Offset(0.5f, 0.5f),
-                        infoWindowAnchor = Offset(0.5f, 0.0f),
-                        onClick = { true },
-                        onInfoWindowClick = {},
-                        infoContent = {
-                            MapPlaceCard(
+                    key("selected:${place.id}:${place.latitude},${place.longitude}") {
+                        selectedPlaceMarkerState.position = LatLng(place.latitude, place.longitude)
+                        val markerImageUrl = remember(place.id, place.imageRef, place.imageUrl) {
+                            resolveMarkerImageUrl(place.imageRef, place.imageUrl)
+                        }
+                        val markerImage = rememberMarkerImage(markerImageUrl)
+                        MarkerInfoWindowComposable(
+                            place.id,
+                            place.name,
+                            place.imageRef.orEmpty(),
+                            place.imageUrl.orEmpty(),
+                            markerImage.renderKey,
+                            state = selectedPlaceMarkerState,
+                            anchor = Offset(0.5f, 0.5f),
+                            infoWindowAnchor = Offset(0.5f, 0.0f),
+                            onClick = { true },
+                            onInfoWindowClick = {},
+                            infoContent = {
+                                MapPlaceCard(
+                                    place = place,
+                                    modifier = Modifier.wrapContentSize(),
+                                )
+                            },
+                        ) {
+                            MapPlaceMarker(
                                 place = place,
-                                modifier = Modifier.wrapContentSize(),
+                                backgroundColor = MAP_SELECTED_MARKER_COLOR,
+                                imagePainter = markerImage.painter,
                             )
-                        },
-                    ) {
-                        MapPlaceMarker(
-                            place = place,
-                            backgroundColor = MAP_SELECTED_MARKER_COLOR,
-                            imagePainter = markerImage.painter,
-                        )
+                        }
                     }
                 }
             }
