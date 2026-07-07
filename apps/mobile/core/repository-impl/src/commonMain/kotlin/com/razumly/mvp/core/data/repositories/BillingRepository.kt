@@ -735,6 +735,31 @@ class BillingRepository(
             ?.trim()
             ?.takeIf(String::isNotBlank)
 
+        if (timeSlotContext == null) {
+            AnalyticsTracker.capture(
+                AnalyticsEvent.EventRegistrationStarted,
+                buildMap {
+                    put("event_id", event.id)
+                    put("event_type", event.eventType.name)
+                    put("registration_type", normalizedTeamId?.let { "team" } ?: "self")
+                    put("amount_cents", effectivePriceCents.toString())
+                    normalizedTeamId?.let { put("team_id", it) }
+                    normalizedDivisionId?.let { put("division_id", it) }
+                    event.organizationId?.trim()?.takeIf(String::isNotBlank)?.let { put("organization_id", it) }
+                },
+            )
+        } else {
+            AnalyticsTracker.capture(
+                AnalyticsEvent.RentalCheckoutStarted,
+                buildMap {
+                    put("event_id", event.id)
+                    put("amount_cents", effectivePriceCents.toString())
+                    timeSlotContext.scheduledFieldId?.trim()?.takeIf(String::isNotBlank)?.let { put("field_id", it) }
+                    event.organizationId?.trim()?.takeIf(String::isNotBlank)?.let { put("organization_id", it) }
+                },
+            )
+        }
+
         val response = api.post<PurchaseIntentRequestDto, PurchaseIntent>(
             path = "api/billing/purchase-intent",
             body = PurchaseIntentRequestDto(
@@ -1038,6 +1063,16 @@ class BillingRepository(
         if (normalizedSelections.isEmpty()) {
             throw IllegalArgumentException("Select at least one rental slot.")
         }
+
+        AnalyticsTracker.capture(
+            AnalyticsEvent.RentalCheckoutStarted,
+            buildMap {
+                put("organization_slug", normalizedSlug)
+                put("event_id", normalizedEventId)
+                put("selection_count", normalizedSelections.size.toString())
+                renterOrganizationId?.trim()?.takeIf(String::isNotBlank)?.let { put("renter_organization_id", it) }
+            },
+        )
 
         val response = api.post<CreateRentalOrderRequestDto, RentalOrderResponseDto>(
             path = "api/public/organizations/${normalizedSlug.encodeURLQueryComponent()}/rental-orders",

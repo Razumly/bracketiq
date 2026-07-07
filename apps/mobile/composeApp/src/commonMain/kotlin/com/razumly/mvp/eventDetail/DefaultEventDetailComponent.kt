@@ -6,6 +6,8 @@ import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
+import com.razumly.mvp.core.analytics.AnalyticsEvent
+import com.razumly.mvp.core.analytics.AnalyticsTracker
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
@@ -1874,6 +1876,23 @@ class DefaultEventDetailComponent(
 
     private fun openAffiliateEventRegistration(event: Event): Boolean {
         val affiliateUrl = event.normalizedAffiliateUrl() ?: return false
+        val eventProperties = buildMap {
+            put("event_id", event.id)
+            put("event_type", event.eventType.name)
+            put("registration_type", "affiliate")
+            put("source", "event_detail")
+            put("team_signup", event.teamSignup.toString())
+            event.organizationId?.trim()?.takeIf(String::isNotBlank)?.let { put("organization_id", it) }
+            event.sportId?.trim()?.takeIf(String::isNotBlank)?.let { put("sport_id", it) }
+        }
+        AnalyticsTracker.capture(
+            AnalyticsEvent.EventOutboundClicked,
+            eventProperties + AnalyticsTracker.destinationProperties(affiliateUrl),
+        )
+        AnalyticsTracker.capture(
+            AnalyticsEvent.EventRegistrationStarted,
+            eventProperties + mapOf("destination_selected" to "true"),
+        )
         scope.launch {
             val result = urlHandler?.openUrlInWebView(affiliateUrl)
             if (result == null) {

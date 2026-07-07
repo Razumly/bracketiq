@@ -94,6 +94,8 @@ import com.kizitonwose.calendar.compose.weekcalendar.rememberWeekCalendarState
 import com.kizitonwose.calendar.core.Week
 import com.kizitonwose.calendar.core.WeekDay
 import com.kizitonwose.calendar.core.WeekDayPosition
+import com.razumly.mvp.core.analytics.AnalyticsEvent
+import com.razumly.mvp.core.analytics.AnalyticsTracker
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
@@ -738,7 +740,25 @@ fun EventSearchScreen(
     }
     val openRental: (Organization) -> Unit = { organization ->
         val affiliateUrl = organization.normalizedAffiliateRentalUrl()
+        AnalyticsTracker.capture(
+            AnalyticsEvent.RentalClicked,
+            buildMap {
+                put("organization_id", organization.id)
+                put("organization_name", organization.name)
+                put("source", "discover_rentals")
+                put("field_count", organization.fieldIds.size.toString())
+            },
+        )
         if (affiliateUrl != null) {
+            AnalyticsTracker.capture(
+                AnalyticsEvent.RentalOutboundClicked,
+                buildMap {
+                    put("organization_id", organization.id)
+                    put("organization_name", organization.name)
+                    put("source", "discover_rentals")
+                    putAll(AnalyticsTracker.destinationProperties(affiliateUrl))
+                },
+            )
             runCatching { uriHandler.openUri(affiliateUrl) }
                 .onFailure { throwable ->
                     popupHandler.showPopup(

@@ -2268,6 +2268,13 @@ class EventRepository(
                 occurrenceDate = occurrence?.occurrenceDate,
                 answers = answers.toRegistrationQuestionAnswerDtos(),
             )
+            AnalyticsTracker.capture(
+                AnalyticsEvent.EventRegistrationStarted,
+                event.analyticsProperties() + mapOf(
+                    "registration_type" to if (event.teamSignup) "free_agent" else "self",
+                    "joined_waitlist" to eventAtCapacity.toString(),
+                ),
+            )
             val response = when {
                 eventAtCapacity -> {
                     api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
@@ -2376,6 +2383,13 @@ class EventRepository(
                     occurrenceDate = occurrence?.occurrenceDate,
                 ),
             )
+            AnalyticsTracker.capture(
+                AnalyticsEvent.EventRegistrationStarted,
+                event.analyticsProperties() + mapOf(
+                    "registration_type" to "self",
+                    "requires_parent_approval" to "true",
+                ),
+            )
             response.error?.takeIf(String::isNotBlank)?.let { error(it) }
             val registrationStatus = response.registration?.status
                 ?.trim()
@@ -2400,6 +2414,14 @@ class EventRepository(
             }
 
             if (joinWaitlist) {
+                AnalyticsTracker.capture(
+                    AnalyticsEvent.EventRegistrationStarted,
+                    mapOf(
+                        "event_id" to normalizedEventId,
+                        "registration_type" to "waitlist",
+                        "requires_parent_approval" to "true",
+                    ),
+                )
                 val waitlistResponse = api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
                     path = "api/events/$normalizedEventId/waitlist",
                     body = EventParticipantsRequestDto(
@@ -2434,6 +2456,14 @@ class EventRepository(
                 )
             }
 
+            AnalyticsTracker.capture(
+                AnalyticsEvent.EventRegistrationStarted,
+                mapOf(
+                    "event_id" to normalizedEventId,
+                    "registration_type" to "child",
+                    "requires_parent_approval" to "true",
+                ),
+            )
             val response = api.post<EventChildRegistrationRequestDto, EventChildRegistrationResponseDto>(
                 path = "api/events/$normalizedEventId/registrations/child",
                 body = EventChildRegistrationRequestDto(
@@ -2500,6 +2530,13 @@ class EventRepository(
                 slotId = occurrence?.slotId,
                 occurrenceDate = occurrence?.occurrenceDate,
                 answers = answers.toRegistrationQuestionAnswerDtos(),
+            )
+            AnalyticsTracker.capture(
+                AnalyticsEvent.EventRegistrationStarted,
+                event.analyticsProperties() + mapOf(
+                    "registration_type" to "team",
+                    "team_id" to team.id,
+                ),
             )
             val updated = if (
                 isEventAtCapacity(

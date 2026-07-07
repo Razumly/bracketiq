@@ -20,6 +20,28 @@ object AnalyticsTracker {
         PlatformAnalytics.reset()
     }
 
+    fun destinationProperties(destinationUrl: String): AnalyticsProperties {
+        val normalizedUrl = destinationUrl.trim()
+        if (normalizedUrl.isBlank()) return emptyMap()
+        val withoutScheme = normalizedUrl.substringAfter("://", normalizedUrl)
+        val host = withoutScheme
+            .substringBefore("/")
+            .substringBefore("?")
+            .substringBefore("#")
+            .trim()
+        val pathWithQuery = withoutScheme.substringAfter("/", "")
+        val path = pathWithQuery
+            .substringBefore("?")
+            .substringBefore("#")
+            .trim()
+            .let { value -> if (value.isBlank()) "/" else "/$value" }
+
+        return buildMap {
+            if (host.isNotBlank()) put("destination_host", host)
+            put("destination_path", path)
+        }
+    }
+
     private fun baseProperties(): AnalyticsProperties = buildMap {
         put("platform", Platform.name.lowercase())
         if (Platform.appVersionName.isNotBlank()) {

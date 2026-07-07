@@ -6,6 +6,8 @@ import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.instancekeeper.InstanceKeeper
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
+import com.razumly.mvp.core.analytics.AnalyticsEvent
+import com.razumly.mvp.core.analytics.AnalyticsTracker
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Facility
@@ -310,6 +312,10 @@ class DefaultEventSearchComponent(
     }
 
     override fun viewEvent(event: Event) {
+        AnalyticsTracker.capture(
+            AnalyticsEvent.EventClicked,
+            event.analyticsProperties("discover_events"),
+        )
         navigationHandler.navigateToEvent(event)
     }
 
@@ -1066,6 +1072,18 @@ private fun Organization.toDiscoverRentalEntries(): List<Organization> {
         entries += toAffiliateRentalEntry(facility)
     }
     return entries
+}
+
+private fun Event.analyticsProperties(source: String): Map<String, String> = buildMap {
+    put("event_id", id)
+    put("event_type", eventType.name)
+    put("team_signup", teamSignup.toString())
+    put("source", source)
+    organizationId?.trim()?.takeIf(String::isNotBlank)?.let { put("organization_id", it) }
+    sportId?.trim()?.takeIf(String::isNotBlank)?.let { put("sport_id", it) }
+    if (affiliateUrl?.trim()?.isNotEmpty() == true) {
+        put("is_affiliate_event", "true")
+    }
 }
 
 private fun Organization.toAffiliateRentalEntry(facility: Facility): Organization {
