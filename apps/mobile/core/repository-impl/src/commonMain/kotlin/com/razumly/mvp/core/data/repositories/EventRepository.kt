@@ -24,6 +24,7 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
+import com.razumly.mvp.core.data.dataTypes.usableLatitudeLongitude
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.analytics.AnalyticsEvent
 import com.razumly.mvp.core.analytics.AnalyticsTracker
@@ -2111,7 +2112,11 @@ class EventRepository(
             )
             databaseService.getEventDao.upsertEvents(events)
             val orderedEvents = if (includeDistanceFilter) {
-                events.sortedBy { calcDistance(bounds.center, LatLng(it.lat, it.long)) }
+                events.sortedBy { event ->
+                    event.usableLatitudeLongitude()
+                        ?.let { (latitude, longitude) -> calcDistance(bounds.center, LatLng(latitude, longitude)) }
+                        ?: Double.MAX_VALUE
+                }
             } else {
                 events
             }
@@ -2150,7 +2155,13 @@ class EventRepository(
             databaseService.getEventDao.upsertEvents(events)
 
             val orderedEvents = userLocation
-                ?.let { location -> events.sortedBy { calcDistance(location, LatLng(it.lat, it.long)) } }
+                ?.let { location ->
+                    events.sortedBy { event ->
+                        event.usableLatitudeLongitude()
+                            ?.let { (latitude, longitude) -> calcDistance(location, LatLng(latitude, longitude)) }
+                            ?: Double.MAX_VALUE
+                    }
+                }
                 ?: events
 
             Pair(

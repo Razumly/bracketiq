@@ -52,6 +52,8 @@ import com.google.maps.android.compose.rememberCameraPositionState
 import com.razumly.mvp.BuildConfig
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import com.razumly.mvp.core.data.dataTypes.hasUsableCoordinates
+import com.razumly.mvp.core.data.dataTypes.usableLatitudeLongitude
 import com.razumly.mvp.core.network.apiBaseUrl
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.util.getImageUrl
@@ -305,10 +307,14 @@ actual fun EventMap(
             .takeIf(String::isNotBlank)
             ?: eventFallbackImageId(event)
 
-    fun eventLatLng(event: Event): LatLng = LatLng(event.latitude, event.longitude)
+    fun eventLatLng(event: Event): LatLng {
+        val (latitude, longitude) = event.usableLatitudeLongitude() ?: return LatLng(0.0, 0.0)
+        return LatLng(latitude, longitude)
+    }
 
     fun uniqueMapEvents(): List<Event> =
         (events + listOfNotNull(focusedEvent))
+            .filter(Event::hasUsableCoordinates)
             .distinctBy { it.id }
 
     fun buildEventMarkerGroups(sourceEvents: List<Event>): List<EventMarkerGroup> {

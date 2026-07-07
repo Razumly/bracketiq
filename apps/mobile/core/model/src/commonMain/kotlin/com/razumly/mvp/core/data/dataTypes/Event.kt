@@ -153,6 +153,18 @@ data class Event(
 
 const val DEFAULT_EVENT_SEED_COLOR_ARGB: Int = -9781761
 
+fun Event.usableLatitudeLongitude(): Pair<Double, Double>? {
+    val longitude = coordinates.getOrNull(0) ?: return null
+    val latitude = coordinates.getOrNull(1) ?: return null
+    if (latitude.isNaN() || latitude.isInfinite()) return null
+    if (longitude.isNaN() || longitude.isInfinite()) return null
+    if (latitude !in -90.0..90.0 || longitude !in -180.0..180.0) return null
+    if (latitude == 0.0 && longitude == 0.0) return null
+    return latitude to longitude
+}
+
+fun Event.hasUsableCoordinates(): Boolean = usableLatitudeLongitude() != null
+
 @Serializable
 enum class TeamCheckInMode {
     OFF,
