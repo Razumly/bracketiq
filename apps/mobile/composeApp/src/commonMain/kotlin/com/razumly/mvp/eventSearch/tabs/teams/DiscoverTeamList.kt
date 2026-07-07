@@ -2,6 +2,7 @@ package com.razumly.mvp.eventSearch.tabs.teams
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -11,9 +12,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -29,6 +37,8 @@ import com.razumly.mvp.eventSearch.composables.EmptyDiscoverListItem
 fun DiscoverTeamList(
     teams: List<Team>,
     isLoading: Boolean,
+    hasMore: Boolean,
+    onLoadMore: () -> Unit,
     listState: LazyListState,
     firstElementPadding: PaddingValues,
     lastElementPadding: PaddingValues,
@@ -36,6 +46,22 @@ fun DiscoverTeamList(
     firstItemGuideTargetId: String? = null,
     onTeamClick: (Team) -> Unit,
 ) {
+    var lastLoadRequestKey by remember { mutableStateOf<String?>(null) }
+    val hasTrailingStatusItem = teams.isNotEmpty() && isLoading
+
+    LaunchedEffect(listState, teams.size, hasMore, isLoading) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .collect { lastVisibleIndex ->
+                val nearListEnd = teams.isNotEmpty() && lastVisibleIndex >= teams.lastIndex - 2
+                val currentRequestKey = "${teams.size}:${teams.lastOrNull()?.id.orEmpty()}"
+                val canRequestMore = hasMore && !isLoading && nearListEnd && lastLoadRequestKey != currentRequestKey
+                if (canRequestMore) {
+                    lastLoadRequestKey = currentRequestKey
+                    onLoadMore()
+                }
+            }
+    }
+
     LazyColumn(state = listState) {
         if (teams.isEmpty()) {
             item {
@@ -52,7 +78,7 @@ fun DiscoverTeamList(
         itemsIndexed(teams, key = { _, team -> team.id }) { index, team ->
             val padding = when (index) {
                 0 -> firstElementPadding
-                teams.size - 1 -> lastElementPadding
+                teams.size - 1 -> if (hasTrailingStatusItem) PaddingValues() else lastElementPadding
                 else -> PaddingValues()
             }
 
@@ -71,6 +97,20 @@ fun DiscoverTeamList(
                         }
                     )
             )
+        }
+
+        if (isLoading && teams.isNotEmpty()) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(lastElementPadding)
+                        .padding(16.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+            }
         }
     }
 }

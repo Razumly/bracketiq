@@ -62,10 +62,13 @@ interface EventSearchComponent {
     val organizations: StateFlow<List<Organization>>
     val allOrganizations: StateFlow<List<Organization>>
     val isLoadingOrganizations: StateFlow<Boolean>
+    val hasMoreOrganizations: StateFlow<Boolean>
     val rentals: StateFlow<List<Organization>>
     val isLoadingRentals: StateFlow<Boolean>
+    val hasMoreRentals: StateFlow<Boolean>
     val teams: StateFlow<List<Team>>
     val isLoadingTeams: StateFlow<Boolean>
+    val hasMoreTeams: StateFlow<Boolean>
     val rentalFieldOptions: StateFlow<List<RentalFieldOption>>
     val isLoadingRentalFields: StateFlow<Boolean>
     val rentalBusyBlocks: StateFlow<List<RentalBusyBlock>>
@@ -75,6 +78,9 @@ interface EventSearchComponent {
 
     fun setLoadingHandler(handler: LoadingHandler)
     fun loadMoreEvents()
+    fun loadMoreOrganizations()
+    fun loadMoreRentals()
+    fun loadMoreTeams()
     fun selectRadius(radius: Double)
     fun onMapClick(event: Event? = null)
     fun viewEvent(event: Event)
@@ -183,14 +189,20 @@ class DefaultEventSearchComponent(
     override val allOrganizations: StateFlow<List<Organization>> = _allOrganizations.asStateFlow()
     private val _isLoadingOrganizations = MutableStateFlow(false)
     override val isLoadingOrganizations: StateFlow<Boolean> = _isLoadingOrganizations.asStateFlow()
+    private val _hasMoreOrganizations = MutableStateFlow(true)
+    override val hasMoreOrganizations: StateFlow<Boolean> = _hasMoreOrganizations.asStateFlow()
     private val _rentals = MutableStateFlow<List<Organization>>(emptyList())
     override val rentals: StateFlow<List<Organization>> = _rentals.asStateFlow()
     private val _isLoadingRentals = MutableStateFlow(false)
     override val isLoadingRentals: StateFlow<Boolean> = _isLoadingRentals.asStateFlow()
+    private val _hasMoreRentals = MutableStateFlow(true)
+    override val hasMoreRentals: StateFlow<Boolean> = _hasMoreRentals.asStateFlow()
     private val _teams = MutableStateFlow<List<Team>>(emptyList())
     override val teams: StateFlow<List<Team>> = _teams.asStateFlow()
     private val _isLoadingTeams = MutableStateFlow(false)
     override val isLoadingTeams: StateFlow<Boolean> = _isLoadingTeams.asStateFlow()
+    private val _hasMoreTeams = MutableStateFlow(true)
+    override val hasMoreTeams: StateFlow<Boolean> = _hasMoreTeams.asStateFlow()
     private val _rentalFieldOptions = MutableStateFlow<List<RentalFieldOption>>(emptyList())
     override val rentalFieldOptions: StateFlow<List<RentalFieldOption>> = _rentalFieldOptions.asStateFlow()
     private val _isLoadingRentalFields = MutableStateFlow(false)
@@ -200,6 +212,9 @@ class DefaultEventSearchComponent(
     private var organizationsLoaded = false
     private var rentalsLoaded = false
     private var teamsLoaded = false
+    private var organizationOffset = 0
+    private var rentalOffset = 0
+    private var teamOffset = 0
     private var suggestEventsJob: Job? = null
     private var suggestOrganizationsJob: Job? = null
     private var suggestTeamsJob: Job? = null
@@ -402,6 +417,24 @@ class DefaultEventSearchComponent(
 
     override fun loadMoreEvents() {
         loadMoreEvents(showLoading = true, reportErrors = true)
+    }
+
+    override fun loadMoreOrganizations() {
+        scope.launch {
+            loadMoreOrganizationsPage()
+        }
+    }
+
+    override fun loadMoreRentals() {
+        scope.launch {
+            loadMoreRentalOrganizationsPage()
+        }
+    }
+
+    override fun loadMoreTeams() {
+        scope.launch {
+            loadMoreTeamsPage()
+        }
     }
 
     private fun loadMoreEvents(
@@ -635,6 +668,22 @@ class DefaultEventSearchComponent(
         return merged.values.toList()
     }
 
+    private fun mergeOrganizations(existing: List<Organization>, incoming: List<Organization>): List<Organization> {
+        if (incoming.isEmpty()) return existing
+        val merged = LinkedHashMap<String, Organization>(existing.size + incoming.size)
+        existing.forEach { organization -> merged[organization.id] = organization }
+        incoming.forEach { organization -> merged[organization.id] = organization }
+        return merged.values.toList()
+    }
+
+    private fun mergeTeams(existing: List<Team>, incoming: List<Team>): List<Team> {
+        if (incoming.isEmpty()) return existing
+        val merged = LinkedHashMap<String, Team>(existing.size + incoming.size)
+        existing.forEach { team -> merged[team.id] = team }
+        incoming.forEach { team -> merged[team.id] = team }
+        return merged.values.toList()
+    }
+
     private suspend fun loadOrganizationsForEvents(events: List<Event>) {
         val loadedOrganizationIds = _allOrganizations.value
             .map { organization -> organization.id }
@@ -697,16 +746,21 @@ class DefaultEventSearchComponent(
 
     private suspend fun loadRentalOrganizations(force: Boolean = false) {
         if (_isLoadingRentals.value) return
+        if (rentalsLoaded && !force) return
 
         _isLoadingRentals.value = true
-        val organizations = billingRepository.listOrganizations(
+        rentalOffset = 0
+        _hasMoreRentals.value = true
+        val page = billingRepository.listOrganizationsPage(
             limit = DISCOVER_PAGE_SIZE,
+            offset = 0,
             includeAffiliateRentals = true,
         )
             .onFailure { e ->
                 _errorState.value = ErrorMessage("Failed to fetch rentals: ${e.userMessage()}")
             }
-            .getOrDefault(emptyList())
+            .getOrNull()
+        val organizations = page?.items.orEmpty()
         val rentals = resolveOrganizationsWithFieldIds(
             organizations = organizations,
             forceFieldRefresh = force,
@@ -715,9 +769,38 @@ class DefaultEventSearchComponent(
             .sortedBy { organization -> organization.name.lowercase() }
 
         _rentals.value = rentals
+        rentalOffset = page?.pagination?.nextOffset ?: organizations.size
+        _hasMoreRentals.value = page?.pagination?.hasMore ?: false
         rentalsLoaded = true
         _isLoadingRentals.value = false
         Napier.d("Loaded ${_rentals.value.size} rental organizations", tag = "Discover")
+    }
+
+    private suspend fun loadMoreRentalOrganizationsPage() {
+        if (_isLoadingRentals.value || !_hasMoreRentals.value) return
+
+        _isLoadingRentals.value = true
+        val page = billingRepository.listOrganizationsPage(
+            limit = DISCOVER_PAGE_SIZE,
+            offset = rentalOffset,
+            includeAffiliateRentals = true,
+        )
+            .onFailure { e ->
+                _errorState.value = ErrorMessage("Failed to fetch more rentals: ${e.userMessage()}")
+            }
+            .getOrNull()
+        val organizations = page?.items.orEmpty()
+        val rentals = resolveOrganizationsWithFieldIds(
+            organizations = organizations,
+            forceFieldRefresh = false,
+        )
+            .flatMap { organization -> organization.toDiscoverRentalEntries() }
+        _rentals.value = mergeOrganizations(_rentals.value, rentals)
+            .sortedBy { organization -> organization.name.lowercase() }
+        rentalOffset = page?.pagination?.nextOffset ?: rentalOffset + organizations.size
+        _hasMoreRentals.value = page?.pagination?.hasMore ?: false
+        rentalsLoaded = true
+        _isLoadingRentals.value = false
     }
 
     private suspend fun loadTeams(force: Boolean = false): List<Team> {
@@ -725,19 +808,44 @@ class DefaultEventSearchComponent(
         if (teamsLoaded && !force) return _teams.value
 
         _isLoadingTeams.value = true
-        val teams = withContext(Dispatchers.Default) {
-            teamRepository.searchOpenRegistrationTeams(limit = DISCOVER_PAGE_SIZE)
+        teamOffset = 0
+        _hasMoreTeams.value = true
+        val page = withContext(Dispatchers.Default) {
+            teamRepository.searchOpenRegistrationTeamsPage(limit = DISCOVER_PAGE_SIZE, offset = 0)
         }
             .onFailure { e ->
                 _errorState.value = ErrorMessage("Failed to fetch teams: ${e.userMessage()}")
             }
-            .getOrDefault(emptyList())
+            .getOrNull()
+        val teams = page?.items.orEmpty()
             .sortedBy { team -> team.name.lowercase() }
 
         _teams.value = teams
+        teamOffset = page?.pagination?.nextOffset ?: teams.size
+        _hasMoreTeams.value = page?.pagination?.hasMore ?: false
         teamsLoaded = true
         _isLoadingTeams.value = false
         return teams
+    }
+
+    private suspend fun loadMoreTeamsPage() {
+        if (_isLoadingTeams.value || !_hasMoreTeams.value) return
+
+        _isLoadingTeams.value = true
+        val page = withContext(Dispatchers.Default) {
+            teamRepository.searchOpenRegistrationTeamsPage(limit = DISCOVER_PAGE_SIZE, offset = teamOffset)
+        }
+            .onFailure { e ->
+                _errorState.value = ErrorMessage("Failed to fetch more teams: ${e.userMessage()}")
+            }
+            .getOrNull()
+        val teams = page?.items.orEmpty()
+        _teams.value = mergeTeams(_teams.value, teams)
+            .sortedBy { team -> team.name.lowercase() }
+        teamOffset = page?.pagination?.nextOffset ?: teamOffset + teams.size
+        _hasMoreTeams.value = page?.pagination?.hasMore ?: false
+        teamsLoaded = true
+        _isLoadingTeams.value = false
     }
 
     private suspend fun loadOrganizations(force: Boolean = false): List<Organization> {
@@ -754,25 +862,48 @@ class DefaultEventSearchComponent(
         }
 
         _isLoadingOrganizations.value = true
-        var organizations: List<Organization> = emptyList()
-        billingRepository.listOrganizations(limit = DISCOVER_PAGE_SIZE)
-            .onSuccess { response ->
-                organizations = response
-            }
+        organizationOffset = 0
+        _hasMoreOrganizations.value = true
+        val page = billingRepository.listOrganizationsPage(limit = DISCOVER_PAGE_SIZE, offset = 0)
             .onFailure { e ->
                 _errorState.value = ErrorMessage("Failed to fetch organizations: ${e.userMessage()}")
-                organizations = emptyList()
             }
+            .getOrNull()
+        val organizations = page?.items.orEmpty()
 
         val sortedOrganizations = organizations.sortedBy { organization -> organization.name.lowercase() }
         _allOrganizations.value = sortedOrganizations
         organizationFieldIdsFromFieldsCache = emptyMap()
+        organizationOffset = page?.pagination?.nextOffset ?: organizations.size
+        _hasMoreOrganizations.value = page?.pagination?.hasMore ?: false
 
         val distanceFiltered = applyDistanceFilter(sortedOrganizations)
         _organizations.value = distanceFiltered
         organizationsLoaded = true
         _isLoadingOrganizations.value = false
         return distanceFiltered
+    }
+
+    private suspend fun loadMoreOrganizationsPage() {
+        if (_isLoadingOrganizations.value || !_hasMoreOrganizations.value) return
+
+        _isLoadingOrganizations.value = true
+        val page = billingRepository.listOrganizationsPage(limit = DISCOVER_PAGE_SIZE, offset = organizationOffset)
+            .onFailure { e ->
+                _errorState.value = ErrorMessage("Failed to fetch more organizations: ${e.userMessage()}")
+            }
+            .getOrNull()
+        val organizations = page?.items.orEmpty()
+        val merged = mergeOrganizations(_allOrganizations.value, organizations)
+            .sortedBy { organization -> organization.name.lowercase() }
+        _allOrganizations.value = merged
+        organizationOffset = page?.pagination?.nextOffset ?: organizationOffset + organizations.size
+        _hasMoreOrganizations.value = page?.pagination?.hasMore ?: false
+
+        val distanceFiltered = applyDistanceFilter(merged)
+        _organizations.value = distanceFiltered
+        organizationsLoaded = true
+        _isLoadingOrganizations.value = false
     }
 
     private suspend fun resolveOrganizationsWithFieldIds(

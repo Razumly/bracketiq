@@ -550,10 +550,13 @@ fun EventSearchScreen(
     val organizationSuggestions by component.suggestedOrganizations.collectAsState()
     val teamSuggestions by component.suggestedTeams.collectAsState()
     val isLoadingOrganizations by component.isLoadingOrganizations.collectAsState()
+    val hasMoreOrganizations by component.hasMoreOrganizations.collectAsState()
     val rentals by component.rentals.collectAsState()
     val isLoadingRentals by component.isLoadingRentals.collectAsState()
+    val hasMoreRentals by component.hasMoreRentals.collectAsState()
     val teams by component.teams.collectAsState()
     val isLoadingTeams by component.isLoadingTeams.collectAsState()
+    val hasMoreTeams by component.hasMoreTeams.collectAsState()
     val isMapVisible by mapComponent.showMap.collectAsState()
     val selectedEvent by component.selectedEvent.collectAsState()
     val hazeState = rememberHazeState()
@@ -1064,6 +1067,8 @@ fun EventSearchScreen(
                                     DiscoverOrganizationList(
                                         organizations = organizations,
                                         isLoading = isLoadingOrganizations,
+                                        hasMore = hasMoreOrganizations,
+                                        onLoadMore = { component.loadMoreOrganizations() },
                                         listState = organizationsListState,
                                         firstElementPadding = firstElementPadding,
                                         lastElementPadding = offsetNavPadding,
@@ -1079,6 +1084,8 @@ fun EventSearchScreen(
                                     DiscoverTeamList(
                                         teams = teams,
                                         isLoading = isLoadingTeams,
+                                        hasMore = hasMoreTeams,
+                                        onLoadMore = { component.loadMoreTeams() },
                                         listState = teamsListState,
                                         firstElementPadding = firstElementPadding,
                                         lastElementPadding = offsetNavPadding,
@@ -1092,6 +1099,8 @@ fun EventSearchScreen(
                                     DiscoverRentalList(
                                         organizations = rentals,
                                         isLoading = isLoadingRentals,
+                                        hasMore = hasMoreRentals,
+                                        onLoadMore = { component.loadMoreRentals() },
                                         listState = rentalsListState,
                                         firstElementPadding = firstElementPadding,
                                         lastElementPadding = offsetNavPadding,

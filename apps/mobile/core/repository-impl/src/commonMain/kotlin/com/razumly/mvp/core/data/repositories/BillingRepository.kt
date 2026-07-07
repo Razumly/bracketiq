@@ -60,6 +60,18 @@ import kotlin.time.Instant
 private const val BOLD_SIGN_RATE_LIMIT_FRIENDLY_MESSAGE =
     "You opened the BoldSign document too many times. Please wait a minute before trying again."
 
+data class RepositoryPagination(
+    val limit: Int,
+    val offset: Int,
+    val nextOffset: Int,
+    val hasMore: Boolean,
+)
+
+data class RepositoryPage<T>(
+    val items: List<T>,
+    val pagination: RepositoryPagination,
+)
+
 private fun toFriendlyBoldSignMessage(rawMessage: String?): String? {
     val normalized = rawMessage?.trim()?.takeIf(String::isNotBlank) ?: return null
     val lowercase = normalized.lowercase()
@@ -638,6 +650,23 @@ interface IBillingRepository : IMVPRepository {
         limit: Int = 100,
         includeAffiliateRentals: Boolean = false,
     ): Result<List<Organization>>
+    suspend fun listOrganizationsPage(
+        limit: Int = 100,
+        offset: Int = 0,
+        includeAffiliateRentals: Boolean = false,
+    ): Result<RepositoryPage<Organization>> =
+        listOrganizations(limit = limit, includeAffiliateRentals = includeAffiliateRentals)
+            .map { organizations ->
+                RepositoryPage(
+                    items = organizations,
+                    pagination = RepositoryPagination(
+                        limit = limit,
+                        offset = offset,
+                        nextOffset = offset + organizations.size,
+                        hasMore = organizations.size >= limit,
+                    ),
+                )
+            }
     suspend fun searchOrganizations(
         query: String,
         limit: Int = 10,
@@ -1919,11 +1948,33 @@ class BillingRepository(
     override suspend fun listOrganizations(
         limit: Int,
         includeAffiliateRentals: Boolean,
-    ): Result<List<Organization>> = runCatching {
-        val normalizedLimit = limit.coerceIn(1, 1000)
+    ): Result<List<Organization>> =
+        listOrganizationsPage(
+            limit = limit,
+            offset = 0,
+            includeAffiliateRentals = includeAffiliateRentals,
+        ).map { page -> page.items }
+
+    override suspend fun listOrganizationsPage(
+        limit: Int,
+        offset: Int,
+        includeAffiliateRentals: Boolean,
+    ): Result<RepositoryPage<Organization>> = runCatching {
+        val normalizedLimit = limit.coerceIn(1, 200)
+        val normalizedOffset = offset.coerceAtLeast(0)
         val affiliateParam = if (includeAffiliateRentals) "&includeAffiliateRentals=true" else ""
-        val response = api.get<OrganizationsResponseDto>(path = "api/organizations?limit=$normalizedLimit$affiliateParam")
-        response.organizations.mapNotNull { it.toOrganizationOrNull() }
+        val response = api.get<OrganizationsResponseDto>(
+            path = "api/organizations?limit=$normalizedLimit&offset=$normalizedOffset$affiliateParam",
+        )
+        val organizations = response.organizations.mapNotNull { it.toOrganizationOrNull() }
+        RepositoryPage(
+            items = organizations,
+            pagination = response.pagination.toRepositoryPagination(
+                fallbackLimit = normalizedLimit,
+                fallbackOffset = normalizedOffset,
+                fallbackItemCount = organizations.size,
+            ),
+        )
     }
 
     override suspend fun searchOrganizations(
@@ -2409,7 +2460,28 @@ private data class ProductsResponseDto(
 @Serializable
 private data class OrganizationsResponseDto(
     val organizations: List<OrganizationApiDto> = emptyList(),
+    val pagination: PaginationResponseDto? = null,
 )
+
+@Serializable
+private data class PaginationResponseDto(
+    val limit: Int? = null,
+    val offset: Int? = null,
+    val nextOffset: Int? = null,
+    val hasMore: Boolean? = null,
+)
+
+private fun PaginationResponseDto?.toRepositoryPagination(
+    fallbackLimit: Int,
+    fallbackOffset: Int,
+    fallbackItemCount: Int,
+): RepositoryPagination =
+    RepositoryPagination(
+        limit = this?.limit ?: fallbackLimit,
+        offset = this?.offset ?: fallbackOffset,
+        nextOffset = this?.nextOffset ?: fallbackOffset + fallbackItemCount,
+        hasMore = this?.hasMore ?: (fallbackItemCount >= fallbackLimit),
+    )
 
 @Serializable
 private data class CreateRentalOrderRequestDto(

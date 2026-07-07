@@ -664,7 +664,7 @@ class BillingRepositoryHttpTest {
 
         val engine = MockEngine { request ->
             assertEquals("/api/organizations", request.url.encodedPath)
-            assertEquals("limit=50&includeAffiliateRentals=true", request.url.encodedQuery)
+            assertEquals("limit=50&offset=0&includeAffiliateRentals=true", request.url.encodedQuery)
             assertEquals(HttpMethod.Get, request.method)
 
             respond(

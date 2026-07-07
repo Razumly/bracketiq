@@ -83,6 +83,22 @@ interface ITeamRepository : IMVPRepository {
         query: String = "",
         limit: Int = 100,
     ): Result<List<Team>> = Result.failure(NotImplementedError("Open team registration search is not implemented."))
+    suspend fun searchOpenRegistrationTeamsPage(
+        query: String = "",
+        limit: Int = 100,
+        offset: Int = 0,
+    ): Result<RepositoryPage<Team>> =
+        searchOpenRegistrationTeams(query = query, limit = limit).map { teams ->
+            RepositoryPage(
+                items = teams,
+                pagination = RepositoryPagination(
+                    limit = limit,
+                    offset = offset,
+                    nextOffset = offset + teams.size,
+                    hasMore = teams.size >= limit,
+                ),
+            )
+        }
     suspend fun addPlayerToTeam(team: Team, player: UserData): Result<Unit>
     suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit>
     suspend fun createTeam(newTeam: Team): Result<Team>
@@ -674,14 +690,23 @@ class TeamRepository(
     override suspend fun searchOpenRegistrationTeams(
         query: String,
         limit: Int,
-    ): Result<List<Team>> = runCatching {
+    ): Result<List<Team>> =
+        searchOpenRegistrationTeamsPage(query = query, limit = limit, offset = 0)
+            .map { page -> page.items }
+
+    override suspend fun searchOpenRegistrationTeamsPage(
+        query: String,
+        limit: Int,
+        offset: Int,
+    ): Result<RepositoryPage<Team>> = runCatching {
         val safeLimit = limit.coerceIn(1, 200)
+        val safeOffset = offset.coerceAtLeast(0)
         val normalizedQuery = query.trim()
         val queryParam = normalizedQuery
             .takeIf(String::isNotBlank)
             ?.let { "&query=${it.encodeURLQueryComponent()}" }
             .orEmpty()
-        val res = api.get<TeamsResponseDto>("api/teams?openRegistration=true&limit=$safeLimit$queryParam")
+        val res = api.get<TeamsResponseDto>("api/teams?openRegistration=true&limit=$safeLimit&offset=$safeOffset$queryParam")
         val teams = res.teams
             .mapNotNull { it.toTeamOrNull() }
             .filter { team -> team.openRegistration }
@@ -689,7 +714,15 @@ class TeamRepository(
             databaseService.getTeamDao.upsertTeamsWithRelations(teams)
         }
         ensureUsersCachedForTeams(teams)
-        teams
+        RepositoryPage(
+            items = teams,
+            pagination = RepositoryPagination(
+                limit = res.pagination?.limit ?: safeLimit,
+                offset = res.pagination?.offset ?: safeOffset,
+                nextOffset = res.pagination?.nextOffset ?: safeOffset + teams.size,
+                hasMore = res.pagination?.hasMore ?: (teams.size >= safeLimit),
+            ),
+        )
     }
 
     override suspend fun addPlayerToTeam(team: Team, player: UserData): Result<Unit> {

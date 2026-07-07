@@ -153,6 +153,15 @@ fun TeamPlayerRegistrationApiDto.toTeamPlayerRegistrationOrNull(): TeamPlayerReg
 @Serializable
 data class TeamsResponseDto(
     val teams: List<TeamApiDto> = emptyList(),
+    val pagination: TeamsPaginationDto? = null,
+)
+
+@Serializable
+data class TeamsPaginationDto(
+    val limit: Int? = null,
+    val offset: Int? = null,
+    val nextOffset: Int? = null,
+    val hasMore: Boolean? = null,
 )
 
 @Serializable
