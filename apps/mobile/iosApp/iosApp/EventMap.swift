@@ -158,6 +158,12 @@ private func coordinatesMatch(
     abs(firstLongitude - secondLongitude) < tolerance
 }
 
+private func isUsableCoordinate(latitude: Double, longitude: Double) -> Bool {
+    guard latitude.isFinite, longitude.isFinite else { return false }
+    guard (-90.0...90.0).contains(latitude), (-180.0...180.0).contains(longitude) else { return false }
+    return !(latitude == 0.0 && longitude == 0.0)
+}
+
 private func placesRepresentSameLocation(_ first: MVPPlace?, _ second: MVPPlace?) -> Bool {
     guard let first = first, let second = second else { return false }
 
@@ -1001,6 +1007,9 @@ struct GoogleMapView: UIViewRepresentable {
             if first.id == second.id { return first.name < second.name }
             return first.id < second.id
         }) {
+            guard isUsableCoordinate(latitude: event.lat, longitude: event.long) else {
+                continue
+            }
             let coordinate = CLLocationCoordinate2D(latitude: event.lat, longitude: event.long)
             let point = mapView.projection.point(for: coordinate)
             var closestIndex: Int?
