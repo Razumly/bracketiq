@@ -13,6 +13,19 @@ import platform.UIKit.UIViewController
 import kotlin.time.ExperimentalTime
 
 interface NativeViewFactory {
+    fun createNativeEventCard(
+        data: NativeEventCardData,
+        bottomPadding: Float,
+        onMapClick: (x: Float, y: Float) -> Unit,
+    ): UIViewController
+
+    fun updateNativeEventCard(
+        viewController: UIViewController,
+        data: NativeEventCardData,
+        bottomPadding: Float,
+        onMapClick: (x: Float, y: Float) -> Unit,
+    )
+
     fun createNativeMapView(
         component: MapComponent,
         onEventSelected: (event: Event) -> Unit,
