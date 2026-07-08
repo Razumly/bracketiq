@@ -13,6 +13,7 @@ import com.arkivanov.decompose.value.Value
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.Field
@@ -93,6 +94,7 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val errorState: StateFlow<ErrorMessage?>
     val eventImageUrls: StateFlow<List<String>>
     val sports: StateFlow<List<Sport>>
+    val eventTags: StateFlow<List<EventTag>>
     val divisionTypeParameters: StateFlow<DivisionTypeParameters>
     val organizationTemplates: StateFlow<List<OrganizationTemplateDocument>>
     val organizationTemplatesLoading: StateFlow<Boolean>
@@ -225,6 +227,8 @@ class DefaultCreateEventComponent(
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
     private val _sports = MutableStateFlow<List<Sport>>(emptyList())
     override val sports = _sports.asStateFlow()
+    private val _eventTags = MutableStateFlow<List<EventTag>>(emptyList())
+    override val eventTags = _eventTags.asStateFlow()
     private val _divisionTypeParameters = MutableStateFlow(DivisionTypeParameters())
     override val divisionTypeParameters = _divisionTypeParameters.asStateFlow()
     private val _organizationTemplates = MutableStateFlow<List<OrganizationTemplateDocument>>(emptyList())
@@ -269,6 +273,7 @@ class DefaultCreateEventComponent(
     init {
         childStack.subscribe {}
         loadSports()
+        loadEventTags()
         loadAvailableRentalResources()
         scope.launch {
             _newEventState
@@ -1570,6 +1575,18 @@ class DefaultCreateEventComponent(
                 }
                 .onFailure { error ->
                     _errorState.value = ErrorMessage(error.userMessage("Failed to load division options."))
+                }
+        }
+    }
+
+    private fun loadEventTags() {
+        scope.launch {
+            eventRepository.getEventTags()
+                .onSuccess { tags ->
+                    _eventTags.value = tags
+                }
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage("Failed to load event tags: ${error.userMessage()}")
                 }
         }
     }

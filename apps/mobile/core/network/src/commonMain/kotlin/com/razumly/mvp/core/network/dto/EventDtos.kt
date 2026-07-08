@@ -459,6 +459,11 @@ data class EventsResponseDto(
 )
 
 @Serializable
+data class EventTagsResponseDto(
+    val tags: List<EventTag> = emptyList(),
+)
+
+@Serializable
 data class EventTemplateApiDto(
     val id: String? = null,
     val name: String? = null,

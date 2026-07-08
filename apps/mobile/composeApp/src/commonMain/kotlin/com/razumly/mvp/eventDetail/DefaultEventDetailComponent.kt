@@ -14,6 +14,7 @@ import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
@@ -423,6 +424,7 @@ class DefaultEventDetailComponent(
     override val leagueStandingsConfirming = leagueStandingsCoordinator.standingsConfirming
     private var sportsLoadJob: Job? = null
     private val sportsCatalogCoordinator = EventSportsCatalogCoordinator()
+    private val _eventTags = MutableStateFlow<List<EventTag>>(emptyList())
 
     private val eventRelations: StateFlow<EventWithRelations> =
         eventRepository.getCachedEventWithRelationsFlow(event.id).map { result ->
@@ -437,6 +439,7 @@ class DefaultEventDetailComponent(
         )
 
     override val sports = sportsCatalogCoordinator.sports
+    override val eventTags = _eventTags.asStateFlow()
     override val divisionTypeParameters = sportsCatalogCoordinator.divisionTypeParameters
 
     override val selectedEvent: StateFlow<Event> =
@@ -991,6 +994,7 @@ class DefaultEventDetailComponent(
         if (editDraftCoordinator.isEditing.value) {
             loadSports(reportErrors = true)
         }
+        loadEventTags()
         scope.launch {
             selectedEvent
                 .map { selected -> selected.organizationId?.trim().orEmpty() }
@@ -1540,6 +1544,18 @@ class DefaultEventDetailComponent(
                     }
                 }
             sportsCatalogCoordinator.finishLoad(loadedSports, loadedDivisionTypes)
+        }
+    }
+
+    private fun loadEventTags() {
+        scope.launch {
+            eventRepository.getEventTags()
+                .onSuccess { tags ->
+                    _eventTags.value = tags
+                }
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage("Failed to load event tags: ${error.userMessage()}")
+                }
         }
     }
 

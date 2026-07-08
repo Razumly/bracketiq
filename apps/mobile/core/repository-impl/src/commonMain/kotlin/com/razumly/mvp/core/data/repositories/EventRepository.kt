@@ -6,6 +6,7 @@ import com.razumly.mvp.core.data.dataTypes.BillDiscountSummary
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.EventParticipantManagementCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventRegistrationCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventTeamComplianceCacheEntry
@@ -24,6 +25,7 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
+import com.razumly.mvp.core.data.dataTypes.normalizedEventTags
 import com.razumly.mvp.core.data.dataTypes.usableLatitudeLongitude
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.analytics.AnalyticsEvent
@@ -58,6 +60,7 @@ import com.razumly.mvp.core.network.dto.EventResponseDto
 import com.razumly.mvp.core.network.dto.EventSearchFiltersDto
 import com.razumly.mvp.core.network.dto.EventSearchRequestDto
 import com.razumly.mvp.core.network.dto.EventSearchUserLocationDto
+import com.razumly.mvp.core.network.dto.EventTagsResponseDto
 import com.razumly.mvp.core.network.dto.EventTeamComplianceResponseDto
 import com.razumly.mvp.core.network.dto.EventTeamComplianceSummaryDto
 import com.razumly.mvp.core.network.dto.EventTemplateApiDto
@@ -150,6 +153,7 @@ interface IEventRepository : IMVPRepository {
         limit: Int = 8,
         offset: Int = 0,
     ): Result<Pair<List<Event>, Boolean>>
+    suspend fun getEventTags(query: String? = null): Result<List<EventTag>> = Result.success(emptyList())
     fun getEventsByHostFlow(hostId: String): Flow<Result<List<Event>>>
     fun getEventTemplatesByHostFlow(hostId: String): Flow<Result<List<EventTemplateSummary>>> =
         flowOf(Result.success(emptyList()))
@@ -2169,6 +2173,23 @@ class EventRepository(
                 events.size == normalizedLimit,
             )
         }
+    }
+
+    override suspend fun getEventTags(query: String?): Result<List<EventTag>> = runCatching {
+        val normalizedQuery = query?.trim().orEmpty()
+        val path = buildString {
+            append("api/event-tags")
+            if (normalizedQuery.isNotEmpty()) {
+                append("?query=")
+                append(normalizedQuery.encodeURLQueryComponent())
+            }
+        }
+        api.get<EventTagsResponseDto>(path).tags
+            .normalizedEventTags()
+            .sortedWith(
+                compareByDescending<EventTag> { tag -> tag.eventCount }
+                    .thenBy { tag -> tag.name.lowercase() },
+            )
     }
 
     override suspend fun reportEvent(eventId: String, notes: String?): Result<Unit> = runCatching {

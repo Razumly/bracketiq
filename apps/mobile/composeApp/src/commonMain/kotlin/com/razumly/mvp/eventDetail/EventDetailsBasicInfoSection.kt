@@ -1,5 +1,9 @@
 package com.razumly.mvp.eventDetail
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -9,12 +13,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -24,7 +32,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -33,13 +40,14 @@ import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.dataTypes.defaultEventTagOptions
 import com.razumly.mvp.core.data.dataTypes.eventTagIdentity
 import com.razumly.mvp.core.data.dataTypes.lockedEventTypeTagSlugs
-import com.razumly.mvp.core.data.dataTypes.normalizedEventTag
+import com.razumly.mvp.core.data.dataTypes.normalizedEventTags
+import com.razumly.mvp.core.data.dataTypes.reservedEventTypeTagSlugs
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.syncEventTypeTagsForEventType
 import com.razumly.mvp.core.presentation.composables.DropdownOption
+import com.razumly.mvp.core.presentation.composables.EventTagSearchDropdown
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
@@ -72,6 +80,7 @@ internal data class EventDetailsBasicInfoState(
     val editEvent: Event,
     val editEventTimeZone: TimeZone,
     val sports: List<Sport>,
+    val eventTagOptions: List<EventTag>,
     val isSportValid: Boolean,
     val scheduleTimeLocked: Boolean,
     val rentalTimeLocked: Boolean,
@@ -168,6 +177,7 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                 )
                 EventTagsEditor(
                     tags = state.editEvent.tags,
+                    tagOptions = state.eventTagOptions,
                     eventType = state.editEvent.eventType,
                     onTagsChange = { tags ->
                         actions.onEditEvent { copy(tags = tags) }
@@ -292,89 +302,97 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
 @Composable
 private fun EventTagsEditor(
     tags: List<EventTag>,
+    tagOptions: List<EventTag>,
     eventType: EventType,
     onTagsChange: (List<EventTag>) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var draftTag by remember { mutableStateOf("") }
+    var selectedTagsExpanded by remember { mutableStateOf(tags.isNotEmpty()) }
     val normalizedTags = remember(tags, eventType) {
         tags.syncEventTypeTagsForEventType(eventType)
     }
     val lockedSlugs = remember(eventType) { lockedEventTypeTagSlugs(eventType) }
-    val defaultOptions = remember(normalizedTags) {
-        val selectedSlugs = normalizedTags.map { tag -> tag.eventTagIdentity() }.toSet()
-        defaultEventTagOptions.filter { option -> option.eventTagIdentity() !in selectedSlugs }
-    }
-
-    fun addDraftTag() {
-        val tag = EventTag(name = draftTag)
-            .normalizedEventTag()
-            ?: return
-        onTagsChange((normalizedTags + tag).syncEventTypeTagsForEventType(eventType))
-        draftTag = ""
+    val reservedSlugs = remember { reservedEventTypeTagSlugs() }
+    val selectedSlugs = remember(normalizedTags) {
+        normalizedTags.map { tag -> tag.eventTagIdentity() }.toSet()
     }
 
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        StandardTextField(
+        EventTagSearchDropdown(
             value = draftTag,
             onValueChange = { draftTag = it },
-            label = "Tags",
-            placeholder = "Add a tag",
-            trailingIcon = {
-                TextButton(
-                    onClick = ::addDraftTag,
-                    enabled = draftTag.isNotBlank(),
-                ) {
-                    Text("Add")
-                }
+            tags = tagOptions.normalizedEventTags(),
+            selectedTagSlugs = selectedSlugs,
+            onTagSelected = { option ->
+                onTagsChange((normalizedTags + option).syncEventTypeTagsForEventType(eventType))
             },
-            imeAction = ImeAction.Done,
-            onImeAction = ::addDraftTag,
+            label = "Tags",
+            placeholder = "Enter tag",
+            hideSelectedOptions = true,
+            allowCustomTag = true,
+            onCustomTagAdded = { tag ->
+                onTagsChange((normalizedTags + tag).syncEventTypeTagsForEventType(eventType))
+            },
+            collapseOnSelect = true,
+            excludedTagSlugs = reservedSlugs,
             modifier = Modifier.fillMaxWidth(),
         )
         if (normalizedTags.isNotEmpty()) {
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { selectedTagsExpanded = !selectedTagsExpanded },
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                normalizedTags.forEach { tag ->
-                    val identity = tag.eventTagIdentity()
-                    val locked = identity in lockedSlugs
-                    FilterChip(
-                        selected = true,
-                        enabled = !locked,
-                        onClick = {
-                            if (!locked) {
-                                onTagsChange(
-                                    normalizedTags
-                                        .filterNot { existing -> existing.eventTagIdentity() == identity }
-                                        .syncEventTypeTagsForEventType(eventType),
-                                )
-                            }
+                Text(
+                    text = "${normalizedTags.size} selected",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                IconButton(onClick = { selectedTagsExpanded = !selectedTagsExpanded }) {
+                    Icon(
+                        imageVector = if (selectedTagsExpanded) {
+                            Icons.Default.KeyboardArrowUp
+                        } else {
+                            Icons.Default.KeyboardArrowDown
                         },
-                        label = { Text(tag.name) },
+                        contentDescription = if (selectedTagsExpanded) "Collapse selected tags" else "Expand selected tags",
                     )
                 }
             }
-        }
-        if (defaultOptions.isNotEmpty()) {
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+            AnimatedVisibility(
+                visible = selectedTagsExpanded,
+                enter = fadeIn(),
+                exit = fadeOut(),
             ) {
-                defaultOptions.forEach { option ->
-                    FilterChip(
-                        selected = false,
-                        onClick = {
-                            onTagsChange((normalizedTags + option).syncEventTypeTagsForEventType(eventType))
-                        },
-                        label = { Text(option.name) },
-                    )
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    normalizedTags.forEach { tag ->
+                        val identity = tag.eventTagIdentity()
+                        val locked = identity in lockedSlugs
+                        FilterChip(
+                            selected = true,
+                            enabled = !locked,
+                            onClick = {
+                                if (!locked) {
+                                    onTagsChange(
+                                        normalizedTags
+                                            .filterNot { existing -> existing.eventTagIdentity() == identity }
+                                            .syncEventTypeTagsForEventType(eventType),
+                                    )
+                                }
+                            },
+                            label = { Text(tag.name) },
+                        )
+                    }
                 }
             }
         }

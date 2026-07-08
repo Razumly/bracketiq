@@ -8,6 +8,7 @@ data class EventTag(
     val id: String? = null,
     val name: String = "",
     val slug: String = "",
+    val eventCount: Int = 0,
 )
 
 private const val MAX_EVENT_TAG_LENGTH = 40
@@ -15,10 +16,6 @@ private const val MAX_EVENT_TAG_LENGTH = 40
 private val eventTypeTags = mapOf(
     EventType.LEAGUE to EventTag(name = "League", slug = "league"),
     EventType.TOURNAMENT to EventTag(name = "Tournament", slug = "tournament"),
-)
-
-val defaultEventTagOptions: List<EventTag> = listOf(
-    EventTag(name = "Tryouts", slug = "tryouts"),
 )
 
 fun slugifyEventTagName(value: String): String {
@@ -43,6 +40,9 @@ fun EventTag.normalizedEventTag(): EventTag? {
 fun EventTag.eventTagIdentity(): String =
     slug.trim().lowercase().ifBlank { slugifyEventTagName(name) }
 
+fun EventTag.eventTagLabelWithCount(): String =
+    "${name.trim()} ($eventCount)"
+
 fun List<EventTag>.normalizedEventTags(): List<EventTag> {
     val seen = mutableSetOf<String>()
     return mapNotNull(EventTag::normalizedEventTag).filter { tag ->
@@ -54,6 +54,9 @@ fun lockedEventTypeTagSlugs(eventType: EventType): Set<String> =
     eventTypeTags[eventType]
         ?.let { setOf(it.eventTagIdentity()) }
         ?: emptySet()
+
+fun reservedEventTypeTagSlugs(): Set<String> =
+    eventTypeTags.values.map(EventTag::eventTagIdentity).toSet()
 
 fun List<EventTag>.syncEventTypeTagsForEventType(eventType: EventType): List<EventTag> {
     val retainedTags = normalizedEventTags().filter { tag ->

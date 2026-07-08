@@ -56,6 +56,7 @@ import com.kmpalette.rememberDominantColorState
 import com.materialkolor.scheme.DynamicScheme
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
@@ -190,6 +191,7 @@ fun EventDetails(
     onAddCurrentUser: (Boolean) -> Unit,
     onEventTypeSelected: (EventType) -> Unit,
     sports: List<Sport> = emptyList(),
+    eventTagOptions: List<EventTag> = emptyList(),
     divisionTypeParameters: DivisionTypeParameters = DivisionTypeParameters(),
     editableFields: List<Field> = emptyList(),
     leagueTimeSlots: List<TimeSlot> = emptyList(),
@@ -2362,6 +2364,7 @@ fun EventDetails(
                         editEvent = editEvent,
                         editEventTimeZone = editEventTimeZone,
                         sports = sports,
+                        eventTagOptions = eventTagOptions,
                         isSportValid = isSportValid,
                         scheduleTimeLocked = scheduleTimeLocked,
                         rentalTimeLocked = rentalTimeLocked,

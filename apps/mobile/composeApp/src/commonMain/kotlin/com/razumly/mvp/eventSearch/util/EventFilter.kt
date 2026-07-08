@@ -9,14 +9,12 @@ import kotlin.time.Instant
 
 @OptIn(ExperimentalTime::class)
 data class EventFilter(
-    val eventType: EventType? = null,
     val price: Pair<Double, Double>? = null,
     val date: Pair<Instant, Instant?> = Pair(Clock.System.now(), null),
     val sportIds: Set<String> = emptySet(),
     val tagSlugs: Set<String> = emptySet(),
 ) {
     fun filter(event: Event, includePastEvents: Boolean = false): Boolean {
-        if (eventType != null && event.eventType != eventType) return false
         if (sportIds.isNotEmpty()) {
             val eventSportId = event.sportId?.trim()?.takeIf(String::isNotBlank) ?: return false
             if (eventSportId !in sportIds) return false

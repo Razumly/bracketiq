@@ -7,6 +7,7 @@ import com.arkivanov.essenty.backhandler.BackCallback
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
@@ -97,6 +98,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val editableMatches: StateFlow<List<MatchWithRelations>>
     val editableRounds: StateFlow<List<List<MatchWithRelations?>>>
     val sports: StateFlow<List<Sport>>
+    val eventTags: StateFlow<List<EventTag>>
     val divisionTypeParameters: StateFlow<DivisionTypeParameters>
     val showTeamSelectionDialog: StateFlow<TeamSelectionDialogState?>
     val showMatchEditDialog: StateFlow<MatchEditDialogState?>

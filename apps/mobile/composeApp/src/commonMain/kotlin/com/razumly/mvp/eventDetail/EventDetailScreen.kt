@@ -967,6 +967,7 @@ fun EventDetailScreen(
     val loadingHandler = LocalLoadingHandler.current
     val selectedEvent by component.eventWithRelations.collectAsState()
     val sports by component.sports.collectAsState()
+    val eventTags by component.eventTags.collectAsState()
     val divisionTypeParameters by component.divisionTypeParameters.collectAsState()
     val currentUser by component.currentUser.collectAsState()
     val showEventTeamCheckInDialog by component.showEventTeamCheckInDialog.collectAsState()
@@ -2151,6 +2152,7 @@ fun EventDetailScreen(
                                 }
                             },
                             sports = sports,
+                            eventTagOptions = eventTags,
                             divisionTypeParameters = divisionTypeParameters,
                             onUpdateDoTeamsOfficiate = { doTeamsOfficiate ->
                                 component.editEventField {

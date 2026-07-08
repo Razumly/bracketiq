@@ -809,6 +809,45 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    fun getEventTags_fetches_database_backed_tag_options() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("/api/event-tags", request.url.encodedPath)
+            assertEquals("query=try", request.url.encodedQuery)
+            respond(
+                content = """
+                    {
+                      "tags": [
+                        { "id": "tag_tryouts", "name": "Tryouts", "slug": "tryouts", "eventCount": 12 },
+                        { "id": "tag_duplicate", "name": "Tryouts Duplicate", "slug": "tryouts", "eventCount": 3 },
+                        { "id": "tag_clinic", "name": "Clinic", "slug": "clinic", "eventCount": 4 }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { configureMvpHttpClient() }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val tags = repo.getEventTags("try").getOrThrow()
+
+        assertEquals(listOf("Tryouts", "Clinic"), tags.map { it.name })
+        assertEquals(listOf("tryouts", "clinic"), tags.map { it.slug })
+        assertEquals(listOf(12, 4), tags.map { it.eventCount })
+    }
+
+    @Test
     fun getEvent_removes_cached_event_when_server_returns_forbidden() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()

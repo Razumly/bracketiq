@@ -12,7 +12,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -31,8 +30,6 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -63,7 +60,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.eventSearch.util.EventFilter
 import kotlinx.datetime.TimeZone
@@ -207,8 +203,7 @@ fun SearchBox(
 
 @OptIn(ExperimentalTime::class)
 private fun isFilterActive(filter: EventFilter, currentRadiusMiles: Double? = null): Boolean {
-    return filter.eventType != null ||
-        filter.price != null ||
+    return filter.price != null ||
         filter.sportIds.isNotEmpty() ||
         filter.tagSlugs.isNotEmpty() ||
         filter.date.second != null ||
@@ -270,10 +265,6 @@ private fun FilterDropdown(
                             Text("Clear All")
                         }
                     }
-
-                    EventTypeFilterSection(
-                        currentFilter = currentFilter, onFilterChange = onFilterChange
-                    )
 
                     PriceFilterSection(
                         currentFilter = currentFilter, onFilterChange = onFilterChange
@@ -413,78 +404,9 @@ private fun DistanceFilterSection(
     }
 }
 
-@Composable
-@OptIn(ExperimentalTime::class)
-private fun EventTypeFilterSection(
-    currentFilter: EventFilter, onFilterChange: (EventFilter.() -> EventFilter) -> Unit
-) {
-    Column {
-        Text(
-            text = "Event Type",
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.fillMaxWidth().padding(top = 3.dp)
-        ) {
-            EventTypeFilterChip(
-                selected = currentFilter.eventType == null,
-                label = "All",
-                onClick = { onFilterChange { copy(eventType = null) } },
-            )
-
-            EventTypeFilterChip(
-                selected = currentFilter.eventType == EventType.TOURNAMENT,
-                label = "Tournaments",
-                onClick = { onFilterChange { copy(eventType = EventType.TOURNAMENT) } },
-            )
-
-            EventTypeFilterChip(
-                selected = currentFilter.eventType == EventType.EVENT,
-                label = "Events",
-                onClick = { onFilterChange { copy(eventType = EventType.EVENT) } },
-            )
-
-            EventTypeFilterChip(
-                selected = currentFilter.eventType == EventType.LEAGUE,
-                label = "Leagues",
-                onClick = { onFilterChange { copy(eventType = EventType.LEAGUE) } },
-            )
-        }
-    }
-}
-
 private const val DEFAULT_DISTANCE_FILTER_MILES = 50
 private const val DISTANCE_SLIDER_MIN_MILES = 10
 private const val DISTANCE_SLIDER_MAX_MILES = 100
-
-@Composable
-private fun EventTypeFilterChip(
-    selected: Boolean,
-    label: String,
-    onClick: () -> Unit,
-) {
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        label = { Text(label) },
-        colors = FilterChipDefaults.filterChipColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-            labelColor = MaterialTheme.colorScheme.onSurface,
-            selectedContainerColor = MaterialTheme.colorScheme.primary,
-            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-        ),
-        border = FilterChipDefaults.filterChipBorder(
-            enabled = true,
-            selected = selected,
-            borderColor = MaterialTheme.colorScheme.outline,
-            selectedBorderColor = MaterialTheme.colorScheme.primary,
-        ),
-    )
-}
 
 @Composable
 @OptIn(ExperimentalTime::class)

@@ -89,6 +89,7 @@ fun CreateEventScreen(
     val childStack by component.childStack.subscribeAsState()
     val eventImageUrls by component.eventImageUrls.collectAsState()
     val sports by component.sports.collectAsState()
+    val eventTags by component.eventTags.collectAsState()
     val divisionTypeParameters by component.divisionTypeParameters.collectAsState()
     val organizationTemplates by component.organizationTemplates.collectAsState()
     val organizationTemplatesLoading by component.organizationTemplatesLoading.collectAsState()
@@ -447,6 +448,7 @@ fun CreateEventScreen(
                             imageScheme = imageScheme,
                             imageIds = eventImageUrls,
                             sports = sports,
+                            eventTagOptions = eventTags,
                             divisionTypeParameters = divisionTypeParameters,
                             organizationTemplates = organizationTemplates,
                             organizationTemplatesLoading = organizationTemplatesLoading,

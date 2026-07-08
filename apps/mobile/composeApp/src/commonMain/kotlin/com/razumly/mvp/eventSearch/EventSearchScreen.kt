@@ -105,10 +105,9 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateUrl
 import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateRentalUrl
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
-import com.razumly.mvp.core.data.dataTypes.defaultEventTagOptions
 import com.razumly.mvp.core.data.dataTypes.eventTagIdentity
-import com.razumly.mvp.core.data.dataTypes.normalizedEventTags
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.composables.EventTagSearchDropdown
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.composables.SearchBox
 import com.razumly.mvp.core.presentation.composables.SearchOverlay
@@ -317,8 +316,8 @@ private fun DiscoverFilterTagSection(
     selectedTagSlugs: Set<String>,
     onTagToggled: (EventTag) -> Unit,
 ) {
-    if (tags.isEmpty()) return
     var tagsExpanded by rememberSaveable { mutableStateOf(selectedTagSlugs.isNotEmpty()) }
+    var tagSearchQuery by rememberSaveable { mutableStateOf("") }
     val selectedTags = remember(tags, selectedTagSlugs) {
         tags.filter { tag -> tag.eventTagIdentity() in selectedTagSlugs }
     }
@@ -368,25 +367,20 @@ private fun DiscoverFilterTagSection(
             enter = expandVertically(animationSpec = tween(180)) + fadeIn(),
             exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(),
         ) {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                tags.forEach { tag ->
-                    val tagSlug = tag.eventTagIdentity()
-                    FilterChip(
-                        selected = tagSlug in selectedTagSlugs,
-                        onClick = { onTagToggled(tag) },
-                        label = {
-                            Text(
-                                text = tag.name,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                    )
-                }
+                EventTagSearchDropdown(
+                    value = tagSearchQuery,
+                    onValueChange = { tagSearchQuery = it },
+                    tags = tags,
+                    selectedTagSlugs = selectedTagSlugs,
+                    onTagSelected = onTagToggled,
+                    placeholder = "Search tags",
+                    clearQueryOnSelect = false,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }
@@ -583,11 +577,7 @@ fun EventSearchScreen(
     val currentRadius by component.currentRadius.collectAsState()
     val selectedSearchLocationLabel by component.selectedSearchLocationLabel.collectAsState()
     val sports by component.sports.collectAsState()
-    val eventTagOptions = remember(events) {
-        (defaultEventTagOptions + events.flatMap { event -> event.tags })
-            .normalizedEventTags()
-            .sortedBy { tag -> tag.name.lowercase() }
-    }
+    val eventTagOptions by component.eventTags.collectAsState()
 
     var selectedTab by rememberSaveable { mutableStateOf(DiscoverTab.EVENTS) }
     var searchQuery by remember { mutableStateOf("") }

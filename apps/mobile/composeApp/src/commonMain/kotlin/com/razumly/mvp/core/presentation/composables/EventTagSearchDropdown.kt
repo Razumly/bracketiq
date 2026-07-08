@@ -1,0 +1,208 @@
+package com.razumly.mvp.core.presentation.composables
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupProperties
+import com.razumly.mvp.core.data.dataTypes.EventTag
+import com.razumly.mvp.core.data.dataTypes.eventTagIdentity
+import com.razumly.mvp.core.data.dataTypes.eventTagLabelWithCount
+import com.razumly.mvp.core.data.dataTypes.normalizedEventTag
+
+@Composable
+fun EventTagSearchDropdown(
+    value: String,
+    onValueChange: (String) -> Unit,
+    tags: List<EventTag>,
+    selectedTagSlugs: Set<String>,
+    onTagSelected: (EventTag) -> Unit,
+    modifier: Modifier = Modifier,
+    label: String = "",
+    placeholder: String = "Search tags",
+    enabled: Boolean = true,
+    hideSelectedOptions: Boolean = false,
+    allowCustomTag: Boolean = false,
+    onCustomTagAdded: ((EventTag) -> Unit)? = null,
+    clearQueryOnSelect: Boolean = true,
+    collapseOnSelect: Boolean = false,
+    excludedTagSlugs: Set<String> = emptySet(),
+    maxVisibleTags: Int = 5,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var hasFocus by remember { mutableStateOf(false) }
+    val normalizedQuery = value.trim().lowercase()
+    val visibleTags = remember(tags, selectedTagSlugs, normalizedQuery, hideSelectedOptions, excludedTagSlugs, maxVisibleTags) {
+        tags
+            .filter { tag ->
+                !hideSelectedOptions || tag.eventTagIdentity() !in selectedTagSlugs
+            }
+            .filter { tag ->
+                tag.eventTagIdentity() !in excludedTagSlugs
+            }
+            .filter { tag ->
+                normalizedQuery.isBlank() ||
+                    tag.name.lowercase().contains(normalizedQuery) ||
+                    tag.slug.lowercase().contains(normalizedQuery)
+            }
+            .sortedWith(
+                compareByDescending<EventTag> { tag -> tag.eventCount }
+                    .thenBy { tag -> tag.name.lowercase() },
+            )
+            .take(maxVisibleTags)
+    }
+    val typedTag = remember(value, tags, selectedTagSlugs, excludedTagSlugs, allowCustomTag) {
+        if (!allowCustomTag) {
+            null
+        } else {
+            EventTag(name = value)
+                .normalizedEventTag()
+                ?.takeIf { tag ->
+                    tag.eventTagIdentity() !in selectedTagSlugs &&
+                        tag.eventTagIdentity() !in excludedTagSlugs &&
+                        tags.none { option -> option.eventTagIdentity() == tag.eventTagIdentity() }
+                }
+        }
+    }
+    val hasDropdownContent = visibleTags.isNotEmpty() || typedTag != null
+
+    fun selectTag(tag: EventTag) {
+        onTagSelected(tag)
+        if (clearQueryOnSelect) {
+            onValueChange("")
+        }
+        if (collapseOnSelect && !hasFocus) {
+            expanded = false
+        } else {
+            expanded = true
+        }
+    }
+
+    fun addTypedTag() {
+        val tag = typedTag ?: return
+        onCustomTagAdded?.invoke(tag)
+        if (clearQueryOnSelect) {
+            onValueChange("")
+        }
+        if (collapseOnSelect && !hasFocus) {
+            expanded = false
+        } else {
+            expanded = true
+        }
+    }
+
+    Box(modifier = modifier) {
+        StandardTextField(
+            value = value,
+            onValueChange = {
+                onValueChange(it)
+                expanded = true
+            },
+            label = label,
+            placeholder = placeholder,
+            enabled = enabled,
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "Search tags",
+                )
+            },
+            imeAction = ImeAction.Done,
+            onImeAction = {
+                if (typedTag != null) {
+                    addTypedTag()
+                }
+            },
+            onTap = { expanded = true },
+            onFocusChanged = { isFocused ->
+                hasFocus = isFocused
+                if (isFocused) {
+                    expanded = true
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        DropdownMenu(
+            expanded = enabled && expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.fillMaxWidth(),
+            properties = PopupProperties(focusable = false),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 220.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (!hasDropdownContent) {
+                    Text(
+                        text = if (normalizedQuery.isBlank()) {
+                            "No tags available."
+                        } else {
+                            "No tags match this search."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        typedTag?.let { tag ->
+                            FilterChip(
+                                selected = false,
+                                onClick = ::addTypedTag,
+                                label = {
+                                    Text(
+                                        text = tag.name,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                },
+                            )
+                        }
+                        visibleTags.forEach { tag ->
+                            val identity = tag.eventTagIdentity()
+                            FilterChip(
+                                selected = identity in selectedTagSlugs,
+                                onClick = { selectTag(tag) },
+                                label = {
+                                    Text(
+                                        text = tag.eventTagLabelWithCount(),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
