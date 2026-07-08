@@ -52,7 +52,7 @@ actual class MapComponent(
     actual val currentViewRadiusMiles = _currentViewRadiusMiles.asStateFlow()
 
     private val _events = MutableStateFlow<List<Event>>(emptyList())
-    val events: StateFlow<List<Event>> = _events.asStateFlow()
+    actual val events: StateFlow<List<Event>> = _events.asStateFlow()
 
     private val _places = MutableStateFlow<List<MVPPlace>>(emptyList())
     actual val places: StateFlow<List<MVPPlace>> = _places.asStateFlow()
@@ -61,7 +61,7 @@ actual class MapComponent(
     val error: StateFlow<String?> = _error.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
-    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+    actual val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     private val _currentRadiusMeters = MutableStateFlow(50.0)
 
@@ -265,12 +265,14 @@ actual class MapComponent(
     }
 
 
-    suspend fun getEvents() {
+    actual suspend fun refreshEventsForVisibleArea() {
         _isLoading.value = true
         _error.value = null
+        _events.value = emptyList()
 
         val searchCenter = _currentViewCenter.value ?: _currentLocation.value ?: run {
             _error.value = "Location not available"
+            _isLoading.value = false
             return
         }
         val searchRadiusMiles = _currentViewRadiusMiles.value ?: _currentRadiusMeters.value
@@ -287,6 +289,10 @@ actual class MapComponent(
         }
 
         _isLoading.value = false
+    }
+
+    suspend fun getEvents() {
+        refreshEventsForVisibleArea()
     }
 
     private fun currentPlaceBiasRadiusMeters(): Double =

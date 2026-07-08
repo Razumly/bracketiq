@@ -52,6 +52,7 @@ import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -67,6 +68,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -158,6 +160,7 @@ import kotlinx.datetime.toLocalDateTime
 import kotlinx.datetime.toInstant
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -573,6 +576,7 @@ fun EventSearchScreen(
     val currentLocation by component.currentLocation.collectAsState()
     val mapViewCenter by mapComponent.currentViewCenter.collectAsState()
     val mapViewRadiusMiles by mapComponent.currentViewRadiusMiles.collectAsState()
+    val isMapLoading by mapComponent.isLoading.collectAsState()
     val currentFilter by component.filter.collectAsState()
     val currentRadius by component.currentRadius.collectAsState()
     val selectedSearchLocationLabel by component.selectedSearchLocationLabel.collectAsState()
@@ -649,6 +653,7 @@ fun EventSearchScreen(
     val teamsScrollingUp by teamsListState.isScrollingUp()
     val rentalsScrollingUp by rentalsListState.isScrollingUp()
     val uriHandler = LocalUriHandler.current
+    val coroutineScope = rememberCoroutineScope()
 
     val density = LocalDensity.current
     val fixedTabFontSize = (13f / density.fontScale).sp
@@ -710,6 +715,7 @@ fun EventSearchScreen(
         }
     } == true
     val showSearchThisArea = isMapVisible &&
+        selectedTab == DiscoverTab.EVENTS &&
         (hasMapSearchMoved || mapRadiusChangedEnough(mapViewRadiusMiles, lastMapSearchRadiusMiles))
 
     val loadingHandler = LocalLoadingHandler.current
@@ -780,14 +786,13 @@ fun EventSearchScreen(
         }
     }
 
-    LaunchedEffect(isMapVisible, selectedTab, events, organizationPlaces, rentalPlaces) {
+    LaunchedEffect(isMapVisible, selectedTab, organizationPlaces, rentalPlaces) {
         if (!isMapVisible) {
             return@LaunchedEffect
         }
         when (selectedTab) {
             DiscoverTab.EVENTS -> {
                 mapComponent.setPlaces(emptyList())
-                mapComponent.setEvents(events)
             }
             DiscoverTab.ORGANIZATIONS -> {
                 mapComponent.setEvents(emptyList())
@@ -804,10 +809,14 @@ fun EventSearchScreen(
         }
     }
 
-    LaunchedEffect(isMapVisible, currentLocation, mapViewCenter, mapViewRadiusMiles) {
+    LaunchedEffect(isMapVisible, selectedTab, currentLocation, mapViewCenter, mapViewRadiusMiles) {
         if (!isMapVisible) {
             lastMapSearchCenter = null
             lastMapSearchRadiusMiles = null
+            loadedInitialMapArea = false
+            return@LaunchedEffect
+        }
+        if (selectedTab != DiscoverTab.EVENTS) {
             loadedInitialMapArea = false
             return@LaunchedEffect
         }
@@ -815,7 +824,7 @@ fun EventSearchScreen(
             val initialCenter = mapViewCenter ?: currentLocation
             if (initialCenter != null) {
                 delay(DISCOVER_MAP_REVEAL_DURATION_MILLIS.toLong())
-                component.searchThisArea(initialCenter, mapViewRadiusMiles)
+                mapComponent.refreshEventsForVisibleArea()
                 lastMapSearchCenter = initialCenter
                 lastMapSearchRadiusMiles = mapViewRadiusMiles
                 loadedInitialMapArea = true
@@ -912,6 +921,9 @@ fun EventSearchScreen(
     val openDiscoverMap: (Offset, com.razumly.mvp.core.data.dataTypes.Event?) -> Unit = { center, event ->
         revealCenter = center
         component.onMapClick(event)
+        if (selectedTab == DiscoverTab.EVENTS) {
+            mapComponent.setEvents(emptyList())
+        }
         mapComponent.openMap()
     }
 
@@ -1341,15 +1353,28 @@ fun EventSearchScreen(
             Button(
                 onClick = {
                     mapViewCenter?.let { center ->
-                        component.searchThisArea(center, mapViewRadiusMiles)
-                        lastMapSearchCenter = center
-                        lastMapSearchRadiusMiles = mapViewRadiusMiles
+                        coroutineScope.launch {
+                            mapComponent.refreshEventsForVisibleArea()
+                            lastMapSearchCenter = center
+                            lastMapSearchRadiusMiles = mapViewRadiusMiles
+                        }
                     }
                 },
+                enabled = !isMapLoading,
                 shape = RoundedCornerShape(50),
                 colors = ButtonDefaults.buttonColors(),
             ) {
-                Text("Search this area")
+                if (isMapLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Searching")
+                } else {
+                    Text("Search this area")
+                }
             }
         }
 

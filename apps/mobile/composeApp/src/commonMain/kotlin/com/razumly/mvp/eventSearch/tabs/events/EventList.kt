@@ -38,8 +38,11 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.presentation.composables.EventCard
 import com.razumly.mvp.core.presentation.composables.EventCardPlaceholder
 import com.razumly.mvp.core.presentation.guides.guideTarget
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 
 private const val INITIAL_EVENT_PLACEHOLDER_COUNT = 4
+private const val EVENT_CLICK_SCROLL_SETTLE_DELAY_MILLIS = 150L
 
 @Composable
 fun EventList(
@@ -57,7 +60,20 @@ fun EventList(
     onEventClick: (Event) -> Unit,
 ) {
     var lastLoadRequestKey by remember { mutableStateOf<String?>(null) }
+    var suppressEventClicksAfterScroll by remember { mutableStateOf(false) }
     val hasTrailingStatusItem = events.isNotEmpty() && (isLoadingMore || !hasMoreEvents)
+
+    LaunchedEffect(lazyListState) {
+        snapshotFlow { lazyListState.isScrollInProgress }
+            .collectLatest { isScrolling ->
+                if (isScrolling) {
+                    suppressEventClicksAfterScroll = true
+                } else {
+                    delay(EVENT_CLICK_SCROLL_SETTLE_DELAY_MILLIS)
+                    suppressEventClicksAfterScroll = false
+                }
+            }
+    }
 
     LaunchedEffect(lazyListState, events.size, hasMoreEvents, isLoadingMore) {
         snapshotFlow { lazyListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
@@ -141,7 +157,11 @@ fun EventList(
                             ?.trim()
                             ?.takeIf(String::isNotBlank)
                             ?.let(organizationLogoIdsById::get),
-                        onClick = { onEventClick(event) },
+                        onClick = {
+                            if (!suppressEventClicksAfterScroll) {
+                                onEventClick(event)
+                            }
+                        },
                         onMapClick = { offset ->
                             onMapClick(offset, event)
                         },
