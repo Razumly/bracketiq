@@ -132,11 +132,17 @@ private func eventImagePreviewURL(
 private func remoteURL(_ value: String?) -> URL? {
     let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     guard !normalized.isEmpty else { return nil }
+    guard normalized.hasPrefix("http://") || normalized.hasPrefix("https://") else { return nil }
     return URL(string: normalized)
 }
 
 private func placeImageURL(_ place: MVPPlace, width: Int? = nil, height: Int? = nil) -> URL? {
     remoteURL(place.imageUrl) ?? imagePreviewURL(imageId: place.imageRef, width: width, height: height)
+}
+
+private func isInitialsAvatarURL(_ url: URL?) -> Bool {
+    guard let url = url else { return false }
+    return url.path.localizedCaseInsensitiveContains("/api/avatars/initials")
 }
 
 private func eventPriceLabel(for event: Event) -> String {
@@ -225,9 +231,12 @@ private func loadRemoteImage(
     from url: URL?,
     into imageView: UIImageView,
     marker: GMSMarker?,
-    tracksMarkerView: Bool
+    tracksMarkerView: Bool,
+    markerName: String? = nil,
+    markerColor: UIColor? = nil
 ) {
     guard let url = url else { return }
+    let generatedInitialsAvatar = isInitialsAvatarURL(url)
 
     if tracksMarkerView {
         marker?.tracksViewChanges = true
@@ -239,6 +248,9 @@ private func loadRemoteImage(
         guard let data = data, let image = UIImage(data: data) else {
             DispatchQueue.main.async {
                 if tracksMarkerView {
+                    if let marker = marker, let markerName = markerName, let markerColor = markerColor {
+                        marker.iconView = makeInitialsMarkerIconView(name: markerName, color: markerColor)
+                    }
                     marker?.tracksViewChanges = false
                 } else {
                     marker?.tracksInfoWindowChanges = false
@@ -248,6 +260,18 @@ private func loadRemoteImage(
         }
 
         DispatchQueue.main.async {
+            if tracksMarkerView, let marker = marker, let markerName = markerName, let markerColor = markerColor {
+                marker.iconView = generatedInitialsAvatar
+                    ? makeLoadedInitialsAvatarMarkerIconView(name: markerName, image: image)
+                    : makeLoadedMarkerIconView(
+                        name: markerName,
+                        color: markerColor,
+                        image: image
+                    )
+                marker.tracksViewChanges = false
+                return
+            }
+
             imageView.image = image
             if tracksMarkerView {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
@@ -262,53 +286,127 @@ private func loadRemoteImage(
     }.resume()
 }
 
+private func makeLoadedMarkerIconView(
+    name: String,
+    color: UIColor,
+    image: UIImage
+) -> UIView {
+    let size: CGFloat = 50
+    let outerView = UIView(frame: CGRect(x: 0, y: 0, width: size, height: size))
+    outerView.backgroundColor = .white
+    outerView.layer.cornerRadius = size / 2
+    outerView.layer.borderWidth = 3
+    outerView.layer.borderColor = color.cgColor
+
+    let imageView = UIImageView(frame: CGRect(x: 5, y: 5, width: 40, height: 40))
+    imageView.image = image
+    imageView.backgroundColor = UIColor.systemBackground
+    imageView.contentMode = .scaleAspectFill
+    imageView.layer.cornerRadius = 20
+    imageView.clipsToBounds = true
+    imageView.accessibilityLabel = "\(name) marker"
+    outerView.addSubview(imageView)
+
+    return outerView
+}
+
+private func makeLoadedInitialsAvatarMarkerIconView(
+    name: String,
+    image: UIImage
+) -> UIView {
+    let size: CGFloat = 48
+    let outerView = UIView(frame: CGRect(x: 0, y: 0, width: size, height: size))
+    outerView.backgroundColor = .clear
+    outerView.layer.cornerRadius = size / 2
+    outerView.layer.borderWidth = 3
+    outerView.layer.borderColor = UIColor.white.cgColor
+
+    let imageView = UIImageView(frame: outerView.bounds)
+    imageView.image = image
+    imageView.contentMode = .scaleAspectFill
+    imageView.layer.cornerRadius = size / 2
+    imageView.clipsToBounds = true
+    imageView.accessibilityLabel = "\(name) marker"
+    outerView.addSubview(imageView)
+
+    return outerView
+}
+
+private func makeInitialsMarkerIconView(
+    name: String,
+    color: UIColor
+) -> UIView {
+    let size: CGFloat = 48
+    let outerView = UIView(frame: CGRect(x: 0, y: 0, width: size, height: size))
+    outerView.backgroundColor = color
+    outerView.layer.cornerRadius = size / 2
+    outerView.layer.borderWidth = 3
+    outerView.layer.borderColor = UIColor.white.cgColor
+
+    let label = UILabel(frame: outerView.bounds.insetBy(dx: 4, dy: 4))
+    label.text = markerInitials(name)
+    label.textAlignment = .center
+    label.textColor = .white
+    label.font = UIFont.boldSystemFont(ofSize: 15)
+    label.adjustsFontSizeToFitWidth = true
+    outerView.addSubview(label)
+
+    return outerView
+}
+
 private func makeMarkerIconView(
     name: String,
     color: UIColor,
     imageURL: URL?,
     marker: GMSMarker?
 ) -> UIView {
+    if imageURL == nil || isInitialsAvatarURL(imageURL) {
+        let initialsView = makeInitialsMarkerIconView(name: name, color: color)
+        if let imageURL = imageURL {
+            let imageView = UIImageView(frame: initialsView.bounds.insetBy(dx: 4, dy: 4))
+            imageView.contentMode = .scaleAspectFill
+            imageView.layer.cornerRadius = imageView.bounds.width / 2
+            imageView.clipsToBounds = true
+            initialsView.addSubview(imageView)
+            loadRemoteImage(
+                from: imageURL,
+                into: imageView,
+                marker: marker,
+                tracksMarkerView: true,
+                markerName: name,
+                markerColor: color
+            )
+        }
+        return initialsView
+    }
+
     let size: CGFloat = 50
     let outerView = UIView(frame: CGRect(x: 0, y: 0, width: size, height: size))
     outerView.backgroundColor = .white
     outerView.layer.cornerRadius = size / 2
-    outerView.layer.borderWidth = imageURL == nil ? 0 : 3
+    outerView.layer.borderWidth = 3
     outerView.layer.borderColor = color.cgColor
 
-    if let imageURL = imageURL {
-        let fallbackView = UIView(frame: CGRect(x: 5, y: 5, width: 40, height: 40))
-        fallbackView.backgroundColor = color
-        fallbackView.layer.cornerRadius = 20
-        fallbackView.clipsToBounds = true
-        outerView.addSubview(fallbackView)
+    let fallbackView = UIView(frame: CGRect(x: 5, y: 5, width: 40, height: 40))
+    fallbackView.backgroundColor = UIColor.systemBackground
+    fallbackView.layer.cornerRadius = 20
+    fallbackView.clipsToBounds = true
+    outerView.addSubview(fallbackView)
 
-        let fallbackLabel = UILabel(frame: fallbackView.bounds.insetBy(dx: 4, dy: 4))
-        fallbackLabel.text = markerInitials(name)
-        fallbackLabel.textAlignment = .center
-        fallbackLabel.textColor = .white
-        fallbackLabel.font = UIFont.boldSystemFont(ofSize: 14)
-        fallbackLabel.adjustsFontSizeToFitWidth = true
-        fallbackView.addSubview(fallbackLabel)
-
-        let imageView = UIImageView(frame: CGRect(x: 5, y: 5, width: 40, height: 40))
-        imageView.backgroundColor = .clear
-        imageView.contentMode = .scaleAspectFill
-        imageView.layer.cornerRadius = 20
-        imageView.clipsToBounds = true
-        outerView.addSubview(imageView)
-        loadRemoteImage(from: imageURL, into: imageView, marker: marker, tracksMarkerView: true)
-    } else {
-        outerView.backgroundColor = color
-        outerView.layer.borderWidth = 3
-        outerView.layer.borderColor = UIColor.white.cgColor
-        let label = UILabel(frame: outerView.bounds.insetBy(dx: 4, dy: 4))
-        label.text = markerInitials(name)
-        label.textAlignment = .center
-        label.textColor = .white
-        label.font = UIFont.boldSystemFont(ofSize: 15)
-        label.adjustsFontSizeToFitWidth = true
-        outerView.addSubview(label)
-    }
+    let imageView = UIImageView(frame: CGRect(x: 5, y: 5, width: 40, height: 40))
+    imageView.backgroundColor = UIColor.systemBackground
+    imageView.contentMode = .scaleAspectFill
+    imageView.layer.cornerRadius = 20
+    imageView.clipsToBounds = true
+    outerView.addSubview(imageView)
+    loadRemoteImage(
+        from: imageURL,
+        into: imageView,
+        marker: marker,
+        tracksMarkerView: true,
+        markerName: name,
+        markerColor: color
+    )
 
     return outerView
 }
@@ -492,6 +590,7 @@ struct EventMap: View {
     var organizationLogoIdsById: [String: String]
     var focusedEvent: Event?
     var focusedLocation: LatLng?
+    var showSelectedEventCards: Bool
     var recenterRequestToken: Int
     var locationButtonBottomPadding: CGFloat
     
@@ -501,7 +600,6 @@ struct EventMap: View {
     @State private var searchTask: Task<Void, Never>? = nil
     @State private var selectedEventGroup: [Event] = []
     @State private var selectedEventIndex: Int = 0
-    @State private var mapCameraRenderTick: Int = 0
     
     init(
         component: MapComponent,
@@ -516,6 +614,7 @@ struct EventMap: View {
         organizationLogoIdsById: [String: String],
         focusedLocation: LatLng?,
         focusedEvent: Event?,
+        showSelectedEventCards: Bool,
         recenterRequestToken: Int,
         locationButtonBottomPadding: CGFloat
     ) {
@@ -531,6 +630,7 @@ struct EventMap: View {
         self.organizationLogoIdsById = organizationLogoIdsById
         self.focusedLocation = focusedLocation
         self.focusedEvent = focusedEvent
+        self.showSelectedEventCards = showSelectedEventCards
         self.recenterRequestToken = recenterRequestToken
         self.locationButtonBottomPadding = locationButtonBottomPadding
     }
@@ -554,10 +654,6 @@ struct EventMap: View {
                         userLocation: loc
                     ),
                     focusedEvent: focusedEvent,
-                    cameraRenderTick: mapCameraRenderTick,
-                    onCameraIdle: {
-                        mapCameraRenderTick += 1
-                    },
                     onEventSelected: onEventSelected,
                     onEventGroupSelected: { events in
                         selectedEventGroup = events
@@ -656,7 +752,7 @@ struct EventMap: View {
                     .zIndex(1)
                 }
 
-                if !selectedEventGroup.isEmpty {
+                if showSelectedEventCards && !selectedEventGroup.isEmpty {
                     VStack {
                         Spacer()
                         EventMapCardCarousel(
@@ -691,8 +787,6 @@ struct GoogleMapView: UIViewRepresentable {
     let focusedLocation: LatLng?
     let isFocusedOnUserLocation: Bool
     let focusedEvent: Event?
-    let cameraRenderTick: Int
-    let onCameraIdle: () -> Void
     let onEventSelected: (Event) -> Void
     let onEventGroupSelected: ([Event]) -> Void
     let onPlaceSelected: (MVPPlace) -> Void
@@ -751,7 +845,6 @@ struct GoogleMapView: UIViewRepresentable {
     
     func updateUIView(_ mapView: GMSMapView, context: Context) {
         context.coordinator.parent = self
-        _ = cameraRenderTick
         let distinctSelectedPlace = selectedPlace.flatMap { place in
             placesRepresentSameLocation(place, originalPlace) ? nil : place
         }
@@ -770,6 +863,15 @@ struct GoogleMapView: UIViewRepresentable {
         }
 
         let selectedMarkerKey = context.coordinator.selectionKey(for: mapView.selectedMarker)
+        let nextMarkerRenderSignature = context.coordinator.markerRenderSignature(
+            for: self,
+            distinctSelectedPlace: distinctSelectedPlace
+        )
+
+        if context.coordinator.lastMarkerRenderSignature == nextMarkerRenderSignature {
+            return
+        }
+        context.coordinator.lastMarkerRenderSignature = nextMarkerRenderSignature
 
         // Clear existing markers, but preserve transient POI selection so location updates
         // do not drop the user's in-progress map choice.
@@ -1081,6 +1183,7 @@ class Coordinator: NSObject, GMSMapViewDelegate {
     var currentPOIMarker: GMSMarker?
     var lastExplicitFocusLocation: CLLocation?
     fileprivate var lastConfirmedSelectionKey: MarkerSelectionKey?
+    fileprivate var lastMarkerRenderSignature: MarkerRenderSignature?
     var lastHandledRecenterRequestToken: Int = 0
     var currentLocation: LatLng?
     private var hasAppliedInitialUserCameraFocus = false
@@ -1190,7 +1293,35 @@ class Coordinator: NSObject, GMSMapViewDelegate {
 
     func mapView(_ mapView: GMSMapView, idleAt position: GMSCameraPosition) {
         updateCameraViewport(mapView)
-        parent.onCameraIdle()
+    }
+
+    fileprivate func markerRenderSignature(
+        for map: GoogleMapView,
+        distinctSelectedPlace: MVPPlace?
+    ) -> MarkerRenderSignature {
+        MarkerRenderSignature(
+            eventKeys: map.eventSourceForCurrentMode()
+                .map { event in
+                    [
+                        event.id,
+                        roundedCoordinate(event.lat),
+                        roundedCoordinate(event.long),
+                        eventImageId(event, organizationLogoIdsById: map.organizationLogoIdsById) ?? "",
+                    ].joined(separator: "|")
+                }
+                .sorted(),
+            placeKeys: map.places
+                .map(markerPlaceSignatureKey)
+                .sorted(),
+            originalPlaceKey: markerPlaceKey(map.originalPlace),
+            selectedPlaceKey: markerPlaceKey(distinctSelectedPlace),
+            selectionRequiresConfirmation: map.selectionRequiresConfirmation,
+            canClickPOI: map.canClickPOI,
+            focusedEventId: map.focusedEvent?.id,
+            organizationLogoKeys: map.organizationLogoIdsById
+                .map { "\($0.key)|\($0.value)" }
+                .sorted()
+        )
     }
     
     // MARK: - Custom Info Windows
@@ -1384,26 +1515,26 @@ class Coordinator: NSObject, GMSMapViewDelegate {
         
         if hasRichContent {
             let avatarView = UIView(frame: CGRect(x: 12, y: 12, width: 40, height: 40))
-            avatarView.backgroundColor = markerColor(for: place, selectedPlace: parent.selectedPlace, originalPlace: parent.originalPlace).withAlphaComponent(0.14)
+            avatarView.backgroundColor = UIColor.secondarySystemBackground
             avatarView.layer.cornerRadius = 20
             avatarView.clipsToBounds = true
             containerView.addSubview(avatarView)
 
-            let initialsLabel = UILabel(frame: avatarView.bounds)
-            initialsLabel.text = markerInitials(place.name)
-            initialsLabel.textAlignment = .center
-            initialsLabel.textColor = markerColor(for: place, selectedPlace: parent.selectedPlace, originalPlace: parent.originalPlace)
-            initialsLabel.font = UIFont.boldSystemFont(ofSize: 14)
-            avatarView.addSubview(initialsLabel)
-
             if let imageUrl = placeImageURL(place, width: eventMarkerImageRequestSize, height: eventMarkerImageRequestSize) {
                 let imageView = UIImageView(frame: avatarView.bounds)
-                imageView.backgroundColor = UIColor.clear
+                imageView.backgroundColor = UIColor.secondarySystemBackground
                 imageView.contentMode = .scaleAspectFill
                 imageView.layer.cornerRadius = 20
                 imageView.clipsToBounds = true
                 avatarView.addSubview(imageView)
                 loadRemoteImage(from: imageUrl, into: imageView, marker: marker, tracksMarkerView: false)
+            } else {
+                let initialsLabel = UILabel(frame: avatarView.bounds)
+                initialsLabel.text = markerInitials(place.name)
+                initialsLabel.textAlignment = .center
+                initialsLabel.textColor = markerColor(for: place, selectedPlace: parent.selectedPlace, originalPlace: parent.originalPlace)
+                initialsLabel.font = UIFont.boldSystemFont(ofSize: 14)
+                avatarView.addSubview(initialsLabel)
             }
 
             let nameLabel = UILabel(frame: CGRect(x: 62, y: 10, width: 186, height: 44))
@@ -1573,6 +1704,38 @@ fileprivate enum MarkerSelectionKey: Equatable {
     case eventCluster(String)
     case place(String)
     case poi(String)
+}
+
+fileprivate struct MarkerRenderSignature: Equatable {
+    let eventKeys: [String]
+    let placeKeys: [String]
+    let originalPlaceKey: String?
+    let selectedPlaceKey: String?
+    let selectionRequiresConfirmation: Bool
+    let canClickPOI: Bool
+    let focusedEventId: String?
+    let organizationLogoKeys: [String]
+}
+
+private func roundedCoordinate(_ value: Double) -> String {
+    String(format: "%.6f", value)
+}
+
+private func markerPlaceKey(_ place: MVPPlace?) -> String? {
+    guard let place = place else { return nil }
+    return markerPlaceSignatureKey(place)
+}
+
+private func markerPlaceSignatureKey(_ place: MVPPlace) -> String {
+    [
+        place.id.trimmingCharacters(in: .whitespacesAndNewlines),
+        roundedCoordinate(place.latitude),
+        roundedCoordinate(place.longitude),
+        place.name.trimmingCharacters(in: .whitespacesAndNewlines),
+        place.markerKind,
+        place.imageUrl ?? "",
+        place.imageRef ?? "",
+    ].joined(separator: "|")
 }
 
 

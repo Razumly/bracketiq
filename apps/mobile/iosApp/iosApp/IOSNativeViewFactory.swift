@@ -19,11 +19,13 @@ class IOSNativeViewFactory: NativeViewFactory {
     func createNativeEventCard(
         data: NativeEventCardData,
         bottomPadding: Float,
+        onCardClick: @escaping () -> Void,
         onMapClick: @escaping (KotlinFloat, KotlinFloat) -> Void
     ) -> UIViewController {
         NativeEventCardViewController(
             data: data,
             bottomPadding: CGFloat(bottomPadding),
+            onCardClick: onCardClick,
             onMapClick: onMapClick
         )
     }
@@ -32,6 +34,7 @@ class IOSNativeViewFactory: NativeViewFactory {
         viewController: UIViewController,
         data: NativeEventCardData,
         bottomPadding: Float,
+        onCardClick: @escaping () -> Void,
         onMapClick: @escaping (KotlinFloat, KotlinFloat) -> Void
     ) {
         guard let eventCardController = viewController as? NativeEventCardViewController else {
@@ -41,6 +44,7 @@ class IOSNativeViewFactory: NativeViewFactory {
         eventCardController.update(
             data: data,
             bottomPadding: CGFloat(bottomPadding),
+            onCardClick: onCardClick,
             onMapClick: onMapClick
         )
     }
@@ -58,6 +62,7 @@ class IOSNativeViewFactory: NativeViewFactory {
         organizationLogoIdsById: [String: String],
         focusedLocation: LatLng?,
         focusedEvent: (Event)?,
+        showSelectedEventCards: Bool,
         recenterRequestToken: Int32,
         locationButtonBottomPadding: Float
     ) -> UIViewController {
@@ -74,6 +79,7 @@ class IOSNativeViewFactory: NativeViewFactory {
             organizationLogoIdsById: organizationLogoIdsById,
             focusedLocation: focusedLocation,
             focusedEvent: focusedEvent,
+            showSelectedEventCards: showSelectedEventCards,
             recenterRequestToken: Int(recenterRequestToken),
             locationButtonBottomPadding: CGFloat(locationButtonBottomPadding)
         )
@@ -100,6 +106,7 @@ class IOSNativeViewFactory: NativeViewFactory {
             organizationLogoIdsById: [String: String],
             focusedLocation: LatLng?,
             focusedEvent: (Event)?,
+            showSelectedEventCards: Bool,
             recenterRequestToken: Int32,
             locationButtonBottomPadding: Float
         ) {
@@ -120,6 +127,7 @@ class IOSNativeViewFactory: NativeViewFactory {
                 organizationLogoIdsById: organizationLogoIdsById,
                 focusedLocation: focusedLocation,
                 focusedEvent: focusedEvent,
+                showSelectedEventCards: showSelectedEventCards,
                 recenterRequestToken: Int(recenterRequestToken),
                 locationButtonBottomPadding: CGFloat(locationButtonBottomPadding)
             )
@@ -250,7 +258,7 @@ class IOSNativeViewFactory: NativeViewFactory {
     }
 }
 
-private final class NativeEventCardViewController: UIViewController {
+private final class NativeEventCardViewController: UIViewController, UIGestureRecognizerDelegate {
     private static let imageCache = NSCache<NSString, UIImage>()
     private static let ciContext = CIContext(options: nil)
 
@@ -286,14 +294,17 @@ private final class NativeEventCardViewController: UIViewController {
     private var lastBlurCardSize: CGSize = .zero
     private var lastBlurPanelSize: CGSize = .zero
     private var bottomPadding: CGFloat
+    private var onCardClick: () -> Void
     private var onMapClick: (KotlinFloat, KotlinFloat) -> Void
 
     init(
         data: NativeEventCardData,
         bottomPadding: CGFloat,
+        onCardClick: @escaping () -> Void,
         onMapClick: @escaping (KotlinFloat, KotlinFloat) -> Void
     ) {
         self.bottomPadding = bottomPadding
+        self.onCardClick = onCardClick
         self.onMapClick = onMapClick
         super.init(nibName: nil, bundle: nil)
         configureView()
@@ -312,9 +323,11 @@ private final class NativeEventCardViewController: UIViewController {
     func update(
         data: NativeEventCardData,
         bottomPadding: CGFloat,
+        onCardClick: @escaping () -> Void,
         onMapClick: @escaping (KotlinFloat, KotlinFloat) -> Void
     ) {
         self.bottomPadding = bottomPadding
+        self.onCardClick = onCardClick
         self.onMapClick = onMapClick
         updatePanelConstraints()
         apply(data: data)
@@ -327,6 +340,10 @@ private final class NativeEventCardViewController: UIViewController {
     private func configureView() {
         view.backgroundColor = .clear
         view.clipsToBounds = true
+
+        let cardTapRecognizer = UITapGestureRecognizer(target: self, action: #selector(handleCardTap))
+        cardTapRecognizer.delegate = self
+        view.addGestureRecognizer(cardTapRecognizer)
 
         imageView.translatesAutoresizingMaskIntoConstraints = false
         imageView.contentMode = .scaleAspectFill
@@ -810,5 +827,20 @@ private final class NativeEventCardViewController: UIViewController {
             KotlinFloat(float: Float(center.x)),
             KotlinFloat(float: Float(center.y))
         )
+    }
+
+    @objc private func handleCardTap() {
+        onCardClick()
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        var touchedView: UIView? = touch.view
+        while let currentView = touchedView {
+            if currentView === mapButton {
+                return false
+            }
+            touchedView = currentView.superview
+        }
+        return true
     }
 }

@@ -162,6 +162,7 @@ class DefaultEventSearchComponent(
     override val currentLocation = _currentLocation.asStateFlow()
     private val _isLocationSearchEnabled = MutableStateFlow(true)
     private val _searchCenter = MutableStateFlow<LatLng?>(null)
+    private val _mapSearchRadiusMiles = MutableStateFlow<Double?>(null)
     private val _selectedSearchLocationLabel = MutableStateFlow<String?>(null)
     override val selectedSearchLocationLabel: StateFlow<String?> = _selectedSearchLocationLabel.asStateFlow()
 
@@ -456,12 +457,14 @@ class DefaultEventSearchComponent(
             try {
                 val activeFilter = _filter.value
                 val currentLocation = activeSearchLocation()
-                val includeDistanceFilter = currentLocation != null && _currentRadius.value > 0.0
-                val currentBounds = if (currentLocation != null) {
-                    getBounds(_currentRadius.value, currentLocation.latitude, currentLocation.longitude)
-                } else {
-                    UNRESTRICTED_EVENT_SEARCH_BOUNDS
-                }
+                val searchRadiusMiles = activeSearchRadiusMiles()
+                val includeDistanceFilter = currentLocation != null && searchRadiusMiles > 0.0
+                val currentBounds = currentLocation
+                    ?.takeIf { searchRadiusMiles > 0.0 }
+                    ?.let { location ->
+                        getBounds(searchRadiusMiles, location.latitude, location.longitude)
+                    }
+                    ?: UNRESTRICTED_EVENT_SEARCH_BOUNDS
 
                 eventRepository.getEventsInBounds(
                     bounds = currentBounds,
@@ -572,10 +575,8 @@ class DefaultEventSearchComponent(
 
     override fun searchThisArea(center: LatLng, radiusMiles: Double?) {
         _searchCenter.value = center
+        _mapSearchRadiusMiles.value = radiusMiles?.takeIf { it > 0.0 }
         _selectedSearchLocationLabel.value = "Map area"
-        if (radiusMiles != null && radiusMiles > 0) {
-            _currentRadius.value = radiusMiles
-        }
         _isLocationSearchEnabled.value = true
         refreshEvents(force = true)
         refreshOrganizations(force = true)
@@ -585,6 +586,7 @@ class DefaultEventSearchComponent(
 
     override fun selectSearchLocation(label: String, center: LatLng) {
         _searchCenter.value = center
+        _mapSearchRadiusMiles.value = null
         _selectedSearchLocationLabel.value = label.trim().takeIf(String::isNotBlank) ?: "Selected location"
         _isLocationSearchEnabled.value = true
         refreshEvents(force = true)
@@ -595,6 +597,7 @@ class DefaultEventSearchComponent(
 
     override fun useCurrentLocationForSearch() {
         _searchCenter.value = null
+        _mapSearchRadiusMiles.value = null
         _selectedSearchLocationLabel.value = null
         _isLocationSearchEnabled.value = true
         refreshEvents(force = true)
@@ -963,7 +966,7 @@ class DefaultEventSearchComponent(
 
     private fun applyDistanceFilter(organizations: List<Organization>): List<Organization> {
         val currentLocation = activeSearchLocationOrNull() ?: return organizations
-        val radiusMiles = _currentRadius.value
+        val radiusMiles = activeSearchRadiusMiles()
         if (radiusMiles <= 0) return organizations
 
         return organizations.filter { organization ->
@@ -991,6 +994,9 @@ class DefaultEventSearchComponent(
             _searchCenter.value
         }
 
+    private fun activeSearchRadiusMiles(): Double =
+        _mapSearchRadiusMiles.value ?: _currentRadius.value
+
     private fun shouldWaitForLocationBeforeEventSearch(): Boolean =
         _isLocationSearchEnabled.value &&
             _searchCenter.value == null &&
@@ -1014,6 +1020,7 @@ class DefaultEventSearchComponent(
 
     private fun handleLocationUnavailable() {
         _searchCenter.value = null
+        _mapSearchRadiusMiles.value = null
         _selectedSearchLocationLabel.value = null
         _isLocationSearchEnabled.value = false
         _currentLocation.value = null
@@ -1025,6 +1032,7 @@ class DefaultEventSearchComponent(
 
     private fun handleLocationPermissionDenied(alwaysDenied: Boolean) {
         _searchCenter.value = null
+        _mapSearchRadiusMiles.value = null
         _selectedSearchLocationLabel.value = null
         _isLocationSearchEnabled.value = false
         _currentLocation.value = null

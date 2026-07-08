@@ -174,6 +174,7 @@ actual fun EventMap(
     modifier: Modifier,
     focusedLocation: dev.icerock.moko.geo.LatLng,
     focusedEvent: Event?,
+    showSelectedEventCards: Boolean,
     mapActionLabel: String,
     usePrimaryActionButton: Boolean,
     onBackPressed: (() -> Unit)?
@@ -1091,7 +1092,7 @@ actual fun EventMap(
             }
         }
 
-        if (selectedMapEvents.isNotEmpty()) {
+        if (showSelectedEventCards && selectedMapEvents.isNotEmpty()) {
             MapEventCardCarousel(
                 events = selectedMapEvents,
                 selectedIndex = selectedMapEventIndex,

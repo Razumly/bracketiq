@@ -316,7 +316,7 @@ fun MapEventMarker(
             modifier = Modifier
                 .size(40.dp)
                 .clip(CircleShape)
-                .background(Color.Black),
+                .background(Color.White),
             contentAlignment = Alignment.Center,
         ) {}
         Image(
@@ -385,17 +385,9 @@ fun MapPlaceMarker(
             modifier = Modifier
                 .size(40.dp)
                 .clip(CircleShape)
-                .background(backgroundColor),
+                .background(Color.White),
             contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = remember(place.name) { mapMarkerInitials(place.name) },
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-            )
-        }
+        ) {}
         Image(
             painter = imagePainter,
             contentDescription = "${place.name} marker",

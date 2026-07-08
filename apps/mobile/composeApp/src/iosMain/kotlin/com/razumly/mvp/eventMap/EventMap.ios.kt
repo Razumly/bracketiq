@@ -38,6 +38,7 @@ actual fun EventMap(
     modifier: Modifier,
     focusedLocation: LatLng,
     focusedEvent: Event?,
+    showSelectedEventCards: Boolean,
     mapActionLabel: String,
     usePrimaryActionButton: Boolean,
     onBackPressed: (() -> Unit)?
@@ -70,6 +71,7 @@ actual fun EventMap(
                     organizationLogoIdsById,
                     focusedLocation,
                     focusedEvent,
+                    showSelectedEventCards,
                     recenterRequestToken,
                     closeButtonBottomPadding.value,
                 )
@@ -89,6 +91,7 @@ actual fun EventMap(
                     organizationLogoIdsById,
                     focusedLocation,
                     focusedEvent,
+                    showSelectedEventCards,
                     recenterRequestToken,
                     closeButtonBottomPadding.value,
                 )

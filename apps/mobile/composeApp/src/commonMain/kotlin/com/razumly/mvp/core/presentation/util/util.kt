@@ -23,6 +23,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.snapshotFlow
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.network.apiBaseUrl
+import io.ktor.http.encodeURLQueryComponent
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.LocalTime
@@ -273,4 +274,14 @@ fun getImageUrl(fileId: String, width: Int? = null, height: Int? = null, trim: B
             append('?')
             append(params.joinToString("&"))
         }
+    }
+
+fun getInitialsAvatarUrl(name: String, size: Int): String =
+    buildString {
+        append(apiBaseUrl.trimEnd('/'))
+        append("/api/avatars/initials?name=")
+        append(name.trim().ifBlank { "Organization" }.encodeURLQueryComponent())
+        append("&size=")
+        append(size.coerceAtLeast(16))
+        append("&format=png")
     }

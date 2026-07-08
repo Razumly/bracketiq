@@ -50,6 +50,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.zIndex
 import com.kmpalette.loader.rememberNetworkLoader
 import com.kmpalette.rememberDominantColorState
 import com.materialkolor.scheme.DynamicScheme
@@ -2294,7 +2295,6 @@ fun EventDetails(
                         ?.let { imageId -> getImageUrl(fileId = imageId, width = 1600, trim = true) }
                         .orEmpty(),
                 )
-                heroTopControls()
             }
             Box(
                 modifier = Modifier
@@ -2698,6 +2698,13 @@ fun EventDetails(
                     ),
                 )
 
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(2f),
+            ) {
+                heroTopControls()
             }
         }
     }

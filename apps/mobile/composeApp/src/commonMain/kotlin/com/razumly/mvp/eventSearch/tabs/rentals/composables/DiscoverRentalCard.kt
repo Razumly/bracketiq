@@ -21,6 +21,7 @@ import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateRentalUrl
+import com.razumly.mvp.core.data.dataTypes.resolvedLogoRef
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.OrganizationVerificationBadge
 import com.razumly.mvp.core.presentation.util.getImageUrl
@@ -58,7 +59,7 @@ internal fun DiscoverRentalCard(
                 ) {
                     NetworkAvatar(
                         displayName = organization.name.ifBlank { "Organization" },
-                        imageRef = organization.logoId,
+                        imageRef = organization.resolvedLogoRef(),
                         size = 36.dp,
                         contentDescription = "Organization logo",
                     )

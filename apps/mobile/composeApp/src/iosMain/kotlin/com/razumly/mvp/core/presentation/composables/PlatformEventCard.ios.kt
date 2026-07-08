@@ -17,6 +17,7 @@ internal actual fun PlatformEventCard(
     data: NativeEventCardData,
     navPadding: PaddingValues,
     showLoadingPlaceholder: Boolean,
+    onClick: (() -> Unit)?,
     onMapClick: (Offset) -> Unit,
 ) {
     val factory = LocalNativeViewFactory.current
@@ -30,6 +31,7 @@ internal actual fun PlatformEventCard(
             factory.createNativeEventCard(
                 data = data,
                 bottomPadding = bottomPadding.value,
+                onCardClick = { onClick?.invoke() },
                 onMapClick = { x, y -> onMapClick(Offset(x, y)) },
             )
         },
@@ -38,6 +40,7 @@ internal actual fun PlatformEventCard(
                 viewController = viewController,
                 data = data,
                 bottomPadding = bottomPadding.value,
+                onCardClick = { onClick?.invoke() },
                 onMapClick = { x, y -> onMapClick(Offset(x, y)) },
             )
         },

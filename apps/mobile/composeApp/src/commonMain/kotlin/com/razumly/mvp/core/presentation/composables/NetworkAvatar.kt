@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -20,30 +19,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImagePainter
 import coil3.compose.SubcomposeAsyncImage
 import coil3.compose.SubcomposeAsyncImageContent
 import com.razumly.mvp.core.network.apiBaseUrl
 import com.razumly.mvp.core.presentation.util.getImageUrl
-import io.ktor.http.encodeURLQueryComponent
-
-private data class AvatarColorScheme(val background: Color, val text: Color)
+import com.razumly.mvp.core.presentation.util.getInitialsAvatarUrl
 
 internal data class NetworkAvatarResolvedSource(
     val fallbackName: String,
     val imageUrl: String?,
-)
-
-private val avatarPalette = listOf(
-    AvatarColorScheme(background = Color(0xFFDCEAF7), text = Color(0xFF19497A)),
-    AvatarColorScheme(background = Color(0xFFE7EDF3), text = Color(0xFF1E2633)),
-    AvatarColorScheme(background = Color(0xFFEFE7D1), text = Color(0xFF5B4B1F)),
-    AvatarColorScheme(background = Color(0xFFE2EAEC), text = Color(0xFF5E6B78)),
 )
 
 @Composable
@@ -65,16 +52,16 @@ fun NetworkAvatar(
             sizePx = sizePx,
         )
     }
-    val initialsUrl = remember(resolvedSource.fallbackName, sizePx) {
-        buildInitialsAvatarUrl(resolvedSource.fallbackName, sizePx)
-    }
     val normalizedImageUrl = resolvedSource.imageUrl
-    var imageModel by remember(normalizedImageUrl, initialsUrl) {
-        mutableStateOf<String?>(normalizedImageUrl ?: initialsUrl)
+    val initialsImageUrl = remember(resolvedSource.fallbackName, sizePx) {
+        getInitialsAvatarUrl(name = resolvedSource.fallbackName, size = sizePx)
+    }
+    var imageModel: String? by remember(normalizedImageUrl, initialsImageUrl) {
+        mutableStateOf(normalizedImageUrl ?: initialsImageUrl)
     }
 
-    LaunchedEffect(normalizedImageUrl, initialsUrl) {
-        imageModel = normalizedImageUrl ?: initialsUrl
+    LaunchedEffect(normalizedImageUrl, initialsImageUrl) {
+        imageModel = normalizedImageUrl ?: initialsImageUrl
     }
 
     val renderedImageModel = if (softwareRenderingSafe) {
@@ -86,15 +73,10 @@ fun NetworkAvatar(
     Box(
         modifier = modifier
             .size(size)
-            .clip(CircleShape),
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center,
     ) {
-        LocalInitialsAvatar(
-            displayName = resolvedSource.fallbackName,
-            size = size,
-            modifier = Modifier.fillMaxSize(),
-        )
-
         if (renderedImageModel != null) {
             SubcomposeAsyncImage(
                 model = renderedImageModel,
@@ -105,7 +87,7 @@ fun NetworkAvatar(
                 contentScale = ContentScale.Crop,
                 onState = { state ->
                     if (state is AsyncImagePainter.State.Error) {
-                        imageModel = if (imageModel != initialsUrl) initialsUrl else null
+                        imageModel = if (imageModel != initialsImageUrl) initialsImageUrl else null
                     }
                 },
             ) {
@@ -122,43 +104,6 @@ fun NetworkAvatar(
                 }
             }
         }
-    }
-}
-
-private fun buildInitialsAvatarUrl(name: String, sizePx: Int): String =
-    buildString {
-        append(apiBaseUrl.trimEnd('/'))
-        append("/api/avatars/initials?name=")
-        append(name.encodeURLQueryComponent())
-        append("&size=")
-        append(sizePx)
-        append("&format=png")
-    }
-
-@Composable
-private fun LocalInitialsAvatar(
-    displayName: String,
-    size: Dp,
-    modifier: Modifier = Modifier,
-) {
-    val initials = remember(displayName) { computeInitials(displayName) }
-    val colors = remember(displayName) { pickColorScheme(displayName) }
-
-    Box(
-        modifier = modifier
-            .clip(CircleShape)
-            .background(colors.background),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = initials,
-            color = colors.text,
-            fontWeight = FontWeight.Bold,
-            fontSize = (size.value * 0.42f).sp,
-            style = MaterialTheme.typography.titleMedium.copy(
-                lineHeight = (size.value * 0.42f).sp,
-            ),
-        )
     }
 }
 
@@ -186,28 +131,4 @@ internal fun resolveNetworkAvatarSource(
         fallbackName = safeJerseyNumber ?: safeName,
         imageUrl = if (safeJerseyNumber != null) null else resolveImageRef(imageRef, sizePx),
     )
-}
-
-private fun computeInitials(name: String): String {
-    val parts = name
-        .split(Regex("\\s+"))
-        .map { it.trim() }
-        .filter { it.isNotEmpty() }
-
-    if (parts.isEmpty()) return "U"
-    if (parts.size == 1) {
-        return parts[0].take(3).uppercase()
-    }
-    return parts.take(3)
-        .mapNotNull { it.firstOrNull()?.toString() }
-        .joinToString(separator = "")
-        .uppercase()
-}
-
-private fun pickColorScheme(name: String): AvatarColorScheme {
-    var hash = 0
-    for (character in name) {
-        hash = (hash * 31 + character.code) and Int.MAX_VALUE
-    }
-    return avatarPalette[hash % avatarPalette.size]
 }

@@ -15,12 +15,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
@@ -35,6 +38,8 @@ fun CircularRevealUnderlay(
     revealCenterInWindow: Offset,
     modifier: Modifier = Modifier,
     animationDurationMillis: Int = 700,
+    showForegroundDuringTransition: Boolean = true,
+    revealBackgroundOnTop: Boolean = false,
     backgroundContent: @Composable BoxScope.() -> Unit,
     foregroundContent: @Composable BoxScope.() -> Unit,
 ) {
@@ -46,9 +51,59 @@ fun CircularRevealUnderlay(
         label = "circularRevealUnderlayProgress",
     )
     val shouldShowBackground = isRevealed || revealProgress > 0.001f
-    val shouldShowForeground = !isRevealed || revealProgress < 0.999f
+    val shouldShowForeground = if (showForegroundDuringTransition) {
+        !isRevealed || revealProgress < 0.999f
+    } else {
+        !isRevealed && revealProgress <= 0.001f
+    }
 
     Box(modifier = modifier) {
+        if (revealBackgroundOnTop) {
+            val platformTextFieldVisible = !isRevealed && revealProgress <= 0.001f
+
+            CompositionLocalProvider(
+                LocalPlatformTextFieldVisible provides platformTextFieldVisible,
+            ) {
+                Box(modifier = Modifier.fillMaxSize(), content = foregroundContentState)
+            }
+
+            if (shouldShowBackground) {
+                var backgroundTopLeft by remember { mutableStateOf(Offset.Zero) }
+                var backgroundSize by remember { mutableStateOf(Size.Zero) }
+                val density = LocalDensity.current
+                val revealInsetPx = with(density) { 32.dp.toPx() }
+                val localRevealCenter = remember(
+                    revealCenterInWindow,
+                    backgroundTopLeft,
+                    backgroundSize,
+                    revealInsetPx,
+                ) {
+                    resolveRevealCenter(
+                        revealCenterInWindow = revealCenterInWindow,
+                        containerTopLeftInWindow = backgroundTopLeft,
+                        containerSize = backgroundSize,
+                        revealInsetPx = revealInsetPx,
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .onGloballyPositioned { coordinates ->
+                            val bounds = coordinates.boundsInWindow()
+                            backgroundTopLeft = bounds.topLeft
+                            backgroundSize = bounds.size
+                        }
+                        .drawRevealCircle(
+                            progress = revealProgress,
+                            revealCenter = localRevealCenter,
+                        ),
+                    content = backgroundContentState,
+                )
+            }
+            return@Box
+        }
+
         if (shouldShowBackground) {
             Box(modifier = Modifier.fillMaxSize(), content = backgroundContentState)
         }
@@ -93,6 +148,37 @@ fun CircularRevealUnderlay(
                     content = foregroundContentState,
                 )
             }
+        }
+    }
+}
+
+private fun Modifier.drawRevealCircle(
+    progress: Float,
+    revealCenter: Offset,
+): Modifier {
+    if (progress >= 0.999f) {
+        return this
+    }
+
+    return drawWithContent {
+        val contentScope = this
+        val radius = maxRevealRadius(revealCenter = revealCenter, progress = progress)
+        if (radius <= 0f) {
+            return@drawWithContent
+        }
+
+        val path = Path().apply {
+            addOval(
+                Rect(
+                    left = revealCenter.x - radius,
+                    top = revealCenter.y - radius,
+                    right = revealCenter.x + radius,
+                    bottom = revealCenter.y + radius,
+                )
+            )
+        }
+        clipPath(path) {
+            contentScope.drawContent()
         }
     }
 }

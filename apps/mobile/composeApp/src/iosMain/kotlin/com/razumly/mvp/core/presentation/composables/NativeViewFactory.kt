@@ -16,6 +16,7 @@ interface NativeViewFactory {
     fun createNativeEventCard(
         data: NativeEventCardData,
         bottomPadding: Float,
+        onCardClick: () -> Unit,
         onMapClick: (x: Float, y: Float) -> Unit,
     ): UIViewController
 
@@ -23,6 +24,7 @@ interface NativeViewFactory {
         viewController: UIViewController,
         data: NativeEventCardData,
         bottomPadding: Float,
+        onCardClick: () -> Unit,
         onMapClick: (x: Float, y: Float) -> Unit,
     )
 
@@ -39,6 +41,7 @@ interface NativeViewFactory {
         organizationLogoIdsById: Map<String, String>,
         focusedLocation: LatLng?,
         focusedEvent: Event?,
+        showSelectedEventCards: Boolean,
         recenterRequestToken: Int,
         locationButtonBottomPadding: Float,
     ): UIViewController
@@ -57,6 +60,7 @@ interface NativeViewFactory {
         organizationLogoIdsById: Map<String, String>,
         focusedLocation: LatLng?,
         focusedEvent: Event?,
+        showSelectedEventCards: Boolean,
         recenterRequestToken: Int,
         locationButtonBottomPadding: Float,
     )

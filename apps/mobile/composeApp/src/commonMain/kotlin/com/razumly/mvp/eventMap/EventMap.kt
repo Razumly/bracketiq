@@ -21,6 +21,7 @@ expect fun EventMap(
     modifier: Modifier = Modifier,
     focusedLocation: LatLng,
     focusedEvent: Event?,
+    showSelectedEventCards: Boolean = true,
     mapActionLabel: String = "Close Map",
     usePrimaryActionButton: Boolean = false,
     onBackPressed: (() -> Unit)? = null

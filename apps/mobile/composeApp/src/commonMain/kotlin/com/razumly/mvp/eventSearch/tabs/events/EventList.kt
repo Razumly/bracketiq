@@ -1,6 +1,5 @@
 package com.razumly.mvp.eventSearch.tabs.events
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -123,7 +122,6 @@ fun EventList(
                     modifier = Modifier
                         .padding(padding)
                         .padding(horizontal = 16.dp, vertical = 8.dp)
-                        .clickable { onEventClick(event) }
                         .fillMaxWidth()
                         .then(
                             if (index == 0 && firstItemGuideTargetId != null) {
@@ -143,6 +141,7 @@ fun EventList(
                             ?.trim()
                             ?.takeIf(String::isNotBlank)
                             ?.let(organizationLogoIdsById::get),
+                        onClick = { onEventClick(event) },
                         onMapClick = { offset ->
                             onMapClick(offset, event)
                         },

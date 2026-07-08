@@ -822,7 +822,7 @@ fun EventSearchScreen(
             return@LaunchedEffect
         }
         if (!loadedInitialMapArea && mapViewRadiusMiles != null) {
-            val initialCenter = currentLocation ?: mapViewCenter
+            val initialCenter = mapViewCenter ?: currentLocation
             if (initialCenter != null) {
                 delay(DISCOVER_MAP_REVEAL_DURATION_MILLIS.toLong())
                 component.searchThisArea(initialCenter, mapViewRadiusMiles)
@@ -979,6 +979,7 @@ fun EventSearchScreen(
         CircularRevealUnderlay(
             isRevealed = isMapVisible,
             revealCenterInWindow = revealCenter,
+            animationDurationMillis = DISCOVER_MAP_REVEAL_DURATION_MILLIS,
             modifier = if (Platform.isIOS) {
                 Modifier.fillMaxSize()
             } else {
@@ -986,6 +987,7 @@ fun EventSearchScreen(
                     .fillMaxSize()
                     .hazeSource(hazeState)
             },
+            revealBackgroundOnTop = true,
             backgroundContent = {
                 discoverMapContent()
             },

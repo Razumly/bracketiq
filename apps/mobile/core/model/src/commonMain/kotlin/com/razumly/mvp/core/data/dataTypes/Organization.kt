@@ -32,6 +32,8 @@ data class Organization(
     @property:ObjCName(swiftName = "organizationDescription")
     val description: String?,
     val logoId: String?,
+    val logoUrl: String? = null,
+    val imageUrl: String? = null,
     val ownerId: String,
     val website: String?,
     val sports: List<String> = emptyList(),
@@ -61,6 +63,11 @@ data class Organization(
 
 fun Organization.activeAffiliateRentalFacilities(): List<Facility> =
     facilities.filter { facility -> facility.isActiveAffiliateRental() }
+
+fun Organization.resolvedLogoRef(): String? =
+    logoUrl?.trim()?.takeIf { it.isNotBlank() }
+        ?: imageUrl?.trim()?.takeIf { it.isNotBlank() }
+        ?: logoId?.trim()?.takeIf { it.isNotBlank() }
 
 fun Organization.normalizedAffiliateRentalUrl(): String? =
     activeAffiliateRentalFacilities().firstNotNullOfOrNull { facility -> facility.normalizedAffiliateUrl() }

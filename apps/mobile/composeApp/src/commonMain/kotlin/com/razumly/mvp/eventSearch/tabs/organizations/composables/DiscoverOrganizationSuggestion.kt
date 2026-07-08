@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.resolvedLogoRef
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.OrganizationVerificationBadge
 
@@ -36,7 +37,7 @@ fun DiscoverOrganizationSuggestion(
             ) {
                 NetworkAvatar(
                     displayName = organization.name.ifBlank { "Organization" },
-                    imageRef = organization.logoId,
+                    imageRef = organization.resolvedLogoRef(),
                     size = 32.dp,
                     contentDescription = "Organization logo",
                 )

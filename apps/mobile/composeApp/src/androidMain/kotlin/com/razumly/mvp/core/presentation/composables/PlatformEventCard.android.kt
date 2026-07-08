@@ -9,12 +9,14 @@ internal actual fun PlatformEventCard(
     data: NativeEventCardData,
     navPadding: PaddingValues,
     showLoadingPlaceholder: Boolean,
+    onClick: (() -> Unit)?,
     onMapClick: (Offset) -> Unit,
 ) {
     ComposeEventCard(
         data = data,
         navPadding = navPadding,
         showLoadingPlaceholder = showLoadingPlaceholder,
+        onClick = onClick,
         onMapClick = onMapClick,
     )
 }

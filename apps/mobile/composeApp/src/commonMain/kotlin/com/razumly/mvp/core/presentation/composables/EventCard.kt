@@ -4,6 +4,7 @@ package com.razumly.mvp.core.presentation.composables
 
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -99,6 +100,7 @@ fun EventCard(
     navPadding: PaddingValues = PaddingValues(),
     showLoadingPlaceholder: Boolean = false,
     fallbackImageId: String? = null,
+    onClick: (() -> Unit)? = null,
     onMapClick: (Offset) -> Unit,
 ) {
     val imageModel = remember(event.imageId, fallbackImageId) {
@@ -190,6 +192,7 @@ fun EventCard(
         data = cardData,
         navPadding = navPadding,
         showLoadingPlaceholder = showLoadingPlaceholder,
+        onClick = onClick,
         onMapClick = onMapClick,
     )
 }
@@ -199,6 +202,7 @@ internal expect fun PlatformEventCard(
     data: NativeEventCardData,
     navPadding: PaddingValues,
     showLoadingPlaceholder: Boolean,
+    onClick: (() -> Unit)?,
     onMapClick: (Offset) -> Unit,
 )
 
@@ -210,6 +214,7 @@ internal fun ComposeEventCard(
     data: NativeEventCardData,
     navPadding: PaddingValues = PaddingValues(),
     showLoadingPlaceholder: Boolean = false,
+    onClick: (() -> Unit)? = null,
     onMapClick: (Offset) -> Unit,
 ) {
     var isImageReady by remember(data.imageUrl) { mutableStateOf(data.imageUrl == null) }
@@ -221,6 +226,13 @@ internal fun ComposeEventCard(
             .fillMaxWidth()
             .clipToBounds()
             .background(Color.Black)
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(onClick = onClick)
+                } else {
+                    Modifier
+                }
+            )
     ) {
         AsyncImage(
             model = data.imageUrl,

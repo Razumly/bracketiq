@@ -845,14 +845,14 @@ private fun OverviewTabContent(
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 6.dp)
-                                .clickable { onEventClick(event) },
+                                .padding(vertical = 6.dp),
                             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                         ) {
                             EventCard(
                                 event = event,
                                 navPadding = PaddingValues(bottom = 16.dp),
                                 fallbackImageId = organization?.logoId,
+                                onClick = { onEventClick(event) },
                                 onMapClick = { }
                             )
                         }
@@ -907,14 +907,14 @@ private fun EventsTabContent(
             items(events, key = { event -> event.id }) { event ->
                 Card(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onEventClick(event) },
+                        .fillMaxWidth(),
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
                     EventCard(
                         event = event,
                         navPadding = PaddingValues(bottom = 16.dp),
                         fallbackImageId = organizationLogoId,
+                        onClick = { onEventClick(event) },
                         onMapClick = { }
                     )
                 }
