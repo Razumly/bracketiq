@@ -9,3 +9,5 @@ internal actual suspend fun platformPushTokenOrNull(): String? {
         ?.trim()
     return token?.takeIf(String::isNotBlank)
 }
+
+internal actual fun platformPushPlatform(): String = "ios"

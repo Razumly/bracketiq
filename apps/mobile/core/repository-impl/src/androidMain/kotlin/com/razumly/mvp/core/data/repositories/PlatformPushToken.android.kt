@@ -65,6 +65,8 @@ internal actual suspend fun platformPushTokenOrNull(): String? {
     return null
 }
 
+internal actual fun platformPushPlatform(): String = "android"
+
 private suspend fun Task<String>.awaitTokenResultOrNull(onFailure: (Exception?) -> Unit): String? =
     suspendCancellableCoroutine { continuation ->
         addOnCompleteListener { completedTask ->

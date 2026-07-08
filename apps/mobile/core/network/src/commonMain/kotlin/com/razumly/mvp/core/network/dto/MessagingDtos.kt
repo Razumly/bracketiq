@@ -13,6 +13,7 @@ data class MessagingTopicSubscriptionRequestDto(
     val userIds: List<String>,
     val pushToken: String? = null,
     val pushTarget: String? = null,
+    val pushPlatform: String? = null,
 )
 
 @Serializable

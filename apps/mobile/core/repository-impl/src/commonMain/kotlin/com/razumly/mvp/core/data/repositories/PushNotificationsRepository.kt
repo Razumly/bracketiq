@@ -355,6 +355,7 @@ class PushNotificationsRepository(
                         userIds = listOf(resolvedUserId),
                         pushToken = localPushToken,
                         pushTarget = targetTopicId,
+                        pushPlatform = platformPushPlatform(),
                     ),
                 )
             }.onFailure { error ->
@@ -528,6 +529,7 @@ class PushNotificationsRepository(
                 userIds = listOf(normalizedUserId),
                 pushToken = pushToken?.takeIf(String::isNotBlank),
                 pushTarget = topicId,
+                pushPlatform = platformPushPlatform(),
             ),
         )
         userDataSource.savePushTarget(topicId)
