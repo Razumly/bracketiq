@@ -33,6 +33,7 @@ fun DiscountCodeDialog(
     error: String? = null,
     loading: Boolean = false,
     onApply: (String) -> Unit = {},
+    onCodeChange: (String) -> Unit = {},
     onContinue: (String?) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -60,6 +61,7 @@ fun DiscountCodeDialog(
                     onValueChange = {
                         code = it
                         localError = null
+                        onCodeChange(it)
                     },
                     label = "Discount code",
                     imeAction = ImeAction.Done,

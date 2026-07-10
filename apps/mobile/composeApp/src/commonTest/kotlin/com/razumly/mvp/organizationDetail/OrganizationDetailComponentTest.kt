@@ -9,6 +9,10 @@ import com.razumly.mvp.core.data.dataTypes.BillingAddressProfile
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.OrganizationReview
+import com.razumly.mvp.core.data.dataTypes.OrganizationReviewReviewer
+import com.razumly.mvp.core.data.dataTypes.OrganizationReviewSummary
+import com.razumly.mvp.core.data.dataTypes.OrganizationReviewsPayload
 import com.razumly.mvp.core.data.dataTypes.Product
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
@@ -41,6 +45,35 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class OrganizationDetailComponentTest : MainDispatcherTest() {
+
+    @Test
+    fun given_section_screen_when_back_clicked_then_component_returns_to_overview() = runTest(testDispatcher) {
+        val harness = OrganizationDetailHarness(product = createProduct(period = "SINGLE"))
+        advance()
+
+        assertEquals(OrganizationDetailTab.STORE, harness.component.selectedTab.value)
+
+        harness.component.onBackClicked()
+
+        assertEquals(OrganizationDetailTab.OVERVIEW, harness.component.selectedTab.value)
+    }
+
+    @Test
+    fun given_review_payload_when_review_saved_then_component_replaces_review_state() = runTest(testDispatcher) {
+        val harness = OrganizationDetailHarness(product = createProduct(period = "SINGLE"))
+        advance()
+
+        assertEquals(0, harness.component.reviews.value?.summary?.reviewCount)
+
+        harness.component.saveReview(5, "Great experience")
+        advance()
+
+        assertEquals(1, harness.billingRepository.saveReviewCallCount)
+        assertEquals(5, harness.billingRepository.lastSavedRating)
+        assertEquals("Great experience", harness.billingRepository.lastSavedBody)
+        assertEquals(1, harness.component.reviews.value?.summary?.reviewCount)
+        assertEquals(5, harness.component.reviews.value?.viewerReview?.rating)
+    }
 
     @Test
     fun given_single_purchase_checkout_in_flight_when_same_product_tapped_again_then_duplicate_purchase_intent_is_ignored() =
@@ -355,6 +388,17 @@ private class OrganizationDetailTestBillingRepository(
         private set
     var productSubscriptionIntentCallCount = 0
         private set
+    var saveReviewCallCount = 0
+        private set
+    var lastSavedRating: Int? = null
+        private set
+    var lastSavedBody: String? = null
+        private set
+    private var reviewPayload = OrganizationReviewsPayload(
+        summary = OrganizationReviewSummary(),
+        viewerIsAuthenticated = true,
+        canReview = true,
+    )
 
     override suspend fun getOrganizationsByIds(organizationIds: List<String>): Result<List<Organization>> =
         Result.success(
@@ -366,6 +410,41 @@ private class OrganizationDetailTestBillingRepository(
 
     override suspend fun listProductsByOrganization(organizationId: String): Result<List<Product>> =
         Result.success(if (organizationId.trim() == organization.id) products else emptyList())
+
+    override suspend fun getOrganizationReviews(organizationId: String): Result<OrganizationReviewsPayload> =
+        Result.success(reviewPayload)
+
+    override suspend fun saveOrganizationReview(
+        organizationId: String,
+        rating: Int,
+        body: String?,
+    ): Result<OrganizationReviewsPayload> {
+        saveReviewCallCount += 1
+        lastSavedRating = rating
+        lastSavedBody = body
+        val review = OrganizationReview(
+            id = "review-1",
+            organizationId = organizationId,
+            reviewerUserId = "user-1",
+            rating = rating,
+            body = body,
+            createdAt = "2026-07-09T20:00:00.000Z",
+            updatedAt = "2026-07-09T20:00:00.000Z",
+            reviewer = OrganizationReviewReviewer(id = "user-1", displayName = "Test User"),
+        )
+        reviewPayload = OrganizationReviewsPayload(
+            summary = OrganizationReviewSummary(
+                averageRating = rating.toDouble(),
+                reviewCount = 1,
+                ratingCounts = List(5) { index -> if (index == rating - 1) 1 else 0 },
+            ),
+            reviews = listOf(review),
+            viewerReview = review,
+            viewerIsAuthenticated = true,
+            canReview = true,
+        )
+        return Result.success(reviewPayload)
+    }
 
     override suspend fun createProductPurchaseIntent(productId: String): Result<PurchaseIntent> {
         productPurchaseIntentCallCount += 1

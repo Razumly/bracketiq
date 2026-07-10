@@ -848,6 +848,41 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    fun getEventTags_can_request_filter_only_tag_options() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("/api/event-tags", request.url.encodedPath)
+            assertEquals("query=try&filterOnly=true", request.url.encodedQuery)
+            respond(
+                content = """
+                    {
+                      "tags": [
+                        { "id": "tag_tryouts", "name": "Tryouts", "slug": "tryouts", "eventCount": 12 }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { configureMvpHttpClient() }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val tags = repo.getEventTags(query = "try", filterOnly = true).getOrThrow()
+
+        assertEquals(listOf("Tryouts"), tags.map { it.name })
+    }
+
+    @Test
     fun getEvent_removes_cached_event_when_server_returns_forbidden() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()

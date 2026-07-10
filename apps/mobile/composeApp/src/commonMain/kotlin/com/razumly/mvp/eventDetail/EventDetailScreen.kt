@@ -4118,6 +4118,7 @@ fun EventDetailScreen(
                     error = prompt.error,
                     loading = prompt.loading,
                     onApply = component::applyDiscountCodePrompt,
+                    onCodeChange = { component.clearDiscountCodePromptFeedback() },
                     onContinue = component::continueFromDiscountCodePrompt,
                     onDismiss = component::dismissDiscountCodePrompt,
                 )

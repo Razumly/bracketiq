@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -62,6 +63,10 @@ import kotlin.time.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
+
+private val SystemTagChipSelectedContainer = Color(0xFF1565C0)
+private val CommunityTagChipSelectedContainer = Color(0xFF2E7D32)
+private val TagChipSelectedContent = Color.White
 
 internal data class EventDetailsBasicInfoState(
     val readOnlySection: ReadOnlySectionModel,
@@ -317,7 +322,6 @@ private fun EventTagsEditor(
     val selectedSlugs = remember(normalizedTags) {
         normalizedTags.map { tag -> tag.eventTagIdentity() }.toSet()
     }
-
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -378,6 +382,17 @@ private fun EventTagsEditor(
                     normalizedTags.forEach { tag ->
                         val identity = tag.eventTagIdentity()
                         val locked = identity in lockedSlugs
+                        val selectedContainer = if (tag.isSystem) {
+                            SystemTagChipSelectedContainer
+                        } else {
+                            CommunityTagChipSelectedContainer
+                        }
+                        val selectedTagChipColors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = selectedContainer,
+                            selectedLabelColor = TagChipSelectedContent,
+                            disabledSelectedContainerColor = selectedContainer.copy(alpha = 0.62f),
+                            disabledLabelColor = TagChipSelectedContent.copy(alpha = 0.78f),
+                        )
                         FilterChip(
                             selected = true,
                             enabled = !locked,
@@ -390,6 +405,7 @@ private fun EventTagsEditor(
                                     )
                                 }
                             },
+                            colors = selectedTagChipColors,
                             label = { Text(tag.name) },
                         )
                     }

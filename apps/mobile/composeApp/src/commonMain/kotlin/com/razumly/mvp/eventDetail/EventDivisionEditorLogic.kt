@@ -2,9 +2,12 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameterOption
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.LeagueConfig
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.toDropdownOptions
+import com.razumly.mvp.core.data.dataTypes.toLeagueConfig
+import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
 import com.razumly.mvp.core.data.util.buildEventDivisionId
 import com.razumly.mvp.core.data.util.buildGenderSkillAgeDivisionToken
 import com.razumly.mvp.core.data.util.divisionsEquivalent
@@ -35,6 +38,63 @@ internal data class DivisionEditorState(
     val nameTouched: Boolean = false,
     val error: String? = null,
 )
+
+internal data class DivisionEditorScheduleConfigs(
+    val leagueConfig: LeagueConfig,
+    val playoffConfig: TournamentConfig,
+)
+
+internal fun alignDivisionPlayoffConfigWithLeagueConfig(
+    leagueConfig: LeagueConfig,
+    playoffConfig: TournamentConfig,
+): TournamentConfig {
+    return if (leagueConfig.usesSets) {
+        playoffConfig.copy(
+            usesSets = true,
+            matchDurationMinutes = null,
+            setDurationMinutes = playoffConfig.setDurationMinutes ?: leagueConfig.setDurationMinutes,
+        )
+    } else {
+        playoffConfig.copy(
+            usesSets = false,
+            matchDurationMinutes = playoffConfig.matchDurationMinutes,
+            setDurationMinutes = null,
+            winnerSetCount = 1,
+            loserSetCount = 1,
+            winnerBracketPointsToVictory = playoffConfig.winnerBracketPointsToVictory
+                .take(1)
+                .ifEmpty { listOf(21) },
+            loserBracketPointsToVictory = playoffConfig.loserBracketPointsToVictory
+                .take(1)
+                .ifEmpty { listOf(21) },
+        )
+    }
+}
+
+internal fun resolveDivisionEditorScheduleConfigs(
+    event: Event,
+    detail: DivisionDetail,
+): DivisionEditorScheduleConfigs {
+    val eventLeagueConfig = event.toLeagueConfig()
+    val leagueConfig = if (event.singleDivision) {
+        eventLeagueConfig
+    } else {
+        detail.toLeagueConfig(eventLeagueConfig)
+    }
+    val eventPlayoffConfig = event.toTournamentConfig()
+    val playoffConfig = if (event.singleDivision) {
+        eventPlayoffConfig
+    } else {
+        detail.toTournamentConfig(eventPlayoffConfig)
+    }
+    return DivisionEditorScheduleConfigs(
+        leagueConfig = leagueConfig,
+        playoffConfig = alignDivisionPlayoffConfigWithLeagueConfig(
+            leagueConfig = leagueConfig,
+            playoffConfig = playoffConfig,
+        ),
+    )
+}
 
 internal data class ParsedDivisionToken(
     val gender: String,

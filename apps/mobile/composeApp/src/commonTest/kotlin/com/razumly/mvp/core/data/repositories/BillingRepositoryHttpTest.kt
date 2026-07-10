@@ -708,6 +708,98 @@ class BillingRepositoryHttpTest {
     }
 
     @Test
+    fun listOrganizationsPage_can_request_organization_tag_filters() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/organizations", request.url.encodedPath)
+            assertEquals("limit=25&offset=50&tags=facility&tags=club", request.url.encodedQuery)
+            assertEquals(HttpMethod.Get, request.method)
+
+            respond(
+                content = """
+                    {
+                      "organizations": [
+                        { "id": "org_facility", "name": "Facility Club" }
+                      ],
+                      "pagination": {
+                        "limit": 25,
+                        "offset": 50,
+                        "nextOffset": 51,
+                        "hasMore": false
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val page = repo.listOrganizationsPage(
+            limit = 25,
+            offset = 50,
+            tagSlugs = linkedSetOf("facility", "club"),
+        ).getOrThrow()
+
+        assertEquals("org_facility", page.items.single().id)
+        assertEquals(51, page.pagination.nextOffset)
+        assertEquals(false, page.pagination.hasMore)
+    }
+
+    @Test
+    fun getOrganizationTags_can_request_filter_only_tag_options() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/organization-tags", request.url.encodedPath)
+            assertEquals("query=fac&filterOnly=true", request.url.encodedQuery)
+            assertEquals(HttpMethod.Get, request.method)
+
+            respond(
+                content = """
+                    {
+                      "tags": [
+                        {
+                          "id": "default_org_tag_facility",
+                          "name": "Facility",
+                          "slug": "facility",
+                          "organizationCount": 3
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val tags = repo.getOrganizationTags(query = "fac", filterOnly = true).getOrThrow()
+
+        assertEquals(1, tags.size)
+        assertEquals("Facility", tags.single().name)
+        assertEquals("facility", tags.single().slug)
+        assertEquals(3, tags.single().eventCount)
+    }
+
+    @Test
     fun getOrganizationsByIds_maps_verification_fallbacks() = runTest {
         val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
         val userRepo = BillingRepositoryHttp_FakeUserRepository(
@@ -2125,5 +2217,100 @@ class BillingRepositoryHttpTest {
         assertEquals(listOf(listOf("user_1", "user_2")), requestedUserIds)
         assertEquals(listOf(listOf("event_1", "event_2")), requestedEventIds)
         assertEquals(listOf("refund_1", "refund_2", "refund_3"), refundDao.storedRefunds.map { refund -> refund.id })
+    }
+
+    @Test
+    fun getOrganizationReviews_reads_nested_review_contract() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        val engine = MockEngine { request ->
+            assertEquals("/api/organizations/org_1/reviews", request.url.encodedPath)
+            assertEquals(HttpMethod.Get, request.method)
+            respond(
+                content = """
+                    {
+                      "summary": {"averageRating": 4.5, "reviewCount": 2, "ratingCounts": [0, 0, 0, 1, 1]},
+                      "reviews": [{
+                        "id": "review_1",
+                        "organizationId": "org_1",
+                        "reviewerUserId": "u2",
+                        "rating": 5,
+                        "body": "Well organized.",
+                        "status": "PUBLISHED",
+                        "createdAt": "2026-07-09T20:00:00.000Z",
+                        "updatedAt": "2026-07-09T20:00:00.000Z",
+                        "reviewer": {"id": "u2", "displayName": "Taylor Reed", "profileImageUrl": null}
+                      }],
+                      "viewerReview": null,
+                      "viewerIsAuthenticated": true,
+                      "canReview": true,
+                      "cannotReviewReason": null
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val repo = BillingRepository(
+            MvpApiClient(http, "http://example.test", tokenStore),
+            userRepo,
+            BillingRepositoryHttp_UnusedEventRepository,
+            db,
+        )
+
+        val payload = repo.getOrganizationReviews("org_1").getOrThrow()
+
+        assertEquals(4.5, payload.summary.averageRating)
+        assertEquals(2, payload.summary.reviewCount)
+        assertEquals(1, payload.summary.countFor(5))
+        assertEquals("Taylor Reed", payload.reviews.single().reviewer.displayName)
+        assertTrue(payload.canReview)
+    }
+
+    @Test
+    fun saveOrganizationReview_posts_rating_and_optional_body() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        var capturedBody = ""
+        val engine = MockEngine { request ->
+            assertEquals("/api/organizations/org_1/reviews", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)?.bytes()?.decodeToString().orEmpty()
+            respond(
+                content = """
+                    {
+                      "summary": {"averageRating": 4.0, "reviewCount": 1, "ratingCounts": [0, 0, 0, 1, 0]},
+                      "reviews": [],
+                      "viewerReview": null,
+                      "viewerIsAuthenticated": true,
+                      "canReview": true,
+                      "cannotReviewReason": null
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val repo = BillingRepository(
+            MvpApiClient(http, "http://example.test", tokenStore),
+            userRepo,
+            BillingRepositoryHttp_UnusedEventRepository,
+            db,
+        )
+
+        repo.saveOrganizationReview("org_1", 4, "Friendly staff").getOrThrow()
+
+        assertTrue(capturedBody.contains("\"rating\":4"))
+        assertTrue(capturedBody.contains("\"body\":\"Friendly staff\""))
     }
 }

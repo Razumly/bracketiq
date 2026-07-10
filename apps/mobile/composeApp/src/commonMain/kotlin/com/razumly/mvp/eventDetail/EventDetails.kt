@@ -558,28 +558,6 @@ fun EventDetails(
         divisionInstallmentDueDatePickerIndex = null
         divisionEditor = divisionEditorDefaults
     }
-    fun alignPlayoffConfigWithLeagueConfig(
-        leagueConfig: LeagueConfig,
-        playoffConfig: TournamentConfig,
-    ): TournamentConfig {
-        return if (leagueConfig.usesSets) {
-            playoffConfig.copy(
-                usesSets = true,
-                matchDurationMinutes = null,
-                setDurationMinutes = playoffConfig.setDurationMinutes ?: leagueConfig.setDurationMinutes,
-            )
-        } else {
-            playoffConfig.copy(
-                usesSets = false,
-                matchDurationMinutes = playoffConfig.matchDurationMinutes,
-                setDurationMinutes = null,
-                winnerSetCount = 1,
-                loserSetCount = 1,
-                winnerBracketPointsToVictory = playoffConfig.winnerBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
-                loserBracketPointsToVictory = playoffConfig.loserBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
-            )
-        }
-    }
     fun normalizeLeagueConfigWithSportMode(config: LeagueConfig): LeagueConfig {
         val setCount = when (val setsPerMatch = config.setsPerMatch) {
             1, 3, 5 -> setsPerMatch
@@ -611,7 +589,7 @@ fun EventDetails(
             playoffTeamCount = divisionEditor.playoffTeamCount,
         )
         val normalizedPlayoffConfig = if (editEvent.eventType == EventType.LEAGUE) {
-            alignPlayoffConfigWithLeagueConfig(
+            alignDivisionPlayoffConfigWithLeagueConfig(
                 leagueConfig = normalizedLeagueConfig,
                 playoffConfig = divisionEditor.playoffConfig,
             )
@@ -645,7 +623,7 @@ fun EventDetails(
         }
     }
     fun updateDivisionPlayoffConfig(updated: TournamentConfig) {
-        val normalizedPlayoffConfig = alignPlayoffConfigWithLeagueConfig(
+        val normalizedPlayoffConfig = alignDivisionPlayoffConfigWithLeagueConfig(
             leagueConfig = divisionEditor.leagueConfig,
             playoffConfig = updated,
         )
@@ -1103,7 +1081,7 @@ fun EventDetails(
             editEvent.eventType == EventType.LEAGUE &&
             editEvent.includePlayoffs
         ) {
-            alignPlayoffConfigWithLeagueConfig(
+            alignDivisionPlayoffConfigWithLeagueConfig(
                 leagueConfig = normalizedLeagueConfig,
                 playoffConfig = divisionEditor.playoffConfig,
             )
@@ -1315,10 +1293,9 @@ fun EventDetails(
             divisionRecordMatchesSelection(existing, divisionId)
         } ?: return
         val parsedToken = parseDivisionToken(detail)
-        val detailLeagueConfig = detail.toLeagueConfig(editEvent.toLeagueConfig())
-        val detailPlayoffConfig = alignPlayoffConfigWithLeagueConfig(
-            leagueConfig = detailLeagueConfig,
-            playoffConfig = detail.toTournamentConfig(editEvent.toTournamentConfig()),
+        val scheduleConfigs = resolveDivisionEditorScheduleConfigs(
+            event = editEvent,
+            detail = detail,
         )
         divisionEditor = DivisionEditorState(
             editingId = detail.id,
@@ -1351,8 +1328,8 @@ fun EventDetails(
             installmentDueDates = detail.installmentDueDates,
             installmentDueRelativeDays = detail.installmentDueRelativeDays,
             installmentAmounts = detail.installmentAmounts,
-            leagueConfig = detailLeagueConfig,
-            playoffConfig = detailPlayoffConfig,
+            leagueConfig = scheduleConfigs.leagueConfig,
+            playoffConfig = scheduleConfigs.playoffConfig,
             nameTouched = true,
             error = null,
         )
@@ -2281,6 +2258,28 @@ fun EventDetails(
                 }
             }
     }
+    val isUsingOrganizationLogoFallback = remember(
+        editView,
+        event.imageId,
+        eventWithRelations.organization?.logoId,
+        displayImageId,
+    ) {
+        !editView &&
+            event.imageId.trim().isBlank() &&
+            eventWithRelations.organization?.logoId?.trim()?.takeIf { it.isNotBlank() } == displayImageId
+    }
+    val heroImageUrl = remember(displayImageId, isUsingOrganizationLogoFallback) {
+        displayImageId
+            .takeIf(String::isNotBlank)
+            ?.let { imageId ->
+                if (isUsingOrganizationLogoFallback) {
+                    getImageUrl(fileId = imageId, width = 1600, height = 1600)
+                } else {
+                    getImageUrl(fileId = imageId, width = 1600, height = 1600, trim = true)
+                }
+            }
+            .orEmpty()
+    }
 
     CompositionLocalProvider(localImageScheme provides imageScheme) {
         Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
@@ -2292,10 +2291,7 @@ fun EventDetails(
             ) {
                 BackgroundImage(
                     modifier = Modifier.fillMaxSize(),
-                    imageUrl = displayImageId
-                        .takeIf(String::isNotBlank)
-                        ?.let { imageId -> getImageUrl(fileId = imageId, width = 1600, trim = true) }
-                        .orEmpty(),
+                    imageUrl = heroImageUrl,
                 )
             }
             Box(

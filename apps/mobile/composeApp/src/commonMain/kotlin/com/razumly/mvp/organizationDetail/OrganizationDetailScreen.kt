@@ -1,15 +1,19 @@
 package com.razumly.mvp.organizationDetail
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.background
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -26,9 +30,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -40,7 +42,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -49,6 +50,7 @@ import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Product
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.evergreenDateDisplayLabel
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.dataTypes.canUsePaidBilling
 import com.razumly.mvp.core.data.repositories.RentalOrderSelectionRequest
@@ -63,10 +65,14 @@ import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
 import com.razumly.mvp.core.presentation.composables.DiscountCodeDialog
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.composables.EventCard
+import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.composables.TeamDetailsDialog
 import com.razumly.mvp.core.presentation.composables.TeamCard
+import com.razumly.mvp.core.presentation.util.dateFormat
+import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.presentation.util.moneyFormat
+import com.razumly.mvp.core.util.resolvedTimeZone
 import com.razumly.mvp.core.util.toTimeZoneOrUtc
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
@@ -86,13 +92,8 @@ import com.razumly.mvp.eventSearch.rangesOverlap
 import com.razumly.mvp.eventSearch.resolveRentalSelection
 import com.razumly.mvp.eventSearch.resolvedRentalTimeZone
 import com.razumly.mvp.eventSearch.toRentalDayIndex
-import com.razumly.mvp.icons.Indoor
-import com.razumly.mvp.icons.MVPIcons
-import com.razumly.mvp.icons.ProfileActionDetails
-import com.razumly.mvp.icons.ProfileActionEvents
-import com.razumly.mvp.icons.ProfileActionPayments
-import com.razumly.mvp.icons.ProfileActionTeams
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.coroutines.flow.flowOf
 import kotlin.time.Clock
@@ -107,9 +108,12 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val loadingHandler = LocalLoadingHandler.current
 
     val organization by component.organization.collectAsState()
+    val selectedTab by component.selectedTab.collectAsState()
+    val visibleTabs by component.visibleTabs.collectAsState()
     val events by component.events.collectAsState()
     val teams by component.teams.collectAsState()
     val products by component.products.collectAsState()
+    val reviews by component.reviews.collectAsState()
     val startingProductCheckoutId by component.startingProductCheckoutId.collectAsState()
     val rentalFieldOptions by component.rentalFieldOptions.collectAsState()
     val rentalBusyBlocks by component.rentalBusyBlocks.collectAsState()
@@ -117,6 +121,8 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val isLoadingEvents by component.isLoadingEvents.collectAsState()
     val isLoadingTeams by component.isLoadingTeams.collectAsState()
     val isLoadingProducts by component.isLoadingProducts.collectAsState()
+    val isLoadingReviews by component.isLoadingReviews.collectAsState()
+    val isMutatingReview by component.isMutatingReview.collectAsState()
     val isLoadingRentals by component.isLoadingRentals.collectAsState()
     val billingAddressPrompt by component.billingAddressPrompt.collectAsState()
     val currentUser by component.currentUser.collectAsState()
@@ -129,7 +135,6 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val isReservingRental by component.isReservingRental.collectAsState()
     val completedRentalReservation by component.completedRentalReservation.collectAsState()
 
-    var selectedTab by remember(component) { mutableStateOf(component.initialTab) }
     var selectedTeam by remember { mutableStateOf<TeamWithPlayers?>(null) }
     var teamDialogKnownUsers by remember { mutableStateOf<Map<String, UserData>>(emptyMap()) }
     val teamRepository = remember {
@@ -308,7 +313,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
 
     LaunchedEffect(selectedTab, organization?.id) {
         if (selectedTab == OrganizationDetailTab.RENTALS && organization != null) {
-            component.refreshRentals()
+            component.refreshRentals(force = true)
         }
     }
 
@@ -318,7 +323,12 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
             rentalDetailsStep = RentalDetailsStep.BUILDER
             selectedRentalDate = today
             nextRentalSelectionId = 1L
-            component.clearRentalData()
+        }
+    }
+
+    LaunchedEffect(visibleTabs, selectedTab) {
+        if (selectedTab !in visibleTabs) {
+            component.selectTab(OrganizationDetailTab.OVERVIEW)
         }
     }
 
@@ -363,11 +373,32 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
         topBar = {
             CenterAlignedTopAppBar(
                 title = {
-                    Text(
-                        text = organization?.name?.ifBlank { "Organization" } ?: "Organization",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    if (selectedTab == OrganizationDetailTab.OVERVIEW) {
+                        val organizationName = organization?.name?.ifBlank { "Organization" } ?: "Organization"
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            NetworkAvatar(
+                                displayName = organizationName,
+                                imageRef = organization?.logoId,
+                                size = 30.dp,
+                                contentDescription = "$organizationName logo",
+                            )
+                            Text(
+                                text = organizationName,
+                                modifier = Modifier.widthIn(max = 190.dp),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = selectedTab.label(),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 },
                 navigationIcon = {
                     IconButton(onClick = component::onBackClicked) {
@@ -384,38 +415,36 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            PrimaryTabRow(selectedTabIndex = selectedTab.ordinal) {
-                OrganizationDetailTab.values().forEachIndexed { index, tab ->
-                    Tab(
-                        selected = selectedTab.ordinal == index,
-                        onClick = { selectedTab = tab },
-                        text = {
-                            Text(
-                                text = tab.label(),
-                                style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                        icon = {
-                            Icon(
-                                imageVector = tab.icon(),
-                                contentDescription = null,
-                            )
-                        },
-                    )
-                }
-            }
-
             when (selectedTab) {
                 OrganizationDetailTab.OVERVIEW -> {
                     OverviewTabContent(
                         organization = organization,
                         events = events,
                         teams = teams,
+                        products = products,
+                        rentalFieldOptions = rentalFieldOptions,
+                        visibleTabs = visibleTabs,
                         isLoading = isLoadingOrganization,
+                        reviewPayload = reviews,
+                        isLoadingReviews = isLoadingReviews,
                         bottomPadding = bottomPadding,
                         onEventClick = component::viewEvent,
+                        onTeamClick = { team -> selectedTeam = team },
+                        onOpenSection = component::selectTab,
+                    )
+                }
+
+                OrganizationDetailTab.REVIEWS -> {
+                    OrganizationReviewsTabContent(
+                        payload = reviews,
+                        isLoading = isLoadingReviews,
+                        isMutating = isMutatingReview,
+                        bottomPadding = bottomPadding,
+                        onRefresh = { component.refreshReviews(force = true) },
+                        onSave = component::saveReview,
+                        onDelete = component::deleteReview,
+                        onReport = component::reportReview,
+                        onSignIn = component::signInToReview,
                     )
                 }
 
@@ -700,20 +729,11 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
 private fun OrganizationDetailTab.label(): String {
     return when (this) {
         OrganizationDetailTab.OVERVIEW -> "Overview"
+        OrganizationDetailTab.REVIEWS -> "Reviews"
         OrganizationDetailTab.EVENTS -> "Events"
         OrganizationDetailTab.TEAMS -> "Teams"
         OrganizationDetailTab.RENTALS -> "Rentals"
         OrganizationDetailTab.STORE -> "Store"
-    }
-}
-
-private fun OrganizationDetailTab.icon(): ImageVector {
-    return when (this) {
-        OrganizationDetailTab.OVERVIEW -> MVPIcons.ProfileActionDetails
-        OrganizationDetailTab.EVENTS -> MVPIcons.ProfileActionEvents
-        OrganizationDetailTab.TEAMS -> MVPIcons.ProfileActionTeams
-        OrganizationDetailTab.RENTALS -> MVPIcons.Indoor
-        OrganizationDetailTab.STORE -> MVPIcons.ProfileActionPayments
     }
 }
 
@@ -797,9 +817,16 @@ private fun OverviewTabContent(
     organization: Organization?,
     events: List<Event>,
     teams: List<TeamWithPlayers>,
+    products: List<Product>,
+    rentalFieldOptions: List<com.razumly.mvp.eventSearch.RentalFieldOption>,
+    visibleTabs: List<OrganizationDetailTab>,
     isLoading: Boolean,
+    reviewPayload: com.razumly.mvp.core.data.dataTypes.OrganizationReviewsPayload?,
+    isLoadingReviews: Boolean,
     bottomPadding: androidx.compose.ui.unit.Dp,
     onEventClick: (Event) -> Unit,
+    onTeamClick: (TeamWithPlayers) -> Unit,
+    onOpenSection: (OrganizationDetailTab) -> Unit,
 ) {
     val scrollState = rememberScrollState()
     Column(
@@ -808,13 +835,23 @@ private fun OverviewTabContent(
             .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 16.dp)
             .padding(bottom = bottomPadding),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         if (isLoading) {
             Text(text = "Loading organization...", style = MaterialTheme.typography.bodyMedium)
         }
 
-        SectionCard(title = "About") {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OrganizationOverviewSectionHeader(
+                title = "About",
+                actionContent = {
+                    OrganizationReviewRatingAction(
+                        payload = reviewPayload,
+                        isLoading = isLoadingReviews,
+                        onClick = { onOpenSection(OrganizationDetailTab.REVIEWS) },
+                    )
+                },
+            )
             Text(
                 text = organization?.description?.ifBlank { "No description" } ?: "No description",
                 style = MaterialTheme.typography.bodyMedium,
@@ -830,53 +867,286 @@ private fun OverviewTabContent(
             }
         }
 
-        SectionCard(title = "Recent Events") {
-            when {
-                events.isEmpty() -> {
-                    Text(
-                        text = "No events yet.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+        if (OrganizationDetailTab.EVENTS in visibleTabs) {
+            OrganizationOverviewPreviewSection(
+                title = "Events",
+                onMore = { onOpenSection(OrganizationDetailTab.EVENTS) },
+            ) {
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(events.take(6), key = Event::id) { event ->
+                        CompactOrganizationEventCard(
+                            event = event,
+                            fallbackImageId = organization?.logoId,
+                            onClick = { onEventClick(event) },
+                        )
+                    }
                 }
+            }
+        }
 
-                else -> {
-                    events.take(3).forEach { event ->
+        if (OrganizationDetailTab.TEAMS in visibleTabs) {
+            OrganizationOverviewPreviewSection(
+                title = "Teams",
+                onMore = { onOpenSection(OrganizationDetailTab.TEAMS) },
+            ) {
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(teams.take(6), key = { team -> team.team.id }) { team ->
                         Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 6.dp),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                            modifier = Modifier.width(280.dp),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                            ),
+                            onClick = { onTeamClick(team) },
                         ) {
-                            EventCard(
-                                event = event,
-                                navPadding = PaddingValues(bottom = 16.dp),
-                                fallbackImageId = organization?.logoId,
-                                onClick = { onEventClick(event) },
-                                onMapClick = { }
-                            )
+                            TeamCard(team = team, modifier = Modifier.fillMaxWidth())
                         }
                     }
                 }
             }
         }
 
-        SectionCard(title = "Teams") {
-            when {
-                teams.isEmpty() -> {
-                    Text(
-                        text = "No teams yet.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                else -> {
-                    teams.take(3).forEach { team ->
-                        TeamCard(team = team, modifier = Modifier.padding(vertical = 6.dp))
+        if (OrganizationDetailTab.RENTALS in visibleTabs) {
+            OrganizationOverviewPreviewSection(
+                title = "Rentals",
+                onMore = { onOpenSection(OrganizationDetailTab.RENTALS) },
+            ) {
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(rentalFieldOptions.take(6), key = { option -> option.field.id }) { option ->
+                        RentalFieldPreviewCard(
+                            option = option,
+                            onClick = { onOpenSection(OrganizationDetailTab.RENTALS) },
+                        )
                     }
                 }
             }
+        }
+
+        if (OrganizationDetailTab.STORE in visibleTabs) {
+            OrganizationOverviewPreviewSection(
+                title = "Store",
+                onMore = { onOpenSection(OrganizationDetailTab.STORE) },
+            ) {
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(products.take(6), key = Product::id) { product ->
+                        ProductPreviewCard(
+                            product = product,
+                            onClick = { onOpenSection(OrganizationDetailTab.STORE) },
+                        )
+                    }
+                }
+            }
+        }
+
+        OrganizationReviewsPreviewSection(
+            payload = reviewPayload,
+            isLoading = isLoadingReviews,
+            onViewReviews = { onOpenSection(OrganizationDetailTab.REVIEWS) },
+        )
+    }
+}
+
+@Composable
+internal fun OrganizationOverviewSectionHeader(
+    title: String,
+    onMore: (() -> Unit)? = null,
+    actionContent: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+        if (actionContent != null) {
+            actionContent()
+        } else if (onMore != null) {
+            TextButton(onClick = onMore) {
+                Text("More")
+            }
+        }
+    }
+}
+
+@Composable
+private fun OrganizationOverviewPreviewSection(
+    title: String,
+    onMore: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OrganizationOverviewSectionHeader(title = title, onMore = onMore)
+        content()
+    }
+}
+
+@Composable
+private fun CompactOrganizationEventCard(
+    event: Event,
+    fallbackImageId: String?,
+    onClick: () -> Unit,
+) {
+    val eventTimeZone = remember(event.timeZone) { event.resolvedTimeZone() }
+    val dateLabel = remember(event.start, event.scheduleText, event.dateDisplayMode, event.dateDisplayText) {
+        event.evergreenDateDisplayLabel()
+            ?: event.start.toLocalDateTime(eventTimeZone).date.format(dateFormat)
+    }
+    val imageUrl = remember(event.imageId, fallbackImageId) {
+        (event.imageId.trim().takeIf(String::isNotBlank)
+            ?: fallbackImageId?.trim()?.takeIf(String::isNotBlank))
+            ?.let { imageId -> getImageUrl(fileId = imageId, width = 320, height = 240) }
+    }
+
+    Card(
+        modifier = Modifier
+            .width(300.dp)
+            .height(112.dp),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+        onClick = onClick,
+    ) {
+        Row(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(104.dp)
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (imageUrl == null) {
+                    Text(
+                        text = "Event",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    coil3.compose.AsyncImage(
+                        model = imageUrl,
+                        contentDescription = "${event.name} image",
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = event.name.ifBlank { "Event" },
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                event.location.trim().takeIf(String::isNotBlank)?.let { location ->
+                    Text(
+                        text = location,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text(
+                    text = dateLabel,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RentalFieldPreviewCard(
+    option: com.razumly.mvp.eventSearch.RentalFieldOption,
+    onClick: () -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .width(240.dp)
+            .height(104.dp),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+        onClick = onClick,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = option.field.displayLabel(),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "${option.rentalSlots.size} available ${if (option.rentalSlots.size == 1) "window" else "windows"}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProductPreviewCard(
+    product: Product,
+    onClick: () -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .width(240.dp)
+            .height(104.dp),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+        onClick = onClick,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = product.name,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = product.priceLabel(),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+            )
         }
     }
 }
@@ -1072,25 +1342,6 @@ private fun StoreTabContent(
                     onPurchase = onPurchase,
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun SectionCard(
-    title: String,
-    content: @Composable () -> Unit,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(text = title, style = MaterialTheme.typography.titleMedium)
-            content()
         }
     }
 }

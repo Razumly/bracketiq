@@ -87,6 +87,8 @@ fun SearchBox(
     trailingAction: (@Composable (() -> Unit))? = null,
     rowAction: (@Composable RowScope.() -> Unit)? = null,
     filterExtraContent: (@Composable (() -> Unit))? = null,
+    filterTitle: String = "Filter Events",
+    showDefaultFilterContent: Boolean = true,
     filterMaxHeight: Dp? = null,
     filterDismissSignal: Int = 0,
 ) {
@@ -195,6 +197,8 @@ fun SearchBox(
                 onRadiusChange = onRadiusChange,
                 maxHeight = filterMaxHeight,
                 extraContent = filterExtraContent,
+                title = filterTitle,
+                showDefaultFilterContent = showDefaultFilterContent,
                 onFilterChange = onFilterChange,
                 onDismiss = { showFilterDropdown = false })
         }
@@ -219,6 +223,8 @@ private fun FilterDropdown(
     onRadiusChange: ((Double) -> Unit)? = null,
     maxHeight: Dp? = null,
     extraContent: (@Composable (() -> Unit))? = null,
+    title: String = "Filter Events",
+    showDefaultFilterContent: Boolean = true,
     onFilterChange: (EventFilter.() -> EventFilter) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -252,7 +258,7 @@ private fun FilterDropdown(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Filter Events",
+                            text = title,
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
@@ -266,15 +272,17 @@ private fun FilterDropdown(
                         }
                     }
 
-                    PriceFilterSection(
-                        currentFilter = currentFilter, onFilterChange = onFilterChange
-                    )
+                    if (showDefaultFilterContent) {
+                        PriceFilterSection(
+                            currentFilter = currentFilter, onFilterChange = onFilterChange
+                        )
 
-                    DateFilterSection(
-                        currentFilter = currentFilter,
-                        { showStartPicker = true },
-                        { showEndPicker = true }
-                    )
+                        DateFilterSection(
+                            currentFilter = currentFilter,
+                            { showStartPicker = true },
+                            { showEndPicker = true }
+                        )
+                    }
 
                     extraContent?.invoke()
 
@@ -291,34 +299,36 @@ private fun FilterDropdown(
                         Text("Apply Filters")
                     }
                 }
-                PlatformDateTimePicker(
-                    onDateSelected = { selectedInstant ->
-                        onFilterChange {
-                            copy(
-                                date = (selectedInstant ?: Clock.System.now()) to date.second
-                            )
-                        }
-                        showStartPicker = false
-                    },
-                    onDismissRequest = { showStartPicker = false },
-                    showPicker = showStartPicker,
-                    getTime = false,
-                    canSelectPast = true,
-                )
-                PlatformDateTimePicker(
-                    onDateSelected = { selectedInstant ->
-                        onFilterChange {
-                            copy(
-                                date = date.first to selectedInstant
-                            )
-                        }
-                        showEndPicker = false
-                    },
-                    onDismissRequest = { showEndPicker = false },
-                    showPicker = showEndPicker,
-                    getTime = false,
-                    canSelectPast = true,
-                )
+                if (showDefaultFilterContent) {
+                    PlatformDateTimePicker(
+                        onDateSelected = { selectedInstant ->
+                            onFilterChange {
+                                copy(
+                                    date = (selectedInstant ?: Clock.System.now()) to date.second
+                                )
+                            }
+                            showStartPicker = false
+                        },
+                        onDismissRequest = { showStartPicker = false },
+                        showPicker = showStartPicker,
+                        getTime = false,
+                        canSelectPast = true,
+                    )
+                    PlatformDateTimePicker(
+                        onDateSelected = { selectedInstant ->
+                            onFilterChange {
+                                copy(
+                                    date = date.first to selectedInstant
+                                )
+                            }
+                            showEndPicker = false
+                        },
+                        onDismissRequest = { showEndPicker = false },
+                        showPicker = showEndPicker,
+                        getTime = false,
+                        canSelectPast = true,
+                    )
+                }
             }
         }
     }

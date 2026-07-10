@@ -2,10 +2,12 @@ package com.razumly.mvp.organizationDetail
 
 import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.OrganizationReviewsPayload
 import com.razumly.mvp.core.data.dataTypes.Product
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -76,12 +78,37 @@ private data class PendingRentalReservation(
     val paymentIntentId: String?,
 )
 
+internal fun resolveOrganizationDetailTabs(
+    initialTab: OrganizationDetailTab,
+    eventsLoaded: Boolean,
+    hasEvents: Boolean,
+    teamsLoaded: Boolean,
+    hasTeams: Boolean,
+    rentalsLoaded: Boolean,
+    hasRentals: Boolean,
+    productsLoaded: Boolean,
+    hasProducts: Boolean,
+): List<OrganizationDetailTab> = OrganizationDetailTab.entries.filter { tab ->
+    when (tab) {
+        OrganizationDetailTab.OVERVIEW,
+        OrganizationDetailTab.REVIEWS -> true
+
+        OrganizationDetailTab.EVENTS -> if (eventsLoaded) hasEvents else tab == initialTab
+        OrganizationDetailTab.TEAMS -> if (teamsLoaded) hasTeams else tab == initialTab
+        OrganizationDetailTab.RENTALS -> if (rentalsLoaded) hasRentals else tab == initialTab
+        OrganizationDetailTab.STORE -> if (productsLoaded) hasProducts else tab == initialTab
+    }
+}
+
 interface OrganizationDetailComponent : IPaymentProcessor {
     val initialTab: OrganizationDetailTab
+    val selectedTab: StateFlow<OrganizationDetailTab>
+    val visibleTabs: StateFlow<List<OrganizationDetailTab>>
     val organization: StateFlow<Organization?>
     val events: StateFlow<List<Event>>
     val teams: StateFlow<List<TeamWithPlayers>>
     val products: StateFlow<List<Product>>
+    val reviews: StateFlow<OrganizationReviewsPayload?>
     val startingProductCheckoutId: StateFlow<String?>
     val rentalFieldOptions: StateFlow<List<RentalFieldOption>>
     val rentalBusyBlocks: StateFlow<List<RentalBusyBlock>>
@@ -89,6 +116,8 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     val isLoadingEvents: StateFlow<Boolean>
     val isLoadingTeams: StateFlow<Boolean>
     val isLoadingProducts: StateFlow<Boolean>
+    val isLoadingReviews: StateFlow<Boolean>
+    val isMutatingReview: StateFlow<Boolean>
     val isLoadingRentals: StateFlow<Boolean>
     val errorState: StateFlow<ErrorMessage?>
     val message: StateFlow<String?>
@@ -108,8 +137,12 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     fun refreshEvents(force: Boolean = false)
     fun refreshTeams(force: Boolean = false)
     fun refreshProducts(force: Boolean = false)
+    fun refreshReviews(force: Boolean = false)
+    fun saveReview(rating: Int, body: String?)
+    fun deleteReview(reviewId: String)
+    fun reportReview(reviewId: String)
+    fun signInToReview()
     fun refreshRentals(force: Boolean = false)
-    fun clearRentalData()
     fun startProductPurchase(product: Product)
     fun startTeamRegistration(team: TeamWithPlayers)
     fun leaveTeam(team: TeamWithPlayers)
@@ -125,6 +158,7 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     fun createEventFromCompletedRentalReservation()
     fun dismissCompletedRentalReservation()
     fun viewEvent(event: Event)
+    fun selectTab(tab: OrganizationDetailTab)
     fun onBackClicked()
 }
 
@@ -140,6 +174,23 @@ class DefaultOrganizationDetailComponent(
     private val userRepository: IUserRepository,
     private val navigationHandler: INavigationHandler,
 ) : OrganizationDetailComponent, PaymentProcessor(), ComponentContext by componentContext {
+    private val _selectedTab = MutableStateFlow(initialTab)
+    override val selectedTab: StateFlow<OrganizationDetailTab> = _selectedTab.asStateFlow()
+    private val _visibleTabs = MutableStateFlow(
+        resolveOrganizationDetailTabs(
+            initialTab = initialTab,
+            eventsLoaded = false,
+            hasEvents = false,
+            teamsLoaded = false,
+            hasTeams = false,
+            rentalsLoaded = false,
+            hasRentals = false,
+            productsLoaded = false,
+            hasProducts = false,
+        ),
+    )
+    override val visibleTabs: StateFlow<List<OrganizationDetailTab>> = _visibleTabs.asStateFlow()
+
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
     private val rentalAvailabilityLoader = RentalAvailabilityLoader(
         eventRepository = eventRepository,
@@ -158,6 +209,9 @@ class DefaultOrganizationDetailComponent(
 
     private val _products = MutableStateFlow<List<Product>>(emptyList())
     override val products: StateFlow<List<Product>> = _products.asStateFlow()
+
+    private val _reviews = MutableStateFlow<OrganizationReviewsPayload?>(null)
+    override val reviews: StateFlow<OrganizationReviewsPayload?> = _reviews.asStateFlow()
 
     private val _startingProductCheckoutId = MutableStateFlow<String?>(null)
     override val startingProductCheckoutId: StateFlow<String?> = _startingProductCheckoutId.asStateFlow()
@@ -179,6 +233,12 @@ class DefaultOrganizationDetailComponent(
 
     private val _isLoadingProducts = MutableStateFlow(false)
     override val isLoadingProducts: StateFlow<Boolean> = _isLoadingProducts.asStateFlow()
+
+    private val _isLoadingReviews = MutableStateFlow(false)
+    override val isLoadingReviews: StateFlow<Boolean> = _isLoadingReviews.asStateFlow()
+
+    private val _isMutatingReview = MutableStateFlow(false)
+    override val isMutatingReview: StateFlow<Boolean> = _isMutatingReview.asStateFlow()
 
     private val _isLoadingRentals = MutableStateFlow(false)
     override val isLoadingRentals: StateFlow<Boolean> = _isLoadingRentals.asStateFlow()
@@ -215,6 +275,7 @@ class DefaultOrganizationDetailComponent(
     private var eventsLoaded = false
     private var teamsLoaded = false
     private var productsLoaded = false
+    private var reviewsLoaded = false
     private var rentalsLoaded = false
     private var pendingProductPurchase: Product? = null
     private var pendingTeamRegistration: TeamWithPlayers? = null
@@ -229,7 +290,15 @@ class DefaultOrganizationDetailComponent(
 
     private lateinit var loadingHandler: LoadingHandler
 
+    private val sectionBackCallback = BackCallback(
+        isEnabled = initialTab != OrganizationDetailTab.OVERVIEW,
+        priority = BackCallback.PRIORITY_MAX,
+    ) {
+        selectTab(OrganizationDetailTab.OVERVIEW)
+    }
+
     init {
+        backHandler.register(sectionBackCallback)
         refreshOrganization()
 
         scope.launch {
@@ -332,6 +401,14 @@ class DefaultOrganizationDetailComponent(
                 refreshEvents(force = true)
                 refreshTeams(force = true)
                 refreshProducts(force = true)
+                refreshReviews(force = true)
+                refreshRentals(force = true)
+            } else {
+                eventsLoaded = true
+                teamsLoaded = true
+                productsLoaded = true
+                rentalsLoaded = true
+                updateVisibleTabs()
             }
         }
     }
@@ -352,6 +429,7 @@ class DefaultOrganizationDetailComponent(
                 }
             _isLoadingEvents.value = false
             eventsLoaded = true
+            updateVisibleTabs()
         }
     }
 
@@ -371,6 +449,7 @@ class DefaultOrganizationDetailComponent(
                 }
             _isLoadingTeams.value = false
             teamsLoaded = true
+            updateVisibleTabs()
         }
     }
 
@@ -410,7 +489,74 @@ class DefaultOrganizationDetailComponent(
                 }
             _isLoadingProducts.value = false
             productsLoaded = true
+            updateVisibleTabs()
         }
+    }
+
+    override fun refreshReviews(force: Boolean) {
+        scope.launch {
+            if (_isLoadingReviews.value) return@launch
+            if (reviewsLoaded && !force) return@launch
+
+            _isLoadingReviews.value = true
+            billingRepository.getOrganizationReviews(organizationId)
+                .onSuccess { payload ->
+                    _reviews.value = payload
+                }
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage(error.userMessage("Failed to load organization reviews."))
+                }
+            _isLoadingReviews.value = false
+            reviewsLoaded = true
+        }
+    }
+
+    override fun saveReview(rating: Int, body: String?) {
+        if (_isMutatingReview.value) return
+        scope.launch {
+            _isMutatingReview.value = true
+            billingRepository.saveOrganizationReview(organizationId, rating, body)
+                .onSuccess { payload ->
+                    _reviews.value = payload
+                    reviewsLoaded = true
+                    _message.value = "Your review has been published."
+                }
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage(error.userMessage("Failed to save your review."))
+                }
+            _isMutatingReview.value = false
+        }
+    }
+
+    override fun deleteReview(reviewId: String) {
+        if (_isMutatingReview.value) return
+        scope.launch {
+            _isMutatingReview.value = true
+            billingRepository.deleteOrganizationReview(organizationId, reviewId)
+                .onSuccess { payload ->
+                    _reviews.value = payload
+                    reviewsLoaded = true
+                    _message.value = "Your review has been deleted."
+                }
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage(error.userMessage("Failed to delete your review."))
+                }
+            _isMutatingReview.value = false
+        }
+    }
+
+    override fun reportReview(reviewId: String) {
+        scope.launch {
+            billingRepository.reportOrganizationReview(reviewId)
+                .onSuccess { _message.value = "Review reported to moderators." }
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage(error.userMessage("Failed to report this review."))
+                }
+        }
+    }
+
+    override fun signInToReview() {
+        navigationHandler.navigateToLogin()
     }
 
     override fun refreshRentals(force: Boolean) {
@@ -423,6 +569,7 @@ class DefaultOrganizationDetailComponent(
                 _rentalFieldOptions.value = emptyList()
                 _rentalBusyBlocks.value = emptyList()
                 rentalsLoaded = true
+                updateVisibleTabs()
                 return@launch
             }
 
@@ -433,6 +580,7 @@ class DefaultOrganizationDetailComponent(
                 _rentalBusyBlocks.value = emptyList()
                 _isLoadingRentals.value = false
                 rentalsLoaded = true
+                updateVisibleTabs()
                 return@launch
             }
 
@@ -441,13 +589,25 @@ class DefaultOrganizationDetailComponent(
 
             _isLoadingRentals.value = false
             rentalsLoaded = true
+            updateVisibleTabs()
         }
     }
 
-    override fun clearRentalData() {
-        _rentalFieldOptions.value = emptyList()
-        _rentalBusyBlocks.value = emptyList()
-        rentalsLoaded = false
+    private fun updateVisibleTabs() {
+        _visibleTabs.value = resolveOrganizationDetailTabs(
+            initialTab = initialTab,
+            eventsLoaded = eventsLoaded,
+            hasEvents = _events.value.isNotEmpty(),
+            teamsLoaded = teamsLoaded,
+            hasTeams = _teams.value.isNotEmpty(),
+            rentalsLoaded = rentalsLoaded,
+            hasRentals = _rentalFieldOptions.value.isNotEmpty(),
+            productsLoaded = productsLoaded,
+            hasProducts = _products.value.isNotEmpty(),
+        )
+        if (_selectedTab.value !in _visibleTabs.value) {
+            selectTab(OrganizationDetailTab.OVERVIEW)
+        }
     }
 
     override fun startProductPurchase(product: Product) {
@@ -853,8 +1013,17 @@ class DefaultOrganizationDetailComponent(
         navigationHandler.navigateToEvent(event)
     }
 
+    override fun selectTab(tab: OrganizationDetailTab) {
+        _selectedTab.value = tab
+        sectionBackCallback.isEnabled = tab != OrganizationDetailTab.OVERVIEW
+    }
+
     override fun onBackClicked() {
-        navigationHandler.navigateBack()
+        if (_selectedTab.value == OrganizationDetailTab.OVERVIEW) {
+            navigationHandler.navigateBack()
+        } else {
+            selectTab(OrganizationDetailTab.OVERVIEW)
+        }
     }
 
     private suspend fun showPaymentSheet(
@@ -1169,7 +1338,7 @@ class DefaultOrganizationDetailComponent(
         _rentalFieldOptions.value = emptyList()
         rentalAvailabilityLoader.loadFieldOptions(fieldIds)
             .onSuccess { options ->
-                _rentalFieldOptions.value = options
+                _rentalFieldOptions.value = options.filter { option -> option.rentalSlots.isNotEmpty() }
             }
             .onFailure { error ->
                 _errorState.value = ErrorMessage("Failed to load rental field options: ${error.userMessage()}")

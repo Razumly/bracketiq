@@ -60,6 +60,9 @@ interface EventSearchComponent {
     val selectedSearchLocationLabel: StateFlow<String?>
     val sports: StateFlow<List<Sport>>
     val eventTags: StateFlow<List<EventTag>>
+    val organizationTags: StateFlow<List<EventTag>>
+    val organizationFilter: StateFlow<EventFilter>
+    val selectedOrganizationTagSlugs: StateFlow<Set<String>>
     val isLoadingMore: StateFlow<Boolean>
     val hasMoreEvents: StateFlow<Boolean>
     val filter: StateFlow<EventFilter>
@@ -95,6 +98,8 @@ interface EventSearchComponent {
     fun suggestOrganizations(searchQuery: String, rentalsOnly: Boolean = false)
     fun suggestTeams(searchQuery: String)
     fun updateFilter(update: EventFilter.() -> EventFilter)
+    fun updateOrganizationFilter(update: EventFilter.() -> EventFilter)
+    fun updateOrganizationTagSlugs(tagSlugs: Set<String>)
     fun refreshEvents(force: Boolean = false)
     fun refreshOrganizations(force: Boolean = false)
     fun refreshRentals(force: Boolean = false)
@@ -178,6 +183,12 @@ class DefaultEventSearchComponent(
     override val sports: StateFlow<List<Sport>> = _sports.asStateFlow()
     private val _eventTags = MutableStateFlow<List<EventTag>>(emptyList())
     override val eventTags: StateFlow<List<EventTag>> = _eventTags.asStateFlow()
+    private val _organizationTags = MutableStateFlow<List<EventTag>>(emptyList())
+    override val organizationTags: StateFlow<List<EventTag>> = _organizationTags.asStateFlow()
+    private val _organizationFilter = MutableStateFlow(EventFilter())
+    override val organizationFilter: StateFlow<EventFilter> = _organizationFilter.asStateFlow()
+    private val _selectedOrganizationTagSlugs = MutableStateFlow<Set<String>>(emptySet())
+    override val selectedOrganizationTagSlugs: StateFlow<Set<String>> = _selectedOrganizationTagSlugs.asStateFlow()
 
     private val _isLoadingMore = MutableStateFlow(false)
     override val isLoadingMore: StateFlow<Boolean> = _isLoadingMore.asStateFlow()
@@ -295,6 +306,7 @@ class DefaultEventSearchComponent(
         observeCachedEvents()
         loadSports()
         loadEventTags()
+        loadOrganizationTags()
         refreshEvents(
             force = true,
             showLoading = false,
@@ -560,6 +572,38 @@ class DefaultEventSearchComponent(
         }
     }
 
+    override fun updateOrganizationTagSlugs(tagSlugs: Set<String>) {
+        val normalized = tagSlugs
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .toSet()
+        if (_selectedOrganizationTagSlugs.value == normalized) return
+        updateOrganizationFilter { copy(tagSlugs = normalized) }
+    }
+
+    override fun updateOrganizationFilter(update: EventFilter.() -> EventFilter) {
+        val previous = _organizationFilter.value
+        val updated = previous.update()
+        if (previous == updated) return
+
+        _organizationFilter.value = updated
+        _selectedOrganizationTagSlugs.value = updated.tagSlugs
+
+        if (previous.tagSlugs != updated.tagSlugs) {
+            organizationsLoaded = false
+            scope.launch {
+                loadOrganizations(force = true)
+            }
+        } else {
+            val source = if (_allOrganizations.value.isNotEmpty()) {
+                _allOrganizations.value
+            } else {
+                _organizations.value
+            }
+            _organizations.value = applyOrganizationFilters(source)
+        }
+    }
+
     override fun refreshOrganizations(force: Boolean) {
         scope.launch {
             loadOrganizations(force = force)
@@ -667,12 +711,24 @@ class DefaultEventSearchComponent(
 
     private fun loadEventTags() {
         scope.launch {
-            eventRepository.getEventTags()
+            eventRepository.getEventTags(filterOnly = true)
                 .onSuccess { tags ->
                     _eventTags.value = tags
                 }
                 .onFailure { e ->
                     _errorState.value = ErrorMessage("Failed to load event tags: ${e.userMessage()}")
+                }
+        }
+    }
+
+    private fun loadOrganizationTags() {
+        scope.launch {
+            billingRepository.getOrganizationTags(filterOnly = true)
+                .onSuccess { tags ->
+                    _organizationTags.value = tags
+                }
+                .onFailure { e ->
+                    _errorState.value = ErrorMessage("Failed to load organization tags: ${e.userMessage()}")
                 }
         }
     }
@@ -728,7 +784,7 @@ class DefaultEventSearchComponent(
                 organizations.forEach { organization -> mergedById[organization.id] = organization }
                 val merged = mergedById.values.sortedBy { organization -> organization.name.lowercase() }
                 _allOrganizations.value = merged
-                _organizations.value = applyDistanceFilter(merged)
+                _organizations.value = applyOrganizationFilters(merged)
             }
             .onFailure { error ->
                 Napier.w("Failed to load event organizations for discover cards: ${error.message}")
@@ -882,15 +938,19 @@ class DefaultEventSearchComponent(
             } else {
                 _organizations.value
             }
-            val distanceFiltered = applyDistanceFilter(source)
-            _organizations.value = distanceFiltered
-            return distanceFiltered
+            val filtered = applyOrganizationFilters(source)
+            _organizations.value = filtered
+            return filtered
         }
 
         _isLoadingOrganizations.value = true
         organizationOffset = 0
         _hasMoreOrganizations.value = true
-        val page = billingRepository.listOrganizationsPage(limit = DISCOVER_PAGE_SIZE, offset = 0)
+        val page = billingRepository.listOrganizationsPage(
+            limit = DISCOVER_PAGE_SIZE,
+            offset = 0,
+            tagSlugs = _organizationFilter.value.tagSlugs,
+        )
             .onFailure { e ->
                 _errorState.value = ErrorMessage("Failed to fetch organizations: ${e.userMessage()}")
             }
@@ -903,18 +963,22 @@ class DefaultEventSearchComponent(
         organizationOffset = page?.pagination?.nextOffset ?: organizations.size
         _hasMoreOrganizations.value = page?.pagination?.hasMore ?: false
 
-        val distanceFiltered = applyDistanceFilter(sortedOrganizations)
-        _organizations.value = distanceFiltered
+        val filtered = applyOrganizationFilters(sortedOrganizations)
+        _organizations.value = filtered
         organizationsLoaded = true
         _isLoadingOrganizations.value = false
-        return distanceFiltered
+        return filtered
     }
 
     private suspend fun loadMoreOrganizationsPage() {
         if (_isLoadingOrganizations.value || !_hasMoreOrganizations.value) return
 
         _isLoadingOrganizations.value = true
-        val page = billingRepository.listOrganizationsPage(limit = DISCOVER_PAGE_SIZE, offset = organizationOffset)
+        val page = billingRepository.listOrganizationsPage(
+            limit = DISCOVER_PAGE_SIZE,
+            offset = organizationOffset,
+            tagSlugs = _organizationFilter.value.tagSlugs,
+        )
             .onFailure { e ->
                 _errorState.value = ErrorMessage("Failed to fetch more organizations: ${e.userMessage()}")
             }
@@ -926,8 +990,8 @@ class DefaultEventSearchComponent(
         organizationOffset = page?.pagination?.nextOffset ?: organizationOffset + organizations.size
         _hasMoreOrganizations.value = page?.pagination?.hasMore ?: false
 
-        val distanceFiltered = applyDistanceFilter(merged)
-        _organizations.value = distanceFiltered
+        val filtered = applyOrganizationFilters(merged)
+        _organizations.value = filtered
         organizationsLoaded = true
         _isLoadingOrganizations.value = false
     }
@@ -979,6 +1043,28 @@ class DefaultEventSearchComponent(
 
         organizationFieldIdsFromFieldsCache = mapFromFields
         return mapFromFields
+    }
+
+    private fun applyOrganizationFilters(organizations: List<Organization>): List<Organization> {
+        val filter = _organizationFilter.value
+        val sportNames = selectedSportNames(filter)
+            .map { sport -> sport.trim().lowercase() }
+            .filter(String::isNotBlank)
+            .toSet()
+        val sportFiltered = if (sportNames.isEmpty() && filter.sportIds.isEmpty()) {
+            organizations
+        } else {
+            organizations.filter { organization ->
+                val organizationSports = organization.sports
+                    .map { sport -> sport.trim().lowercase() }
+                    .filter(String::isNotBlank)
+                    .toSet()
+                organizationSports.any { sport ->
+                    sport in sportNames || sport in filter.sportIds
+                }
+            }
+        }
+        return applyDistanceFilter(sportFiltered)
     }
 
     private fun applyDistanceFilter(organizations: List<Organization>): List<Organization> {

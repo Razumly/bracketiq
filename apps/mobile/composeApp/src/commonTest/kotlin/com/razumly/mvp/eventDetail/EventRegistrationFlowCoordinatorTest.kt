@@ -7,6 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
+import com.razumly.mvp.core.data.repositories.DiscountPreview
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
@@ -60,6 +61,39 @@ class EventRegistrationFlowCoordinatorTest {
             mapOf("q1" to "Answer 1", "q3" to ""),
             coordinator.answers.value,
         )
+    }
+
+    @Test
+    fun clear_discount_feedback_removes_stale_error_and_preview() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        coordinator.showDiscountCodePrompt(
+            originalAmountCents = 10000,
+            onContinue = {},
+        )
+
+        coordinator.applyDiscountCodePrompt("bad-code")
+        coordinator.updateDiscountCodePreview(Result.failure(Exception("HTTP 404 for discount preview")))
+        assertEquals("HTTP 404 for discount preview", coordinator.discountCodePrompt.value?.error)
+
+        coordinator.updateDiscountCodePreview(
+            Result.success(
+                DiscountPreview(
+                    code = "SAVE20",
+                    applied = true,
+                    originalAmountCents = 10000,
+                    discountAmountCents = 2000,
+                    discountedAmountCents = 8000,
+                ),
+            ),
+        )
+        assertEquals("SAVE20", coordinator.discountCodePrompt.value?.preview?.code)
+
+        coordinator.clearDiscountCodePromptFeedback()
+
+        val prompt = coordinator.discountCodePrompt.value
+        assertNull(prompt?.error)
+        assertNull(prompt?.preview)
+        assertFalse(prompt?.loading ?: true)
     }
 
     @Test

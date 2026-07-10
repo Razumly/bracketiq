@@ -153,7 +153,10 @@ interface IEventRepository : IMVPRepository {
         limit: Int = 8,
         offset: Int = 0,
     ): Result<Pair<List<Event>, Boolean>>
-    suspend fun getEventTags(query: String? = null): Result<List<EventTag>> = Result.success(emptyList())
+    suspend fun getEventTags(
+        query: String? = null,
+        filterOnly: Boolean = false,
+    ): Result<List<EventTag>> = Result.success(emptyList())
     fun getEventsByHostFlow(hostId: String): Flow<Result<List<Event>>>
     fun getEventTemplatesByHostFlow(hostId: String): Flow<Result<List<EventTemplateSummary>>> =
         flowOf(Result.success(emptyList()))
@@ -2175,13 +2178,21 @@ class EventRepository(
         }
     }
 
-    override suspend fun getEventTags(query: String?): Result<List<EventTag>> = runCatching {
+    override suspend fun getEventTags(query: String?, filterOnly: Boolean): Result<List<EventTag>> = runCatching {
         val normalizedQuery = query?.trim().orEmpty()
         val path = buildString {
             append("api/event-tags")
-            if (normalizedQuery.isNotEmpty()) {
-                append("?query=")
-                append(normalizedQuery.encodeURLQueryComponent())
+            val params = buildList {
+                if (normalizedQuery.isNotEmpty()) {
+                    add("query=${normalizedQuery.encodeURLQueryComponent()}")
+                }
+                if (filterOnly) {
+                    add("filterOnly=true")
+                }
+            }
+            if (params.isNotEmpty()) {
+                append("?")
+                append(params.joinToString("&"))
             }
         }
         api.get<EventTagsResponseDto>(path).tags

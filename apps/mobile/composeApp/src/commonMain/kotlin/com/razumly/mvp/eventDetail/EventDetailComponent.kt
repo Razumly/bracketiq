@@ -261,6 +261,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun dismissBillingAddressPrompt()
     fun continueFromDiscountCodePrompt(code: String?)
     fun applyDiscountCodePrompt(code: String)
+    fun clearDiscountCodePromptFeedback()
     fun dismissDiscountCodePrompt()
     fun onUploadSelected(photo: GalleryPhotoResult)
     fun deleteImage(imageId: String)

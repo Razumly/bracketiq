@@ -973,6 +973,7 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
     override suspend fun listOrganizations(
         limit: Int,
         includeAffiliateRentals: Boolean,
+        tagSlugs: Set<String>,
     ): Result<List<Organization>> = Result.success(emptyList())
     override suspend fun getOrganizationsByIds(organizationIds: List<String>): Result<List<Organization>> =
         Result.success(emptyList())

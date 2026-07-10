@@ -139,6 +139,14 @@ private fun FamilyChild.toJoinChildOption(): JoinChildOption {
     )
 }
 
+private fun EventWithRelations.withInitialEventImageFallback(initialEvent: Event): EventWithRelations {
+    val initialImageId = initialEvent.imageId.trim()
+    if (initialImageId.isBlank() || event.id != initialEvent.id || event.imageId.isNotBlank()) {
+        return this
+    }
+    return copy(event = event.copy(imageId = initialImageId))
+}
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class DefaultEventDetailComponent(
     componentContext: ComponentContext,
@@ -431,7 +439,7 @@ class DefaultEventDetailComponent(
             result.getOrElse {
                 _errorState.value = ErrorMessage(it.userMessage())
                 EventWithRelations(event, null)
-            }
+            }.withInitialEventImageFallback(event)
         }.stateIn(
             scope,
             SharingStarted.Eagerly,
@@ -983,6 +991,10 @@ class DefaultEventDetailComponent(
 
     override fun applyDiscountCodePrompt(code: String) {
         registrationFlowCoordinator.applyDiscountCodePrompt(code)
+    }
+
+    override fun clearDiscountCodePromptFeedback() {
+        registrationFlowCoordinator.clearDiscountCodePromptFeedback()
     }
 
     override fun dismissDiscountCodePrompt() {

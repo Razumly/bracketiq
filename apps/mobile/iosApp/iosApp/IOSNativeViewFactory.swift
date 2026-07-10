@@ -293,6 +293,8 @@ private final class NativeEventCardViewController: UIViewController, UIGestureRe
     private weak var lastBlurSourceImage: UIImage?
     private var lastBlurCardSize: CGSize = .zero
     private var lastBlurPanelSize: CGSize = .zero
+    private var lastBlurUsesLogoFallback: Bool = false
+    private var usesLogoFallback: Bool = false
     private var bottomPadding: CGFloat
     private var onCardClick: () -> Void
     private var onMapClick: (KotlinFloat, KotlinFloat) -> Void
@@ -609,15 +611,20 @@ private final class NativeEventCardViewController: UIViewController, UIGestureRe
             lifecycleLabel.isHidden = true
         }
 
-        loadImage(from: data.imageUrl)
+        let shouldUseLogoFallback = data.usesLogoFallback
+        imageView.contentMode = .scaleAspectFill
+        imageView.backgroundColor = UIColor(red: 0.08, green: 0.10, blue: 0.14, alpha: 1.0)
+
+        loadImage(from: data.imageUrl, usesLogoFallback: shouldUseLogoFallback)
     }
 
-    private func loadImage(from imageUrl: String?) {
-        guard currentImageUrl != imageUrl else {
+    private func loadImage(from imageUrl: String?, usesLogoFallback: Bool) {
+        guard currentImageUrl != imageUrl || self.usesLogoFallback != usesLogoFallback else {
             return
         }
 
         currentImageUrl = imageUrl
+        self.usesLogoFallback = usesLogoFallback
         imageTask?.cancel()
         imageView.image = nil
         blurredImageView.image = nil
@@ -686,13 +693,17 @@ private final class NativeEventCardViewController: UIViewController, UIGestureRe
 
         let roundedCardSize = CGSize(width: round(cardSize.width), height: round(cardSize.height))
         let roundedPanelSize = CGSize(width: round(panelSize.width), height: round(panelSize.height))
-        guard lastBlurSourceImage !== sourceImage || lastBlurCardSize != roundedCardSize || lastBlurPanelSize != roundedPanelSize else {
+        guard lastBlurSourceImage !== sourceImage ||
+                lastBlurCardSize != roundedCardSize ||
+                lastBlurPanelSize != roundedPanelSize ||
+                lastBlurUsesLogoFallback != usesLogoFallback else {
             return
         }
 
         lastBlurSourceImage = sourceImage
         lastBlurCardSize = roundedCardSize
         lastBlurPanelSize = roundedPanelSize
+        lastBlurUsesLogoFallback = usesLogoFallback
         blurRenderWorkItem?.cancel()
 
         var workItem: DispatchWorkItem!

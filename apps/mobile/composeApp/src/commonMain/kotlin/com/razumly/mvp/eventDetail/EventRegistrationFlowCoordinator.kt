@@ -288,6 +288,14 @@ internal class EventRegistrationFlowCoordinator {
         pendingDiscountCodePreviewAction?.invoke(normalizedCode)
     }
 
+    fun clearDiscountCodePromptFeedback() {
+        _discountCodePrompt.value = _discountCodePrompt.value?.copy(
+            preview = null,
+            error = null,
+            loading = false,
+        )
+    }
+
     fun updateDiscountCodePreview(result: Result<DiscountPreview>) {
         _discountCodePrompt.value = _discountCodePrompt.value?.let { state ->
             result.fold(

@@ -3,7 +3,10 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.util.buildEventDivisionId
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameterOption
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.LeagueConfig
+import com.razumly.mvp.core.data.dataTypes.TournamentConfig
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.normalizeDivisionDetail
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import kotlin.test.Test
@@ -351,6 +354,92 @@ class EventDetailsDivisionEditorHelpersTest {
         )
 
         assertEquals(3, state.poolCount)
+    }
+
+    @Test
+    fun resolve_division_editor_schedule_configs_uses_event_values_for_single_division() {
+        val event = Event(
+            id = "event-single",
+            eventType = EventType.TOURNAMENT,
+            singleDivision = true,
+            usesSets = true,
+            setDurationMinutes = 20,
+            doubleElimination = true,
+            winnerSetCount = 3,
+            loserSetCount = 1,
+            winnerBracketPointsToVictory = listOf(21, 21, 15),
+            loserBracketPointsToVictory = listOf(25),
+            restTimeMinutes = 15,
+        )
+        val detail = DivisionDetail(
+            id = "event-single__division__m_skill_open_age_16plus",
+            usesSets = false,
+            matchDurationMinutes = 60,
+            playoffConfig = TournamentConfig(
+                doubleElimination = false,
+                winnerSetCount = 1,
+                loserSetCount = 1,
+                winnerBracketPointsToVictory = listOf(21),
+                loserBracketPointsToVictory = listOf(21),
+                restTimeMinutes = 0,
+            ),
+        )
+
+        val configs = resolveDivisionEditorScheduleConfigs(event, detail)
+
+        assertTrue(configs.leagueConfig.usesSets)
+        assertTrue(configs.playoffConfig.usesSets)
+        assertEquals(true, configs.playoffConfig.doubleElimination)
+        assertEquals(3, configs.playoffConfig.winnerSetCount)
+        assertEquals(1, configs.playoffConfig.loserSetCount)
+        assertEquals(listOf(21, 21, 15), configs.playoffConfig.winnerBracketPointsToVictory)
+        assertEquals(listOf(25), configs.playoffConfig.loserBracketPointsToVictory)
+        assertEquals(20, configs.playoffConfig.setDurationMinutes)
+        assertEquals(15, configs.playoffConfig.restTimeMinutes)
+    }
+
+    @Test
+    fun resolve_division_editor_schedule_configs_keeps_multi_division_overrides() {
+        val event = Event(
+            id = "event-multi",
+            eventType = EventType.TOURNAMENT,
+            singleDivision = false,
+            usesSets = true,
+            setDurationMinutes = 20,
+            doubleElimination = true,
+            winnerSetCount = 3,
+            loserSetCount = 1,
+            winnerBracketPointsToVictory = listOf(21, 21, 15),
+            loserBracketPointsToVictory = listOf(25),
+        )
+        val detail = DivisionDetail(
+            id = "event-multi__division__f_skill_open_age_u18",
+            gamesPerOpponent = 2,
+            usesSets = true,
+            setDurationMinutes = 12,
+            setsPerMatch = 5,
+            pointsToVictory = listOf(11, 11, 11, 11, 7),
+            playoffConfig = TournamentConfig(
+                doubleElimination = false,
+                winnerSetCount = 5,
+                loserSetCount = 1,
+                winnerBracketPointsToVictory = listOf(11, 11, 11, 11, 7),
+                loserBracketPointsToVictory = listOf(11),
+                restTimeMinutes = 4,
+                usesSets = true,
+                setDurationMinutes = 12,
+            ),
+        )
+
+        val configs = resolveDivisionEditorScheduleConfigs(event, detail)
+
+        assertEquals(2, configs.leagueConfig.gamesPerOpponent)
+        assertEquals(5, configs.leagueConfig.setsPerMatch)
+        assertEquals(false, configs.playoffConfig.doubleElimination)
+        assertEquals(5, configs.playoffConfig.winnerSetCount)
+        assertEquals(listOf(11, 11, 11, 11, 7), configs.playoffConfig.winnerBracketPointsToVictory)
+        assertEquals(12, configs.playoffConfig.setDurationMinutes)
+        assertEquals(4, configs.playoffConfig.restTimeMinutes)
     }
 
     @Test

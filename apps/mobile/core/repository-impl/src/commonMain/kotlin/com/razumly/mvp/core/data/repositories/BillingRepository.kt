@@ -12,13 +12,16 @@ import com.razumly.mvp.core.data.dataTypes.DiscountCodeCacheEntry
 import com.razumly.mvp.core.data.dataTypes.DiscountOfferCacheEntry
 import com.razumly.mvp.core.data.dataTypes.DiscountTargetCacheEntry
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.Facility
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentProof
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.OrganizationReviewsPayload
 import com.razumly.mvp.core.data.dataTypes.OrganizationStaffMember
+import com.razumly.mvp.core.data.dataTypes.normalizedEventTags
 import com.razumly.mvp.core.data.dataTypes.resolveOrganizationVerificationReviewStatus
 import com.razumly.mvp.core.data.dataTypes.resolveOrganizationVerificationStatus
 import com.razumly.mvp.core.data.dataTypes.Product
@@ -86,6 +89,16 @@ private fun toFriendlyBoldSignMessage(rawMessage: String?): String? {
         BOLD_SIGN_RATE_LIMIT_FRIENDLY_MESSAGE
     } else {
         normalized
+    }
+}
+
+private fun Set<String>.toOrganizationTagsQueryParam(): String {
+    val normalizedTags = map(String::trim)
+        .filter(String::isNotBlank)
+        .distinct()
+    if (normalizedTags.isEmpty()) return ""
+    return normalizedTags.joinToString(separator = "", prefix = "") { tag ->
+        "&tags=${tag.encodeURLQueryComponent()}"
     }
 }
 
@@ -649,13 +662,15 @@ interface IBillingRepository : IMVPRepository {
     suspend fun listOrganizations(
         limit: Int = 100,
         includeAffiliateRentals: Boolean = false,
+        tagSlugs: Set<String> = emptySet(),
     ): Result<List<Organization>>
     suspend fun listOrganizationsPage(
         limit: Int = 100,
         offset: Int = 0,
         includeAffiliateRentals: Boolean = false,
+        tagSlugs: Set<String> = emptySet(),
     ): Result<RepositoryPage<Organization>> =
-        listOrganizations(limit = limit, includeAffiliateRentals = includeAffiliateRentals)
+        listOrganizations(limit = limit, includeAffiliateRentals = includeAffiliateRentals, tagSlugs = tagSlugs)
             .map { organizations ->
                 RepositoryPage(
                     items = organizations,
@@ -671,9 +686,27 @@ interface IBillingRepository : IMVPRepository {
         query: String,
         limit: Int = 10,
         includeAffiliateRentals: Boolean = false,
+        tagSlugs: Set<String> = emptySet(),
     ): Result<List<Organization>> =
-        listOrganizations(limit = limit, includeAffiliateRentals = includeAffiliateRentals)
+        listOrganizations(limit = limit, includeAffiliateRentals = includeAffiliateRentals, tagSlugs = tagSlugs)
+    suspend fun getOrganizationTags(query: String? = null, filterOnly: Boolean = false): Result<List<EventTag>> =
+        Result.success(emptyList())
     suspend fun getOrganizationsByIds(organizationIds: List<String>): Result<List<Organization>>
+    suspend fun getOrganizationReviews(organizationId: String): Result<OrganizationReviewsPayload> =
+        Result.failure(UnsupportedOperationException("Organization reviews are not available."))
+    suspend fun saveOrganizationReview(
+        organizationId: String,
+        rating: Int,
+        body: String?,
+    ): Result<OrganizationReviewsPayload> =
+        Result.failure(UnsupportedOperationException("Organization reviews are not available."))
+    suspend fun deleteOrganizationReview(
+        organizationId: String,
+        reviewId: String,
+    ): Result<OrganizationReviewsPayload> =
+        Result.failure(UnsupportedOperationException("Organization reviews are not available."))
+    suspend fun reportOrganizationReview(reviewId: String): Result<Unit> =
+        Result.failure(UnsupportedOperationException("Organization review reporting is not available."))
     suspend fun listOrganizationTemplates(organizationId: String): Result<List<OrganizationTemplateDocument>>
     suspend fun leaveAndRefundEvent(event: Event, reason: String, targetUserId: String? = null): Result<Unit>
     suspend fun deleteAndRefundEvent(event: Event): Result<Unit>
@@ -1983,23 +2016,27 @@ class BillingRepository(
     override suspend fun listOrganizations(
         limit: Int,
         includeAffiliateRentals: Boolean,
+        tagSlugs: Set<String>,
     ): Result<List<Organization>> =
         listOrganizationsPage(
             limit = limit,
             offset = 0,
             includeAffiliateRentals = includeAffiliateRentals,
+            tagSlugs = tagSlugs,
         ).map { page -> page.items }
 
     override suspend fun listOrganizationsPage(
         limit: Int,
         offset: Int,
         includeAffiliateRentals: Boolean,
+        tagSlugs: Set<String>,
     ): Result<RepositoryPage<Organization>> = runCatching {
         val normalizedLimit = limit.coerceIn(1, 200)
         val normalizedOffset = offset.coerceAtLeast(0)
         val affiliateParam = if (includeAffiliateRentals) "&includeAffiliateRentals=true" else ""
+        val tagsParam = tagSlugs.toOrganizationTagsQueryParam()
         val response = api.get<OrganizationsResponseDto>(
-            path = "api/organizations?limit=$normalizedLimit&offset=$normalizedOffset$affiliateParam",
+            path = "api/organizations?limit=$normalizedLimit&offset=$normalizedOffset$affiliateParam$tagsParam",
         )
         val organizations = response.organizations.mapNotNull { it.toOrganizationOrNull() }
         RepositoryPage(
@@ -2016,6 +2053,7 @@ class BillingRepository(
         query: String,
         limit: Int,
         includeAffiliateRentals: Boolean,
+        tagSlugs: Set<String>,
     ): Result<List<Organization>> = runCatching {
         val normalizedQuery = query.trim()
         if (normalizedQuery.isEmpty()) return@runCatching emptyList()
@@ -2023,10 +2061,37 @@ class BillingRepository(
         val normalizedLimit = limit.coerceIn(1, 100)
         val encodedQuery = normalizedQuery.encodeURLQueryComponent()
         val affiliateParam = if (includeAffiliateRentals) "&includeAffiliateRentals=true" else ""
+        val tagsParam = tagSlugs.toOrganizationTagsQueryParam()
         val response = api.get<OrganizationsResponseDto>(
-            path = "api/organizations?query=$encodedQuery&limit=$normalizedLimit$affiliateParam",
+            path = "api/organizations?query=$encodedQuery&limit=$normalizedLimit$affiliateParam$tagsParam",
         )
         response.organizations.mapNotNull { it.toOrganizationOrNull() }
+    }
+
+    override suspend fun getOrganizationTags(query: String?, filterOnly: Boolean): Result<List<EventTag>> = runCatching {
+        val normalizedQuery = query?.trim().orEmpty()
+        val path = buildString {
+            append("api/organization-tags")
+            val params = buildList {
+                if (normalizedQuery.isNotEmpty()) {
+                    add("query=${normalizedQuery.encodeURLQueryComponent()}")
+                }
+                if (filterOnly) {
+                    add("filterOnly=true")
+                }
+            }
+            if (params.isNotEmpty()) {
+                append("?")
+                append(params.joinToString("&"))
+            }
+        }
+        api.get<OrganizationTagsResponseDto>(path).tags
+            .map { tag -> tag.toEventTag() }
+            .normalizedEventTags()
+            .sortedWith(
+                compareByDescending<EventTag> { tag -> tag.eventCount }
+                    .thenBy { tag -> tag.name.lowercase() },
+            )
     }
 
     override suspend fun getOrganizationsByIds(organizationIds: List<String>): Result<List<Organization>> = runCatching {
@@ -2041,6 +2106,49 @@ class BillingRepository(
         val encodedIds = ids.joinToString(",") { it.encodeURLQueryComponent() }
         val response = api.get<OrganizationsResponseDto>(path = "api/organizations?ids=$encodedIds&limit=100")
         response.organizations.mapNotNull { it.toOrganizationOrNull() }
+    }
+
+    override suspend fun getOrganizationReviews(organizationId: String): Result<OrganizationReviewsPayload> = runCatching {
+        val encodedId = organizationId.trim().encodeURLQueryComponent()
+        require(encodedId.isNotBlank()) { "Organization id is required." }
+        api.get<OrganizationReviewsPayload>(path = "api/organizations/$encodedId/reviews")
+    }
+
+    override suspend fun saveOrganizationReview(
+        organizationId: String,
+        rating: Int,
+        body: String?,
+    ): Result<OrganizationReviewsPayload> = runCatching {
+        val encodedId = organizationId.trim().encodeURLQueryComponent()
+        require(encodedId.isNotBlank()) { "Organization id is required." }
+        api.post<OrganizationReviewRequestDto, OrganizationReviewsPayload>(
+            path = "api/organizations/$encodedId/reviews",
+            body = OrganizationReviewRequestDto(rating = rating, body = body),
+        )
+    }
+
+    override suspend fun deleteOrganizationReview(
+        organizationId: String,
+        reviewId: String,
+    ): Result<OrganizationReviewsPayload> = runCatching {
+        val encodedOrganizationId = organizationId.trim().encodeURLQueryComponent()
+        val encodedReviewId = reviewId.trim().encodeURLQueryComponent()
+        require(encodedOrganizationId.isNotBlank() && encodedReviewId.isNotBlank()) {
+            "Organization id and review id are required."
+        }
+        api.delete<EmptyRequestDto, OrganizationReviewsPayload>(
+            path = "api/organizations/$encodedOrganizationId/reviews/$encodedReviewId",
+            body = EmptyRequestDto(),
+        )
+    }
+
+    override suspend fun reportOrganizationReview(reviewId: String): Result<Unit> = runCatching {
+        val encodedReviewId = reviewId.trim()
+        require(encodedReviewId.isNotBlank()) { "Review id is required." }
+        api.postNoResponse(
+            path = "api/moderation/reports",
+            body = OrganizationReviewReportRequestDto(targetId = encodedReviewId),
+        )
     }
 
     override suspend fun listOrganizationTemplates(
@@ -2354,6 +2462,19 @@ private data class EmptyRequestDto(
 )
 
 @Serializable
+private data class OrganizationReviewRequestDto(
+    val rating: Int,
+    val body: String? = null,
+)
+
+@Serializable
+private data class OrganizationReviewReportRequestDto(
+    val targetType: String = "ORGANIZATION_REVIEW",
+    val targetId: String,
+    val category: String = "report_organization_review",
+)
+
+@Serializable
 private data class ProductSubscriptionCheckoutRequestDto(
     val discountCode: String? = null,
 )
@@ -2497,6 +2618,29 @@ private data class OrganizationsResponseDto(
     val organizations: List<OrganizationApiDto> = emptyList(),
     val pagination: PaginationResponseDto? = null,
 )
+
+@Serializable
+private data class OrganizationTagsResponseDto(
+    val tags: List<OrganizationTagApiDto> = emptyList(),
+)
+
+@Serializable
+private data class OrganizationTagApiDto(
+    val id: String? = null,
+    val name: String = "",
+    val slug: String = "",
+    val organizationCount: Int = 0,
+    val isSystem: Boolean = false,
+) {
+    fun toEventTag(): EventTag =
+        EventTag(
+            id = id,
+            name = name,
+            slug = slug,
+            eventCount = organizationCount,
+            isSystem = isSystem,
+        )
+}
 
 @Serializable
 private data class PaginationResponseDto(

@@ -10,6 +10,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class OrganizationDetailTab {
     OVERVIEW,
+    REVIEWS,
     EVENTS,
     TEAMS,
     RENTALS,

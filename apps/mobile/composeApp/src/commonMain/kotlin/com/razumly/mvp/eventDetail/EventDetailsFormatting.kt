@@ -3,11 +3,11 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 
 internal fun Int.toRegistrationCutoffSummary(): String {
-    return when (this) {
-        0 -> "No cutoff"
-        1 -> "24h before start"
-        2 -> "48h before start"
-        else -> "No cutoff"
+    val normalizedHours = coerceAtLeast(0)
+    return if (normalizedHours == 0) {
+        "No cutoff"
+    } else {
+        "${normalizedHours}h before start"
     }
 }
 
