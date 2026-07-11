@@ -34,6 +34,8 @@ import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -67,6 +69,9 @@ internal class GooglePlacesBillingAddressProvider(
         }
 
         val response = httpClient.post(AutocompleteUrl) {
+            // Callers can inject an HttpClient without the app-wide defaultRequest configuration.
+            // Places autocomplete always sends JSON, so make that contract explicit here.
+            contentType(ContentType.Application.Json)
             applyGooglePlacesHeaders(SuggestionFieldMask)
             setBody(GooglePlacesAutocompleteRequest(input = normalizedQuery))
         }.body<GooglePlacesAutocompleteResponse>()

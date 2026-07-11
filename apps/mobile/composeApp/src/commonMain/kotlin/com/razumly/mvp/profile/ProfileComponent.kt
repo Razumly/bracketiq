@@ -149,9 +149,15 @@ data class ProfilePaymentPlansState(
 )
 
 private data class ActiveBillPaymentAttempt(
+    val checkoutOperationId: String,
     val billId: String,
     val billPaymentId: String,
     val paymentIntent: String,
+)
+
+private data class PendingChildTeamRegistrationPayment(
+    val checkoutOperationId: String,
+    val team: Team,
 )
 
 data class ProfileMembership(
@@ -713,6 +719,7 @@ class DefaultProfileComponent(
 
     private val _activeBillPaymentId = MutableStateFlow<String?>(null)
     override val activeBillPaymentId = _activeBillPaymentId.asStateFlow()
+    private val checkoutSessionCoordinator = ProfileCheckoutSessionCoordinator()
     private var activeBillPaymentAttempt: ActiveBillPaymentAttempt? = null
 
     private val _activeMembershipActionId = MutableStateFlow<String?>(null)
@@ -737,7 +744,7 @@ class DefaultProfileComponent(
     private var pendingDocumentSyncJob: Job? = null
     private var pendingBillingAddressAction: (() -> Unit)? = null
     private var pendingDiscountCodeAction: ((String?) -> Unit)? = null
-    private var pendingChildTeamRegistrationPayment: Team? = null
+    private var pendingChildTeamRegistrationPayment: PendingChildTeamRegistrationPayment? = null
 
     override val childStack: Value<ChildStack<*, ProfileComponent.Child>> = childStack(
         source = navigation,
@@ -782,54 +789,119 @@ class DefaultProfileComponent(
 
         scope.launch {
             paymentResult.collect { payment ->
-                val activeAttempt = activeBillPaymentAttempt
-                val pendingTeam = pendingChildTeamRegistrationPayment
                 if (payment == null) return@collect
-                if (pendingTeam != null) {
-                    when (payment) {
-                        PaymentResult.Canceled -> _errorState.value = ErrorMessage("Payment canceled.")
-                        is PaymentResult.Failed -> _errorState.value = ErrorMessage(payment.error)
-                        PaymentResult.Completed -> {
-                            _errorState.value = ErrorMessage(
-                                "Payment submitted for ${pendingTeam.name}. Registration is pending until the bank payment clears.",
-                            )
-                            refreshChildren()
-                            refreshPaymentPlans()
-                        }
-                    }
-
-                    loadingHandler?.hideLoading()
-                    pendingChildTeamRegistrationPayment = null
+                val checkout = checkoutSessionCoordinator.claimPaymentResult()
+                if (checkout == null) {
+                    Napier.w(
+                        "Ignoring profile payment result without an active presented checkout.",
+                        tag = "ProfileCheckout",
+                    )
                     clearPaymentResult()
                     return@collect
                 }
-                if (_activeBillPaymentId.value == null || activeAttempt == null) return@collect
 
-                when (payment) {
-                    PaymentResult.Canceled -> _errorState.value = ErrorMessage("Payment canceled.")
-                    is PaymentResult.Failed -> _errorState.value = ErrorMessage(payment.error)
-                    PaymentResult.Completed -> {
-                        billingRepository.markBillingPaymentProcessing(
-                            billId = activeAttempt.billId,
-                            billPaymentId = activeAttempt.billPaymentId,
-                            paymentIntent = activeAttempt.paymentIntent,
-                        ).onFailure { throwable ->
+                when (checkout.owner) {
+                    ProfileCheckoutOwner.BILL_INSTALLMENT -> {
+                        val activeAttempt = activeBillPaymentAttempt
+                        if (activeAttempt == null || activeAttempt.checkoutOperationId != checkout.operationId) {
                             Napier.w(
-                                "Unable to mark bill payment processing for ${activeAttempt.billPaymentId}",
-                                throwable,
+                                "Ignoring bill payment result for checkout ${checkout.operationId} with no matching attempt.",
+                                tag = "ProfileCheckout",
                             )
+                            checkoutSessionCoordinator.releasePaymentResultClaim(checkout)
+                            clearPaymentResult()
+                            return@collect
                         }
-                        _errorState.value = ErrorMessage("Payment submitted.")
-                        refreshPaymentPlans()
+
+                        when (payment) {
+                            PaymentResult.Canceled -> _errorState.value = ErrorMessage("Payment canceled.")
+                            is PaymentResult.Failed -> _errorState.value = ErrorMessage(payment.error)
+                            PaymentResult.Completed -> {
+                                billingRepository.markBillingPaymentProcessing(
+                                    billId = activeAttempt.billId,
+                                    billPaymentId = activeAttempt.billPaymentId,
+                                    paymentIntent = activeAttempt.paymentIntent,
+                                ).onFailure { throwable ->
+                                    Napier.w(
+                                        "Unable to mark bill payment processing for ${activeAttempt.billPaymentId}",
+                                        throwable,
+                                    )
+                                }
+                                _errorState.value = ErrorMessage("Payment submitted.")
+                                refreshPaymentPlans()
+                            }
+                        }
+                    }
+
+                    ProfileCheckoutOwner.CHILD_TEAM_REGISTRATION -> {
+                        val pendingTeamPayment = pendingChildTeamRegistrationPayment
+                        if (
+                            pendingTeamPayment == null ||
+                            pendingTeamPayment.checkoutOperationId != checkout.operationId
+                        ) {
+                            Napier.w(
+                                "Ignoring child team payment result for checkout ${checkout.operationId} with no matching registration.",
+                                tag = "ProfileCheckout",
+                            )
+                            checkoutSessionCoordinator.releasePaymentResultClaim(checkout)
+                            clearPaymentResult()
+                            return@collect
+                        }
+
+                        when (payment) {
+                            PaymentResult.Canceled -> _errorState.value = ErrorMessage("Payment canceled.")
+                            is PaymentResult.Failed -> _errorState.value = ErrorMessage(payment.error)
+                            PaymentResult.Completed -> {
+                                _errorState.value = ErrorMessage(
+                                    "Payment submitted for ${pendingTeamPayment.team.name}. Registration is pending until the bank payment clears.",
+                                )
+                                refreshChildren()
+                                refreshPaymentPlans()
+                            }
+                        }
                     }
                 }
 
-                loadingHandler?.hideLoading()
-                _activeBillPaymentId.value = null
-                activeBillPaymentAttempt = null
+                if (finishProfileCheckout(checkout)) {
+                    loadingHandler?.hideLoading()
+                }
                 clearPaymentResult()
             }
         }
+    }
+
+    private fun hasActiveProfilePaymentAction(): Boolean {
+        return checkoutSessionCoordinator.activeSession != null || _activeBillPaymentId.value != null
+    }
+
+    private fun beginProfileCheckout(owner: ProfileCheckoutOwner): ProfileCheckoutSession? {
+        if (hasActiveProfilePaymentAction()) {
+            _errorState.value = ErrorMessage("Another checkout is already in progress.")
+            return null
+        }
+
+        val checkout = checkoutSessionCoordinator.start(owner)
+        if (checkout == null) {
+            _errorState.value = ErrorMessage("Another checkout is already in progress.")
+        }
+        return checkout
+    }
+
+    private fun finishProfileCheckout(checkout: ProfileCheckoutSession): Boolean {
+        if (!checkoutSessionCoordinator.finish(checkout)) return false
+
+        when (checkout.owner) {
+            ProfileCheckoutOwner.BILL_INSTALLMENT -> {
+                _activeBillPaymentId.value = null
+                activeBillPaymentAttempt = null
+            }
+
+            ProfileCheckoutOwner.CHILD_TEAM_REGISTRATION -> {
+                pendingChildTeamRegistrationPayment = null
+            }
+        }
+
+        return true
     }
 
     override fun onBackClicked() {
@@ -1027,9 +1099,7 @@ class DefaultProfileComponent(
                 error = null,
             )
 
-            userRepository.updateUser(
-                currentUser.copy(notificationSettings = normalizedSettings),
-            ).onSuccess { updatedUser ->
+            userRepository.updateNotificationSettings(normalizedSettings).onSuccess { updatedUser ->
                 _notificationSettingsState.value = ProfileNotificationSettingsState(
                     settings = normalizeNotificationSettings(updatedUser.notificationSettings),
                 )
@@ -1531,6 +1601,10 @@ class DefaultProfileComponent(
             _errorState.value = ErrorMessage("Upload proof of payment for this manual bill.")
             return
         }
+        if (hasActiveProfilePaymentAction()) {
+            _errorState.value = ErrorMessage("Another checkout is already in progress.")
+            return
+        }
         val nextPayment = paymentPlan.nextPayablePayment
         if (nextPayment == null) {
             _errorState.value = ErrorMessage("No payable installment available for this bill.")
@@ -1545,6 +1619,7 @@ class DefaultProfileComponent(
             if (!ensureBillingAddressOrPrompt { payNextInstallment(paymentPlan) }) {
                 return@launch
             }
+            val checkout = beginProfileCheckout(ProfileCheckoutOwner.BILL_INSTALLMENT) ?: return@launch
             _activeBillPaymentId.value = paymentPlan.bill.id
             loadingHandler?.showLoading("Preparing payment ...")
 
@@ -1552,12 +1627,20 @@ class DefaultProfileComponent(
                 billId = paymentPlan.bill.id,
                 billPaymentId = nextPayment.id,
             ).onSuccess { intent ->
+                if (!checkoutSessionCoordinator.isCurrent(checkout)) {
+                    Napier.w(
+                        "Ignoring a bill intent for inactive checkout ${checkout.operationId}.",
+                        tag = "ProfileCheckout",
+                    )
+                    return@onSuccess
+                }
                 runCatching {
                     val paymentIntent = intent.paymentIntent
                         ?.trim()
                         ?.takeIf(String::isNotBlank)
                         ?: throw IllegalStateException("Payment intent is missing.")
                     activeBillPaymentAttempt = ActiveBillPaymentAttempt(
+                        checkoutOperationId = checkout.operationId,
                         billId = intent.billId?.trim()?.takeIf(String::isNotBlank) ?: paymentPlan.bill.id,
                         billPaymentId = intent.billPaymentId?.trim()?.takeIf(String::isNotBlank) ?: nextPayment.id,
                         paymentIntent = paymentIntent,
@@ -1568,27 +1651,34 @@ class DefaultProfileComponent(
                     val user = userRepository.currentUser.value.getOrThrow()
                     val billingAddress = loadSavedBillingAddress()
                     loadingHandler?.showLoading("Waiting for payment completion ...")
+                    check(checkoutSessionCoordinator.awaitPaymentResult(checkout)) {
+                        "Checkout is no longer active."
+                    }
                     presentPaymentSheet(
                         email = account.email,
                         name = user.fullName,
                         billingAddress = billingAddress,
                     )
-                }.onFailure {
-                    _activeBillPaymentId.value = null
-                    activeBillPaymentAttempt = null
-                    loadingHandler?.hideLoading()
-                    _errorState.value = ErrorMessage(it.userMessage("Unable to start payment sheet."))
+                }.onFailure { error ->
+                    if (finishProfileCheckout(checkout)) {
+                        loadingHandler?.hideLoading()
+                        _errorState.value = ErrorMessage(error.userMessage("Unable to start payment sheet."))
+                    }
                 }
-            }.onFailure {
-                _activeBillPaymentId.value = null
-                activeBillPaymentAttempt = null
-                loadingHandler?.hideLoading()
-                _errorState.value = ErrorMessage(it.userMessage("Unable to create payment intent."))
+            }.onFailure { error ->
+                if (finishProfileCheckout(checkout)) {
+                    loadingHandler?.hideLoading()
+                    _errorState.value = ErrorMessage(error.userMessage("Unable to create payment intent."))
+                }
             }
         }
     }
 
     override fun uploadManualPaymentProof(paymentPlan: ProfilePaymentPlan, photo: GalleryPhotoResult) {
+        if (hasActiveProfilePaymentAction()) {
+            _errorState.value = ErrorMessage("Another checkout is already in progress.")
+            return
+        }
         val nextPayment = paymentPlan.nextPayablePayment
         if (!paymentPlan.isManualRegistrationBill) {
             _errorState.value = ErrorMessage("Proof upload is only available for manual registration bills.")
@@ -1624,6 +1714,10 @@ class DefaultProfileComponent(
     }
 
     override fun cancelPendingBillPayment(paymentPlan: ProfilePaymentPlan) {
+        if (hasActiveProfilePaymentAction()) {
+            _errorState.value = ErrorMessage("Another checkout is already in progress.")
+            return
+        }
         val processingPayment = paymentPlan.processingPayment
         if (processingPayment == null) {
             _errorState.value = ErrorMessage("No pending payment is available to cancel.")
@@ -1869,6 +1963,10 @@ class DefaultProfileComponent(
         team: Team,
         registration: TeamPlayerRegistration?,
     ) {
+        if (hasActiveProfilePaymentAction()) {
+            _errorState.value = ErrorMessage("Another checkout is already in progress.")
+            return
+        }
         scope.launch {
             if (!ensureBillingAddressOrPrompt { startChildTeamRegistrationPayment(team, registration) }) {
                 return@launch
@@ -1877,34 +1975,50 @@ class DefaultProfileComponent(
                 description = "Enter a discount code for this team registration, or continue without one.",
             )
 
+            val checkout = beginProfileCheckout(ProfileCheckoutOwner.CHILD_TEAM_REGISTRATION) ?: return@launch
             loadingHandler?.showLoading("Preparing checkout...")
             billingRepository.createTeamRegistrationPurchaseIntent(
                 team = team,
                 teamRegistration = registration,
                 discountCode = discountCode,
             ).onSuccess { intent ->
+                if (!checkoutSessionCoordinator.isCurrent(checkout)) {
+                    Napier.w(
+                        "Ignoring a child team intent for inactive checkout ${checkout.operationId}.",
+                        tag = "ProfileCheckout",
+                    )
+                    return@onSuccess
+                }
                 runCatching {
-                    pendingChildTeamRegistrationPayment = team
+                    pendingChildTeamRegistrationPayment = PendingChildTeamRegistrationPayment(
+                        checkoutOperationId = checkout.operationId,
+                        team = team,
+                    )
                     clearPaymentResult()
                     setPaymentIntent(intent)
                     val account = userRepository.currentAccount.value.getOrThrow()
                     val user = userRepository.currentUser.value.getOrThrow()
                     val billingAddress = loadSavedBillingAddress()
                     loadingHandler?.showLoading("Waiting for payment completion ...")
+                    check(checkoutSessionCoordinator.awaitPaymentResult(checkout)) {
+                        "Checkout is no longer active."
+                    }
                     presentPaymentSheet(
                         email = account.email,
                         name = user.fullName,
                         billingAddress = billingAddress,
                     )
                 }.onFailure { error ->
-                    pendingChildTeamRegistrationPayment = null
-                    loadingHandler?.hideLoading()
-                    _errorState.value = ErrorMessage(error.userMessage("Unable to start payment sheet."))
+                    if (finishProfileCheckout(checkout)) {
+                        loadingHandler?.hideLoading()
+                        _errorState.value = ErrorMessage(error.userMessage("Unable to start payment sheet."))
+                    }
                 }
             }.onFailure { error ->
-                pendingChildTeamRegistrationPayment = null
-                loadingHandler?.hideLoading()
-                _errorState.value = ErrorMessage(error.userMessage("Unable to create payment intent."))
+                if (finishProfileCheckout(checkout)) {
+                    loadingHandler?.hideLoading()
+                    _errorState.value = ErrorMessage(error.userMessage("Unable to create payment intent."))
+                }
             }
         }
     }
@@ -2432,10 +2546,19 @@ class DefaultProfileComponent(
             )
 
             signLinksResult.onSuccess { steps ->
-                val step = steps.firstOrNull { it.templateId == document.templateId }
-                    ?: steps.firstOrNull()
+                val requestedTemplateId = document.templateId.trim()
+                val matchingSteps = steps.filter { step ->
+                    step.templateId?.trim() == requestedTemplateId
+                }
+                val step = matchingSteps.singleOrNull()
                 if (step == null) {
-                    _errorState.value = ErrorMessage("No signing step is available for this document.")
+                    _errorState.value = ErrorMessage(
+                        if (matchingSteps.isEmpty()) {
+                            "The selected document is not available for signing. Refresh and try again."
+                        } else {
+                            "Multiple signing steps matched the selected document. Refresh and try again."
+                        },
+                    )
                     return@onSuccess
                 }
 

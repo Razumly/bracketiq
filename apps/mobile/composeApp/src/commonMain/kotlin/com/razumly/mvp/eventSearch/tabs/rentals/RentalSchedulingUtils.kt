@@ -171,35 +171,22 @@ internal fun resolveRentalRange(
         return null
     }
 
-    var segmentStartMinutes = startMinutes
-    val matchedSlots = mutableListOf<TimeSlot>()
-    var totalPriceCents = 0
-
-    while (segmentStartMinutes < endMinutes) {
-        val segmentEndMinutes = (segmentStartMinutes + SLOT_INTERVAL_MINUTES)
-            .coerceAtMost(endMinutes)
-        val segmentStart = date.toInstantAtMinutes(segmentStartMinutes, timeZone)
-        val segmentEnd = date.toInstantAtMinutes(segmentEndMinutes, timeZone)
-
-        val matchedSlot = selectBestSlotForInterval(
-            slots = option.rentalSlots,
-            rangeStart = segmentStart,
-            rangeEnd = segmentEnd,
-            fieldId = option.field.id,
-            timeZone = timeZone,
-        ) ?: return null
-
-        matchedSlots += matchedSlot
-        totalPriceCents += proratedRentalPriceCents(
-            priceCents = matchedSlot.price ?: 0,
-            durationMinutes = segmentEndMinutes - segmentStartMinutes,
-        )
-        segmentStartMinutes += SLOT_INTERVAL_MINUTES
-    }
+    val rangeStart = date.toInstantAtMinutes(startMinutes, timeZone)
+    val rangeEnd = date.toInstantAtMinutes(endMinutes, timeZone)
+    val matchedSlot = selectBestSlotForInterval(
+        slots = option.rentalSlots,
+        rangeStart = rangeStart,
+        rangeEnd = rangeEnd,
+        fieldId = option.field.id,
+        timeZone = timeZone,
+    ) ?: return null
 
     return ResolvedRentalRange(
-        slots = matchedSlots.distinctBy { slot -> slot.id },
-        totalPriceCents = totalPriceCents,
+        slots = listOf(matchedSlot),
+        totalPriceCents = proratedRentalPriceCents(
+            priceCents = matchedSlot.price ?: 0,
+            durationMinutes = endMinutes - startMinutes,
+        ),
     )
 }
 

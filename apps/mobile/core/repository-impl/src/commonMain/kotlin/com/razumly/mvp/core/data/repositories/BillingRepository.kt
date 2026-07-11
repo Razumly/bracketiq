@@ -21,6 +21,10 @@ import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.OrganizationReviewsPayload
 import com.razumly.mvp.core.data.dataTypes.OrganizationStaffMember
+import com.razumly.mvp.core.data.dataTypes.PENDING_RENTAL_ORDER_STATUS_AWAITING_PAYMENT
+import com.razumly.mvp.core.data.dataTypes.PENDING_RENTAL_ORDER_STATUS_PENDING
+import com.razumly.mvp.core.data.dataTypes.PENDING_RENTAL_ORDER_STATUS_REJECTED
+import com.razumly.mvp.core.data.dataTypes.PendingRentalOrder
 import com.razumly.mvp.core.data.dataTypes.normalizedEventTags
 import com.razumly.mvp.core.data.dataTypes.resolveOrganizationVerificationReviewStatus
 import com.razumly.mvp.core.data.dataTypes.resolveOrganizationVerificationStatus
@@ -46,6 +50,7 @@ import com.razumly.mvp.core.network.dto.RefundRequestsResponseDto
 import com.razumly.mvp.core.network.dto.RegistrationQuestionAnswerDto
 import com.razumly.mvp.core.network.dto.StripeHostLinkRequestDto
 import com.razumly.mvp.core.network.dto.UpdateRefundRequestDto
+import com.razumly.mvp.core.util.jsonMVP
 import io.github.aakira.napier.Napier
 import io.ktor.client.plugins.ClientRequestException
 import io.ktor.http.HttpStatusCode
@@ -57,11 +62,19 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
 private const val BOLD_SIGN_RATE_LIMIT_FRIENDLY_MESSAGE =
     "You opened the BoldSign document too many times. Please wait a minute before trying again."
+
+/** The payment succeeded, but the server has rejected its idempotent rental booking mutation. */
+class RentalOrderTerminalFailureException(message: String, cause: Throwable) : IllegalStateException(message, cause)
+
+/** The original payer must sign back in before their prepared rental can be submitted. */
+class RentalOrderPayerMismatchException(message: String) : IllegalStateException(message)
 
 data class RepositoryPagination(
     val limit: Int,
@@ -532,9 +545,21 @@ interface IBillingRepository : IMVPRepository {
         eventId: String,
         selections: List<RentalOrderSelectionRequest>,
         paymentIntentId: String? = null,
+        payerUserId: String? = null,
         renterOrganizationId: String? = null,
         sportId: String? = null,
     ): Result<RentalOrderResult> = Result.failure(UnsupportedOperationException("Rental orders are not supported."))
+    suspend fun prepareRentalOrder(
+        publicSlug: String,
+        eventId: String,
+        selections: List<RentalOrderSelectionRequest>,
+        paymentIntentId: String,
+        payerUserId: String,
+        renterOrganizationId: String? = null,
+        sportId: String? = null,
+    ): Result<String> = Result.failure(UnsupportedOperationException("Rental orders are not supported."))
+    suspend fun discardPreparedRentalOrder(orderId: String): Result<Unit> = Result.success(Unit)
+    suspend fun syncPendingRentalOrders(): Result<Int> = Result.success(0)
     suspend fun listRentalResourceOptions(
         eventId: String? = null,
         organizationId: String? = null,
@@ -1067,18 +1092,56 @@ class BillingRepository(
         }
     }
 
-    override suspend fun createRentalOrder(
+    private fun Throwable.isPaymentStillAwaiting(): Boolean =
+        this is ApiException && statusCode == 402
+
+    private fun Throwable.isTerminalRentalOrderFailure(): Boolean =
+        this is ApiException && statusCode in 400..499 && statusCode !in setOf(402, 408, 429)
+
+    private suspend fun recordPendingRentalOrderFailure(
+        pendingOrder: PendingRentalOrder,
+        error: Throwable,
+    ) {
+        val message = error.message ?: "Unable to reserve paid rental resources."
+        val attemptedAt = kotlin.time.Clock.System.now().toString()
+        if (error.isPaymentStillAwaiting()) {
+            databaseService.getPendingRentalOrderDao.markAwaitingPayment(
+                id = pendingOrder.id,
+                error = message,
+                attemptedAt = attemptedAt,
+            )
+        } else if (error.isTerminalRentalOrderFailure()) {
+            databaseService.getPendingRentalOrderDao.markRejected(
+                id = pendingOrder.id,
+                error = message,
+                attemptedAt = attemptedAt,
+                status = PENDING_RENTAL_ORDER_STATUS_REJECTED,
+            )
+        } else {
+            databaseService.getPendingRentalOrderDao.markFailed(
+                id = pendingOrder.id,
+                error = message,
+                attemptedAt = attemptedAt,
+            )
+        }
+    }
+
+    private fun buildPendingRentalOrder(
         publicSlug: String,
         eventId: String,
         selections: List<RentalOrderSelectionRequest>,
         paymentIntentId: String?,
+        payerUserId: String,
         renterOrganizationId: String?,
         sportId: String?,
-    ): Result<RentalOrderResult> = runCatching {
+        status: String,
+    ): PendingRentalOrder {
         val normalizedSlug = publicSlug.trim().takeIf(String::isNotBlank)
             ?: throw IllegalArgumentException("This organization needs a public rental checkout before resources can be reserved.")
         val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
             ?: throw IllegalArgumentException("Rental booking id is required.")
+        val normalizedPayerUserId = payerUserId.trim().takeIf(String::isNotBlank)
+            ?: throw IllegalArgumentException("A signed-in renter is required.")
         val normalizedSelections = selections
             .mapNotNull { selection ->
                 val fieldIds = selection.scheduledFieldIds
@@ -1097,32 +1160,143 @@ class BillingRepository(
             throw IllegalArgumentException("Select at least one rental slot.")
         }
 
+        val normalizedPaymentIntentId = paymentIntentId?.trim()?.takeIf(String::isNotBlank)
+        return PendingRentalOrder(
+            id = "$normalizedEventId:${normalizedPaymentIntentId ?: "free"}",
+            publicSlug = normalizedSlug,
+            eventId = normalizedEventId,
+            selectionsJson = jsonMVP.encodeToString(normalizedSelections),
+            paymentIntentId = normalizedPaymentIntentId,
+            payerUserId = normalizedPayerUserId,
+            renterOrganizationId = renterOrganizationId?.trim()?.takeIf(String::isNotBlank),
+            sportId = sportId?.trim()?.takeIf(String::isNotBlank),
+            status = status,
+            createdAt = kotlin.time.Clock.System.now().toString(),
+        )
+    }
+
+    private fun currentPayerUserId(): String =
+        userRepository.currentUser.value.getOrNull()?.id?.trim()?.takeIf(String::isNotBlank)
+            ?: throw IllegalStateException("A signed-in renter is required.")
+
+    override suspend fun prepareRentalOrder(
+        publicSlug: String,
+        eventId: String,
+        selections: List<RentalOrderSelectionRequest>,
+        paymentIntentId: String,
+        payerUserId: String,
+        renterOrganizationId: String?,
+        sportId: String?,
+    ): Result<String> = runCatching {
+        val normalizedPaymentIntentId = paymentIntentId.trim().takeIf(String::isNotBlank)
+            ?: throw IllegalArgumentException("A rental payment intent is required.")
+        if (payerUserId.trim() != currentPayerUserId()) {
+            throw RentalOrderPayerMismatchException(
+                "Sign in as the original renter before continuing this rental checkout.",
+            )
+        }
+        val pendingOrder = buildPendingRentalOrder(
+            publicSlug = publicSlug,
+            eventId = eventId,
+            selections = selections,
+            paymentIntentId = normalizedPaymentIntentId,
+            payerUserId = payerUserId,
+            renterOrganizationId = renterOrganizationId,
+            sportId = sportId,
+            status = PENDING_RENTAL_ORDER_STATUS_AWAITING_PAYMENT,
+        )
+        databaseService.getPendingRentalOrderDao.upsert(pendingOrder)
+        pendingOrder.id
+    }
+
+    override suspend fun discardPreparedRentalOrder(orderId: String): Result<Unit> = runCatching {
+        val normalizedOrderId = orderId.trim().takeIf(String::isNotBlank)
+            ?: return@runCatching
+        databaseService.getPendingRentalOrderDao.deleteById(normalizedOrderId)
+    }
+
+    override suspend fun createRentalOrder(
+        publicSlug: String,
+        eventId: String,
+        selections: List<RentalOrderSelectionRequest>,
+        paymentIntentId: String?,
+        payerUserId: String?,
+        renterOrganizationId: String?,
+        sportId: String?,
+    ): Result<RentalOrderResult> = runCatching {
+        val activePayerUserId = currentPayerUserId()
+        val expectedPayerUserId = payerUserId?.trim()?.takeIf(String::isNotBlank) ?: activePayerUserId
+        if (expectedPayerUserId != activePayerUserId) {
+            throw RentalOrderPayerMismatchException(
+                "Sign in as the original renter before continuing this rental checkout.",
+            )
+        }
+        val pendingOrder = buildPendingRentalOrder(
+            publicSlug = publicSlug,
+            eventId = eventId,
+            selections = selections,
+            paymentIntentId = paymentIntentId,
+            payerUserId = expectedPayerUserId,
+            renterOrganizationId = renterOrganizationId,
+            sportId = sportId,
+            status = PENDING_RENTAL_ORDER_STATUS_PENDING,
+        )
+        databaseService.getPendingRentalOrderDao.upsert(pendingOrder)
+        try {
+            submitPendingRentalOrder(pendingOrder).also {
+                databaseService.getPendingRentalOrderDao.deleteById(pendingOrder.id)
+            }
+        } catch (error: Throwable) {
+            recordPendingRentalOrderFailure(pendingOrder, error)
+            if (error.isTerminalRentalOrderFailure()) {
+                throw RentalOrderTerminalFailureException(
+                    "The payment was recorded, but this reservation needs staff assistance: ${error.message.orEmpty()}",
+                    error,
+                )
+            }
+            throw error
+        }
+    }
+
+    override suspend fun syncPendingRentalOrders(): Result<Int> = runCatching {
+        val payerUserId = currentPayerUserId()
+        var completed = 0
+        databaseService.getPendingRentalOrderDao.retryableOrders(payerUserId).forEach { pendingOrder ->
+            runCatching { submitPendingRentalOrder(pendingOrder) }
+                .onSuccess {
+                    databaseService.getPendingRentalOrderDao.deleteById(pendingOrder.id)
+                    completed += 1
+                }
+                .onFailure { error ->
+                    recordPendingRentalOrderFailure(pendingOrder, error)
+                }
+        }
+        completed
+    }
+
+    private suspend fun submitPendingRentalOrder(pendingOrder: PendingRentalOrder): RentalOrderResult {
+        val selections = jsonMVP.decodeFromString<List<RentalOrderSelectionRequest>>(pendingOrder.selectionsJson)
         AnalyticsTracker.capture(
             AnalyticsEvent.RentalCheckoutStarted,
             buildMap {
-                put("organization_slug", normalizedSlug)
-                put("event_id", normalizedEventId)
-                put("selection_count", normalizedSelections.size.toString())
-                renterOrganizationId?.trim()?.takeIf(String::isNotBlank)?.let { put("renter_organization_id", it) }
+                put("organization_slug", pendingOrder.publicSlug)
+                put("event_id", pendingOrder.eventId)
+                put("selection_count", selections.size.toString())
+                pendingOrder.renterOrganizationId?.let { put("renter_organization_id", it) }
             },
         )
-
         val response = api.post<CreateRentalOrderRequestDto, RentalOrderResponseDto>(
-            path = "api/public/organizations/${normalizedSlug.encodeURLQueryComponent()}/rental-orders",
+            path = "api/public/organizations/${pendingOrder.publicSlug.encodeURLQueryComponent()}/rental-orders",
             body = CreateRentalOrderRequestDto(
-                eventId = normalizedEventId,
-                selections = normalizedSelections,
-                sportId = sportId?.trim()?.takeIf(String::isNotBlank),
-                paymentIntentId = paymentIntentId?.trim()?.takeIf(String::isNotBlank),
-                renterOrganizationId = renterOrganizationId?.trim()?.takeIf(String::isNotBlank),
+                eventId = pendingOrder.eventId,
+                selections = selections,
+                sportId = pendingOrder.sportId,
+                paymentIntentId = pendingOrder.paymentIntentId,
+                renterOrganizationId = pendingOrder.renterOrganizationId,
             ),
         )
-
-        response.error?.trim()?.takeIf(String::isNotBlank)?.let { errorMessage ->
-            throw Exception(errorMessage)
-        }
-        response.toRentalOrderResultOrNull()
-            ?: throw Exception("Unable to create rental order.")
+        response.error?.trim()?.takeIf(String::isNotBlank)?.let(::error)
+        return response.toRentalOrderResultOrNull() ?: error("Unable to create rental order.")
     }
 
     override suspend fun listRentalResourceOptions(

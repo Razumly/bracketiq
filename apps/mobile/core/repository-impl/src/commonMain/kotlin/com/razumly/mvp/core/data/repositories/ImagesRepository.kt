@@ -64,9 +64,7 @@ class ImagesRepository(
         val updatedImages = user.uploadedImages.toMutableList().apply {
             if (!contains(imageId)) add(imageId)
         }
-        val updatedUser = user.copy(uploadedImages = updatedImages)
-
-        userRepository.updateUser(updatedUser).getOrThrow()
+        userRepository.updateUploadedImages(updatedImages).getOrThrow()
     }
 
     override suspend fun deleteImage(imageId: String): Result<Unit> = runCatching {

@@ -59,6 +59,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -688,6 +690,55 @@ class EventRepositoryHttpTest {
         assertEquals(listOf("event_1"), cachedUser?.hiddenEventIds)
         assertEquals(listOf(listOf("event_1")), eventDao.deleteEventsWithCrossRefsCalls)
         assertTrue(eventDao.deleteEventsByIdCalls.isEmpty())
+    }
+
+    @Test
+    fun updateEvent_doesNotClearLegacyFieldCountWhenUnrelatedFieldsChange() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val cachedEvent = makeEvent(id = "event_1", hostId = "host_1").copy(fieldCount = 4)
+        eventDao.upsertEvent(cachedEvent)
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        var capturedRequestBody = ""
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Patch, request.method)
+            assertEquals("/api/events/event_1", request.url.encodedPath)
+            capturedRequestBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+            respond(
+                content = """
+                    {
+                      "id": "event_1",
+                      "name": "Renamed Event",
+                      "hostId": "host_1",
+                      "coordinates": [-80.0, 25.0],
+                      "start": "2026-02-10T00:00:00Z",
+                      "end": "2026-02-10T01:00:00Z"
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        repo.updateEvent(cachedEvent.copy(name = "Renamed Event", fieldCount = null)).getOrThrow()
+
+        val eventPatch = jsonMVP.parseToJsonElement(capturedRequestBody)
+            .jsonObject
+            .getValue("event")
+            .jsonObject
+        assertEquals("Renamed Event", eventPatch["name"]?.jsonPrimitive?.content)
+        assertFalse("fieldCount" in eventPatch)
     }
 
     @Test

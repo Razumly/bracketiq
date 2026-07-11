@@ -34,10 +34,10 @@ class CreateEventSelectionRulesTest {
         assertTrue(updated.teamSignup)
         assertFalse(updated.singleDivision)
         assertTrue(updated.noFixedEndDateTime)
-        assertFalse(updated.allowPaymentPlans == true)
-        assertEquals(null, updated.installmentCount)
-        assertTrue(updated.installmentDueDates.isEmpty())
-        assertTrue(updated.installmentAmounts.isEmpty())
+        assertTrue(updated.allowPaymentPlans == true)
+        assertEquals(2, updated.installmentCount)
+        assertEquals(listOf("2026-02-24", "2026-03-24"), updated.installmentDueDates)
+        assertEquals(listOf(1000, 1000), updated.installmentAmounts)
         assertEquals(end, updated.end)
     }
 
@@ -109,7 +109,7 @@ class CreateEventSelectionRulesTest {
     }
 
     @Test
-    fun apply_create_selection_rules_clears_division_payment_plan_data() {
+    fun apply_create_selection_rules_preserves_division_payment_plan_data() {
         val draft = Event(
             eventType = EventType.EVENT,
             singleDivision = false,
@@ -129,9 +129,9 @@ class CreateEventSelectionRulesTest {
         assertFalse(updated.singleDivision)
         assertEquals(1, updated.divisionDetails.size)
         val detail = updated.divisionDetails.first()
-        assertFalse(detail.allowPaymentPlans == true)
-        assertEquals(null, detail.installmentCount)
-        assertTrue(detail.installmentDueDates.isEmpty())
-        assertTrue(detail.installmentAmounts.isEmpty())
+        assertTrue(detail.allowPaymentPlans == true)
+        assertEquals(3, detail.installmentCount)
+        assertEquals(listOf("2026-03-01", "2026-04-01", "2026-05-01"), detail.installmentDueDates)
+        assertEquals(listOf(1000, 1000, 1000), detail.installmentAmounts)
     }
 }

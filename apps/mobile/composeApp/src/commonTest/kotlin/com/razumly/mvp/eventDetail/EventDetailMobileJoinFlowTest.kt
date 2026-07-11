@@ -146,7 +146,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
         }
 
     @Test
-    fun league_mobile_flow_loads_playoffs_staff_invites_schedule_and_periphery_then_keeps_them_after_join() =
+    fun league_mobile_join_flow_loads_playoffs_schedule_and_periphery_without_exposing_staff_invites() =
         runTest(testDispatcher) {
             val host = mobileUser(id = "host_1", firstName = "Host", lastName = "User")
             val currentUser = mobileUser(id = "mobile_joiner", firstName = "Mobile", lastName = "Joiner")
@@ -286,7 +286,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             assertEquals(UPLOADED_DB_IMAGE_ID, component.selectedEvent.value.imageId)
             assertTrue(component.selectedEvent.value.includePlayoffs)
             assertEquals(4, component.selectedEvent.value.playoffTeamCount)
-            assertEquals(staffInvites.map(Invite::email), component.eventWithRelations.value.staffInvites.map(Invite::email))
+            assertEquals(emptyList(), component.eventWithRelations.value.staffInvites)
             assertEquals(listOf(slot.id), component.eventWithRelations.value.timeSlots.map(TimeSlot::id))
             assertEquals(listOf(field.id), component.eventFields.value.map { it.field.id })
             assertEquals(matches.map(MatchMVP::id), component.eventWithRelations.value.matches.map { it.match.id })
@@ -307,7 +307,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             assertEquals(matches.map(MatchMVP::id), component.eventWithRelations.value.matches.map { it.match.id })
             assertEquals(listOf(slot.id), component.eventWithRelations.value.timeSlots.map(TimeSlot::id))
             assertEquals(listOf(field.id), component.eventFields.value.map { it.field.id })
-            assertEquals(staffInvites.map(Invite::id), component.eventWithRelations.value.staffInvites.map(Invite::id))
+            assertEquals(emptyList(), component.eventWithRelations.value.staffInvites)
             assertTrue(eventRepository.staffInviteRequests.isEmpty())
         }
 
@@ -1966,7 +1966,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
     }
 
     @Test
-    fun eventEntryLoadsRegistrationDetailsSilentlyAndReusesThemUntilRefresh() = runTest(testDispatcher) {
+    fun eventEntryLoadsRegistrationDetailsOnceAndReusesThemUntilRefresh() = runTest(testDispatcher) {
         val host = mobileUser(id = "host_1", firstName = "Host", lastName = "User")
         val event = Event(
             id = "event_1",

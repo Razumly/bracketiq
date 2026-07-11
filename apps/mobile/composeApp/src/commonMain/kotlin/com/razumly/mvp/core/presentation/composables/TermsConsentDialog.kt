@@ -1,21 +1,13 @@
 package com.razumly.mvp.core.presentation.composables
 
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.repositories.ChatTermsConsentState
 
@@ -25,33 +17,39 @@ private val defaultSummaryLines = listOf(
     "Moderation acts on reports within 24 hours.",
 )
 
-private data class TermsAgreementSection(
-    val title: String,
-    val body: String,
-)
+private const val CANONICAL_TERMS_ORIGIN = "https://bracket-iq.com"
+private const val CANONICAL_TERMS_PATH = "/terms"
 
-private val fullAgreementSections = listOf(
-    TermsAgreementSection(
-        title = "Content Creation Access",
-        body = "Sending chat messages, creating events, or other user-generated content in Bracket IQ requires agreement to the Terms and EULA. If you do not agree, those flows remain unavailable until you accept.",
-    ),
-    TermsAgreementSection(
-        title = "No Tolerance Policy",
-        body = "Bracket IQ does not tolerate objectionable content, abusive users, harassment, threats, hate speech, sexual exploitation, graphic abuse, or other harmful conduct.",
-    ),
-    TermsAgreementSection(
-        title = "Reports And Blocks",
-        body = "Users can report chat groups, report events, and block abusive users. Blocking can immediately hide shared chats from the blocker and can remove the blocker from shared chats when that option is chosen.",
-    ),
-    TermsAgreementSection(
-        title = "Moderation Timeline",
-        body = "Moderation reports are reviewed within 24 hours. When objectionable content is confirmed, the content is removed and the offending user is ejected or suspended.",
-    ),
-    TermsAgreementSection(
-        title = "Enforcement And Visibility",
-        body = "Reported events are hidden from the reporting user's event results. Chat groups and messages remain preserved for moderator review even when they are hidden from end users. Unblocking removes the block relationship but does not restore friendships, follows, or chat memberships.",
-    ),
-)
+/**
+ * Accept only the canonical BracketIQ terms endpoint.  The API normally sends
+ * a relative `/terms` path, which we resolve locally without ever substituting
+ * a missing or untrusted value with a fallback URL.
+ */
+internal fun resolveCanonicalTermsUrl(rawUrl: String?): String? {
+    val url = rawUrl?.trim()?.takeIf(String::isNotBlank) ?: return null
+    if (url.any { it.isWhitespace() || it.code < 0x20 || it.code == 0x7f } || url.contains('\\')) return null
+
+    if (url.startsWith(CANONICAL_TERMS_PATH)) {
+        val suffix = url.removePrefix(CANONICAL_TERMS_PATH)
+        return if (suffix.isEmpty() || suffix.startsWith('?') || suffix.startsWith('#')) {
+            "$CANONICAL_TERMS_ORIGIN$url"
+        } else {
+            null
+        }
+    }
+
+    if (!url.startsWith(CANONICAL_TERMS_ORIGIN, ignoreCase = true)) return null
+    val suffix = url.substring(CANONICAL_TERMS_ORIGIN.length)
+    return if (
+        suffix.startsWith(CANONICAL_TERMS_PATH) &&
+        (suffix.length == CANONICAL_TERMS_PATH.length ||
+            suffix[CANONICAL_TERMS_PATH.length] in charArrayOf('?', '#'))
+    ) {
+        "$CANONICAL_TERMS_ORIGIN$suffix"
+    } else {
+        null
+    }
+}
 
 @Composable
 fun TermsConsentDialog(
@@ -65,8 +63,8 @@ fun TermsConsentDialog(
     dismissLabel: String = "Not now",
 ) {
     val summaryLines = state.summary.ifEmpty { defaultSummaryLines }
-    var showFullAgreement by remember { mutableStateOf(false) }
-    val fullAgreementScrollState = rememberScrollState()
+    val uriHandler = LocalUriHandler.current
+    val agreementUrl = resolveCanonicalTermsUrl(state.url)
 
     AlertDialog(
         onDismissRequest = { onDismiss?.invoke() },
@@ -74,6 +72,9 @@ fun TermsConsentDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(intro)
+                state.version.trim().takeIf(String::isNotBlank)?.let { version ->
+                    Text("Agreement version: $version", style = MaterialTheme.typography.labelMedium)
+                }
                 if (loading && state.summary.isEmpty() && !state.accepted) {
                     Text(
                         "Checking your Terms and EULA status...",
@@ -87,36 +88,21 @@ fun TermsConsentDialog(
                     "Moderation reports are reviewed within 24 hours. Confirmed objectionable content is removed and abusive users are ejected or suspended.",
                     style = MaterialTheme.typography.bodySmall,
                 )
-                TextButton(onClick = { showFullAgreement = !showFullAgreement }) {
-                    Text(if (showFullAgreement) "Hide full agreement" else "View full agreement")
-                }
-                if (showFullAgreement) {
-                    Box(
-                        modifier = androidx.compose.ui.Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 280.dp)
-                            .verticalScroll(fullAgreementScrollState),
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            fullAgreementSections.forEach { section ->
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text(
-                                        text = section.title,
-                                        style = MaterialTheme.typography.titleSmall,
-                                    )
-                                    Text(
-                                        text = section.body,
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                }
-                            }
-                        }
+                if (agreementUrl == null) {
+                    Text(
+                        "The authoritative Terms and EULA link is unavailable. You cannot agree until it can be verified.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                } else {
+                    TextButton(onClick = { runCatching { uriHandler.openUri(agreementUrl) } }) {
+                        Text("View authoritative full agreement")
                     }
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = onAccept, enabled = !loading) {
+            TextButton(onClick = onAccept, enabled = !loading && agreementUrl != null) {
                 Text(if (loading) "Saving..." else confirmLabel)
             }
         },

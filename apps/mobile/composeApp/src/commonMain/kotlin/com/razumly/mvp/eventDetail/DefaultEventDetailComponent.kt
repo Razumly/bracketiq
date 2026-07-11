@@ -2101,6 +2101,14 @@ class DefaultEventDetailComponent(
             showDetails = { _showDetails.value = true },
         ) ?: return
 
+        // Mobile hydration refreshes the management data directly. Mark that work before
+        // launching it so the managed-detail observer does not start a second identical
+        // bootstrap for the same event and occurrence.
+        markManagedBootstrapRequested(
+            event = event,
+            occurrence = currentWeeklyOccurrenceSelection(),
+            manage = canManageParticipantData(event),
+        )
         eventDetailHydrationJob?.cancel()
         eventDetailHydrationJob = scope.launch {
             detailHydrationCoordinator.hydrateMobileEventDetail(
@@ -3299,13 +3307,13 @@ class DefaultEventDetailComponent(
         )
     }
 
-    override fun sendNotification(title: String, message: String) {
-        scope.launch {
-            notificationCoordinator
-                .sendEventNotification(eventWithRelations.value.event.id, title, message)
-                ?.let { errorMessage -> _errorState.value = errorMessage }
-        }
-    }
+    override suspend fun sendNotification(title: String, message: String): Result<Unit> =
+        notificationCoordinator.sendEventNotification(
+            eventWithRelations.value.event.id,
+            eventWithRelations.value.event.eventType,
+            title,
+            message,
+        )
 
     override fun dismissMatchEditDialog() {
         matchEditingCoordinator.dismissMatchEditDialog(

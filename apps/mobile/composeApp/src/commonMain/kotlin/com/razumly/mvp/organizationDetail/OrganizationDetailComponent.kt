@@ -22,7 +22,9 @@ import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.PurchaseIntentTimeSlotContext
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.RentalOrderItem
+import com.razumly.mvp.core.data.repositories.RentalOrderPayerMismatchException
 import com.razumly.mvp.core.data.repositories.RentalOrderSelectionRequest
+import com.razumly.mvp.core.data.repositories.RentalOrderTerminalFailureException
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
 import com.razumly.mvp.core.data.repositories.isActive
@@ -75,7 +77,9 @@ private data class PendingRentalReservation(
     val publicSlug: String,
     val context: RentalCreateContext,
     val selections: List<RentalOrderSelectionRequest>,
+    val payerUserId: String,
     val paymentIntentId: String?,
+    val pendingOrderId: String? = null,
 )
 
 internal fun resolveOrganizationDetailTabs(
@@ -287,6 +291,10 @@ class DefaultOrganizationDetailComponent(
     private var pendingTeamSignaturePollJob: Job? = null
     private var pendingPostSignatureAction: (suspend () -> Unit)? = null
     private var pendingRentalReservation: PendingRentalReservation? = null
+    private val checkoutSessionCoordinator = OrganizationCheckoutSessionCoordinator()
+    private var pendingProductCheckoutOperationId: String? = null
+    private var pendingTeamCheckoutOperationId: String? = null
+    private var pendingRentalCheckoutOperationId: String? = null
 
     private lateinit var loadingHandler: LoadingHandler
 
@@ -302,47 +310,55 @@ class DefaultOrganizationDetailComponent(
         refreshOrganization()
 
         scope.launch {
+            billingRepository.syncPendingRentalOrders()
+                .onFailure { error ->
+                    Napier.w("Unable to retry pending paid rental reservations: ${error.message}")
+                }
+        }
+
+        scope.launch {
             paymentResult.collect { result ->
                 if (result == null) return@collect
+                val checkout = checkoutSessionCoordinator.claimResult()
+                if (checkout == null) {
+                    Napier.w("Ignoring organization payment result without an active presented checkout.")
+                    clearPaymentResult()
+                    return@collect
+                }
+                if (!matchesOrganizationCheckout(checkout)) {
+                    Napier.w("Ignoring organization payment result for unmatched checkout ${checkout.operationId}.")
+                    checkoutSessionCoordinator.releaseClaim(checkout)
+                    clearPaymentResult()
+                    return@collect
+                }
                 when (result) {
                     PaymentResult.Canceled -> {
+                        discardPendingRentalReservation(pendingRentalReservation)
                         _errorState.value = ErrorMessage("Payment canceled.")
-                        _startingProductCheckoutId.value = null
-                        _startingTeamRegistrationId.value = null
-                        pendingProductPurchase = null
-                        pendingTeamRegistration = null
-                        pendingRentalReservation = null
-                        _isReservingRental.value = false
                     }
 
                     is PaymentResult.Failed -> {
+                        discardPendingRentalReservation(pendingRentalReservation)
                         _errorState.value = ErrorMessage(result.error)
-                        _startingProductCheckoutId.value = null
-                        _startingTeamRegistrationId.value = null
-                        pendingProductPurchase = null
-                        pendingTeamRegistration = null
-                        pendingRentalReservation = null
-                        _isReservingRental.value = false
                     }
 
                     PaymentResult.Completed -> {
                         val pendingRental = pendingRentalReservation
                         val pendingProduct = pendingProductPurchase
                         val pendingTeam = pendingTeamRegistration
-                        _startingProductCheckoutId.value = null
-                        _startingTeamRegistrationId.value = null
-                        if (pendingRental != null) {
+                        when (checkout.owner) {
+                        OrganizationCheckoutOwner.RENTAL -> if (pendingRental != null) {
                             completePendingRentalReservation(pendingRental)
-                        } else if (pendingProduct != null) {
+                        }
+                        OrganizationCheckoutOwner.PRODUCT -> if (pendingProduct != null) {
                             _message.value = if (pendingProduct.isSinglePurchase()) {
                                 "Purchase completed for ${pendingProduct.name}."
                             } else {
                                 "Subscription started for ${pendingProduct.name}."
                             }
                             refreshProducts(force = true)
-                            pendingProductPurchase = null
                         }
-                        if (pendingTeam != null) {
+                        OrganizationCheckoutOwner.TEAM -> if (pendingTeam != null) {
                             val refreshedTeams = teamRepository.getTeamsByOrganization(organizationId).getOrNull()
                             if (refreshedTeams != null) {
                                 _teams.value = refreshedTeams
@@ -360,16 +376,61 @@ class DefaultOrganizationDetailComponent(
                             } else {
                                 "Registration completed for ${pendingTeam.team.name}."
                             }
-                            pendingTeamRegistration = null
+                        }
                         }
                     }
                 }
+                finishOrganizationCheckout(checkout)
                 clearPaymentResult()
                 if (::loadingHandler.isInitialized) {
                     loadingHandler.hideLoading()
                 }
             }
         }
+    }
+
+    private fun matchesOrganizationCheckout(checkout: OrganizationCheckoutSession): Boolean = when (checkout.owner) {
+        OrganizationCheckoutOwner.PRODUCT ->
+            pendingProductPurchase != null && pendingProductCheckoutOperationId == checkout.operationId
+        OrganizationCheckoutOwner.TEAM ->
+            pendingTeamRegistration != null && pendingTeamCheckoutOperationId == checkout.operationId
+        OrganizationCheckoutOwner.RENTAL ->
+            pendingRentalReservation != null && pendingRentalCheckoutOperationId == checkout.operationId
+    }
+
+    private fun beginOrganizationCheckout(owner: OrganizationCheckoutOwner): OrganizationCheckoutSession? {
+        if (checkoutSessionCoordinator.activeSession != null) {
+            _errorState.value = ErrorMessage("Another checkout is already in progress.")
+            return null
+        }
+
+        return checkoutSessionCoordinator.start(owner)
+            ?: run {
+                _errorState.value = ErrorMessage("Another checkout is already in progress.")
+                null
+            }
+    }
+
+    private fun finishOrganizationCheckout(checkout: OrganizationCheckoutSession): Boolean {
+        if (!checkoutSessionCoordinator.finish(checkout)) return false
+        when (checkout.owner) {
+            OrganizationCheckoutOwner.PRODUCT -> {
+                _startingProductCheckoutId.value = null
+                pendingProductPurchase = null
+                pendingProductCheckoutOperationId = null
+            }
+            OrganizationCheckoutOwner.TEAM -> {
+                _startingTeamRegistrationId.value = null
+                pendingTeamRegistration = null
+                pendingTeamCheckoutOperationId = null
+            }
+            OrganizationCheckoutOwner.RENTAL -> {
+                pendingRentalReservation = null
+                pendingRentalCheckoutOperationId = null
+                _isReservingRental.value = false
+            }
+        }
+        return true
     }
 
     override fun setLoadingHandler(handler: LoadingHandler) {
@@ -615,6 +676,7 @@ class DefaultOrganizationDetailComponent(
             if (_startingProductCheckoutId.value != null) return@launch
 
             _startingProductCheckoutId.value = product.id
+            var checkout: OrganizationCheckoutSession? = null
             try {
                 val user = userRepository.currentUser.value.getOrNull()
                 val account = userRepository.currentAccount.value.getOrNull()
@@ -628,6 +690,7 @@ class DefaultOrganizationDetailComponent(
                 val discountCode = requestDiscountCode(
                     description = "Enter a discount code for ${product.name}, or continue without one.",
                 )
+                checkout = beginOrganizationCheckout(OrganizationCheckoutOwner.PRODUCT) ?: return@launch
 
                 if (::loadingHandler.isInitialized) {
                     loadingHandler.showLoading("Preparing checkout...")
@@ -639,22 +702,51 @@ class DefaultOrganizationDetailComponent(
                 }
                 purchaseIntentResult
                     .onSuccess { intent ->
-                        pendingProductPurchase = product
-                        scope.launch { showPaymentSheet(intent, account?.email.orEmpty(), user.fullName) }
+                        val activeCheckout = checkout ?: return@onSuccess
+                        if (!checkoutSessionCoordinator.isCurrent(activeCheckout)) {
+                            Napier.w("Ignoring a product intent for inactive checkout ${activeCheckout.operationId}.")
+                            return@onSuccess
+                        }
+                        runCatching {
+                            pendingProductPurchase = product
+                            pendingProductCheckoutOperationId = activeCheckout.operationId
+                            showPaymentSheet(
+                                intent = intent,
+                                email = account?.email.orEmpty(),
+                                name = user.fullName,
+                                checkout = activeCheckout,
+                            )
+                        }.onFailure { error ->
+                            if (finishOrganizationCheckout(activeCheckout)) {
+                                _errorState.value = ErrorMessage(error.userMessage("Unable to start payment sheet."))
+                                if (::loadingHandler.isInitialized) {
+                                    loadingHandler.hideLoading()
+                                }
+                            }
+                        }
                     }
                     .onFailure { error ->
-                        _errorState.value = ErrorMessage("Unable to start checkout: ${error.userMessage()}")
-                        if (::loadingHandler.isInitialized) {
-                            loadingHandler.hideLoading()
+                        checkout?.let { activeCheckout ->
+                            if (finishOrganizationCheckout(activeCheckout)) {
+                                _errorState.value = ErrorMessage("Unable to start checkout: ${error.userMessage()}")
+                                if (::loadingHandler.isInitialized) {
+                                    loadingHandler.hideLoading()
+                                }
+                            }
                         }
                     }
             } catch (error: Throwable) {
-                _errorState.value = ErrorMessage("Unable to start checkout: ${error.userMessage()}")
-                if (::loadingHandler.isInitialized) {
-                    loadingHandler.hideLoading()
+                val activeCheckout = checkout
+                if (activeCheckout == null || finishOrganizationCheckout(activeCheckout)) {
+                    _errorState.value = ErrorMessage("Unable to start checkout: ${error.userMessage()}")
+                    if (::loadingHandler.isInitialized) {
+                        loadingHandler.hideLoading()
+                    }
                 }
             } finally {
-                _startingProductCheckoutId.value = null
+                if (pendingProductPurchase == null && checkoutSessionCoordinator.activeSession == null) {
+                    _startingProductCheckoutId.value = null
+                }
             }
         }
     }
@@ -707,6 +799,7 @@ class DefaultOrganizationDetailComponent(
                     publicSlug = publicSlug,
                     context = rentalContext,
                     selections = orderSelections,
+                    payerUserId = user.id,
                     paymentIntentId = null,
                 )
 
@@ -714,6 +807,8 @@ class DefaultOrganizationDetailComponent(
                     completePendingRentalReservation(pendingReservation)
                     return@launch
                 }
+
+                val checkout = beginOrganizationCheckout(OrganizationCheckoutOwner.RENTAL) ?: return@launch
 
                 if (::loadingHandler.isInitialized) {
                     loadingHandler.showLoading("Preparing rental checkout...")
@@ -726,17 +821,44 @@ class DefaultOrganizationDetailComponent(
                     ),
                     timeSlotContext = buildRentalPaymentTimeSlotContext(rentalContext),
                 ).onSuccess { intent ->
-                    pendingRentalReservation = pendingReservation.copy(
-                        paymentIntentId = intent.paymentIntent.toPaymentIntentId(),
-                    )
+                    if (!checkoutSessionCoordinator.isCurrent(checkout)) {
+                        Napier.w("Ignoring a rental intent for inactive checkout ${checkout.operationId}.")
+                        return@onSuccess
+                    }
                     runCatching {
-                        showPaymentSheet(intent, account?.email.orEmpty(), user.fullName)
+                        val paymentIntentId = intent.paymentIntent.toPaymentIntentId()
+                            ?.trim()
+                            ?.takeIf(String::isNotBlank)
+                            ?: error("Rental checkout did not return a payment intent.")
+                        billingRepository.prepareRentalOrder(
+                            publicSlug = pendingReservation.publicSlug,
+                            eventId = rentalContext.rentalBookingId ?: error("Rental booking id is required."),
+                            selections = pendingReservation.selections,
+                            paymentIntentId = paymentIntentId,
+                            payerUserId = pendingReservation.payerUserId,
+                        ).getOrThrow().also { pendingOrderId ->
+                            pendingRentalReservation = pendingReservation.copy(
+                                paymentIntentId = paymentIntentId,
+                                pendingOrderId = pendingOrderId,
+                            )
+                            pendingRentalCheckoutOperationId = checkout.operationId
+                        }
+                        showPaymentSheet(
+                            intent = intent,
+                            email = account?.email.orEmpty(),
+                            name = user.fullName,
+                            checkout = checkout,
+                        )
                     }.onFailure { error ->
-                        pendingRentalReservation = null
-                        _errorState.value = ErrorMessage(error.userMessage("Unable to start rental payment."))
+                        discardPendingRentalReservation(pendingRentalReservation)
+                        if (finishOrganizationCheckout(checkout)) {
+                            _errorState.value = ErrorMessage(error.userMessage("Unable to start rental payment."))
+                        }
                     }
                 }.onFailure { error ->
-                    _errorState.value = ErrorMessage(error.userMessage("Unable to start rental checkout."))
+                    if (finishOrganizationCheckout(checkout)) {
+                        _errorState.value = ErrorMessage(error.userMessage("Unable to start rental checkout."))
+                    }
                 }
             } finally {
                 if (pendingRentalReservation == null) {
@@ -875,19 +997,43 @@ class DefaultOrganizationDetailComponent(
                 val discountCode = requestDiscountCode(
                     description = "Enter a discount code for this team registration, or continue without one.",
                 )
+                val checkout = beginOrganizationCheckout(OrganizationCheckoutOwner.TEAM) ?: return
                 billingRepository.createTeamRegistrationPurchaseIntent(
                     team = team.team,
                     teamRegistration = result.registration,
                     discountCode = discountCode,
                 ).onSuccess { intent ->
-                    pendingTeamRegistration = team
-                    scope.launch { showPaymentSheet(intent, accountEmail, payerName) }
+                    if (!checkoutSessionCoordinator.isCurrent(checkout)) {
+                        Napier.w("Ignoring a team intent for inactive checkout ${checkout.operationId}.")
+                        return@onSuccess
+                    }
+                    runCatching {
+                        pendingTeamRegistration = team
+                        pendingTeamCheckoutOperationId = checkout.operationId
+                        showPaymentSheet(
+                            intent = intent,
+                            email = accountEmail,
+                            name = payerName,
+                            checkout = checkout,
+                        )
+                    }.onFailure { error ->
+                        if (finishOrganizationCheckout(checkout)) {
+                            _errorState.value = ErrorMessage(
+                                error.userMessage("Unable to start payment sheet."),
+                            )
+                            if (::loadingHandler.isInitialized) {
+                                loadingHandler.hideLoading()
+                            }
+                        }
+                    }
                 }.onFailure { error ->
-                    _errorState.value = ErrorMessage(
-                        "Unable to start registration: ${error.userMessage(result.userMessage("Unable to start registration."))}",
-                    )
-                    if (::loadingHandler.isInitialized) {
-                        loadingHandler.hideLoading()
+                    if (finishOrganizationCheckout(checkout)) {
+                        _errorState.value = ErrorMessage(
+                            "Unable to start registration: ${error.userMessage(result.userMessage("Unable to start registration."))}",
+                        )
+                        if (::loadingHandler.isInitialized) {
+                            loadingHandler.hideLoading()
+                        }
                     }
                 }
                 return
@@ -1030,11 +1176,19 @@ class DefaultOrganizationDetailComponent(
         intent: PurchaseIntent,
         email: String,
         name: String,
+        checkout: OrganizationCheckoutSession,
     ) {
+        check(checkoutSessionCoordinator.isCurrent(checkout)) {
+            "Checkout is no longer active."
+        }
+        clearPaymentResult()
         setPaymentIntent(intent)
         val billingAddress = loadSavedBillingAddress()
         if (::loadingHandler.isInitialized) {
             loadingHandler.showLoading("Waiting for payment completion...")
+        }
+        check(checkoutSessionCoordinator.awaitResult(checkout)) {
+            "Checkout is no longer active."
         }
         presentPaymentSheet(email, name, billingAddress)
     }
@@ -1048,6 +1202,7 @@ class DefaultOrganizationDetailComponent(
             eventId = pending.context.rentalBookingId?.trim()?.takeIf(String::isNotBlank) ?: newId(),
             selections = pending.selections,
             paymentIntentId = pending.paymentIntentId,
+            payerUserId = pending.payerUserId,
         ).onSuccess { result ->
             _completedRentalReservation.value = RentalReservationComplete(
                 bookingId = result.bookingId,
@@ -1057,13 +1212,32 @@ class DefaultOrganizationDetailComponent(
             _message.value = "Resources reserved."
             refreshRentals(force = true)
         }.onFailure { error ->
-            _errorState.value = ErrorMessage(error.userMessage("Unable to reserve resources."))
+            _errorState.value = ErrorMessage(
+                if (error is RentalOrderTerminalFailureException) {
+                    "Payment was recorded, but this reservation needs staff assistance. " +
+                        "Do not submit another payment. " + error.userMessage()
+                } else if (error is RentalOrderPayerMismatchException) {
+                    "Payment is linked to the original renter account. Sign back in as that renter to finish the reservation."
+                } else {
+                    "Payment was recorded, but the reservation is still being finalized. " +
+                        "It will retry automatically; do not submit another payment. " +
+                        error.userMessage("Unable to reserve resources right now.")
+                },
+            )
         }
         pendingRentalReservation = null
         _isReservingRental.value = false
         if (::loadingHandler.isInitialized) {
             loadingHandler.hideLoading()
         }
+    }
+
+    private suspend fun discardPendingRentalReservation(pending: PendingRentalReservation?) {
+        val pendingOrderId = pending?.pendingOrderId?.trim()?.takeIf(String::isNotBlank) ?: return
+        billingRepository.discardPreparedRentalOrder(pendingOrderId)
+            .onFailure { error ->
+                Napier.w("Unable to discard canceled rental checkout $pendingOrderId: ${error.message}")
+            }
     }
 
     private fun buildRentalPaymentEvent(

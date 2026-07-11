@@ -1628,7 +1628,7 @@ class DefaultMatchContentComponent(
                 val updatedScoringMatch = scoringMatch.copy(segments = updatedSegments)
                     .syncLegacyScoresFromSegments(maxSets)
 
-                val success = if (isMatchOver(updatedScoringMatch)) {
+                val persistedMatch = if (isMatchOver(updatedScoringMatch)) {
                     val endTime = updatedScoringMatch.end ?: updatedScoringMatch.start ?: Clock.System.now()
                     syncMatchImmediatelyBlocking(
                         match = updatedScoringMatch,
@@ -1642,9 +1642,11 @@ class DefaultMatchContentComponent(
                         saveLocallyBeforeRemote = false,
                     )
                 }
-                if (!success) return@launch
-                applyConfirmedMatchState(updatedScoringMatch)
-                persistMatchLocally(updatedScoringMatch, clearOptimisticOnSuccess = true)
+                if (persistedMatch == null) return@launch
+                applyConfirmedMatchState(persistedMatch)
+                if (!isMatchOver(updatedScoringMatch)) {
+                    persistMatchLocally(persistedMatch, clearOptimisticOnSuccess = true)
+                }
             } finally {
                 _segmentConfirmSaving.value = false
             }
@@ -1730,11 +1732,11 @@ class DefaultMatchContentComponent(
         finalize: Boolean = false,
         time: Instant? = null,
         saveLocallyBeforeRemote: Boolean = true,
-    ): Boolean {
+    ): MatchMVP? {
             cancelPendingDirectScoreSync()
             if (saveLocallyBeforeRemote) {
                 if (!persistMatchLocally(match, clearOptimisticOnSuccess = true)) {
-                    return false
+                    return null
                 }
             }
 
@@ -1756,7 +1758,7 @@ class DefaultMatchContentComponent(
                     } else {
                         "Failed to sync match: ${error.userMessage()}"
                     }
-                }.isSuccess
+                }.getOrNull()
             } else {
                 matchRepository.updateMatch(match).onSuccess {
                     // Clear optimistic state since database is now up to date
@@ -1766,7 +1768,10 @@ class DefaultMatchContentComponent(
                     if (!saveLocallyBeforeRemote) {
                         _optimisticMatch.value = null
                     }
-                }.isSuccess
+                }.fold(
+                    onSuccess = { match },
+                    onFailure = { null },
+                )
             }
     }
 
@@ -2473,7 +2478,7 @@ internal fun canIncrementCurrentSegment(
     val pointsToVictory = resolvePointsToVictory(match, currentEvent, setIndex) ?: return true
     val team1Score = match.team1Points.getOrElse(setIndex) { 0 }
     val team2Score = match.team2Points.getOrElse(setIndex) { 0 }
-    return team1Score < pointsToVictory && team2Score < pointsToVictory
+    return !isValidFinalSetScore(team1Score, team2Score, pointsToVictory)
 }
 
 internal fun canConfirmCurrentSegment(
@@ -2490,7 +2495,7 @@ internal fun canConfirmCurrentSegment(
                 false
             } else {
                 resolvePointsToVictory(match, currentEvent, setIndex)?.let { pointsToVictory ->
-                    team1Score >= pointsToVictory || team2Score >= pointsToVictory
+                    isValidFinalSetScore(team1Score, team2Score, pointsToVictory)
                 } ?: true
             }
         }
@@ -2498,6 +2503,13 @@ internal fun canConfirmCurrentSegment(
         "POINTS_ONLY" -> rules.supportsDraw || team1Score != team2Score
         else -> true
     }
+}
+
+private fun isValidFinalSetScore(team1Score: Int, team2Score: Int, target: Int): Boolean {
+    val leaderScore = maxOf(team1Score.coerceAtLeast(0), team2Score.coerceAtLeast(0))
+    val trailingScore = minOf(team1Score.coerceAtLeast(0), team2Score.coerceAtLeast(0))
+    val requiredWinningScore = maxOf(target, trailingScore + 2)
+    return leaderScore == requiredWinningScore
 }
 
 internal fun resolvePointsToVictory(match: MatchMVP, currentEvent: Event?, setIndex: Int): Int? {

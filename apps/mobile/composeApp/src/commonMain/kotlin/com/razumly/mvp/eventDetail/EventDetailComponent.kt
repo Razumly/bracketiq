@@ -265,7 +265,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun dismissDiscountCodePrompt()
     fun onUploadSelected(photo: GalleryPhotoResult)
     fun deleteImage(imageId: String)
-    fun sendNotification(title: String, message: String)
+    suspend fun sendNotification(title: String, message: String): Result<Unit>
     fun searchUsers(query: String)
     fun searchInviteTeams(query: String)
     fun inviteTeamToEvent(team: Team)

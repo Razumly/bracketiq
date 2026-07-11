@@ -83,6 +83,8 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
 
             harness.component.startProductPurchase(harness.product)
             advance()
+            harness.component.dismissDiscountCodePrompt()
+            advance()
 
             assertEquals(harness.product.id, harness.component.startingProductCheckoutId.value)
             assertEquals(1, harness.billingRepository.productPurchaseIntentCallCount)
@@ -107,6 +109,8 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
             advance()
 
             harness.component.startProductPurchase(harness.product)
+            advance()
+            harness.component.dismissDiscountCodePrompt()
             advance()
 
             assertEquals(harness.product.id, harness.component.startingProductCheckoutId.value)
@@ -328,6 +332,8 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
                 )
             )
             advance()
+            component.dismissDiscountCodePrompt()
+            advance()
 
             assertEquals(listOf(team.id), billingRepository.testState.teamRegistrationPurchaseIntentCalls)
             assertEquals(currentUser.id, billingRepository.testState.teamRegistrationPurchaseTargets.single()?.registrantId)
@@ -538,6 +544,7 @@ private object NoopMatchRepository : IMatchRepository {
         segmentOperations: List<com.razumly.mvp.core.network.dto.MatchSegmentOperationDto>?,
         incidentOperations: List<com.razumly.mvp.core.network.dto.MatchIncidentOperationDto>?,
         officialCheckIn: com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto?,
+        matchAction: com.razumly.mvp.core.network.dto.MatchActionOperationDto?,
         finalize: Boolean,
         time: kotlin.time.Instant?,
     ): Result<com.razumly.mvp.core.data.dataTypes.MatchMVP> = Result.success(match)
@@ -580,6 +587,63 @@ private object NoopMatchRepository : IMatchRepository {
         rangeStart: kotlin.time.Instant?,
         rangeEnd: kotlin.time.Instant?,
     ): Result<List<com.razumly.mvp.core.data.dataTypes.MatchMVP>> = Result.success(emptyList())
+
+    override suspend fun getEventTeamCheckIns(
+        eventId: String,
+    ): Result<com.razumly.mvp.core.network.dto.TeamCheckInsResponseDto> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun checkInEventTeam(
+        eventId: String,
+        eventTeamId: String,
+    ): Result<com.razumly.mvp.core.network.dto.TeamCheckInDto> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun getMatchTeamCheckIns(
+        eventId: String,
+        matchId: String,
+    ): Result<com.razumly.mvp.core.network.dto.TeamCheckInsResponseDto> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun checkInMatchTeam(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+    ): Result<com.razumly.mvp.core.network.dto.TeamCheckInDto> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun getMatchRosters(
+        eventId: String,
+        matchId: String,
+    ): Result<com.razumly.mvp.core.network.dto.MatchRostersResponseDto> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun removeMatchRosterPlayer(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+        userId: String,
+    ): Result<com.razumly.mvp.core.network.dto.MatchRosterDto> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun restoreMatchRosterPlayer(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+        userId: String,
+    ): Result<com.razumly.mvp.core.network.dto.MatchRosterDto> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun addTemporaryMatchRosterPlayer(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+        firstName: String?,
+        lastName: String?,
+        email: String?,
+        entryId: String?,
+    ): Result<com.razumly.mvp.core.network.dto.MatchRosterDto> =
+        Result.failure(IllegalStateException("unused"))
 
     override suspend fun deleteMatchesOfTournament(tournamentId: String): Result<Unit> = Result.success(Unit)
 

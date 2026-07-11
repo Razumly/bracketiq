@@ -2,9 +2,11 @@ package com.razumly.mvp.teamManagement
 
 import android.app.Application
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -25,6 +27,7 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.TeamInviteEventTeamOption
 import com.razumly.mvp.core.data.repositories.TeamInviteFreeAgentContext
+import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -157,35 +160,37 @@ class TeamInviteDialogUiTest {
         )
 
         composeRule.setContent {
-            MaterialTheme {
-                Box(
-                    modifier = Modifier
-                        .width(420.dp)
-                        .height(900.dp)
-                ) {
-                    CreateOrEditTeamScreen(
-                        team = TeamWithPlayers(
-                            team = team,
-                            captain = null,
-                            players = listOf(rosterPlayer),
-                            pendingPlayers = emptyList(),
-                        ),
-                        sports = emptyList(),
-                        friends = emptyList(),
-                        freeAgents = emptyList(),
-                        suggestions = emptyList(),
-                        onSearch = {},
-                        onFinish = {},
-                        onLeaveTeam = {},
-                        onDelete = {},
-                        onDismiss = {},
-                        deleteEnabled = false,
-                        selectedEvent = null,
-                        isCaptain = false,
-                        currentUser = currentUser,
-                        isNewTeam = false,
-                        staffUsersById = mapOf(manager.id to manager),
-                    )
+            CompositionLocalProvider(LocalNavBarPadding provides PaddingValues()) {
+                MaterialTheme {
+                    Box(
+                        modifier = Modifier
+                            .width(420.dp)
+                            .height(900.dp)
+                    ) {
+                        CreateOrEditTeamScreen(
+                            team = TeamWithPlayers(
+                                team = team,
+                                captain = null,
+                                players = listOf(rosterPlayer),
+                                pendingPlayers = emptyList(),
+                            ),
+                            sports = emptyList(),
+                            friends = emptyList(),
+                            freeAgents = emptyList(),
+                            suggestions = emptyList(),
+                            onSearch = {},
+                            onFinish = {},
+                            onLeaveTeam = {},
+                            onDelete = {},
+                            onDismiss = {},
+                            deleteEnabled = false,
+                            selectedEvent = null,
+                            isCaptain = false,
+                            currentUser = currentUser,
+                            isNewTeam = false,
+                            staffUsersById = mapOf(manager.id to manager),
+                        )
+                    }
                 }
             }
         }

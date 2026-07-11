@@ -43,6 +43,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
@@ -1173,6 +1174,7 @@ class TeamRepositoryTeamsFetchTest {
             name = "Existing Team",
             captainId = "u1",
             managerId = "u1",
+            profileImageId = "image_1",
             playerIds = listOf("u1", "u2"),
             pending = emptyList(),
             teamSize = 6,
@@ -1270,6 +1272,61 @@ class TeamRepositoryTeamsFetchTest {
         assertTrue("openRegistration" !in teamPayload)
         assertTrue("registrationPriceCents" !in teamPayload)
         assertTrue("assistantCoachIds" !in teamPayload)
+        assertTrue("managerId" !in teamPayload)
+        assertTrue("profileImageId" !in teamPayload)
+    }
+
+    @Test
+    fun updateTeam_encodesExplicitProfileImageClearAsJsonNull() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+        var capturedRequestBody = ""
+        val existingTeam = Team(
+            division = "Open",
+            name = "Existing Team",
+            captainId = "u1",
+            managerId = "u1",
+            profileImageId = "image_1",
+            playerIds = listOf("u1"),
+            pending = emptyList(),
+            teamSize = 6,
+            id = "team_1",
+        ).withSynchronizedMembership()
+        teamDao.upsertTeamWithRelations(existingTeam)
+
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Patch, request.method)
+            assertEquals("/api/teams/team_1", request.url.encodedPath)
+            capturedRequestBody = outgoingBodyText(request.body)
+            respond(
+                content = """
+                    {
+                      "id": "team_1",
+                      "name": "Existing Team",
+                      "division": "Open",
+                      "playerIds": ["u1"],
+                      "captainId": "u1",
+                      "pending": [],
+                      "teamSize": 6
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        repo.updateTeam(existingTeam.copy(profileImageId = null).withSynchronizedMembership()).getOrThrow()
+
+        val teamPatch = jsonMVP.parseToJsonElement(capturedRequestBody)
+            .jsonObject
+            .getValue("team")
+            .jsonObject
+        assertEquals(JsonNull, teamPatch["profileImageId"])
     }
 }
 

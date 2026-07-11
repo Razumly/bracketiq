@@ -6,6 +6,7 @@ import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.MATCH_OPERATION_STATUS_ACKED
 import com.razumly.mvp.core.data.dataTypes.MATCH_OPERATION_STATUS_FAILED
 import com.razumly.mvp.core.data.dataTypes.MATCH_OPERATION_STATUS_PENDING
+import com.razumly.mvp.core.data.dataTypes.MATCH_OPERATION_STATUS_RECONCILING
 import com.razumly.mvp.core.data.dataTypes.MATCH_OPERATION_STATUS_SYNCING
 import com.razumly.mvp.core.data.dataTypes.MatchOperationOutboxEntry
 
@@ -20,7 +21,7 @@ interface MatchOperationOutboxDao {
     @Query(
         """
         SELECT * FROM MatchOperationOutboxEntry
-        WHERE status IN (:pendingStatus, :failedStatus, :syncingStatus)
+        WHERE status IN (:pendingStatus, :failedStatus, :syncingStatus, :reconcilingStatus)
         ORDER BY clientSequence ASC, clientCreatedAt ASC
         """,
     )
@@ -28,13 +29,14 @@ interface MatchOperationOutboxDao {
         pendingStatus: String = MATCH_OPERATION_STATUS_PENDING,
         failedStatus: String = MATCH_OPERATION_STATUS_FAILED,
         syncingStatus: String = MATCH_OPERATION_STATUS_SYNCING,
+        reconcilingStatus: String = MATCH_OPERATION_STATUS_RECONCILING,
     ): List<MatchOperationOutboxEntry>
 
     @Query(
         """
         SELECT * FROM MatchOperationOutboxEntry
         WHERE matchId = :matchId
-          AND status IN (:pendingStatus, :failedStatus, :syncingStatus)
+          AND status IN (:pendingStatus, :failedStatus, :syncingStatus, :reconcilingStatus)
         ORDER BY clientSequence ASC, clientCreatedAt ASC
         """,
     )
@@ -43,18 +45,20 @@ interface MatchOperationOutboxDao {
         pendingStatus: String = MATCH_OPERATION_STATUS_PENDING,
         failedStatus: String = MATCH_OPERATION_STATUS_FAILED,
         syncingStatus: String = MATCH_OPERATION_STATUS_SYNCING,
+        reconcilingStatus: String = MATCH_OPERATION_STATUS_RECONCILING,
     ): List<MatchOperationOutboxEntry>
 
     @Query(
         """
         SELECT COUNT(*) FROM MatchOperationOutboxEntry
-        WHERE status IN (:pendingStatus, :failedStatus, :syncingStatus)
+        WHERE status IN (:pendingStatus, :failedStatus, :syncingStatus, :reconcilingStatus)
         """,
     )
     suspend fun pendingOperationCount(
         pendingStatus: String = MATCH_OPERATION_STATUS_PENDING,
         failedStatus: String = MATCH_OPERATION_STATUS_FAILED,
         syncingStatus: String = MATCH_OPERATION_STATUS_SYNCING,
+        reconcilingStatus: String = MATCH_OPERATION_STATUS_RECONCILING,
     ): Int
 
     @Query("SELECT * FROM MatchOperationOutboxEntry WHERE id IN (:ids)")

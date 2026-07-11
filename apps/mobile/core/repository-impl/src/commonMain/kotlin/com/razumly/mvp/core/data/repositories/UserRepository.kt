@@ -4,9 +4,11 @@ import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.data.dataTypes.NotificationSettings
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.normalizeNotificationSettings
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.auth.NoOpWatchAuthSync
 import com.razumly.mvp.core.auth.WatchAuthSync
@@ -205,7 +207,7 @@ data class UserVisibilityContext(
 
 data class ChatTermsConsentState(
     val version: String = "",
-    val url: String = "/terms",
+    val url: String? = null,
     val summary: List<String> = emptyList(),
     val accepted: Boolean = false,
     val acceptedAt: String? = null,
@@ -309,6 +311,16 @@ interface IUserRepository : IMVPRepository {
     ): Result<UserData>
 
     suspend fun updateUser(user: UserData): Result<UserData>
+
+    suspend fun updateNotificationSettings(settings: NotificationSettings): Result<UserData> =
+        currentUser.value.getOrNull()
+            ?.let { user -> updateUser(user.copy(notificationSettings = settings)) }
+            ?: Result.failure(IllegalStateException("No user"))
+
+    suspend fun updateUploadedImages(imageIds: List<String>): Result<UserData> =
+        currentUser.value.getOrNull()
+            ?.let { user -> updateUser(user.copy(uploadedImages = imageIds)) }
+            ?: Result.failure(IllegalStateException("No user"))
 
     suspend fun updateEmail(email: String, password: String): Result<Unit>
 
@@ -759,10 +771,13 @@ class UserRepository(
         _chatTermsConsentLoading.value = false
         runCatching { tokenStore.clear() }
         runCatching { currentUserDataSource.saveUserId("") }
+        // Root's cleanup collector keys off this state when the empty-user emission arrives.
+        // Publish the authorization state first so push, chat, registration, and shortcut cleanup
+        // cannot be skipped by flow ordering.
+        _startupAuthState.value = StartupAuthState.Unauthenticated
         _currentUser.value = Result.failure(Exception("No User"))
         _currentAccount.value = Result.failure(Exception("No Account"))
         updateRequiredProfileCompletionState(RequiredProfileCompletionState())
-        _startupAuthState.value = StartupAuthState.Unauthenticated
     }
 
     private fun updateStartupAuthStateFromCurrentUser() {
@@ -1252,14 +1267,7 @@ class UserRepository(
                 firstName = normalizedUser.firstName,
                 lastName = normalizedUser.lastName,
                 userName = normalizedUser.userName,
-                friendIds = normalizedUser.friendIds,
-                friendRequestIds = normalizedUser.friendRequestIds,
-                friendRequestSentIds = normalizedUser.friendRequestSentIds,
-                followingIds = normalizedUser.followingIds,
-                hasStripeAccount = normalizedUser.hasStripeAccount,
-                uploadedImages = normalizedUser.uploadedImages,
                 profileImageId = normalizedUser.profileImageId,
-                notificationSettings = normalizedUser.notificationSettings,
             )
         )
 
@@ -1286,6 +1294,42 @@ class UserRepository(
         databaseService.getUserDataDao.upsertUserWithRelations(updated)
 
         // Update current user state.
+        _currentUser.value = Result.success(updated)
+        updated
+    }
+
+    override suspend fun updateNotificationSettings(settings: NotificationSettings): Result<UserData> = runCatching {
+        val current = currentUser.value.getOrThrow()
+        val normalizedSettings = normalizeNotificationSettings(settings)
+        val response = api.patch<UpdateUserRequestDto, UserResponseDto>(
+            path = "api/users/${current.id}",
+            body = UpdateUserRequestDto(
+                data = UserUpdateDto(notificationSettings = normalizedSettings),
+            ),
+        )
+        val responseUser = response.user
+        val updated = responseUser?.toUserDataOrNull()
+            ?.copy(notificationSettings = responseUser.notificationSettings ?: normalizedSettings)
+            ?: current.copy(notificationSettings = normalizedSettings)
+        databaseService.getUserDataDao.upsertUserWithRelations(updated)
+        _currentUser.value = Result.success(updated)
+        updated
+    }
+
+    override suspend fun updateUploadedImages(imageIds: List<String>): Result<UserData> = runCatching {
+        val current = currentUser.value.getOrThrow()
+        val normalizedImageIds = imageIds.map(String::trim).filter(String::isNotBlank).distinct()
+        val response = api.patch<UpdateUserRequestDto, UserResponseDto>(
+            path = "api/users/${current.id}",
+            body = UpdateUserRequestDto(
+                data = UserUpdateDto(uploadedImages = normalizedImageIds),
+            ),
+        )
+        val responseUser = response.user
+        val updated = responseUser?.toUserDataOrNull()
+            ?.copy(uploadedImages = responseUser.uploadedImages ?: normalizedImageIds)
+            ?: current.copy(uploadedImages = normalizedImageIds)
+        databaseService.getUserDataDao.upsertUserWithRelations(updated)
         _currentUser.value = Result.success(updated)
         updated
     }
@@ -1690,7 +1734,7 @@ private data class ChatTermsConsentResponseDto(
         if (code == CHAT_TERMS_REQUIRED_CODE) {
             return ChatTermsConsentState(
                 version = version.orEmpty(),
-                url = url?.trim()?.takeIf(String::isNotBlank) ?: "/terms",
+                url = url?.trim()?.takeIf(String::isNotBlank),
                 summary = summary,
                 accepted = false,
                 acceptedAt = null,
@@ -1699,7 +1743,7 @@ private data class ChatTermsConsentResponseDto(
 
         return ChatTermsConsentState(
             version = version.orEmpty(),
-            url = url?.trim()?.takeIf(String::isNotBlank) ?: "/terms",
+            url = url?.trim()?.takeIf(String::isNotBlank),
             summary = summary,
             accepted = accepted == true,
             acceptedAt = acceptedAt?.trim()?.takeIf(String::isNotBlank),

@@ -13,6 +13,18 @@ data class RefundRequestDTO(
     val reason: String,
     val organizationId: String? = null,
     val status: String? = null,
+    val createdAt: String? = null,
+    val requestedByUserId: String? = null,
+    val teamId: String? = null,
+    val slotId: String? = null,
+    val occurrenceDate: String? = null,
+    val billIds: List<String> = emptyList(),
+    val paymentIds: List<String> = emptyList(),
+    val requestedAmountCents: Int = 0,
+    val currency: String = "usd",
+    val policyDecision: String? = null,
+    val scopeVersion: Int = 1,
+    val scopeHash: String? = null,
 ) {
     fun toRefundRequest(id: String): RefundRequest {
         return RefundRequest(
@@ -22,7 +34,19 @@ data class RefundRequestDTO(
             hostId = hostId,
             reason = reason,
             organizationId = organizationId,
-            status = status
+            status = status,
+            createdAt = createdAt,
+            requestedByUserId = requestedByUserId,
+            teamId = teamId,
+            slotId = slotId,
+            occurrenceDate = occurrenceDate,
+            billIds = billIds,
+            paymentIds = paymentIds,
+            requestedAmountCents = requestedAmountCents,
+            currency = currency,
+            policyDecision = policyDecision,
+            scopeVersion = scopeVersion,
+            scopeHash = scopeHash,
         )
     }
 }

@@ -1,12 +1,14 @@
 package com.razumly.mvp.eventDetail.data
 
 import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MATCH_OPERATION_KIND_SCORE_SET
 import com.razumly.mvp.core.data.dataTypes.MATCH_OPERATION_KIND_UPDATE
 import com.razumly.mvp.core.data.dataTypes.MATCH_OPERATION_STATUS_FAILED
+import com.razumly.mvp.core.data.dataTypes.MATCH_OPERATION_STATUS_RECONCILING
 import com.razumly.mvp.core.data.dataTypes.MatchOperationOutboxEntry
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
@@ -47,6 +49,7 @@ import com.razumly.mvp.core.network.dto.toBulkMatchCreateEntryDto
 import com.razumly.mvp.core.network.dto.toBulkMatchUpdateEntryDto
 import com.razumly.mvp.core.network.dto.toMatchOperationsJsonObject
 import com.razumly.mvp.core.util.jsonMVP
+import com.razumly.mvp.core.util.newId
 import io.ktor.http.encodeURLQueryComponent
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
@@ -67,12 +70,17 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
@@ -168,20 +176,30 @@ class MatchRepository(
     private val databaseService: DatabaseService,
     private val watchMatchOperationSync: WatchMatchOperationSync = NoOpWatchMatchOperationSync,
     private val autoSyncOperations: Boolean = true,
+    private val currentUserDataSource: CurrentUserDataSource? = null,
 ) : IMatchRepository {
     private companion object {
         const val CLIENT_MATCH_PREFIX = "client:"
         const val LOCAL_PLACEHOLDER_PREFIX = "placeholder-local:"
         const val LOCAL_OPERATION_SOURCE_DEVICE = "PHONE"
-        const val LOCAL_OPERATION_DEVICE_ID = "phone"
+        val processOutboxEnqueueMutex = Mutex()
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val outboxSyncMutex = Mutex()
+    private var outboxRetryJob: Job? = null
     private var _ignoreMatch = MutableStateFlow<MatchMVP?>(null)
     private val realtimePauseReasons = MutableStateFlow<Set<String>>(emptySet())
     private var realtimeJob: Job? = null
     private var realtimeEventId: String? = null
     private var activeRealtimeEventId: String? = null
+    private var fallbackClientDeviceId: String? = null
+
+    init {
+        if (autoSyncOperations) {
+            scope.launch { syncPendingMatchOperations() }
+        }
+    }
 
     private fun normalizeOptionalToken(value: String?): String? =
         value?.trim()?.takeIf(String::isNotBlank)
@@ -302,16 +320,30 @@ class MatchRepository(
         }
     }
 
-    private suspend fun applyPendingLocalOperations(match: MatchMVP): MatchMVP {
+    private suspend fun applyPendingLocalOperations(
+        match: MatchMVP,
+        excludedOperationId: String? = null,
+    ): MatchMVP {
         val operations = databaseService.getMatchOperationOutboxDao
             .getPendingOperationsForMatch(match.id)
+            .filterNot { operation ->
+                operation.id == excludedOperationId ||
+                    operation.status == MATCH_OPERATION_STATUS_RECONCILING
+            }
         return operations.fold(match) { current, operation ->
             applyOutboxOperationLocally(current, operation)
         }
     }
 
-    private suspend fun mergePendingLocalState(remoteMatch: MatchMVP, localMatch: MatchMVP?): MatchMVP =
-        applyPendingLocalOperations(mergeLocalMatchState(remoteMatch, localMatch))
+    private suspend fun mergePendingLocalState(
+        remoteMatch: MatchMVP,
+        localMatch: MatchMVP?,
+        excludedOperationId: String? = null,
+    ): MatchMVP =
+        applyPendingLocalOperations(
+            match = mergeLocalMatchState(remoteMatch, localMatch),
+            excludedOperationId = excludedOperationId,
+        )
 
     private suspend fun mergePendingLocalState(remoteMatches: List<MatchMVP>): List<MatchMVP> {
         if (remoteMatches.isEmpty()) return remoteMatches
@@ -323,9 +355,18 @@ class MatchRepository(
         }
     }
 
-    private suspend fun upsertRemoteMatchPreservingPendingIncidents(remoteMatch: MatchMVP) {
+    private suspend fun upsertRemoteMatchPreservingPendingIncidents(
+        remoteMatch: MatchMVP,
+        excludedOperationId: String? = null,
+    ) {
         val localMatch = databaseService.getMatchDao.getMatchById(remoteMatch.id)?.match
-        databaseService.getMatchDao.upsertMatch(mergePendingLocalState(remoteMatch, localMatch))
+        databaseService.getMatchDao.upsertMatch(
+            mergePendingLocalState(
+                remoteMatch = remoteMatch,
+                localMatch = localMatch,
+                excludedOperationId = excludedOperationId,
+            ),
+        )
     }
 
     private suspend fun upsertRemoteMatchesPreservingPendingIncidents(remoteMatches: List<MatchMVP>) {
@@ -377,6 +418,67 @@ class MatchRepository(
         )
     }
 
+    /**
+     * Bulk PATCH must not turn every absent nullable field into a clear. Since MatchMVP does not
+     * carry presence bits, a null is sent only when this edit changed a cached non-null value to
+     * null. A missing cache entry remains omission-only.
+     */
+    private fun MatchMVP.explicitlyClearedBulkFields(
+        cached: MatchMVP?,
+        submitted: MatchMVP,
+    ): Set<String> {
+        if (cached == null) return emptySet()
+        return buildSet {
+            fun addWhenCleared(
+                field: String,
+                previous: Any?,
+                current: Any?,
+                explicitlyCleared: Boolean = true,
+            ) {
+                if (previous != null && current == null && explicitlyCleared) add(field)
+            }
+
+            // Sanitizing a local placeholder must omit it rather than clearing a persisted team.
+            addWhenCleared(
+                "team1Id",
+                cached.team1Id,
+                team1Id,
+                submitted.team1Id.isNullOrBlank(),
+            )
+            addWhenCleared(
+                "team2Id",
+                cached.team2Id,
+                team2Id,
+                submitted.team2Id.isNullOrBlank(),
+            )
+            addWhenCleared("team1Seed", cached.team1Seed, team1Seed)
+            addWhenCleared("team2Seed", cached.team2Seed, team2Seed)
+            addWhenCleared("officialId", cached.officialId, officialId)
+            addWhenCleared("teamOfficialId", cached.teamOfficialId, teamOfficialId)
+            addWhenCleared("fieldId", cached.fieldId, fieldId)
+            addWhenCleared("previousLeftId", cached.previousLeftId, previousLeftId)
+            addWhenCleared("previousRightId", cached.previousRightId, previousRightId)
+            addWhenCleared("winnerNextMatchId", cached.winnerNextMatchId, winnerNextMatchId)
+            addWhenCleared("loserNextMatchId", cached.loserNextMatchId, loserNextMatchId)
+            addWhenCleared("side", cached.side, side)
+            addWhenCleared("officialCheckedIn", cached.officialCheckedIn, officialCheckedIn)
+            addWhenCleared("start", cached.start, start)
+            addWhenCleared("end", cached.end, end)
+            addWhenCleared("division", cached.division, division)
+            addWhenCleared("matchRulesSnapshot", cached.matchRulesSnapshot, matchRulesSnapshot)
+            addWhenCleared("resolvedMatchRules", cached.resolvedMatchRules, resolvedMatchRules)
+        }
+    }
+
+    private fun BulkMatchUpdateEntryDto.toPresenceAwareJson(clearFields: Set<String>): JsonObject {
+        val encoded = jsonMVP.encodeToJsonElement(this).jsonObject
+        if (clearFields.isEmpty()) return encoded
+        return buildJsonObject {
+            encoded.forEach { (key, value) -> put(key, value) }
+            clearFields.filterNot(encoded::containsKey).forEach { field -> put(field, JsonNull) }
+        }
+    }
+
     private fun MatchMVP.toSegmentOperations(): List<MatchSegmentOperationDto>? =
         segments
             .takeIf { it.isNotEmpty() }
@@ -396,9 +498,6 @@ class MatchRepository(
 
     private suspend fun nextClientSequence(): Long =
         databaseService.getMatchOperationOutboxDao.maxClientSequence() + 1L
-
-    private fun operationIdFor(matchId: String, sequence: Long): String =
-        "$LOCAL_OPERATION_DEVICE_ID:$matchId:$sequence"
 
     private fun MatchSegmentOperationDto.withClientOperation(entry: MatchOperationOutboxEntry): MatchSegmentOperationDto =
         copy(
@@ -446,14 +545,16 @@ class MatchRepository(
     ): MatchOperationOutboxEntry {
         val sequence = nextClientSequence()
         val now = Clock.System.now().toString()
+        val clientDeviceId = currentUserDataSource?.getOrCreateMatchOperationDeviceId()
+            ?: (fallbackClientDeviceId ?: newId().also { fallbackClientDeviceId = it })
         return MatchOperationOutboxEntry(
-            id = operationIdFor(match.id, sequence),
+            id = "$clientDeviceId:${match.id}:$sequence",
             eventId = match.eventId,
             matchId = match.id,
             operationKind = operationKind,
             payloadJson = payloadJson,
             sourceDevice = LOCAL_OPERATION_SOURCE_DEVICE,
-            clientDeviceId = LOCAL_OPERATION_DEVICE_ID,
+            clientDeviceId = clientDeviceId,
             clientSequence = sequence,
             clientCreatedAt = now,
         )
@@ -462,7 +563,7 @@ class MatchRepository(
     private suspend fun enqueueMatchUpdate(
         match: MatchMVP,
         update: MatchUpdateDto,
-    ): MatchMVP {
+    ): MatchMVP = processOutboxEnqueueMutex.withLock {
         val provisional = newOutboxEntry(
             match = match,
             operationKind = MATCH_OPERATION_KIND_UPDATE,
@@ -471,8 +572,7 @@ class MatchRepository(
         val payload = update.withClientOperation(provisional)
         val entry = provisional.copy(payloadJson = payload.toMatchOperationsJsonObject().toString())
         val localMatch = match.applyLocalMatchUpdate(payload)
-        databaseService.getMatchOperationOutboxDao.upsertOperation(entry)
-        databaseService.getMatchDao.upsertMatch(localMatch)
+        databaseService.enqueueMatchOperationAndOptimisticMatch(entry, localMatch)
         scheduleWatchOperationSync(entry)
         scheduleMatchOperationSync(match.id)
         return localMatch
@@ -481,7 +581,7 @@ class MatchRepository(
     private suspend fun enqueueScoreSet(
         match: MatchMVP,
         scoreSet: MatchScoreSetDto,
-    ): MatchMVP {
+    ): MatchMVP = processOutboxEnqueueMutex.withLock {
         val provisional = newOutboxEntry(
             match = match,
             operationKind = MATCH_OPERATION_KIND_SCORE_SET,
@@ -490,8 +590,7 @@ class MatchRepository(
         val payload = scoreSet.withClientOperation(provisional)
         val entry = provisional.copy(payloadJson = jsonMVP.encodeToString(payload))
         val localMatch = match.applyLocalScoreSet(payload)
-        databaseService.getMatchOperationOutboxDao.upsertOperation(entry)
-        databaseService.getMatchDao.upsertMatch(localMatch)
+        databaseService.enqueueMatchOperationAndOptimisticMatch(entry, localMatch)
         scheduleWatchOperationSync(entry)
         scheduleMatchOperationSync(match.id)
         return localMatch
@@ -509,6 +608,19 @@ class MatchRepository(
     private fun scheduleMatchOperationSync(matchId: String) {
         if (autoSyncOperations) {
             scope.launch { syncPendingMatchOperations(matchId) }
+        }
+    }
+
+    private fun scheduleMatchOperationRetry() {
+        if (!autoSyncOperations || outboxRetryJob?.isActive == true) return
+        outboxRetryJob = scope.launch {
+            while (currentCoroutineContext().isActive) {
+                delay(5_000)
+                syncPendingMatchOperations()
+                if (databaseService.getMatchOperationOutboxDao.pendingOperationCount() == 0) {
+                    return@launch
+                }
+            }
         }
     }
 
@@ -564,27 +676,41 @@ class MatchRepository(
 
     private suspend fun syncOutboxOperation(operation: MatchOperationOutboxEntry): Boolean {
         val dao = databaseService.getMatchOperationOutboxDao
+        if (operation.status == MATCH_OPERATION_STATUS_RECONCILING) {
+            return reconcileRejectedOperation(dao, operation)
+        }
         val attemptAt = Clock.System.now().toString()
         dao.markAttempting(operation.id, attemptAt)
         return try {
             val remoteMatch = sendOutboxOperation(operation)
+            // Persist canonical state before ACK. If the process dies after this write, the
+            // durable operation is safely replayed through the server receipt rather than
+            // leaving a stale optimistic match with no reconciliation path.
+            upsertRemoteMatchPreservingPendingIncidents(
+                remoteMatch = remoteMatch,
+                excludedOperationId = operation.id,
+            )
             dao.markAcked(operation.id, Clock.System.now().toString())
-            upsertRemoteMatchPreservingPendingIncidents(remoteMatch)
             true
         } catch (error: CancellationException) {
             throw error
         } catch (error: ApiException) {
             if (isTerminalMatchActionConflict(operation, error)) {
-                runCatching { fetchRemoteMatch(operation.eventId, operation.matchId) }
-                    .onSuccess { remoteMatch -> upsertRemoteMatchPreservingPendingIncidents(remoteMatch) }
-                    .onFailure { fetchError ->
-                        Napier.w(
-                            "Terminal match action conflict for ${operation.id}; acking without refresh: ${fetchError.message}",
-                        )
-                    }
-                dao.markAcked(operation.id, Clock.System.now().toString())
-                Napier.i("Acked terminal match action conflict for ${operation.id}.")
-                true
+                val rejectedOperation = markOutboxOperationReconciling(
+                    dao = dao,
+                    operation = operation,
+                    message = "Match action was rejected because the match is already completed or cancelled",
+                )
+                reconcileRejectedOperation(
+                    dao = dao,
+                    operation = rejectedOperation,
+                )
+            } else if (error.statusCode in 400..499 && error.statusCode !in setOf(408, 429)) {
+                val message = error.message ?: "Match operation was rejected"
+                val rejectedOperation = markOutboxOperationReconciling(dao, operation, message)
+                val reconciled = reconcileRejectedOperation(dao, rejectedOperation)
+                Napier.w("Rejected terminal match operation ${operation.id}: $message")
+                reconciled
             } else {
                 markOutboxOperationFailed(dao, operation, error)
                 false
@@ -593,6 +719,52 @@ class MatchRepository(
             markOutboxOperationFailed(dao, operation, error)
             false
         }
+    }
+
+    /** Persist terminal rejection before the network read so relaunches never re-POST it. */
+    private suspend fun markOutboxOperationReconciling(
+        dao: com.razumly.mvp.core.data.dataTypes.daos.MatchOperationOutboxDao,
+        operation: MatchOperationOutboxEntry,
+        message: String,
+    ): MatchOperationOutboxEntry {
+        dao.markFailed(
+            id = operation.id,
+            error = message,
+            failedAt = Clock.System.now().toString(),
+            status = MATCH_OPERATION_STATUS_RECONCILING,
+        )
+        return operation.copy(
+            status = MATCH_OPERATION_STATUS_RECONCILING,
+            lastError = message,
+        )
+    }
+
+    /** A terminal write failure must never be replayed; retry only the authoritative read. */
+    private suspend fun reconcileRejectedOperation(
+        dao: com.razumly.mvp.core.data.dataTypes.daos.MatchOperationOutboxDao,
+        operation: MatchOperationOutboxEntry,
+    ): Boolean = runCatching {
+        val remoteMatch = fetchRemoteMatch(operation.eventId, operation.matchId)
+        // Exclude the rejected overlay while it is still durable, then ACK only after the
+        // canonical replacement is stored. Either crash point remains reconcilable.
+        upsertRemoteMatchPreservingPendingIncidents(
+            remoteMatch = remoteMatch,
+            excludedOperationId = operation.id,
+        )
+        dao.markAcked(operation.id, Clock.System.now().toString())
+        true
+    }.getOrElse { fetchError ->
+        if (fetchError is CancellationException) throw fetchError
+        val message = operation.lastError
+            ?: "Match operation was rejected and awaits reconciliation"
+        dao.markFailed(
+            id = operation.id,
+            error = "$message; reconciliation failed: ${fetchError.message.orEmpty()}",
+            failedAt = Clock.System.now().toString(),
+            status = MATCH_OPERATION_STATUS_RECONCILING,
+        )
+        Napier.w("Unable to reconcile rejected match operation ${operation.id}: ${fetchError.message}")
+        false
     }
 
     private suspend fun markOutboxOperationFailed(
@@ -909,6 +1081,7 @@ class MatchRepository(
         )
 
     override suspend fun syncPendingMatchOperations(matchId: String?): Result<Int> = runCatching {
+        outboxSyncMutex.withLock {
         val dao = databaseService.getMatchOperationOutboxDao
         val pendingOperations = if (matchId == null) {
             dao.getPendingOperations()
@@ -919,11 +1092,13 @@ class MatchRepository(
         for (operation in pendingOperations) {
             val didSync = syncOutboxOperation(operation)
             if (!didSync) {
+                scheduleMatchOperationRetry()
                 break
             }
             syncedCount += 1
         }
         syncedCount
+        }
     }
 
     override suspend fun updateMatchesBulk(
@@ -964,7 +1139,14 @@ class MatchRepository(
         val eventId = eventIds.first()
 
         return runCatching {
-            val updateEntries: List<BulkMatchUpdateEntryDto> = normalizedUpdates.map { it.toBulkMatchUpdateEntryDto() }
+            val submittedUpdatesById = matches
+                .filter { match -> match.id.isNotBlank() && !match.id.startsWith(CLIENT_MATCH_PREFIX) }
+                .associateBy(MatchMVP::id)
+            val updateEntries: List<Pair<BulkMatchUpdateEntryDto, Set<String>>> = normalizedUpdates.map { match ->
+                val cached = databaseService.getMatchDao.getMatchById(match.id)?.match
+                val submitted = submittedUpdatesById[match.id] ?: match
+                match.toBulkMatchUpdateEntryDto() to match.explicitlyClearedBulkFields(cached, submitted)
+            }
             val createEntries: List<BulkMatchCreateEntryDto> = normalizedCreates.map { create ->
                 create.match.toBulkMatchCreateEntryDto(
                     clientId = create.clientId,
@@ -973,13 +1155,28 @@ class MatchRepository(
                 )
             }
 
-            val response = api.patch<BulkMatchUpdateRequestDto, BulkMatchesResponseDto>(
+            val requestBody = buildJsonObject {
+                if (updateEntries.isNotEmpty()) {
+                    put(
+                        "matches",
+                        JsonArray(updateEntries.map { (entry, clearFields) ->
+                            entry.toPresenceAwareJson(clearFields)
+                        }),
+                    )
+                }
+                if (createEntries.isNotEmpty()) {
+                    put(
+                        "creates",
+                        JsonArray(createEntries.map { entry -> jsonMVP.encodeToJsonElement(entry) }),
+                    )
+                }
+                if (normalizedDeletes.isNotEmpty()) {
+                    put("deletes", JsonArray(normalizedDeletes.map(::JsonPrimitive)))
+                }
+            }
+            val response = api.patch<JsonObject, BulkMatchesResponseDto>(
                 path = "api/events/$eventId/matches",
-                body = BulkMatchUpdateRequestDto(
-                    matches = updateEntries.ifEmpty { null },
-                    creates = createEntries.ifEmpty { null },
-                    deletes = normalizedDeletes.ifEmpty { null },
-                ),
+                body = requestBody,
             )
 
             persistEmbeddedFields(response.matches)

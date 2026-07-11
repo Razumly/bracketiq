@@ -21,6 +21,7 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.repositories.AppUpdatePrompt
 import com.razumly.mvp.core.data.repositories.IAppUpdateRepository
+import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.StartupAuthState
@@ -242,6 +243,12 @@ class RootComponent(
                             refreshChatsOnStartupIfNeeded(userData.id)
                             startChatRefreshLoopIfNeeded(userData.id)
                             startCenterActionRefreshLoopIfNeeded(userData.id)
+                            scope.launch {
+                                _koin.get<IBillingRepository>().syncPendingRentalOrders()
+                                    .onFailure { error ->
+                                        Napier.w("Unable to retry pending paid rentals: ${error.message}")
+                                    }
+                            }
                         } else if (userRepository.startupAuthState.value == StartupAuthState.Unauthenticated) {
                             clearRegistrationCacheSyncState()
                             clearPushTargetIfNeeded()

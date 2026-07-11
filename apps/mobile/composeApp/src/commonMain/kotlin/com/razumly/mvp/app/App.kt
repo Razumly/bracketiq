@@ -2,7 +2,6 @@ package com.razumly.mvp.app
 
 import androidx.collection.MutableObjectList
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,6 +48,8 @@ import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -484,40 +485,51 @@ private fun StartupSplashScreen() {
 fun LoadingOverlay(
     message: String, progress: Float? = null, modifier: Modifier = Modifier
 ) {
-    Box(
-        modifier = modifier.background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.42f))
-            .clickable(enabled = false) { }, // Prevent interaction
-        contentAlignment = Alignment.Center
+    // A platform Dialog gives assistive technologies a true modal boundary and
+    // prevents keyboard focus from escaping to controls behind the overlay.
+    Dialog(
+        onDismissRequest = {},
+        properties = DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false,
+            usePlatformDefaultWidth = false,
+        ),
     ) {
-        Card(
-            modifier = Modifier.padding(32.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.42f))
+                .semantics { contentDescription = "Loading. $message" },
+            contentAlignment = Alignment.Center,
         ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+            Card(
+                modifier = Modifier.padding(32.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
             ) {
-                if (progress != null) {
-                    // Determinate progress indicator
-                    CircularProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier.size(48.dp),
-                        trackColor = ProgressIndicatorDefaults.circularIndeterminateTrackColor,
-                    )
-                    Text("${(progress * 100).toInt()}%")
-                } else {
-                    // Indeterminate progress indicator
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(48.dp)
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    if (progress != null) {
+                        CircularProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier.size(48.dp),
+                            trackColor = ProgressIndicatorDefaults.circularIndeterminateTrackColor,
+                        )
+                        Text("${(progress * 100).toInt()}%")
+                    } else {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(48.dp)
+                        )
+                    }
+
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center
                     )
                 }
-
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center
-                )
             }
         }
     }

@@ -4,6 +4,9 @@ import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.PENDING_RENTAL_ORDER_STATUS_AWAITING_PAYMENT
+import com.razumly.mvp.core.data.dataTypes.PENDING_RENTAL_ORDER_STATUS_REJECTED
+import com.razumly.mvp.core.data.dataTypes.PendingRentalOrder
 import com.razumly.mvp.core.data.dataTypes.OrganizationVerificationReviewStatus
 import com.razumly.mvp.core.data.dataTypes.OrganizationVerificationStatus
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
@@ -20,6 +23,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
 import com.razumly.mvp.core.data.dataTypes.daos.MessageDao
+import com.razumly.mvp.core.data.dataTypes.daos.PendingRentalOrderDao
 import com.razumly.mvp.core.data.dataTypes.daos.RefundRequestDao
 import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
@@ -27,6 +31,7 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.AuthTokenStore
 import com.razumly.mvp.core.network.MvpApiClient
+import com.razumly.mvp.core.network.configureMvpHttpClient
 import com.razumly.mvp.core.network.stripeRedirectBaseUrl
 import com.razumly.mvp.core.util.jsonMVP
 import io.ktor.client.HttpClient
@@ -57,6 +62,11 @@ private class BillingRepositoryHttp_InMemoryAuthTokenStore(
     override suspend fun set(token: String) { this.token = token }
     override suspend fun clear() { token = "" }
 }
+
+private fun billingRepositoryHttpProductionClient(engine: MockEngine): HttpClient =
+    HttpClient(engine) {
+        configureMvpHttpClient()
+    }
 
 private class BillingRepositoryHttp_FakeRefundRequestDao : RefundRequestDao {
     var storedRefunds: List<RefundRequest> = emptyList()
@@ -108,8 +118,69 @@ private class BillingRepositoryHttp_FakeRefundRequestDao : RefundRequestDao {
         }
 }
 
+private class BillingRepositoryHttp_FakePendingRentalOrderDao : PendingRentalOrderDao {
+    private val orders = linkedMapOf<String, PendingRentalOrder>()
+    val storedOrders: List<PendingRentalOrder>
+        get() = orders.values.toList()
+
+    override suspend fun upsert(order: PendingRentalOrder) {
+        orders[order.id] = order
+    }
+
+    override suspend fun retryableOrders(
+        payerUserId: String,
+        pendingStatus: String,
+        awaitingPaymentStatus: String,
+    ): List<PendingRentalOrder> =
+        orders.values.filter { order ->
+            order.payerUserId == payerUserId &&
+                order.status in setOf(pendingStatus, awaitingPaymentStatus)
+        }
+
+    override suspend fun deleteById(id: String) {
+        orders.remove(id)
+    }
+
+    override suspend fun markFailed(id: String, error: String, attemptedAt: String) {
+        orders[id]?.let { order ->
+            orders[id] = order.copy(
+                attemptCount = order.attemptCount + 1,
+                lastError = error,
+                lastAttemptAt = attemptedAt,
+            )
+        }
+    }
+
+    override suspend fun markAwaitingPayment(
+        id: String,
+        error: String,
+        attemptedAt: String,
+        status: String,
+    ) {
+        orders[id]?.let { order ->
+            orders[id] = order.copy(
+                status = status,
+                lastError = error,
+                lastAttemptAt = attemptedAt,
+            )
+        }
+    }
+
+    override suspend fun markRejected(id: String, error: String, attemptedAt: String, status: String) {
+        orders[id]?.let { order ->
+            orders[id] = order.copy(
+                status = status,
+                attemptCount = order.attemptCount + 1,
+                lastError = error,
+                lastAttemptAt = attemptedAt,
+            )
+        }
+    }
+}
+
 private class BillingRepositoryHttp_FakeDatabaseService(
     private val refundRequestDao: RefundRequestDao = BillingRepositoryHttp_FakeRefundRequestDao(),
+    private val pendingRentalOrderDao: PendingRentalOrderDao = BillingRepositoryHttp_FakePendingRentalOrderDao(),
 ) : DatabaseService {
     override val getMatchDao: MatchDao get() = error("unused")
     override val getTeamDao: TeamDao get() = error("unused")
@@ -120,6 +191,7 @@ private class BillingRepositoryHttp_FakeDatabaseService(
     override val getChatGroupDao: ChatGroupDao get() = error("unused")
     override val getMessageDao: MessageDao get() = error("unused")
     override val getRefundRequestDao: RefundRequestDao get() = refundRequestDao
+    override val getPendingRentalOrderDao: PendingRentalOrderDao get() = pendingRentalOrderDao
 }
 
 private class BillingRepositoryHttp_FakeUserRepository(
@@ -1667,6 +1739,291 @@ class BillingRepositoryHttpTest {
         assertEquals("bill_1", result.billId)
         assertEquals(27500, result.totalCents)
         assertEquals("booking_1__item_1", result.items.single().id)
+    }
+
+    @Test
+    fun createRentalOrder_keeps_paid_booking_for_retry_after_server_failure() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val pendingDao = BillingRepositoryHttp_FakePendingRentalOrderDao()
+        val db = BillingRepositoryHttp_FakeDatabaseService(pendingRentalOrderDao = pendingDao)
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        var requests = 0
+        val engine = MockEngine { _ ->
+            requests += 1
+            if (requests == 1) {
+                respond(
+                    content = "{\"error\":\"temporary outage\"}",
+                    status = HttpStatusCode.ServiceUnavailable,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            } else {
+                respond(
+                    content = "{\"bookingId\":\"booking_retry\",\"totalCents\":1200}",
+                    status = HttpStatusCode.Created,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+        }
+        val http = billingRepositoryHttpProductionClient(engine)
+        val repo = BillingRepository(
+            MvpApiClient(http, "http://example.test", tokenStore),
+            userRepo,
+            BillingRepositoryHttp_UnusedEventRepository,
+            db,
+        )
+        val selections = listOf(
+            RentalOrderSelectionRequest(
+                scheduledFieldIds = listOf("field_1"),
+                startDate = "2026-06-22T12:00:00Z",
+                endDate = "2026-06-22T13:00:00Z",
+            ),
+        )
+
+        assertTrue(
+            repo.createRentalOrder(
+                publicSlug = "summit-sports",
+                eventId = "booking_retry",
+                selections = selections,
+                paymentIntentId = "pi_retry",
+            ).isFailure,
+        )
+        assertEquals(1, pendingDao.storedOrders.size)
+        assertEquals("pi_retry", pendingDao.storedOrders.single().paymentIntentId)
+
+        assertEquals(1, repo.syncPendingRentalOrders().getOrThrow())
+        assertTrue(pendingDao.storedOrders.isEmpty())
+        assertEquals(2, requests)
+    }
+
+    @Test
+    fun preparedRentalOrder_survives_payment_callback_crash_and_waits_for_payment_confirmation() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val pendingDao = BillingRepositoryHttp_FakePendingRentalOrderDao()
+        val db = BillingRepositoryHttp_FakeDatabaseService(pendingRentalOrderDao = pendingDao)
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("payer_a"),
+            currentAccount = AuthAccount(id = "payer_a", email = "payer@example.test", name = "Payer A"),
+        )
+        var requests = 0
+        val engine = MockEngine { _ ->
+            requests += 1
+            if (requests == 1) {
+                respond(
+                    content = "{\"error\":\"Payment has not completed yet.\"}",
+                    status = HttpStatusCode.PaymentRequired,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            } else {
+                respond(
+                    content = "{\"bookingId\":\"booking_crash\",\"totalCents\":1200}",
+                    status = HttpStatusCode.Created,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+        }
+        val repo = BillingRepository(
+            MvpApiClient(billingRepositoryHttpProductionClient(engine), "http://example.test", tokenStore),
+            userRepo,
+            BillingRepositoryHttp_UnusedEventRepository,
+            db,
+        )
+        val selections = listOf(
+            RentalOrderSelectionRequest(
+                scheduledFieldIds = listOf("field_1"),
+                startDate = "2026-06-22T12:00:00Z",
+                endDate = "2026-06-22T13:00:00Z",
+            ),
+        )
+
+        val orderId = repo.prepareRentalOrder(
+            publicSlug = "summit-sports",
+            eventId = "booking_crash",
+            selections = selections,
+            paymentIntentId = "pi_crash",
+            payerUserId = "payer_a",
+        ).getOrThrow()
+        assertEquals("booking_crash:pi_crash", orderId)
+        assertEquals(PENDING_RENTAL_ORDER_STATUS_AWAITING_PAYMENT, pendingDao.storedOrders.single().status)
+
+        assertEquals(0, repo.syncPendingRentalOrders().getOrThrow())
+        assertEquals(PENDING_RENTAL_ORDER_STATUS_AWAITING_PAYMENT, pendingDao.storedOrders.single().status)
+        assertEquals(0, pendingDao.storedOrders.single().attemptCount)
+
+        assertEquals(1, repo.syncPendingRentalOrders().getOrThrow())
+        assertTrue(pendingDao.storedOrders.isEmpty())
+        assertEquals(2, requests)
+    }
+
+    @Test
+    fun pendingRentalOrder_is_not_replayed_by_a_different_signed_in_user() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val pendingDao = BillingRepositoryHttp_FakePendingRentalOrderDao()
+        val db = BillingRepositoryHttp_FakeDatabaseService(pendingRentalOrderDao = pendingDao)
+        var requests = 0
+        val engine = MockEngine { _ ->
+            requests += 1
+            respond(
+                content = "{\"bookingId\":\"booking_owner\",\"totalCents\":1200}",
+                status = HttpStatusCode.Created,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }, "http://example.test", tokenStore)
+        val payerRepository = BillingRepository(
+            api,
+            BillingRepositoryHttp_FakeUserRepository(
+                currentUser = billingMakeUser("payer_a"),
+                currentAccount = AuthAccount(id = "payer_a", email = "payer@example.test", name = "Payer A"),
+            ),
+            BillingRepositoryHttp_UnusedEventRepository,
+            db,
+        )
+        val otherUserRepository = BillingRepository(
+            api,
+            BillingRepositoryHttp_FakeUserRepository(
+                currentUser = billingMakeUser("payer_b"),
+                currentAccount = AuthAccount(id = "payer_b", email = "other@example.test", name = "Payer B"),
+            ),
+            BillingRepositoryHttp_UnusedEventRepository,
+            db,
+        )
+        val selections = listOf(
+            RentalOrderSelectionRequest(
+                scheduledFieldIds = listOf("field_1"),
+                startDate = "2026-06-22T12:00:00Z",
+                endDate = "2026-06-22T13:00:00Z",
+            ),
+        )
+
+        payerRepository.prepareRentalOrder(
+            publicSlug = "summit-sports",
+            eventId = "booking_owner",
+            selections = selections,
+            paymentIntentId = "pi_owner",
+            payerUserId = "payer_a",
+        ).getOrThrow()
+
+        assertEquals(0, otherUserRepository.syncPendingRentalOrders().getOrThrow())
+        assertEquals(0, requests)
+        assertEquals("payer_a", pendingDao.storedOrders.single().payerUserId)
+
+        assertEquals(1, payerRepository.syncPendingRentalOrders().getOrThrow())
+        assertEquals(1, requests)
+        assertTrue(pendingDao.storedOrders.isEmpty())
+    }
+
+    @Test
+    fun rentalCompletion_never_submits_a_prepared_order_after_the_active_account_changes() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val pendingDao = BillingRepositoryHttp_FakePendingRentalOrderDao()
+        val db = BillingRepositoryHttp_FakeDatabaseService(pendingRentalOrderDao = pendingDao)
+        var requests = 0
+        val engine = MockEngine { _ ->
+            requests += 1
+            respond(
+                content = "{\"bookingId\":\"unexpected\",\"totalCents\":1200}",
+                status = HttpStatusCode.Created,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }, "http://example.test", tokenStore)
+        val payerRepository = BillingRepository(
+            api,
+            BillingRepositoryHttp_FakeUserRepository(
+                currentUser = billingMakeUser("payer_a"),
+                currentAccount = AuthAccount(id = "payer_a", email = "payer@example.test", name = "Payer A"),
+            ),
+            BillingRepositoryHttp_UnusedEventRepository,
+            db,
+        )
+        val switchedAccountRepository = BillingRepository(
+            api,
+            BillingRepositoryHttp_FakeUserRepository(
+                currentUser = billingMakeUser("payer_b"),
+                currentAccount = AuthAccount(id = "payer_b", email = "other@example.test", name = "Payer B"),
+            ),
+            BillingRepositoryHttp_UnusedEventRepository,
+            db,
+        )
+        val selections = listOf(
+            RentalOrderSelectionRequest(
+                scheduledFieldIds = listOf("field_1"),
+                startDate = "2026-06-22T12:00:00Z",
+                endDate = "2026-06-22T13:00:00Z",
+            ),
+        )
+
+        payerRepository.prepareRentalOrder(
+            publicSlug = "summit-sports",
+            eventId = "booking_account_change",
+            selections = selections,
+            paymentIntentId = "pi_account_change",
+            payerUserId = "payer_a",
+        ).getOrThrow()
+
+        val result = switchedAccountRepository.createRentalOrder(
+            publicSlug = "summit-sports",
+            eventId = "booking_account_change",
+            selections = selections,
+            paymentIntentId = "pi_account_change",
+            payerUserId = "payer_a",
+        )
+
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull() is RentalOrderPayerMismatchException)
+        assertEquals(0, requests)
+        assertEquals(PENDING_RENTAL_ORDER_STATUS_AWAITING_PAYMENT, pendingDao.storedOrders.single().status)
+        assertEquals("payer_a", pendingDao.storedOrders.single().payerUserId)
+    }
+
+    @Test
+    fun createRentalOrder_marks_terminal_paid_booking_failure_without_replaying_it() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val pendingDao = BillingRepositoryHttp_FakePendingRentalOrderDao()
+        val db = BillingRepositoryHttp_FakeDatabaseService(pendingRentalOrderDao = pendingDao)
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        var requests = 0
+        val engine = MockEngine { _ ->
+            requests += 1
+            respond(
+                content = "{\"error\":\"The rental slot is no longer available.\"}",
+                status = HttpStatusCode.Conflict,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = billingRepositoryHttpProductionClient(engine)
+        val repo = BillingRepository(
+            MvpApiClient(http, "http://example.test", tokenStore),
+            userRepo,
+            BillingRepositoryHttp_UnusedEventRepository,
+            db,
+        )
+        val selections = listOf(
+            RentalOrderSelectionRequest(
+                scheduledFieldIds = listOf("field_1"),
+                startDate = "2026-06-22T12:00:00Z",
+                endDate = "2026-06-22T13:00:00Z",
+            ),
+        )
+
+        val result = repo.createRentalOrder(
+            publicSlug = "summit-sports",
+            eventId = "booking_terminal",
+            selections = selections,
+            paymentIntentId = "pi_terminal",
+        )
+
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull() is RentalOrderTerminalFailureException)
+        assertEquals(PENDING_RENTAL_ORDER_STATUS_REJECTED, pendingDao.storedOrders.single().status)
+        assertEquals(0, repo.syncPendingRentalOrders().getOrThrow())
+        assertEquals(1, requests)
     }
 
     @Test

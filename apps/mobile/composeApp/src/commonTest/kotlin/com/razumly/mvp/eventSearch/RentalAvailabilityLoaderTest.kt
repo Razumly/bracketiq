@@ -21,6 +21,39 @@ import kotlin.time.Instant
 
 class RentalAvailabilityLoaderTest {
     @Test
+    fun resolveRentalRange_requires_one_availability_slot_to_cover_entire_paid_range() {
+        val date = LocalDate(2026, 6, 22)
+        fun slot(id: String, startMinutes: Int, endMinutes: Int) = TimeSlot(
+            id = id,
+            dayOfWeek = 0,
+            daysOfWeek = listOf(0),
+            startTimeMinutes = startMinutes,
+            endTimeMinutes = endMinutes,
+            startDate = Instant.parse("2026-06-01T00:00:00Z"),
+            endDate = Instant.parse("2026-07-01T00:00:00Z"),
+            timeZone = "UTC",
+            repeating = true,
+            scheduledFieldId = "field_1",
+            scheduledFieldIds = listOf("field_1"),
+            price = 2000,
+        )
+        val stitched = RentalFieldOption(
+            field = Field(id = "field_1", fieldNumber = 1, name = "Court 1"),
+            rentalSlots = listOf(slot("first", 10 * 60, 10 * 60 + 30), slot("second", 10 * 60 + 30, 11 * 60)),
+        )
+        val continuous = stitched.copy(rentalSlots = listOf(slot("whole", 10 * 60, 11 * 60)))
+
+        assertEquals(
+            null,
+            resolveRentalRange(stitched, date, 10 * 60, 11 * 60, TimeZone.UTC),
+        )
+        assertEquals(
+            listOf("whole"),
+            resolveRentalRange(continuous, date, 10 * 60, 11 * 60, TimeZone.UTC)?.slots?.map(TimeSlot::id),
+        )
+    }
+
+    @Test
     fun rentalPrice_isProratedByDuration() {
         assertEquals(1250, proratedRentalPriceCents(priceCents = 2500, durationMinutes = 30))
         assertEquals(3750, proratedRentalPriceCents(priceCents = 2500, durationMinutes = 90))

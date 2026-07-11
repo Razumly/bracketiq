@@ -53,6 +53,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 private class UserRepositoryHttp_InMemoryAuthTokenStore(
@@ -314,6 +315,39 @@ class UserRepositoryHttpTest {
         assertEquals(false, state.accepted)
         assertEquals("2026-04-14", state.version)
         assertEquals("/terms", state.url)
+    }
+
+    @Test
+    fun getChatTermsConsentState_doesNotSubstituteMissingRequiredAgreementUrl() = runTest {
+        val engine = MockEngine { request ->
+            assertEquals("http://localhost/api/chat/terms-consent", request.url.toString())
+            respond(
+                content = """
+                    {
+                      "code": "CHAT_TERMS_REQUIRED",
+                      "accepted": false,
+                      "version": "2026-04-14",
+                      "summary": ["No tolerance for objectionable content."]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val client = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val repository = UserRepository(
+            databaseService = UserRepositoryHttp_FakeDatabaseService(),
+            api = MvpApiClient(client, "http://localhost", UserRepositoryHttp_InMemoryAuthTokenStore()),
+            tokenStore = UserRepositoryHttp_InMemoryAuthTokenStore(),
+            currentUserDataSource = CurrentUserDataSource(UserRepositoryHttp_InMemoryPreferencesDataStore()),
+        )
+
+        val state = repository.getChatTermsConsentState().getOrThrow()
+
+        assertEquals(false, state.accepted)
+        assertNull(state.url)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)

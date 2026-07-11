@@ -3,26 +3,28 @@ package com.razumly.mvp.eventDetail
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 
 class EventNotificationCoordinatorTest {
     @Test
-    fun send_event_notification_passes_event_payload_and_tournament_flag() = runTest {
+    fun send_event_notification_passes_event_payload_and_event_topic_for_league() = runTest {
         val calls = mutableListOf<NotificationCall>()
         val coordinator = EventNotificationCoordinator { eventId, title, body, isTournament ->
             calls += NotificationCall(eventId, title, body, isTournament)
             Result.success(Unit)
         }
 
-        val error = coordinator.sendEventNotification(
+        val result = coordinator.sendEventNotification(
             eventId = "event-1",
+            eventType = EventType.LEAGUE,
             title = "Schedule update",
             message = "Court changed.",
         )
 
-        assertNull(error)
+        assertTrue(result.isSuccess)
         assertEquals(
-            listOf(NotificationCall("event-1", "Schedule update", "Court changed.", true)),
+            listOf(NotificationCall("event-1", "Schedule update", "Court changed.", false)),
             calls,
         )
     }
@@ -33,13 +35,14 @@ class EventNotificationCoordinatorTest {
             Result.failure(IllegalStateException("No token"))
         }
 
-        val error = coordinator.sendEventNotification(
+        val result = coordinator.sendEventNotification(
             eventId = "event-1",
+            eventType = EventType.TOURNAMENT,
             title = "Schedule update",
             message = "Court changed.",
         )
 
-        assertEquals("Failed to send message: No token", error?.message)
+        assertEquals("Failed to send message: No token", result.exceptionOrNull()?.message)
     }
 
     private data class NotificationCall(

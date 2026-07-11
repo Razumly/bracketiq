@@ -1,8 +1,8 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.network.userMessage
-import com.razumly.mvp.core.util.ErrorMessage
 
 internal class EventNotificationCoordinator(
     private val sendEventNotificationRequest: suspend (
@@ -18,14 +18,22 @@ internal class EventNotificationCoordinator(
 
     suspend fun sendEventNotification(
         eventId: String,
+        eventType: EventType,
         title: String,
         message: String,
-    ): ErrorMessage? {
-        return sendEventNotificationRequest(eventId, title, message, true)
+    ): Result<Unit> {
+        return sendEventNotificationRequest(
+            eventId,
+            title,
+            message,
+            eventType == EventType.TOURNAMENT,
+        )
             .fold(
-                onSuccess = { null },
+                onSuccess = { Result.success(Unit) },
                 onFailure = { error ->
-                    ErrorMessage("Failed to send message: ${error.userMessage()}")
+                    Result.failure(
+                        IllegalStateException("Failed to send message: ${error.userMessage()}"),
+                    )
                 },
             )
     }

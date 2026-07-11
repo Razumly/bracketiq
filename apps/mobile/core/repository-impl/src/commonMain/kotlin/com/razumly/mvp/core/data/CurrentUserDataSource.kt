@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.razumly.mvp.core.util.jsonMVP
+import com.razumly.mvp.core.util.newId
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -39,6 +40,7 @@ class CurrentUserDataSource(private val dataStore: DataStore<Preferences>) {
     private val registrationSyncUserId = stringPreferencesKey("registration_sync_user_id")
     private val dismissedAppReleaseKey = stringPreferencesKey("dismissed_app_release_key")
     private val completedGuideIds = stringPreferencesKey("completed_guide_ids")
+    private val matchOperationDeviceId = stringPreferencesKey("match_operation_device_id")
 
     suspend fun saveUserId(userId: String) {
         dataStore.edit { dataStore ->
@@ -54,6 +56,21 @@ class CurrentUserDataSource(private val dataStore: DataStore<Preferences>) {
 
     suspend fun getUserIdNow(): String =
         dataStore.data.first()[idKey].orEmpty()
+
+    suspend fun getOrCreateMatchOperationDeviceId(): String {
+        val existing = dataStore.data.first()[matchOperationDeviceId]
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+        if (existing != null) return existing
+
+        val created = newId()
+        dataStore.edit { preferences ->
+            if (preferences[matchOperationDeviceId].isNullOrBlank()) {
+                preferences[matchOperationDeviceId] = created
+            }
+        }
+        return dataStore.data.first()[matchOperationDeviceId].orEmpty().ifBlank { created }
+    }
 
     suspend fun savePushToken(token: String) {
         dataStore.edit { dataStore ->

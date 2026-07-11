@@ -71,10 +71,15 @@ import com.razumly.mvp.core.data.repositories.SignupProfileSelection
 import com.razumly.mvp.core.data.repositories.UserEmailMembershipMatch
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.network.dto.InviteCreateDto
+import com.razumly.mvp.core.network.dto.MatchActionOperationDto
 import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
 import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
 import com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto
+import com.razumly.mvp.core.network.dto.MatchRosterDto
+import com.razumly.mvp.core.network.dto.MatchRostersResponseDto
 import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
+import com.razumly.mvp.core.network.dto.TeamCheckInDto
+import com.razumly.mvp.core.network.dto.TeamCheckInsResponseDto
 import com.razumly.mvp.core.network.MvpUploadFile
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.LoadingState
@@ -580,6 +585,7 @@ internal class CreateEvent_FakeMatchRepository : IMatchRepository {
         segmentOperations: List<MatchSegmentOperationDto>?,
         incidentOperations: List<MatchIncidentOperationDto>?,
         officialCheckIn: MatchOfficialCheckInOperationDto?,
+        matchAction: MatchActionOperationDto?,
         finalize: Boolean,
         time: Instant?,
     ): Result<MatchMVP> = Result.success(match)
@@ -618,6 +624,51 @@ internal class CreateEvent_FakeMatchRepository : IMatchRepository {
     ): Result<List<MatchMVP>> = Result.success(
         tournamentMatches.filter { match -> eventIds.contains(match.eventId) }
     )
+
+    override suspend fun getEventTeamCheckIns(eventId: String): Result<TeamCheckInsResponseDto> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun checkInEventTeam(eventId: String, eventTeamId: String): Result<TeamCheckInDto> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun getMatchTeamCheckIns(
+        eventId: String,
+        matchId: String,
+    ): Result<TeamCheckInsResponseDto> = Result.failure(IllegalStateException("unused"))
+
+    override suspend fun checkInMatchTeam(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+    ): Result<TeamCheckInDto> = Result.failure(IllegalStateException("unused"))
+
+    override suspend fun getMatchRosters(eventId: String, matchId: String): Result<MatchRostersResponseDto> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun removeMatchRosterPlayer(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+        userId: String,
+    ): Result<MatchRosterDto> = Result.failure(IllegalStateException("unused"))
+
+    override suspend fun restoreMatchRosterPlayer(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+        userId: String,
+    ): Result<MatchRosterDto> = Result.failure(IllegalStateException("unused"))
+
+    override suspend fun addTemporaryMatchRosterPlayer(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+        firstName: String?,
+        lastName: String?,
+        email: String?,
+        entryId: String?,
+    ): Result<MatchRosterDto> = Result.failure(IllegalStateException("unused"))
+
     override suspend fun deleteMatchesOfTournament(tournamentId: String): Result<Unit> = Result.success(Unit)
     override suspend fun subscribeToMatches(eventId: String): Result<Unit> = Result.success(Unit)
     override suspend fun unsubscribeFromRealtime(): Result<Unit> = Result.success(Unit)

@@ -18,6 +18,7 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOperationOutboxEntry
+import com.razumly.mvp.core.data.dataTypes.PendingRentalOrder
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.Team
@@ -37,13 +38,15 @@ import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
 import com.razumly.mvp.core.data.dataTypes.daos.InviteDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchOperationOutboxDao
+import com.razumly.mvp.core.data.dataTypes.daos.MatchOperationTransactionDao
 import com.razumly.mvp.core.data.dataTypes.daos.MessageDao
+import com.razumly.mvp.core.data.dataTypes.daos.PendingRentalOrderDao
 import com.razumly.mvp.core.data.dataTypes.daos.RefundRequestDao
 import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.data.util.Converters
 
-const val MVP_DATABASE_VERSION = 32
+const val MVP_DATABASE_VERSION = 90
 
 @Database(
     entities = [
@@ -55,6 +58,7 @@ const val MVP_DATABASE_VERSION = 32
         UserData::class,
         MatchMVP::class,
         MatchOperationOutboxEntry::class,
+        PendingRentalOrder::class,
         Field::class,
         Team::class,
         ChatGroup::class,
@@ -77,6 +81,7 @@ const val MVP_DATABASE_VERSION = 32
 abstract class MVPDatabaseService : RoomDatabase(), DatabaseService {
     abstract override val getMatchDao: MatchDao
     abstract override val getMatchOperationOutboxDao: MatchOperationOutboxDao
+    abstract override val getMatchOperationTransactionDao: MatchOperationTransactionDao
     abstract override val getTeamDao: TeamDao
     abstract override val getFieldDao: FieldDao
     abstract override val getUserDataDao: UserDataDao
@@ -87,6 +92,7 @@ abstract class MVPDatabaseService : RoomDatabase(), DatabaseService {
     abstract override val getChatGroupDao: ChatGroupDao
     abstract override val getMessageDao: MessageDao
     abstract override val getRefundRequestDao: RefundRequestDao
+    abstract override val getPendingRentalOrderDao: PendingRentalOrderDao
     abstract override val getDiscountDao: DiscountDao
     abstract override val getInviteDao: InviteDao
 }

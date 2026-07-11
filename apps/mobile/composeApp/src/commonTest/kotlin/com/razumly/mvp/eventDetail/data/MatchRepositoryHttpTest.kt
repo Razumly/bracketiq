@@ -6,6 +6,7 @@ import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MATCH_OPERATION_STATUS_ACKED
 import com.razumly.mvp.core.data.dataTypes.MATCH_OPERATION_STATUS_FAILED
 import com.razumly.mvp.core.data.dataTypes.MATCH_OPERATION_STATUS_PENDING
+import com.razumly.mvp.core.data.dataTypes.MATCH_OPERATION_STATUS_RECONCILING
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOperationOutboxEntry
 import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
@@ -22,6 +23,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.network.AuthTokenStore
 import com.razumly.mvp.core.network.MvpApiClient
+import com.razumly.mvp.core.network.configureMvpHttpClient
 import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
 import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
 import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
@@ -35,13 +37,21 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import io.ktor.http.content.OutgoingContent
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 private class MatchRepositoryHttp_InMemoryAuthTokenStore(
@@ -55,6 +65,11 @@ private class MatchRepositoryHttp_InMemoryAuthTokenStore(
         token = ""
     }
 }
+
+private fun matchRepositoryHttpProductionClient(engine: MockEngine): HttpClient =
+    HttpClient(engine) {
+        configureMvpHttpClient()
+    }
 
 private class MatchRepositoryHttp_FakeMatchDao(
     initialMatches: List<MatchMVP>,
@@ -145,23 +160,26 @@ private class MatchRepositoryHttp_FakeOutboxDao : MatchOperationOutboxDao {
         pendingStatus: String,
         failedStatus: String,
         syncingStatus: String,
+        reconcilingStatus: String,
     ): List<MatchOperationOutboxEntry> =
-        pendingOperationsFor(matchId = null, pendingStatus, failedStatus, syncingStatus)
+        pendingOperationsFor(matchId = null, pendingStatus, failedStatus, syncingStatus, reconcilingStatus)
 
     override suspend fun getPendingOperationsForMatch(
         matchId: String,
         pendingStatus: String,
         failedStatus: String,
         syncingStatus: String,
+        reconcilingStatus: String,
     ): List<MatchOperationOutboxEntry> =
-        pendingOperationsFor(matchId, pendingStatus, failedStatus, syncingStatus)
+        pendingOperationsFor(matchId, pendingStatus, failedStatus, syncingStatus, reconcilingStatus)
 
     override suspend fun pendingOperationCount(
         pendingStatus: String,
         failedStatus: String,
         syncingStatus: String,
+        reconcilingStatus: String,
     ): Int =
-        pendingOperationsFor(matchId = null, pendingStatus, failedStatus, syncingStatus).size
+        pendingOperationsFor(matchId = null, pendingStatus, failedStatus, syncingStatus, reconcilingStatus).size
 
     override suspend fun getOperationsByIds(ids: List<String>): List<MatchOperationOutboxEntry> =
         ids.mapNotNull(operationsById::get)
@@ -206,8 +224,9 @@ private class MatchRepositoryHttp_FakeOutboxDao : MatchOperationOutboxDao {
         pendingStatus: String,
         failedStatus: String,
         syncingStatus: String,
+        reconcilingStatus: String,
     ): List<MatchOperationOutboxEntry> {
-        val statuses = setOf(pendingStatus, failedStatus, syncingStatus)
+        val statuses = setOf(pendingStatus, failedStatus, syncingStatus, reconcilingStatus)
         return operationsById.values
             .asSequence()
             .filter { operation -> operation.status in statuses }
@@ -377,6 +396,184 @@ class MatchRepositoryHttpTest {
         assertEquals(1, syncResult.getOrThrow())
         assertEquals(listOf("/api/events/event_1/matches/match_1/score"), requestedPaths)
         assertEquals(MATCH_OPERATION_STATUS_ACKED, outboxDao.operations.single().status)
+    }
+
+    @Test
+    fun rejectedOperationRetriesOnlyRemoteReconciliationUntilLocalStateIsAuthoritative() = runTest {
+        var scorePostCount = 0
+        var matchFetchCount = 0
+        val engine = MockEngine { request ->
+            when (request.method to request.url.encodedPath) {
+                HttpMethod.Post to "/api/events/event_1/matches/match_1/score" -> {
+                    scorePostCount += 1
+                    respond(
+                        content = """{ "error": "The score update is no longer valid." }""",
+                        status = HttpStatusCode.BadRequest,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+                HttpMethod.Get to "/api/events/event_1/matches/match_1" -> {
+                    matchFetchCount += 1
+                    if (matchFetchCount == 1) {
+                        respond(
+                            content = """{ "error": "temporarily unavailable" }""",
+                            status = HttpStatusCode.ServiceUnavailable,
+                            headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                        )
+                    } else {
+                        respond(
+                            content = """
+                                {
+                                  "match": {
+                                    "id": "match_1",
+                                    "matchId": 1,
+                                    "eventId": "event_1",
+                                    "team1Id": "team_1",
+                                    "team2Id": "team_2",
+                                    "team1Points": [1],
+                                    "team2Points": [2]
+                                  }
+                                }
+                            """.trimIndent(),
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                        )
+                    }
+                }
+                else -> error("Unexpected request ${request.method.value} ${request.url.encodedPath}")
+            }
+        }
+        val http = matchRepositoryHttpProductionClient(engine)
+        val localMatch = MatchMVP(
+            id = "match_1",
+            matchId = 1,
+            eventId = "event_1",
+            team1Id = "team_1",
+            team2Id = "team_2",
+        )
+        val matchDao = MatchRepositoryHttp_FakeMatchDao(listOf(localMatch))
+        val outboxDao = MatchRepositoryHttp_FakeOutboxDao()
+        val repository = MatchRepository(
+            api = MvpApiClient(http, "http://example.test", MatchRepositoryHttp_InMemoryAuthTokenStore()),
+            databaseService = MatchRepositoryHttp_FakeDatabaseService(
+                getMatchDao = matchDao,
+                getMatchOperationOutboxDao = outboxDao,
+            ),
+            autoSyncOperations = false,
+        )
+
+        repository.setMatchScore(
+            match = localMatch,
+            segmentId = "segment_1",
+            sequence = 1,
+            eventTeamId = "team_1",
+            points = 1,
+        )
+        repository.syncPendingMatchOperations("match_1")
+
+        assertEquals(1, scorePostCount)
+        assertEquals(1, matchFetchCount)
+        assertEquals(MATCH_OPERATION_STATUS_RECONCILING, outboxDao.operations.single().status)
+
+        repository.syncPendingMatchOperations("match_1")
+
+        assertEquals(1, scorePostCount)
+        assertEquals(2, matchFetchCount)
+        assertEquals(MATCH_OPERATION_STATUS_ACKED, outboxDao.operations.single().status)
+        assertEquals(listOf(1), matchDao.upsertedMatches.last().team1Points)
+        assertEquals(listOf(2), matchDao.upsertedMatches.last().team2Points)
+    }
+
+    @Test
+    fun rejectedOperation_is_reconciling_before_the_authoritative_fetch_can_be_interrupted() = runTest {
+        var scorePostCount = 0
+        var matchFetchCount = 0
+        val firstFetchStarted = CompletableDeferred<Unit>()
+        val firstFetchRelease = CompletableDeferred<Unit>()
+        val engine = MockEngine { request ->
+            when (request.method to request.url.encodedPath) {
+                HttpMethod.Post to "/api/events/event_1/matches/match_1/score" -> {
+                    scorePostCount += 1
+                    respond(
+                        content = """{ "error": "The score update is no longer valid." }""",
+                        status = HttpStatusCode.BadRequest,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+                HttpMethod.Get to "/api/events/event_1/matches/match_1" -> {
+                    matchFetchCount += 1
+                    if (matchFetchCount == 1) {
+                        firstFetchStarted.complete(Unit)
+                        firstFetchRelease.await()
+                    }
+                    respond(
+                        content = """
+                            {
+                              "match": {
+                                "id": "match_1",
+                                "matchId": 1,
+                                "eventId": "event_1",
+                                "team1Id": "team_1",
+                                "team2Id": "team_2",
+                                "team1Points": [1],
+                                "team2Points": [2]
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+                else -> error("Unexpected request ${request.method.value} ${request.url.encodedPath}")
+            }
+        }
+        val http = matchRepositoryHttpProductionClient(engine)
+        val localMatch = MatchMVP(
+            id = "match_1",
+            matchId = 1,
+            eventId = "event_1",
+            team1Id = "team_1",
+            team2Id = "team_2",
+        )
+        val matchDao = MatchRepositoryHttp_FakeMatchDao(listOf(localMatch))
+        val outboxDao = MatchRepositoryHttp_FakeOutboxDao()
+        val databaseService = MatchRepositoryHttp_FakeDatabaseService(
+            getMatchDao = matchDao,
+            getMatchOperationOutboxDao = outboxDao,
+        )
+        val api = MvpApiClient(http, "http://example.test", MatchRepositoryHttp_InMemoryAuthTokenStore())
+        val repository = MatchRepository(
+            api = api,
+            databaseService = databaseService,
+            autoSyncOperations = false,
+        )
+
+        repository.setMatchScore(
+            match = localMatch,
+            segmentId = "segment_1",
+            sequence = 1,
+            eventTeamId = "team_1",
+            points = 1,
+        )
+        val firstSync = async { repository.syncPendingMatchOperations("match_1") }
+        firstFetchStarted.await()
+        assertEquals(MATCH_OPERATION_STATUS_RECONCILING, outboxDao.operations.single().status)
+
+        firstSync.cancelAndJoin()
+        assertEquals(MATCH_OPERATION_STATUS_RECONCILING, outboxDao.operations.single().status)
+
+        val recreatedRepository = MatchRepository(
+            api = api,
+            databaseService = databaseService,
+            autoSyncOperations = false,
+        )
+        assertEquals(1, recreatedRepository.syncPendingMatchOperations("match_1").getOrThrow())
+
+        assertEquals(1, scorePostCount)
+        assertEquals(2, matchFetchCount)
+        assertEquals(MATCH_OPERATION_STATUS_ACKED, outboxDao.operations.single().status)
+        assertEquals(listOf(1), matchDao.upsertedMatches.last().team1Points)
+        assertEquals(listOf(2), matchDao.upsertedMatches.last().team2Points)
     }
 
     @Test
@@ -750,6 +947,75 @@ class MatchRepositoryHttpTest {
         assertEquals("field_1", result.getOrThrow().single().fieldId)
         assertEquals(listOf("field_1"), fieldDao.upsertedFields.map(Field::id))
         assertEquals("field_1", matchDao.upsertedMatches.single().fieldId)
+    }
+
+    @Test
+    fun updateMatchesBulkOmitsUnchangedNullsAndSendsOnlyIntentionalClears() = runTest {
+        var capturedBody = ""
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Patch, request.method)
+            assertEquals("/api/events/event_1/matches", request.url.encodedPath)
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+            respond(
+                content = """{ "matches": [], "created": {}, "deleted": [] }""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) {
+                json(jsonMVP)
+            }
+        }
+        val cachedOmittedField = MatchMVP(
+            id = "match_omit",
+            matchId = 1,
+            eventId = "event_1",
+            team1Id = "team_1",
+            fieldId = null,
+        )
+        val cachedClearedField = MatchMVP(
+            id = "match_clear",
+            matchId = 2,
+            eventId = "event_1",
+            team1Id = "team_2",
+            fieldId = "field_1",
+        )
+        val cachedPlaceholderTeam = MatchMVP(
+            id = "match_placeholder",
+            matchId = 3,
+            eventId = "event_1",
+            team1Id = "team_persisted",
+        )
+        val repository = MatchRepository(
+            api = MvpApiClient(http, "http://example.test", MatchRepositoryHttp_InMemoryAuthTokenStore()),
+            databaseService = MatchRepositoryHttp_FakeDatabaseService(
+                MatchRepositoryHttp_FakeMatchDao(
+                    listOf(cachedOmittedField, cachedClearedField, cachedPlaceholderTeam),
+                ),
+            ),
+        )
+
+        val result = repository.updateMatchesBulk(
+            matches = listOf(
+                cachedOmittedField,
+                cachedClearedField.copy(fieldId = null),
+                cachedPlaceholderTeam.copy(team1Id = "placeholder-local:new-team"),
+            ),
+        )
+
+        assertTrue(result.isSuccess)
+        val updatesById = jsonMVP.parseToJsonElement(capturedBody)
+            .jsonObject["matches"]
+            ?.jsonArray
+            ?.associateBy { entry -> entry.jsonObject.getValue("id").toString().trim('"') }
+            .orEmpty()
+        assertFalse(updatesById.getValue("match_omit").jsonObject.containsKey("fieldId"))
+        assertEquals(JsonNull, updatesById.getValue("match_clear").jsonObject["fieldId"])
+        assertFalse(updatesById.getValue("match_placeholder").jsonObject.containsKey("team1Id"))
     }
 
     @Test

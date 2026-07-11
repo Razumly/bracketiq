@@ -160,6 +160,20 @@ private fun RefundRequestItem(
 
             HorizontalDivider()
 
+            val request = refundWithRelations.refundRequest
+            Text(
+                text = "Amount: ${request.currency.uppercase()} ${request.requestedAmountCents / 100}.${(request.requestedAmountCents % 100).toString().padStart(2, '0')}",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+            )
+            Text("Payments: ${request.paymentIds.size} • Bills: ${request.billIds.size}")
+            request.occurrenceDate?.takeIf(String::isNotBlank)?.let { occurrence ->
+                Text("Occurrence: $occurrence")
+            }
+            request.policyDecision?.takeIf(String::isNotBlank)?.let { policy ->
+                Text("Policy: $policy")
+            }
+
             val user = refundWithRelations.user
             if (user != null) {
                 Text(
@@ -242,7 +256,10 @@ private fun RefundRequestItem(
             text = {
                 Text(
                     if (isApproval) {
-                        "Are you sure you want to approve this refund? This will process the payment refund."
+                        "Approve ${refundWithRelations.refundRequest.currency.uppercase()} " +
+                            "${refundWithRelations.refundRequest.requestedAmountCents / 100}." +
+                            (refundWithRelations.refundRequest.requestedAmountCents % 100).toString().padStart(2, '0') +
+                            " across ${refundWithRelations.refundRequest.paymentIds.size} payment(s)? This executes the stored refund scope."
                     } else {
                         "Are you sure you want to reject this refund request?"
                     }

@@ -55,11 +55,15 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 
 interface ITeamRepository : IMVPRepository {
     fun getTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>>
@@ -827,7 +831,7 @@ class TeamRepository(
             }
 
             val updated = try {
-                patchTeamUpdate(teamId = syncedTeam.id, request = preparedUpdate.request)
+                patchTeamUpdate(teamId = syncedTeam.id, prepared = preparedUpdate)
             } catch (error: ApiException) {
                 if (error.statusCode != 400) {
                     throw error
@@ -847,7 +851,7 @@ class TeamRepository(
                 }
                 patchTeamUpdate(
                     teamId = syncedTeam.id,
-                    request = retryPreparedUpdate.request,
+                    prepared = retryPreparedUpdate,
                 )
             }
 
@@ -1275,11 +1279,19 @@ class TeamRepository(
 
     private suspend fun patchTeamUpdate(
         teamId: String,
-        request: UpdateTeamRequestDto,
+        prepared: PreparedTeamUpdate,
     ): Team {
-        return api.patch<UpdateTeamRequestDto, TeamApiDto>(
+        val encodedRequest = jsonMVP.encodeToJsonElement(prepared.request).jsonObject
+        val encodedTeam = (encodedRequest["team"] as? JsonObject).orEmpty()
+        val teamPatch = JsonObject(
+            encodedTeam + prepared.includedFields
+                .filterNot(encodedTeam::containsKey)
+                .associateWith { JsonNull },
+        )
+        val requestBody = JsonObject(mapOf("team" to teamPatch))
+        return api.patch<JsonObject, TeamApiDto>(
             path = "api/teams/$teamId",
-            body = request,
+            body = requestBody,
         ).toTeamOrNull() ?: error("Update team response missing team")
     }
 

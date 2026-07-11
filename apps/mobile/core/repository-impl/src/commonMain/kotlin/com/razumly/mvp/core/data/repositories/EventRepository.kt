@@ -87,6 +87,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -295,6 +299,33 @@ interface IEventRepository : IMVPRepository {
     suspend fun clearCurrentUserRegistrationCache(): Result<Unit> = Result.success(Unit)
 suspend fun reportEvent(eventId: String, notes: String? = null): Result<Unit> =
         Result.failure(NotImplementedError("Event reporting is not implemented"))
+}
+
+private fun Event.explicitlyClearedEventPatchFields(previous: Event): Set<String> = buildSet {
+    if (previous.address != null && address == null) add("address")
+    if (previous.rating != null && rating == null) add("rating")
+    if (previous.cancellationRefundHours != null && cancellationRefundHours == null) add("cancellationRefundHours")
+    if (previous.sportId != null && sportId == null) add("sportId")
+    if (previous.leagueScoringConfigId != null && leagueScoringConfigId == null) add("leagueScoringConfigId")
+    if (previous.affiliateUrl != null && affiliateUrl == null) add("affiliateUrl")
+    if (previous.scheduleText != null && scheduleText == null) add("scheduleText")
+    if (previous.dateDisplayMode != null && dateDisplayMode == null) add("dateDisplayMode")
+    if (previous.dateDisplayText != null && dateDisplayText == null) add("dateDisplayText")
+    if (previous.manualPaymentInstructions != null && manualPaymentInstructions == null) add("manualPaymentInstructions")
+    if (previous.minAge != null && minAge == null) add("minAge")
+    if (previous.maxAge != null && maxAge == null) add("maxAge")
+    if (previous.gamesPerOpponent != null && gamesPerOpponent == null) add("gamesPerOpponent")
+    if (previous.playoffTeamCount != null && playoffTeamCount == null) add("playoffTeamCount")
+    if (previous.matchDurationMinutes != null && matchDurationMinutes == null) add("matchDurationMinutes")
+    if (previous.setDurationMinutes != null && setDurationMinutes == null) add("setDurationMinutes")
+    if (previous.setsPerMatch != null && setsPerMatch == null) add("setsPerMatch")
+    if (previous.doTeamsOfficiate != null && doTeamsOfficiate == null) add("doTeamsOfficiate")
+    if (previous.teamOfficialsMaySwap != null && teamOfficialsMaySwap == null) add("teamOfficialsMaySwap")
+    if (previous.matchRulesOverride != null && matchRulesOverride == null) add("matchRulesOverride")
+    if (previous.restTimeMinutes != null && restTimeMinutes == null) add("restTimeMinutes")
+    if (previous.allowPaymentPlans != null && allowPaymentPlans == null) add("allowPaymentPlans")
+    if (previous.installmentCount != null && installmentCount == null) add("installmentCount")
+    if (previous.allowTeamSplitDefault != null && allowTeamSplitDefault == null) add("allowTeamSplitDefault")
 }
 
 @Serializable
@@ -2018,18 +2049,28 @@ class EventRepository(
         leagueScoringConfig: LeagueScoringConfigDTO?,
     ): Result<Event> =
         singleResponse(networkCall = {
-            val updated = api.patch<UpdateEventRequestDto, EventApiDto>(
+            val eventDto = newEvent.toUpdateDto(
+                leagueScoringConfigOverride = leagueScoringConfig,
+                fieldsOverride = fields,
+                timeSlotsOverride = timeSlots,
+                includeOrganizationId = false,
+                includeFieldObjects = fields != null,
+                includeTimeSlotObjects = timeSlots != null,
+            )
+            val encoded = jsonMVP.encodeToJsonElement(UpdateEventRequestDto(eventDto)).jsonObject
+            val encodedEvent = (encoded["event"] as? JsonObject).orEmpty()
+            val cachedEvent = databaseService.getEventDao.getEventById(newEvent.id)
+            val clearableFields = cachedEvent
+                ?.let { existing -> newEvent.explicitlyClearedEventPatchFields(existing) }
+                .orEmpty()
+            val eventPatch = JsonObject(
+                encodedEvent + clearableFields
+                    .filterNot(encodedEvent::containsKey)
+                    .associateWith { JsonNull },
+            )
+            val updated = api.patch<JsonObject, EventApiDto>(
                 path = "api/events/${newEvent.id}",
-                body = UpdateEventRequestDto(
-                    event = newEvent.toUpdateDto(
-                        leagueScoringConfigOverride = leagueScoringConfig,
-                        fieldsOverride = fields,
-                        timeSlotsOverride = timeSlots,
-                        includeOrganizationId = false,
-                        includeFieldObjects = fields != null,
-                        includeTimeSlotObjects = timeSlots != null,
-                    ),
-                ),
+                body = JsonObject(mapOf("event" to eventPatch)),
             ).toEventOrNull() ?: error("Update event response missing event")
             updated
         }, saveCall = { event ->
