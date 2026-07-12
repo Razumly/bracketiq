@@ -15,7 +15,6 @@ import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.network.MvpApiClient
-import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.dto.BillDiscountSummaryDto
 import com.razumly.mvp.core.network.dto.CreateInvitesRequestDto
 import com.razumly.mvp.core.network.dto.EventComplianceDocumentCountsDto
@@ -57,12 +56,8 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.encodeToJsonElement
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 
 interface ITeamRepository : IMVPRepository {
@@ -553,20 +548,6 @@ class TeamRepository(
             "requiredTemplateIds",
             "playerRegistrations",
         )
-        val RETRYABLE_TEAM_UPDATE_FIELDS = setOf(
-            "assistantCoachIds",
-            "parentTeamId",
-            "playerRegistrations",
-            "joinPolicy",
-            "openRegistration",
-            "registrationPriceCents",
-            "requiredTemplateIds",
-        )
-        val UNRECOGNIZED_KEYS_REGEX = Regex(
-            pattern = "Unrecognized key\\(s\\) in object:\\s*(.+)",
-            option = RegexOption.IGNORE_CASE,
-        )
-        val QUOTED_FIELD_REGEX = Regex("'([^']+)'|`([^`]+)`|\"([^\"]+)\"")
     }
 
     override fun getTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> {
@@ -830,30 +811,7 @@ class TeamRepository(
                 return@singleResponse syncedTeam
             }
 
-            val updated = try {
-                patchTeamUpdate(teamId = syncedTeam.id, prepared = preparedUpdate)
-            } catch (error: ApiException) {
-                if (error.statusCode != 400) {
-                    throw error
-                }
-                val retryFields = extractRetryableUnknownTeamUpdateFields(error.responseBody)
-                    .intersect(preparedUpdate.includedFields)
-                if (retryFields.isEmpty()) {
-                    throw error
-                }
-                val retryPreparedUpdate = prepareTeamUpdate(
-                    newTeam = syncedTeam,
-                    cachedTeam = cachedTeam,
-                    omitFields = retryFields,
-                )
-                if (retryPreparedUpdate == null || retryPreparedUpdate.includedFields.isEmpty()) {
-                    throw error
-                }
-                patchTeamUpdate(
-                    teamId = syncedTeam.id,
-                    prepared = retryPreparedUpdate,
-                )
-            }
+            val updated = patchTeamUpdate(teamId = syncedTeam.id, prepared = preparedUpdate)
 
             ensureUsersCachedForTeam(updated)
             updated
@@ -1308,7 +1266,6 @@ class TeamRepository(
     private fun prepareTeamUpdate(
         newTeam: Team,
         cachedTeam: Team?,
-        omitFields: Set<String> = emptySet(),
     ): PreparedTeamUpdate? {
         val syncedNewTeam = newTeam.withSynchronizedMembership()
         val syncedCachedTeam = cachedTeam?.withSynchronizedMembership()
@@ -1319,11 +1276,10 @@ class TeamRepository(
             return null
         }
 
-        val includedFields = changedFields - omitFields
+        val includedFields = changedFields
         return PreparedTeamUpdate(
             request = UpdateTeamRequestDto(
                 team = syncedNewTeam.toUpdateDto(
-                    omitFields = omitFields,
                     includeFields = syncedCachedTeam?.let { includedFields },
                 ),
             ),
@@ -1364,62 +1320,6 @@ class TeamRepository(
     ): Boolean {
         return existingTeam.toUpdateDto(includeFields = setOf("playerRegistrations")).playerRegistrations ==
             updatedTeam.toUpdateDto(includeFields = setOf("playerRegistrations")).playerRegistrations
-    }
-
-    private fun extractRetryableUnknownTeamUpdateFields(responseBody: String?): Set<String> {
-        val normalizedBody = responseBody?.trim()?.takeIf(String::isNotBlank) ?: return emptySet()
-        val fields = mutableSetOf<String>()
-        val json = runCatching { jsonMVP.parseToJsonElement(normalizedBody) }.getOrNull()
-        if (json != null) {
-            collectUnknownKeysFromJson(json, fields)
-            collectStringLeaves(json).forEach { message ->
-                fields += extractUnknownKeysFromMessage(message)
-            }
-        } else {
-            fields += extractUnknownKeysFromMessage(normalizedBody)
-        }
-        return fields.intersect(RETRYABLE_TEAM_UPDATE_FIELDS)
-    }
-
-    private fun collectUnknownKeysFromJson(
-        element: JsonElement,
-        fields: MutableSet<String>,
-    ) {
-        when (element) {
-            is JsonObject -> {
-                (element["unknownKeys"] as? JsonArray)
-                    ?.mapNotNull { entry -> (entry as? JsonPrimitive)?.contentOrNull?.trim() }
-                    ?.filter(String::isNotBlank)
-                    ?.forEach(fields::add)
-                element.values.forEach { value -> collectUnknownKeysFromJson(value, fields) }
-            }
-
-            is JsonArray -> element.forEach { value -> collectUnknownKeysFromJson(value, fields) }
-            is JsonPrimitive -> Unit
-        }
-    }
-
-    private fun collectStringLeaves(element: JsonElement): Sequence<String> = sequence {
-        when (element) {
-            is JsonObject -> element.values.forEach { value -> yieldAll(collectStringLeaves(value)) }
-            is JsonArray -> element.forEach { value -> yieldAll(collectStringLeaves(value)) }
-            is JsonPrimitive -> {
-                element.contentOrNull?.takeIf(String::isNotBlank)?.let { value -> yield(value) }
-            }
-        }
-    }
-
-    private fun extractUnknownKeysFromMessage(message: String): Set<String> {
-        val normalizedMessage = message.trim()
-        val unknownKeysMessage = UNRECOGNIZED_KEYS_REGEX.find(normalizedMessage)
-            ?.groupValues
-            ?.getOrNull(1)
-            ?: return emptySet()
-        return QUOTED_FIELD_REGEX.findAll(unknownKeysMessage)
-            .mapNotNull { match ->
-                match.groupValues.drop(1).firstOrNull(String::isNotBlank)
-            }
-            .toSet()
     }
 
     private data class PreparedTeamUpdate(

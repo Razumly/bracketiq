@@ -1112,7 +1112,7 @@ class TeamRepositoryTeamsFetchTest {
     }
 
     @Test
-    fun updateTeam_retries_without_unknown_fields_when_backend_rejects_strict_patch() = runTest {
+    fun updateTeam_fails_without_dropping_fields_when_backend_rejects_strict_patch() = runTest {
         val tokenStore = InMemoryAuthTokenStore("t123")
         val teamDao = FakeTeamDao()
         val db = FakeDatabaseService(teamDao)
@@ -1124,40 +1124,21 @@ class TeamRepositoryTeamsFetchTest {
             assertEquals(HttpMethod.Patch, request.method)
             requestCount += 1
 
-            if (requestCount == 1) {
-                respond(
-                    content = """
-                        {
-                          "error": "Invalid input",
-                          "details": {
-                            "formErrors": [
-                              "Unrecognized key(s) in object: 'assistantCoachIds', 'playerRegistrations', 'openRegistration', 'registrationPriceCents'"
-                            ],
-                            "fieldErrors": {}
-                          }
-                        }
-                    """.trimIndent(),
-                    status = HttpStatusCode.BadRequest,
-                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
-                )
-            } else {
-                respond(
-                    content = """
-                        {
-                          "id": "team_1",
-                          "name": "Compatibility Team",
-                          "division": "Open",
-                          "playerIds": ["u1"],
-                          "captainId": "u1",
-                          "pending": [],
-                          "teamSize": 6,
-                          "organizationId": "org_1"
-                        }
-                    """.trimIndent(),
-                    status = HttpStatusCode.OK,
-                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
-                )
-            }
+            respond(
+                content = """
+                    {
+                      "error": "Invalid input",
+                      "details": {
+                        "formErrors": [
+                          "Unrecognized key(s) in object: 'assistantCoachIds', 'playerRegistrations', 'openRegistration', 'registrationPriceCents'"
+                        ],
+                        "fieldErrors": {}
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.BadRequest,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
         }
 
         val http = HttpClient(engine) {
@@ -1187,10 +1168,11 @@ class TeamRepositoryTeamsFetchTest {
             id = "team_1",
         )
 
-        val updated = repo.updateTeam(team).getOrThrow()
+        val result = repo.updateTeam(team)
 
-        assertEquals("team_1", updated.id)
-        assertEquals(2, requestCount)
+        assertTrue(result.isFailure)
+        assertEquals(1, requestCount)
+        assertTrue(teamDao.getTeams(listOf("team_1")).isEmpty())
     }
 
     @Test
