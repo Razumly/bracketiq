@@ -1249,6 +1249,7 @@ class UserRepository(
         if (ids.isEmpty()) return Result.success(emptyList())
 
         return multiResponse(
+            authoritativeIds = ids,
             getRemoteData = {
                 fetchUsersByIds(ids, visibilityContext)
             },

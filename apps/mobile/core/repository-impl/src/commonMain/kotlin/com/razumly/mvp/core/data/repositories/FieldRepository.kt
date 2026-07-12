@@ -82,18 +82,21 @@ class FieldRepository(
         return databaseService.getFieldDao.getFieldsWithMatches(ids)
     }
 
-    override suspend fun getFields(ids: List<String>): Result<List<Field>> =
-        multiResponse(
+    override suspend fun getFields(ids: List<String>): Result<List<Field>> {
+        val fieldIds = ids.distinct().filter(String::isNotBlank)
+        if (fieldIds.isEmpty()) return Result.success(emptyList())
+
+        return multiResponse(
+            authoritativeIds = fieldIds,
             getRemoteData = {
-                val fieldIds = ids.distinct().filter(String::isNotBlank)
-                if (fieldIds.isEmpty()) return@multiResponse emptyList()
                 val encodedIds = fieldIds.joinToString(",") { it.trim() }.encodeURLQueryComponent()
                 api.get<FieldsResponseDto>("api/fields?ids=$encodedIds").fields
             },
             saveData = { fields -> databaseService.getFieldDao.upsertFields(fields) },
-            getLocalData = { databaseService.getFieldDao.getFieldsByIds(ids) },
+            getLocalData = { databaseService.getFieldDao.getFieldsByIds(fieldIds) },
             deleteData = { staleIds -> databaseService.getFieldDao.deleteFieldsById(staleIds) },
         )
+    }
 
     override suspend fun listFields(eventId: String?): Result<List<Field>> = runCatching {
         val params = buildList {
