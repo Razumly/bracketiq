@@ -375,6 +375,7 @@ fun AuthScreenBase(
         showPicker = showBirthdayPicker,
         getTime = false,
         canSelectPast = true,
+        canSelectFuture = false,
     )
 }
 

@@ -32,6 +32,7 @@ actual fun PlatformDateTimePicker(
     getTime: Boolean,
     showDate: Boolean,
     canSelectPast: Boolean,
+    canSelectFuture: Boolean,
     initialDate: Instant?,
 ) {
     if (showPicker) {
@@ -39,10 +40,10 @@ actual fun PlatformDateTimePicker(
         var showTimePicker by remember(showDate, getTime) { mutableStateOf(!showDate && getTime) }
         val nowMillis = System.currentTimeMillis()
         val initialMillis = initialDate?.toEpochMilliseconds() ?: nowMillis
-        val clampedInitialMillis = if (canSelectPast) {
-            initialMillis
-        } else {
-            maxOf(initialMillis, nowMillis)
+        val clampedInitialMillis = when {
+            !canSelectPast && initialMillis < nowMillis -> nowMillis
+            !canSelectFuture && initialMillis > nowMillis -> nowMillis
+            else -> initialMillis
         }
         val initialDateTime = java.time.Instant.ofEpochMilli(clampedInitialMillis)
             .atZone(ZoneId.systemDefault())
@@ -63,7 +64,10 @@ actual fun PlatformDateTimePicker(
         if (showDatePicker) {
             val datePickerState = rememberDatePickerState(
                 initialSelectedDateMillis = initialDatePickerMillis,
-                selectableDates = PastOrFutureSelectableDates(canSelectPast)
+                selectableDates = PastOrFutureSelectableDates(
+                    canSelectPast = canSelectPast,
+                    canSelectFuture = canSelectFuture,
+                )
             )
 
             DatePickerDialog(
@@ -139,24 +143,34 @@ actual fun PlatformDateTimePicker(
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-class PastOrFutureSelectableDates(private val canSelectPast: Boolean) : SelectableDates {
+class PastOrFutureSelectableDates(
+    private val canSelectPast: Boolean,
+    private val canSelectFuture: Boolean = true,
+) : SelectableDates {
     override fun isSelectableDate(utcTimeMillis: Long): Boolean {
-        if (!canSelectPast) {
-            // ✅ FIXED: Compare UTC dates directly since DatePicker works in UTC
-            val selectedDateUTC = java.time.Instant.ofEpochMilli(utcTimeMillis)
-                .atZone(ZoneOffset.UTC)
-                .toLocalDate()
-            val todayUTC = LocalDate.now(ZoneId.systemDefault())
+        // DatePicker supplies a UTC calendar date. Compare calendar days rather
+        // than instants so the local current date is always selectable.
+        val selectedDateUtc = java.time.Instant.ofEpochMilli(utcTimeMillis)
+            .atZone(ZoneOffset.UTC)
+            .toLocalDate()
+        val today = LocalDate.now(ZoneId.systemDefault())
 
-            return selectedDateUTC >= todayUTC
-        }
-        return true
+        return isPlatformDateSelectable(
+            selectedEpochDay = selectedDateUtc.toEpochDay(),
+            todayEpochDay = today.toEpochDay(),
+            canSelectPast = canSelectPast,
+            canSelectFuture = canSelectFuture,
+        )
     }
 
     override fun isSelectableYear(year: Int): Boolean {
-        if (!canSelectPast) {
-            return year >= LocalDate.now().year && year <= LocalDate.now().year + 2
-        }
-        return true
+        val currentYear = LocalDate.now().year
+        if (!canSelectPast && year < currentYear) return false
+        if (!canSelectFuture && year > currentYear) return false
+
+        // Preserve the existing future scheduling picker ceiling when past dates
+        // are disallowed. DOB callers allow past dates and therefore keep all
+        // historical years available.
+        return canSelectPast || year <= currentYear + 2
     }
 }

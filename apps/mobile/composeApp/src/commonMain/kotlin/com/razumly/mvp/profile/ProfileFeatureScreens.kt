@@ -1637,6 +1637,7 @@ fun ProfileChildrenScreen(component: ProfileComponent) {
         showPicker = showChildBirthdayPicker,
         getTime = false,
         canSelectPast = true,
+        canSelectFuture = false,
     )
 }
 
