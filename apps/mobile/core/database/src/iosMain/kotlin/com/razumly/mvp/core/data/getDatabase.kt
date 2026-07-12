@@ -29,7 +29,7 @@ fun getDatabase(): RoomDatabase.Builder<MVPDatabaseService> {
                 MIGRATION_2_3_MATCH_START_NULLABLE,
                 MIGRATION_3_4_USER_PRIVACY_FIELDS,
                 MIGRATION_28_29_EVENT_DATE_DISPLAY,
-                *IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V90,
+                *IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V91,
             )
 
             .also { Napier.d(tag = ROOM_DB_LOG_TAG) { "Database builder created successfully for $dbPath" } }

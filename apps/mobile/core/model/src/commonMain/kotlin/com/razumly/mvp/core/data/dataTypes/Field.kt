@@ -42,11 +42,13 @@ data class Field(
     val rentalSlotIds: List<String> = emptyList(),
     val location: String? = null,
     val organizationId: String? = null,
+    /**
+     * The canonical facility relationship. This stays in the Room entity so a
+     * cached field retains its facility grouping after an offline read.
+     */
+    var facilityId: String? = null,
     @PrimaryKey override val id: String = "",
 ) : MVPDocument {
-    @Ignore
-    var facilityId: String? = null
-
     @Ignore
     var facility: Facility? = null
 

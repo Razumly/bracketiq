@@ -1134,6 +1134,17 @@ internal val MVP_DATABASE_MIGRATIONS_7_TO_35: Array<Migration> = arrayOf(
  */
 val MIGRATION_35_90_LEGACY_VERSION_CONTINUITY = migration(35, 90, emptyList())
 
+/**
+ * Facility membership is canonical server data and is needed to group cached
+ * fields when the client falls back to Room. Facility details remain hydrated
+ * separately, but the ID itself must survive every Room round trip.
+ */
+val MIGRATION_90_91_FIELD_FACILITY_ID = migration(
+    90,
+    91,
+    listOf("ALTER TABLE `Field` ADD COLUMN `facilityId` TEXT"),
+)
+
 val MVP_DATABASE_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_3_4_OFFICIAL_TERMINOLOGY_AND_PRIVACY,
     MIGRATION_4_5_NO_SCHEMA_CHANGE,
@@ -1142,4 +1153,5 @@ val MVP_DATABASE_MIGRATIONS: Array<Migration> = arrayOf(
     *MVP_DATABASE_MIGRATIONS_7_TO_35,
     MIGRATION_35_90_LEGACY_VERSION_CONTINUITY,
     *LEGACY_DATABASE_MIGRATIONS,
+    MIGRATION_90_91_FIELD_FACILITY_ID,
 )

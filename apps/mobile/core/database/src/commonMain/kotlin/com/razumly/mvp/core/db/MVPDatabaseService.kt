@@ -46,7 +46,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.data.util.Converters
 
-const val MVP_DATABASE_VERSION = 90
+const val MVP_DATABASE_VERSION = 91
 
 @Database(
     entities = [

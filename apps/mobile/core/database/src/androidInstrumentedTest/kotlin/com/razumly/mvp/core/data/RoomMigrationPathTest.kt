@@ -1,11 +1,14 @@
 package com.razumly.mvp.core.data
 
+import androidx.room.Room
 import androidx.room.testing.MigrationTestHelper
 import androidx.test.platform.app.InstrumentationRegistry
+import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.PENDING_RENTAL_ORDER_LEGACY_UNKNOWN_PAYER_ID
 import com.razumly.mvp.core.data.dataTypes.PENDING_RENTAL_ORDER_STATUS_REJECTED
 import com.razumly.mvp.core.db.MVP_DATABASE_VERSION
 import com.razumly.mvp.core.db.MVPDatabaseService
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -115,6 +118,62 @@ class RoomMigrationPathTest {
                 assertEquals("2026-01-01T00:02:00Z", cursor.getString(6))
                 assertTrue(cursor.getString(7).contains("payer could not be verified"))
             }
+        }
+    }
+
+    @Test
+    fun v90FieldMigration_addsWritableFacilityId() {
+        val databaseName = "room-field-facility-v90"
+        migrationHelper.createDatabase(databaseName, 90).use { database ->
+            database.execSQL(
+                """
+                INSERT INTO `Field` (
+                    `fieldNumber`, `divisions`, `lat`, `long`, `heading`, `inUse`, `name`,
+                    `rentalSlotIds`, `location`, `organizationId`, `id`
+                ) VALUES (
+                    2, '[]', NULL, NULL, NULL, 0, 'Court 2', '[]', NULL, 'org-1', 'field-1'
+                )
+                """.trimIndent(),
+            )
+        }
+
+        migrationHelper.runMigrationsAndValidate(
+            databaseName,
+            MVP_DATABASE_VERSION,
+            true,
+            *MVP_DATABASE_MIGRATIONS,
+        ).use { database ->
+            database.execSQL("UPDATE `Field` SET `facilityId` = 'facility-1' WHERE `id` = 'field-1'")
+            database.query(
+                "SELECT `facilityId` FROM `Field` WHERE `id` = 'field-1'",
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("facility-1", cursor.getString(0))
+            }
+        }
+    }
+
+    @Test
+    fun fieldDao_roundTripsCanonicalFacilityId() = runBlocking {
+        val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(
+            InstrumentationRegistry.getInstrumentation().targetContext,
+        ).allowMainThreadQueries().build()
+
+        try {
+            database.getFieldDao.upsertField(
+                Field(
+                    id = "field-1",
+                    fieldNumber = 2,
+                    name = "Court 2",
+                    organizationId = "org-1",
+                    facilityId = "facility-1",
+                ),
+            )
+
+            val cached = database.getFieldDao.getFieldsByIds(listOf("field-1")).single()
+            assertEquals("facility-1", cached.facilityId)
+        } finally {
+            database.close()
         }
     }
 

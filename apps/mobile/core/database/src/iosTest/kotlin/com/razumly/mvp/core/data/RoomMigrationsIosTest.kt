@@ -47,7 +47,7 @@ class RoomMigrationsIosTest {
                 "INSERT INTO `MatchOperationOutboxEntry` (`id`, `payloadJson`) VALUES ('outbox-1', '{\"score\":1}')",
             )
 
-            val migrations = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V90
+            val migrations = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V91.take(4)
             assertEquals(listOf(32, 33, 34, 35), migrations.map { it.startVersion })
             assertEquals(listOf(33, 34, 35, 90), migrations.map { it.endVersion })
 
@@ -90,6 +90,49 @@ class RoomMigrationsIosTest {
                 assertEquals(PENDING_RENTAL_ORDER_STATUS_REJECTED, statement.getText(1))
                 assertEquals("[{\"fieldId\":\"court-1\"}]", statement.getText(2))
                 assertTrue(statement.getText(3).contains("payer could not be verified"))
+            }
+        }
+    }
+
+    @Test
+    fun v90FieldMigration_addsWritableFacilityId() {
+        BundledSQLiteDriver().open(":memory:").use { connection ->
+            connection.execute(
+                """
+                CREATE TABLE `Field` (
+                    `fieldNumber` INTEGER NOT NULL,
+                    `divisions` TEXT NOT NULL,
+                    `lat` REAL,
+                    `long` REAL,
+                    `heading` REAL,
+                    `inUse` INTEGER,
+                    `name` TEXT,
+                    `rentalSlotIds` TEXT NOT NULL,
+                    `location` TEXT,
+                    `organizationId` TEXT,
+                    `id` TEXT NOT NULL,
+                    PRIMARY KEY(`id`)
+                )
+                """.trimIndent(),
+            )
+            connection.execute(
+                """
+                INSERT INTO `Field` (
+                    `fieldNumber`, `divisions`, `rentalSlotIds`, `organizationId`, `id`
+                ) VALUES (2, '[]', '[]', 'org-1', 'field-1')
+                """.trimIndent(),
+            )
+
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V91.last()
+            assertEquals(90, migration.startVersion)
+            assertEquals(91, migration.endVersion)
+            migration.migrate(connection)
+
+            connection.execute("UPDATE `Field` SET `facilityId` = 'facility-1' WHERE `id` = 'field-1'")
+            connection.assertSingleRow(
+                "SELECT `facilityId` FROM `Field` WHERE `id` = 'field-1'",
+            ) { statement ->
+                assertEquals("facility-1", statement.getText(0))
             }
         }
     }
