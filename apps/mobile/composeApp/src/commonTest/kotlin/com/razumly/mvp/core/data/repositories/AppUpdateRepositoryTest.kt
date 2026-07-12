@@ -95,6 +95,66 @@ class AppUpdateRepositoryTest {
     }
 
     @Test
+    fun checkForUpdate_accepts_the_shipped_1_6_14_boundary_release() = runTest {
+        val currentBuild = if (Platform.isIOS) 78 else 67
+        val previousBuild = if (Platform.isIOS) 77 else 66
+        val repository = repositoryWithResponse(
+            response = """
+                {
+                  "updateAvailable": true,
+                  "updateRequired": false,
+                  "latestVersion": {
+                    "platform": "$expectedPlatform",
+                    "versionName": "1.6.14",
+                    "buildNumber": $currentBuild,
+                    "changes": [
+                      "Adds organization reviews on organization profiles.",
+                      "Improves Discover map searches and database-backed event tag filters.",
+                      "Makes registration, discount-code, and bill pricing details clearer and more reliable.",
+                      "Tags push tokens by platform for more reliable notifications."
+                    ],
+                    "hasBreakingChanges": false,
+                    "updateUrl": "$trustedUpdateUrl"
+                  },
+                  "releases": [
+                    {
+                      "platform": "$expectedPlatform",
+                      "versionName": "1.6.14",
+                      "buildNumber": $currentBuild,
+                      "changes": [
+                        "Adds organization reviews on organization profiles.",
+                        "Improves Discover map searches and database-backed event tag filters.",
+                        "Makes registration, discount-code, and bill pricing details clearer and more reliable.",
+                        "Tags push tokens by platform for more reliable notifications."
+                      ],
+                      "hasBreakingChanges": false,
+                      "updateUrl": "$trustedUpdateUrl"
+                    }
+                  ]
+                }
+            """.trimIndent(),
+        )
+
+        val prompt = repository.checkForUpdate().getOrThrow()
+
+        assertNotNull(prompt)
+        assertEquals("1.6.14", prompt.versionName)
+        assertEquals(currentBuild, prompt.buildNumber)
+        assertEquals("$expectedPlatform:1.6.14:$currentBuild", prompt.releaseKey)
+        assertTrue(previousBuild < currentBuild)
+        assertEquals(
+            listOf(
+                "Adds organization reviews on organization profiles.",
+                "Improves Discover map searches and database-backed event tag filters.",
+                "Makes registration, discount-code, and bill pricing details clearer and more reliable.",
+                "Tags push tokens by platform for more reliable notifications.",
+            ),
+            prompt.changes,
+        )
+        assertFalse(prompt.updateRequired)
+    }
+
+    @Test
     fun checkForUpdate_rejects_untrusted_remote_update_url() = runTest {
         val repository = repositoryWithResponse(
             response = """
