@@ -646,10 +646,11 @@ class DefaultMatchContentComponent(
         val officialWindowOpen = isOfficialMatchWindowOpen(currentMatch)
         val canCheckIn = canCheckIntoMatch(currentMatch) && officialWindowOpen
         val rawCheckedIn = when {
+            isAssignedTeamOfficial -> true
             isAssignedUserOfficial -> currentMatch.isUserCheckedInForOfficialSlot(currentUser.id)
             else -> currentMatch.officialCheckedIn == true
         }
-        val assignedPromptKey = if (isAssignedTeamOfficial || isAssignedUserOfficial) {
+        val assignedPromptKey = if (isAssignedUserOfficial) {
             officialCheckInPromptKey(
                 match = currentMatch,
                 teamOfficialId = teamOfficialId,
@@ -663,11 +664,11 @@ class DefaultMatchContentComponent(
         val checkedIn = rawCheckedIn || (assignedPromptKey != null && assignedPromptKey in confirmedOfficialCheckInPromptKeys)
         val canSwapIntoOfficial = !checkedIn && canCurrentUserSwapIntoOfficial(currentMatch)
         val isOfficial = isAssignedTeamOfficial || isAssignedUserOfficial
-        val shouldShowPrompt = canCheckIn && !checkedIn && (isOfficial || canSwapIntoOfficial)
+        val shouldShowPrompt = canCheckIn && !checkedIn && (isAssignedUserOfficial || canSwapIntoOfficial)
 
         _isOfficial.value = isOfficial
         _officialCheckedIn.value = checkedIn
-        _assignedTeamOfficialPendingCheckIn.value = canCheckIn && !checkedIn && isAssignedTeamOfficial
+        _assignedTeamOfficialPendingCheckIn.value = false
         if (!shouldShowPrompt) {
             _showOfficialCheckInDialog.value = false
             return
@@ -760,6 +761,13 @@ class DefaultMatchContentComponent(
                     )
                 val isAssignedUserOfficial = currentMatch.isUserAssignedToOfficialSlot(currentUser.id)
                 val canSwap = canCurrentUserSwapIntoOfficial(currentMatch)
+                if (isAssignedTeamOfficial) {
+                    dismissOfficialDialog()
+                    _isOfficial.value = true
+                    _officialCheckedIn.value = true
+                    _assignedTeamOfficialPendingCheckIn.value = false
+                    return@launch
+                }
                 if (!canCheckIntoMatch(currentMatch)) {
                     dismissOfficialDialog()
                     _errorState.value = "Officials can only check in after both teams are assigned."
@@ -788,16 +796,12 @@ class DefaultMatchContentComponent(
                     return@launch
                 }
 
-                if (isAssignedTeamOfficial || isAssignedUserOfficial) {
+                if (isAssignedUserOfficial) {
                     val updatedMatch = matchWithTeams.value.copy(
-                        match = if (isAssignedUserOfficial) {
-                            currentMatch.updateOfficialAssignmentCheckIn(
-                                userId = currentUser.id,
-                                checkedIn = true,
-                            )
-                        } else {
-                            currentMatch.copy(officialCheckedIn = true)
-                        },
+                        match = currentMatch.updateOfficialAssignmentCheckIn(
+                            userId = currentUser.id,
+                            checkedIn = true,
+                        ),
                     )
                     matchRepository.updateMatch(updatedMatch.match).onSuccess {
                         markOfficialCheckInConfirmed(currentMatch)
@@ -825,9 +829,9 @@ class DefaultMatchContentComponent(
                 )
                 matchRepository.updateMatch(updatedMatch.match).onSuccess {
                     _isOfficial.value = true
-                    _officialCheckedIn.value = false
-                    _assignedTeamOfficialPendingCheckIn.value = true
-                    _showOfficialCheckInDialog.value = true
+                    _officialCheckedIn.value = true
+                    _assignedTeamOfficialPendingCheckIn.value = false
+                    _showOfficialCheckInDialog.value = false
                 }.onFailure {
                     _errorState.value = it.userMessage()
                 }

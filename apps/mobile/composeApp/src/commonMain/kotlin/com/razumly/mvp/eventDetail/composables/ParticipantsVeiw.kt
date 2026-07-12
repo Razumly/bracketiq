@@ -423,6 +423,8 @@ fun ParticipantsView(
     manageMode: Boolean = false,
     canManageParticipants: Boolean = false,
     showEventCheckInBadges: Boolean = false,
+    canCheckInEventTeams: Boolean = false,
+    onCheckInEventTeam: (String) -> Unit = {},
     topContentPadding: Dp = 0.dp,
     selectedDivisionId: String? = null,
     divisionOptions: List<EventDetailDivisionOption> = emptyList(),
@@ -1101,9 +1103,19 @@ fun ParticipantsView(
                         },
                     )
                     if (showEventCheckInBadges) {
-                        EventTeamCheckInBadge(
-                            checkedIn = eventTeamCheckIns[card.team.team.id].isCheckedIn(),
-                        )
+                        val checkedIn = eventTeamCheckIns[card.team.team.id].isCheckedIn()
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            EventTeamCheckInBadge(checkedIn = checkedIn)
+                            if (canCheckInEventTeams && !checkedIn) {
+                                OutlinedButton(onClick = { onCheckInEventTeam(card.team.team.id) }) {
+                                    Text("Check in team")
+                                }
+                            }
+                        }
                     }
                 }
             }

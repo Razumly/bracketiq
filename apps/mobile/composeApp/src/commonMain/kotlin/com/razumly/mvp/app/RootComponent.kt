@@ -17,7 +17,10 @@ import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
+import com.razumly.mvp.core.data.dataTypes.normalizedRole
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.repositories.AppUpdatePrompt
 import com.razumly.mvp.core.data.repositories.IAppUpdateRepository
@@ -69,6 +72,56 @@ import kotlinx.coroutines.launch
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
 import kotlin.time.Clock
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.minutes
+
+data class ActiveEventTeamCheckInPrompt(
+    val eventId: String,
+    val eventName: String,
+    val eventTeamId: String,
+    val teamName: String,
+)
+
+internal fun resolveActiveEventTeamCheckInCandidates(
+    snapshot: UserScheduleSnapshot,
+    user: UserData,
+    now: kotlin.time.Instant,
+): List<ActiveEventTeamCheckInPrompt> = snapshot.events
+    .asSequence()
+    .filter { event ->
+        val activeEnd = event.end.takeIf { end -> end > event.start } ?: event.start + 24.hours
+        event.teamSignup &&
+            event.teamCheckInMode.name == "EVENT" &&
+            now >= event.start - event.teamCheckInOpenMinutesBefore.coerceAtLeast(0).minutes &&
+            now <= activeEnd
+    }
+    .sortedBy { event -> event.start }
+    .flatMap { event ->
+        val eventTeamIds = event.teamIds.map(String::trim).filter(String::isNotBlank).toSet()
+        snapshot.teams.asSequence()
+            .filter { team -> team.id in eventTeamIds && team.isManagedBy(user.id) }
+            .map { team ->
+                ActiveEventTeamCheckInPrompt(
+                    eventId = event.id,
+                    eventName = event.name,
+                    eventTeamId = team.id,
+                    teamName = team.name,
+                )
+            }
+    }
+    .toList()
+
+private fun Team.isManagedBy(userId: String): Boolean {
+    val normalizedUserId = userId.trim()
+    if (normalizedUserId.isBlank()) return false
+    return managerId?.trim() == normalizedUserId ||
+        headCoachId?.trim() == normalizedUserId ||
+        coachIds.any { coachId -> coachId.trim() == normalizedUserId } ||
+        activeStaffAssignments().any { assignment ->
+            assignment.userId.trim() == normalizedUserId &&
+                assignment.normalizedRole() in setOf("MANAGER", "HEAD_COACH", "ASSISTANT_COACH")
+        }
+}
 
 class RootComponent(
     componentContext: ComponentContext,
@@ -133,6 +186,7 @@ class RootComponent(
     private var activeRegistrationSyncUserId: String? = null
     private var activeCenterActionUserId: String? = null
     private var centerActionScheduleSnapshot = UserScheduleSnapshot()
+    private val suppressedEventTeamCheckInPromptKeys = mutableSetOf<String>()
 
     private val _selectedPage = MutableStateFlow<AppConfig>(AppConfig.Search())
     val selectedPage: StateFlow<AppConfig> = _selectedPage.asStateFlow()
@@ -155,6 +209,12 @@ class RootComponent(
     private val _completedGuideIdsLoaded = MutableStateFlow(false)
     val completedGuideIdsLoaded: StateFlow<Boolean> = _completedGuideIdsLoaded.asStateFlow()
     val currentUser: StateFlow<Result<UserData>> = userRepository.currentUser
+    private val _activeEventTeamCheckInPrompt = MutableStateFlow<ActiveEventTeamCheckInPrompt?>(null)
+    val activeEventTeamCheckInPrompt = _activeEventTeamCheckInPrompt.asStateFlow()
+    private val _activeEventTeamCheckInSaving = MutableStateFlow(false)
+    val activeEventTeamCheckInSaving = _activeEventTeamCheckInSaving.asStateFlow()
+    private val _activeEventTeamCheckInError = MutableStateFlow<String?>(null)
+    val activeEventTeamCheckInError = _activeEventTeamCheckInError.asStateFlow()
 
     val childStack: Value<ChildStack<AppConfig, Child>> = childStack(
         source = navigation,
@@ -248,6 +308,7 @@ class RootComponent(
                             clearChatStartupSyncState()
                             clearChatRefreshLoop()
                             clearCenterActionRefreshLoop()
+                            clearActiveEventTeamCheckInState()
                         }
                     },
                     onFailure = {
@@ -257,6 +318,7 @@ class RootComponent(
                             clearChatStartupSyncState()
                             clearChatRefreshLoop()
                             clearCenterActionRefreshLoop()
+                            clearActiveEventTeamCheckInState()
                         }
                     }
                 )
@@ -702,21 +764,21 @@ class RootComponent(
                     delay(CENTER_ACTION_RECOMPUTE_INTERVAL_MS)
                     elapsedMillis += CENTER_ACTION_RECOMPUTE_INTERVAL_MS
                     recomputeCenterNavAction()
+                    refreshActiveEventTeamCheckInPrompt(centerActionScheduleSnapshot)
                 }
             }
         }
     }
 
     private suspend fun refreshCenterActionScheduleSnapshot() {
-        eventRepository.getMySchedule()
-            .onSuccess { snapshot ->
-                centerActionScheduleSnapshot = snapshot
-                recomputeCenterNavAction()
-            }
-            .onFailure { throwable ->
-                Napier.w("Failed to refresh center nav schedule shortcut: ${throwable.message}")
-                recomputeCenterNavAction()
-            }
+        val snapshot = eventRepository.getMySchedule().getOrElse { throwable ->
+            Napier.w("Failed to refresh center nav schedule shortcut: ${throwable.message}")
+            recomputeCenterNavAction()
+            return
+        }
+        centerActionScheduleSnapshot = snapshot
+        recomputeCenterNavAction()
+        refreshActiveEventTeamCheckInPrompt(snapshot)
     }
 
     private fun recomputeCenterNavAction() {
@@ -733,6 +795,72 @@ class RootComponent(
         centerActionScheduleSnapshot = UserScheduleSnapshot()
         _centerNavAction.value = CenterNavAction.CreateEvent
     }
+
+    fun dismissActiveEventTeamCheckInPrompt() {
+        _activeEventTeamCheckInPrompt.value?.let { prompt ->
+            suppressedEventTeamCheckInPromptKeys += activeEventTeamCheckInPromptKey(prompt.eventId, prompt.eventTeamId)
+        }
+        _activeEventTeamCheckInPrompt.value = null
+        _activeEventTeamCheckInError.value = null
+    }
+
+    fun confirmActiveEventTeamCheckIn() {
+        val prompt = _activeEventTeamCheckInPrompt.value ?: return
+        if (_activeEventTeamCheckInSaving.value) return
+        _activeEventTeamCheckInSaving.value = true
+        _activeEventTeamCheckInError.value = null
+        scope.launch {
+            matchRepository.checkInEventTeam(prompt.eventId, prompt.eventTeamId)
+                .onSuccess {
+                    suppressedEventTeamCheckInPromptKeys += activeEventTeamCheckInPromptKey(
+                        prompt.eventId,
+                        prompt.eventTeamId,
+                    )
+                    _activeEventTeamCheckInPrompt.value = null
+                }
+                .onFailure { throwable ->
+                    _activeEventTeamCheckInError.value = throwable.userMessage("Failed to check in team.")
+                }
+            _activeEventTeamCheckInSaving.value = false
+        }
+    }
+
+    private suspend fun refreshActiveEventTeamCheckInPrompt(snapshot: UserScheduleSnapshot) {
+        val user = userRepository.currentUser.value.getOrNull() ?: return
+        val candidates = resolveActiveEventTeamCheckInCandidates(snapshot, user, Clock.System.now())
+
+        for (candidate in candidates) {
+            val promptKey = activeEventTeamCheckInPromptKey(candidate.eventId, candidate.eventTeamId)
+            if (promptKey in suppressedEventTeamCheckInPromptKeys) continue
+
+            val checkIns = matchRepository.getEventTeamCheckIns(candidate.eventId).getOrElse { throwable ->
+                Napier.w("Failed to load active event team check-in for ${candidate.eventId}: ${throwable.message}")
+                return
+            }.checkIns
+            val alreadyCheckedIn = checkIns.any { checkIn ->
+                checkIn.eventTeamId?.trim() == candidate.eventTeamId &&
+                    (checkIn.status.isNullOrBlank() || checkIn.status.equals("CHECKED_IN", ignoreCase = true))
+            }
+            if (!alreadyCheckedIn) {
+                _activeEventTeamCheckInPrompt.value = candidate
+                _activeEventTeamCheckInError.value = null
+                return
+            }
+        }
+        _activeEventTeamCheckInPrompt.value = null
+        _activeEventTeamCheckInError.value = null
+    }
+
+    private fun clearActiveEventTeamCheckInState() {
+        suppressedEventTeamCheckInPromptKeys.clear()
+        _activeEventTeamCheckInPrompt.value = null
+        _activeEventTeamCheckInSaving.value = false
+        _activeEventTeamCheckInError.value = null
+    }
+
+    private fun activeEventTeamCheckInPromptKey(eventId: String, eventTeamId: String): String =
+        "${eventId.trim()}:${eventTeamId.trim()}"
+
 
     private suspend fun refreshPendingInviteCount(userId: String) {
         userRepository.listInvites(userId)

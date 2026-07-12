@@ -414,7 +414,7 @@ class UserRepository(
             ?: error("Login response missing token")
         tokenStore.set(token)
 
-        val account = res.user?.toAuthAccountOrNull()
+        val account = res.user?.toAuthAccountOrNull(isAdmin = res.session?.isAdmin == true)
             ?: error("Login response missing user")
         _currentAccount.value = Result.success(account)
         updateRequiredProfileCompletionState(res.toRequiredProfileCompletionState())
@@ -448,7 +448,7 @@ class UserRepository(
             ?: error("Google login response missing token")
         tokenStore.set(token)
 
-        val account = res.user?.toAuthAccountOrNull()
+        val account = res.user?.toAuthAccountOrNull(isAdmin = res.session?.isAdmin == true)
             ?: error("Google login response missing user")
         _currentAccount.value = Result.success(account)
         updateRequiredProfileCompletionState(res.toRequiredProfileCompletionState())
@@ -497,7 +497,7 @@ class UserRepository(
             ?: error("Apple login response missing token")
         tokenStore.set(token)
 
-        val account = res.user?.toAuthAccountOrNull()
+        val account = res.user?.toAuthAccountOrNull(isAdmin = res.session?.isAdmin == true)
             ?: error("Apple login response missing user")
         _currentAccount.value = Result.success(account)
         updateRequiredProfileCompletionState(res.toRequiredProfileCompletionState())
@@ -575,7 +575,7 @@ class UserRepository(
             ?: error("Register response missing token")
         tokenStore.set(token)
 
-        val account = res.user?.toAuthAccountOrNull()
+        val account = res.user?.toAuthAccountOrNull(isAdmin = res.session?.isAdmin == true)
             ?: error("Register response missing user")
         _currentAccount.value = Result.success(account)
         updateRequiredProfileCompletionState(res.toRequiredProfileCompletionState())
@@ -664,7 +664,7 @@ class UserRepository(
             }
 
             val me = api.get<AuthResponseDto>("api/auth/me")
-            val account = me.user?.toAuthAccountOrNull()
+            val account = me.user?.toAuthAccountOrNull(isAdmin = me.session?.isAdmin == true)
             if (account == null) {
                 clearLoginState()
                 return
@@ -703,7 +703,7 @@ class UserRepository(
             }
         }.getOrNull() ?: return false
 
-        val account = me.user?.toAuthAccountOrNull() ?: return false
+        val account = me.user?.toAuthAccountOrNull(isAdmin = me.session?.isAdmin == true) ?: return false
         val refreshed = me.token?.takeIf(String::isNotBlank) ?: return false
         tokenStore.set(refreshed)
         _currentAccount.value = Result.success(account)

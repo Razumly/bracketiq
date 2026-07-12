@@ -628,7 +628,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_assigned_official_team_when_match_not_checked_in_then_check_in_prompt_is_shown() = runTest(testDispatcher) {
+    fun given_assigned_official_team_when_match_not_checked_in_then_team_is_ready_without_prompt() = runTest(testDispatcher) {
         val user = createUser(id = "user-1", teamIds = listOf("team-c"))
         val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c"))
         val match = createMatch(
@@ -652,8 +652,8 @@ class MatchContentComponentTest : MainDispatcherTest() {
         advance()
 
         assertTrue(harness.component.isOfficial.value)
-        assertFalse(harness.component.officialCheckedIn.value)
-        assertTrue(harness.component.showOfficialCheckInDialog.value)
+        assertTrue(harness.component.officialCheckedIn.value)
+        assertFalse(harness.component.showOfficialCheckInDialog.value)
     }
 
     @Test
@@ -679,7 +679,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
         )
 
         advance()
-        assertTrue(harness.component.showOfficialCheckInDialog.value)
+        assertFalse(harness.component.showOfficialCheckInDialog.value)
 
         harness.component.dismissOfficialDialog()
         assertFalse(harness.component.showOfficialCheckInDialog.value)
@@ -688,7 +688,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
         advance()
 
         assertTrue(harness.component.isOfficial.value)
-        assertFalse(harness.component.officialCheckedIn.value)
+        assertTrue(harness.component.officialCheckedIn.value)
         assertFalse(harness.component.showOfficialCheckInDialog.value)
     }
 
@@ -715,7 +715,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
         )
 
         advance()
-        assertTrue(harness.component.showOfficialCheckInDialog.value)
+        assertFalse(harness.component.showOfficialCheckInDialog.value)
 
         harness.component.confirmOfficialCheckIn()
         advance()
@@ -756,14 +756,14 @@ class MatchContentComponentTest : MainDispatcherTest() {
         advance()
 
         assertTrue(harness.component.isOfficial.value)
-        assertFalse(harness.component.officialCheckedIn.value)
+        assertTrue(harness.component.officialCheckedIn.value)
         assertFalse(harness.component.showOfficialCheckInDialog.value)
 
         harness.component.confirmOfficialCheckIn()
         advance()
 
         assertTrue(harness.matchRepository.updatedMatches.isEmpty())
-        assertFalse(harness.component.officialCheckedIn.value)
+        assertTrue(harness.component.officialCheckedIn.value)
     }
 
     @Test
@@ -774,8 +774,19 @@ class MatchContentComponentTest : MainDispatcherTest() {
             eventId = event.id,
             team1Id = "team-a",
             team2Id = "team-b",
-            teamOfficialId = "team-c",
+            teamOfficialId = "team-a",
             officialCheckedIn = false,
+        ).copy(
+            officialIds = listOf(
+                MatchOfficialAssignment(
+                    positionId = "position-referee",
+                    slotIndex = 0,
+                    holderType = OfficialAssignmentHolderType.OFFICIAL,
+                    userId = user.id,
+                    eventOfficialId = "event-official-1",
+                    checkedIn = false,
+                ),
+            ),
         )
         val harness = MatchDetailHarness(
             event = event,
@@ -806,7 +817,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_event_team_member_swap_when_confirming_then_match_updates_then_check_in_prompt_is_shown() = runTest(testDispatcher) {
+    fun given_event_team_member_swap_when_confirming_then_match_updates_and_team_is_ready() = runTest(testDispatcher) {
         val user = createUser(id = "user-1", teamIds = listOf("team-c"))
         val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c"))
         val match = createMatch(
@@ -839,15 +850,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
         assertEquals(1, harness.matchRepository.updatedMatches.size)
         assertEquals("team-c", harness.matchRepository.updatedMatches[0].teamOfficialId)
         assertEquals(false, harness.matchRepository.updatedMatches[0].officialCheckedIn)
-        assertTrue(harness.component.isOfficial.value)
-        assertFalse(harness.component.officialCheckedIn.value)
-        assertTrue(harness.component.showOfficialCheckInDialog.value)
-
-        harness.component.confirmOfficialCheckIn()
-        advance()
-
-        assertEquals(2, harness.matchRepository.updatedMatches.size)
-        assertEquals(true, harness.matchRepository.updatedMatches[1].officialCheckedIn)
         assertTrue(harness.component.isOfficial.value)
         assertTrue(harness.component.officialCheckedIn.value)
         assertFalse(harness.component.showOfficialCheckInDialog.value)

@@ -15,12 +15,14 @@ internal fun canManageEventForUser(
     event: Event,
     user: UserData,
     organization: Organization?,
+    isPlatformAdmin: Boolean = false,
 ): Boolean {
     val currentUserId = user.id.trim()
     if (currentUserId.isBlank()) {
         return false
     }
-    return event.hostId.trim() == currentUserId ||
+    return isPlatformAdmin ||
+        event.hostId.trim() == currentUserId ||
         event.assistantHostIds.any { assistantHostId -> assistantHostId.trim() == currentUserId } ||
         organization?.canManageEventsForViewer(currentUserId) == true
 }

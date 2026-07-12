@@ -76,6 +76,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val errorState: StateFlow<ErrorMessage?>
     val eventWithRelations: StateFlow<EventWithFullRelations>
     val currentUser: StateFlow<UserData>
+    val isPlatformAdmin: StateFlow<Boolean>
     val eventTeamCheckIns: StateFlow<Map<String, TeamCheckInDto>>
     val showEventTeamCheckInDialog: StateFlow<Boolean>
     val eventTeamCheckInSaving: StateFlow<Boolean>
@@ -138,6 +139,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun onNavigateToChat(user: UserData)
     fun dismissEventTeamCheckInDialog()
     fun confirmEventTeamCheckIn()
+    fun checkInEventTeam(eventTeamId: String)
     fun matchSelected(selectedMatch: MatchWithRelations)
     fun updateEventRegistrationQuestionAnswer(questionId: String, answer: String)
     fun toggleEventRegistrationQuestionsExpanded()

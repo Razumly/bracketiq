@@ -460,12 +460,14 @@ internal fun canViewOfficialsPanel(
     currentUserId: String,
     event: Event,
     organization: Organization?,
+    isPlatformAdmin: Boolean = false,
 ): Boolean {
     val normalizedCurrentUserId = currentUserId.trim()
     if (normalizedCurrentUserId.isBlank()) {
         return false
     }
-    return event.hostId == normalizedCurrentUserId ||
+    return isPlatformAdmin ||
+        event.hostId == normalizedCurrentUserId ||
         event.assistantHostIds.any { assistantHostId -> assistantHostId == normalizedCurrentUserId } ||
         isCurrentUserEventOfficial(normalizedCurrentUserId, event) ||
         organization?.canManageEventsForViewer(normalizedCurrentUserId) == true
@@ -1026,6 +1028,7 @@ fun EventDetailScreen(
     val editableLeagueScoringConfig by component.editableLeagueScoringConfig.collectAsState()
 
     val isHost by component.isHost.collectAsState()
+    val isPlatformAdmin by component.isPlatformAdmin.collectAsState()
     val isEditing by component.isEditing.collectAsState()
     val isEventFull by component.isEventFull.collectAsState()
     val isUserInEvent by component.isUserInEvent.collectAsState()
@@ -1076,8 +1079,8 @@ fun EventDetailScreen(
         val currentUserId = currentUser.id.trim()
         selectedEvent.organization?.canManageEventsForViewer(currentUserId) == true
     }
-    val canManageTemplate = remember(isHost, isAssistantHost, isOrganizationManager) {
-        isHost || isAssistantHost || isOrganizationManager
+    val canManageTemplate = remember(isHost, isAssistantHost, isOrganizationManager, isPlatformAdmin) {
+        isPlatformAdmin || isHost || isAssistantHost || isOrganizationManager
     }
     val canEditEventDetails = remember(
         isHost,
@@ -1090,11 +1093,11 @@ fun EventDetailScreen(
             canManageTemplate = canManageTemplate,
         )
     }
-    val canDeleteEvent = remember(isHost, isTemplateEvent, canManageTemplate) {
+    val canDeleteEvent = remember(isHost, isPlatformAdmin, isTemplateEvent, canManageTemplate) {
         if (isTemplateEvent) {
             canManageTemplate
         } else {
-            isHost
+            isHost || isPlatformAdmin
         }
     }
     val canCreateTemplateFromCurrentEvent = remember(isHost, isTemplateEvent, selectedEvent.event.organizationId) {
@@ -1102,11 +1105,13 @@ fun EventDetailScreen(
     }
     val canManageLeagueStandings = remember(
         currentUser.id,
+        isPlatformAdmin,
         selectedEvent.event.hostId,
         selectedEvent.event.assistantHostIds,
     ) {
         val currentUserId = currentUser.id.trim()
         currentUserId.isNotBlank() && (
+            isPlatformAdmin ||
             selectedEvent.event.hostId.trim() == currentUserId ||
                 selectedEvent.event.assistantHostIds.any { assistantHostId ->
                     assistantHostId.trim() == currentUserId
@@ -1117,11 +1122,13 @@ fun EventDetailScreen(
         currentUser.id,
         selectedEvent.event,
         selectedEvent.organization,
+        isPlatformAdmin,
     ) {
         canViewOfficialsPanel(
             currentUserId = currentUser.id,
             event = selectedEvent.event,
             organization = selectedEvent.organization,
+            isPlatformAdmin = isPlatformAdmin,
         )
     }
     val selectedSport = remember(sports, editedEvent.sportId) {
@@ -1151,6 +1158,13 @@ fun EventDetailScreen(
         selectedEvent.event.teamSignup &&
             selectedEvent.event.teamCheckInMode.name == "EVENT" &&
             (canManageParticipantsFromDock || isEventOfficial)
+    }
+    val eventTeamCheckInWindowOpen = remember(
+        selectedEvent.event.start,
+        selectedEvent.event.teamCheckInOpenMinutesBefore,
+    ) {
+        Clock.System.now() >= selectedEvent.event.start -
+            selectedEvent.event.teamCheckInOpenMinutesBefore.coerceAtLeast(0).minutes
     }
     val currentUserManagedEventTeam = remember(
         currentUserManagedEventTeamId,
@@ -3271,6 +3285,10 @@ fun EventDetailScreen(
                                             manageMode = isManagingParticipants,
                                             canManageParticipants = canManageParticipantsFromDock,
                                             showEventCheckInBadges = showEventCheckInBadges,
+                                            canCheckInEventTeams = showEventCheckInBadges &&
+                                                eventTeamCheckInWindowOpen &&
+                                                !eventTeamCheckInSaving,
+                                            onCheckInEventTeam = component::checkInEventTeam,
                                             topContentPadding = tabContentTopOffset,
                                             selectedDivisionId = selectedParticipantsDivisionId
                                                 ?: selectedDivision,

@@ -218,7 +218,7 @@ class UserRepositoryAuthTest {
                     content = """
                         {
                           "user": { "id":"u1", "email":"u1@example.com", "name":"U1" },
-                          "session": { "userId":"u1", "isAdmin":false },
+                          "session": { "userId":"u1", "isAdmin":true },
                           "token":"t123",
                           "profile": {
                             "id":"u1",
@@ -258,6 +258,7 @@ class UserRepositoryAuthTest {
         val account = repo.currentAccount.value.getOrThrow()
         assertEquals("u1", account.id)
         assertEquals("u1@example.com", account.email)
+        assertTrue(account.isAdmin)
     }
 
     @Test

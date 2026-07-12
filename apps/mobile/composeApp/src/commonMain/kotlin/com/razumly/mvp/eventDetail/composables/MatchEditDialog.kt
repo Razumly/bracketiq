@@ -61,6 +61,7 @@ import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.util.toTeamDisplayLabel
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.eventDetail.MatchCreateContext
+import com.razumly.mvp.eventDetail.withOfficialAssignmentCheckIn
 import com.razumly.mvp.eventDetail.data.BracketLane
 import com.razumly.mvp.eventDetail.data.BracketNode
 import com.razumly.mvp.eventDetail.data.filterValidNextMatchCandidates
@@ -430,6 +431,36 @@ private fun MatchEditDialogContent(
                             )
                         },
                     )
+                    if (currentAssignment != null) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    editedMatch = editedMatch.copy(
+                                        match = editedMatch.match.withOfficialAssignmentCheckIn(
+                                            positionId = slot.positionId,
+                                            slotIndex = slot.slotIndex,
+                                            checkedIn = !currentAssignment.checkedIn,
+                                        ),
+                                    )
+                                },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = currentAssignment.checkedIn,
+                                onCheckedChange = { checkedIn ->
+                                    editedMatch = editedMatch.copy(
+                                        match = editedMatch.match.withOfficialAssignmentCheckIn(
+                                            positionId = slot.positionId,
+                                            slotIndex = slot.slotIndex,
+                                            checkedIn = checkedIn,
+                                        ),
+                                    )
+                                },
+                            )
+                            Text("Official checked in")
+                        }
+                    }
                 }
             }
 

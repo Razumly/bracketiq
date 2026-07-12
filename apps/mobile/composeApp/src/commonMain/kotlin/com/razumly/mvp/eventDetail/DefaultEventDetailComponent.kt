@@ -174,6 +174,7 @@ class DefaultEventDetailComponent(
             event = selectedEvent.value,
             user = currentUser.value,
             organization = eventWithRelations.value.organization,
+            isPlatformAdmin = _currentAccount.value.isAdmin,
         )
 
     private fun canManageParticipantData(
@@ -184,6 +185,7 @@ class DefaultEventDetailComponent(
         event = event,
         user = user,
         organization = organization,
+        isPlatformAdmin = _currentAccount.value.isAdmin,
     )
 
     private fun canEditMatchesNow(): Boolean = matchEditingCoordinator.canEditNow(canManageMatchEditing())
@@ -198,6 +200,9 @@ class DefaultEventDetailComponent(
             AuthAccount.empty()
         }
     }.stateIn(scope, SharingStarted.Eagerly, AuthAccount.empty())
+    override val isPlatformAdmin = _currentAccount
+        .map { account -> account.isAdmin }
+        .stateIn(scope, SharingStarted.Eagerly, false)
     private val _eventStaffInvites = MutableStateFlow<List<Invite>>(emptyList())
 
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
@@ -234,10 +239,23 @@ class DefaultEventDetailComponent(
     }
 
     override fun confirmEventTeamCheckIn() {
+        val eventTeamId = _currentUserManagedEventTeamId.value ?: resolveCurrentUserManagedEventTeamId()
+        if (eventTeamId.isNullOrBlank()) {
+            _showEventTeamCheckInDialog.value = false
+            return
+        }
+        submitEventTeamCheckIn(eventTeamId = eventTeamId, dismissPromptOnSuccess = true)
+    }
+
+    override fun checkInEventTeam(eventTeamId: String) {
+        submitEventTeamCheckIn(eventTeamId = eventTeamId, dismissPromptOnSuccess = false)
+    }
+
+    private fun submitEventTeamCheckIn(eventTeamId: String, dismissPromptOnSuccess: Boolean) {
         if (_eventTeamCheckInSaving.value) return
         val currentEvent = selectedEvent.value
-        val eventTeamId = _currentUserManagedEventTeamId.value ?: resolveCurrentUserManagedEventTeamId()
-        if (!eventTeamCheckInEnabled(currentEvent) || eventTeamId.isNullOrBlank()) {
+        val normalizedEventTeamId = eventTeamId.trim()
+        if (!eventTeamCheckInEnabled(currentEvent) || normalizedEventTeamId.isBlank()) {
             _showEventTeamCheckInDialog.value = false
             return
         }
@@ -246,11 +264,13 @@ class DefaultEventDetailComponent(
             try {
                 matchRepository.checkInEventTeam(
                     eventId = currentEvent.id,
-                    eventTeamId = eventTeamId,
+                    eventTeamId = normalizedEventTeamId,
                 ).onSuccess { checkIn ->
-                    confirmedEventTeamCheckInPromptKeys += eventTeamCheckInPromptKey(currentEvent.id, eventTeamId)
-                    _eventTeamCheckIns.value = _eventTeamCheckIns.value + (eventTeamId to checkIn)
-                    _showEventTeamCheckInDialog.value = false
+                    confirmedEventTeamCheckInPromptKeys += eventTeamCheckInPromptKey(currentEvent.id, normalizedEventTeamId)
+                    _eventTeamCheckIns.value = _eventTeamCheckIns.value + (normalizedEventTeamId to checkIn)
+                    if (dismissPromptOnSuccess) {
+                        _showEventTeamCheckInDialog.value = false
+                    }
                 }.onFailure { error ->
                     _errorState.value = ErrorMessage("Failed to check in team: ${error.userMessage()}")
                 }
@@ -332,7 +352,7 @@ class DefaultEventDetailComponent(
                     }
                     .toMap()
             }.onFailure {
-                // Managers/coaches can submit event check-ins, but read access is host/official scoped.
+                // Keep the prompt available and retry on the next refresh after transient read failures.
             }
         }
     }

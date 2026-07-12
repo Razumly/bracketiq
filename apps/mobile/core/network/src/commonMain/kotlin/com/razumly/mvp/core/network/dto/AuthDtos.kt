@@ -210,10 +210,10 @@ data class UserUpdateDto(
     val notificationSettings: NotificationSettings? = null,
 )
 
-fun AuthUserDto.toAuthAccountOrNull(): AuthAccount? {
+fun AuthUserDto.toAuthAccountOrNull(isAdmin: Boolean = false): AuthAccount? {
     val userId = id?.takeIf(String::isNotBlank) ?: return null
     val emailAddr = email?.takeIf(String::isNotBlank) ?: return null
-    return AuthAccount(id = userId, email = emailAddr, name = name)
+    return AuthAccount(id = userId, email = emailAddr, name = name, isAdmin = isAdmin)
 }
 
 fun UserProfileDto.toUserDataOrNull(): UserData? {
