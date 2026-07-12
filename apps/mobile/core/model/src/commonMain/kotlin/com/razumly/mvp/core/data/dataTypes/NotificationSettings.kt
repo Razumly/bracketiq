@@ -74,7 +74,7 @@ fun normalizeNotificationSettings(settings: NotificationSettings?): Notification
         val rawChannels = rawSettings[option.id].orEmpty()
         option.id to notificationChannels.associateWith { channel ->
             isNotificationChannelSupported(option.id, channel) &&
-                (rawChannels[channel] ?: true)
+                (rawChannels[channel] ?: (option.channels[channel] == true))
         }
     }
 }
