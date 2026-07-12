@@ -15,6 +15,7 @@ internal fun Event.withSportRules(sports: List<Sport>): Event {
         ?: false
     return when (eventType) {
         EventType.EVENT,
+        EventType.TRYOUT,
         EventType.WEEKLY_EVENT -> this
 
         EventType.LEAGUE -> applyLeagueSportRules(requiresSets)

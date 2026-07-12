@@ -102,6 +102,15 @@ private fun Set<String>.toOrganizationTagsQueryParam(): String {
     }
 }
 
+private fun Set<String>.toOrganizationListQueryParam(name: String): String {
+    val normalizedValues = map(String::trim)
+        .filter(String::isNotBlank)
+        .distinct()
+    return normalizedValues.joinToString(separator = "") { value ->
+        "&$name=${value.encodeURLQueryComponent()}"
+    }
+}
+
 private fun Throwable.withFriendlyBoldSignMessage(): Throwable {
     val friendlyMessage = toFriendlyBoldSignMessage(message) ?: return this
     if (friendlyMessage == message) {
@@ -682,6 +691,21 @@ interface IBillingRepository : IMVPRepository {
                     ),
                 )
             }
+    suspend fun listOrganizationsPage(
+        limit: Int,
+        offset: Int,
+        includeAffiliateRentals: Boolean,
+        tagSlugs: Set<String>,
+        price: Pair<Double, Double>?,
+        divisionGenders: Set<String>,
+        skillDivisionTypeIds: Set<String>,
+        ageDivisionTypeIds: Set<String>,
+    ): Result<RepositoryPage<Organization>> = listOrganizationsPage(
+        limit = limit,
+        offset = offset,
+        includeAffiliateRentals = includeAffiliateRentals,
+        tagSlugs = tagSlugs,
+    )
     suspend fun searchOrganizations(
         query: String,
         limit: Int = 10,
@@ -2031,12 +2055,41 @@ class BillingRepository(
         includeAffiliateRentals: Boolean,
         tagSlugs: Set<String>,
     ): Result<RepositoryPage<Organization>> = runCatching {
+        listOrganizationsPage(
+            limit = limit,
+            offset = offset,
+            includeAffiliateRentals = includeAffiliateRentals,
+            tagSlugs = tagSlugs,
+            price = null,
+            divisionGenders = emptySet(),
+            skillDivisionTypeIds = emptySet(),
+            ageDivisionTypeIds = emptySet(),
+        ).getOrThrow()
+    }
+
+    override suspend fun listOrganizationsPage(
+        limit: Int,
+        offset: Int,
+        includeAffiliateRentals: Boolean,
+        tagSlugs: Set<String>,
+        price: Pair<Double, Double>?,
+        divisionGenders: Set<String>,
+        skillDivisionTypeIds: Set<String>,
+        ageDivisionTypeIds: Set<String>,
+    ): Result<RepositoryPage<Organization>> = runCatching {
         val normalizedLimit = limit.coerceIn(1, 200)
         val normalizedOffset = offset.coerceAtLeast(0)
         val affiliateParam = if (includeAffiliateRentals) "&includeAffiliateRentals=true" else ""
         val tagsParam = tagSlugs.toOrganizationTagsQueryParam()
+        val divisionParams = buildString {
+            price?.first?.times(100.0)?.toInt()?.let { append("&divisionPriceMin=$it") }
+            price?.second?.times(100.0)?.toInt()?.let { append("&divisionPriceMax=$it") }
+            divisionGenders.toOrganizationListQueryParam("divisionGenders").let(::append)
+            skillDivisionTypeIds.toOrganizationListQueryParam("skillDivisionTypeIds").let(::append)
+            ageDivisionTypeIds.toOrganizationListQueryParam("ageDivisionTypeIds").let(::append)
+        }
         val response = api.get<OrganizationsResponseDto>(
-            path = "api/organizations?limit=$normalizedLimit&offset=$normalizedOffset$affiliateParam$tagsParam",
+            path = "api/organizations?limit=$normalizedLimit&offset=$normalizedOffset$affiliateParam$tagsParam$divisionParams",
         )
         val organizations = response.organizations.mapNotNull { it.toOrganizationOrNull() }
         RepositoryPage(
@@ -3513,6 +3566,8 @@ private data class OrganizationApiDto(
     val ownerId: String? = null,
     val website: String? = null,
     val sports: List<String>? = null,
+    val enabledFeatures: List<com.razumly.mvp.core.data.dataTypes.OrganizationFeature>? = null,
+    val divisions: List<com.razumly.mvp.core.data.dataTypes.DivisionDetail>? = null,
     val hasStripeAccount: Boolean? = null,
     val verificationStatus: String? = null,
     val verifiedAt: String? = null,
@@ -3552,6 +3607,8 @@ private data class OrganizationApiDto(
                 ?.map(String::trim)
                 ?.filter(String::isNotBlank)
                 ?: emptyList(),
+            enabledFeatures = enabledFeatures ?: emptyList(),
+            divisions = divisions ?: emptyList(),
             hasStripeAccount = hasStripeAccount ?: false,
             verificationStatus = resolveOrganizationVerificationStatus(
                 verificationStatus = verificationStatus,

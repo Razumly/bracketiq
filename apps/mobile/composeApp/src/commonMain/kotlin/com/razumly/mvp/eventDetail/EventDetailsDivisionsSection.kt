@@ -211,7 +211,7 @@ private fun EventDetailsDivisionsReadOnlyContent(
                     }
                 }
 
-                EventType.EVENT, EventType.WEEKLY_EVENT -> {
+                EventType.EVENT, EventType.TRYOUT, EventType.WEEKLY_EVENT -> {
                     // No additional event-only rows for now.
                 }
             }

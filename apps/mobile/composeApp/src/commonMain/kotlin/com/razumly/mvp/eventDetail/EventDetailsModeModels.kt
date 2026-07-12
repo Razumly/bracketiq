@@ -49,7 +49,16 @@ internal data class EditSectionModel(
 )
 
 internal fun shouldShowMatchRulesSection(eventType: EventType): Boolean =
-    eventType != EventType.EVENT && eventType != EventType.WEEKLY_EVENT
+    eventType != EventType.EVENT && eventType != EventType.TRYOUT && eventType != EventType.WEEKLY_EVENT
+
+internal fun selectableMobileEventTypes(
+    isNewEvent: Boolean,
+    rentalTimeLocked: Boolean,
+    currentEventType: EventType,
+): List<EventType> = EventType.entries.filterNot { eventType ->
+    (isNewEvent && rentalTimeLocked && eventType == EventType.WEEKLY_EVENT) ||
+        (eventType == EventType.TRYOUT && currentEventType != EventType.TRYOUT)
+}
 
 internal data class EventDetailsReadOnlyActions(
     val onOpenLocationMap: () -> Unit = {},

@@ -99,6 +99,8 @@ import com.razumly.mvp.core.analytics.AnalyticsEvent
 import com.razumly.mvp.core.analytics.AnalyticsTracker
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.EventTag
+import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameterOption
+import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Sport
@@ -417,6 +419,96 @@ private fun DiscoverFilterTagSection(
 }
 
 @Composable
+private fun DiscoverFilterDivisionSection(
+    parameters: DivisionTypeParameters,
+    filter: EventFilter,
+    onFilterChange: (EventFilter.() -> EventFilter) -> Unit,
+) {
+    val skills = remember(parameters.sportSkills) {
+        parameters.sportSkills
+            .flatMap { group -> group.skills }
+            .distinctBy { option -> option.id }
+            .sortedBy { option -> option.name.lowercase() }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = "Division",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        DivisionFilterOptions(
+            label = "Gender",
+            options = parameters.genders,
+            selectedIds = filter.divisionGenders,
+            onToggle = { id ->
+                onFilterChange {
+                    copy(divisionGenders = divisionGenders.toggleFilterValue(id))
+                }
+            },
+        )
+        DivisionFilterOptions(
+            label = "Age group",
+            options = parameters.ages,
+            selectedIds = filter.ageDivisionTypeIds,
+            onToggle = { id ->
+                onFilterChange {
+                    copy(ageDivisionTypeIds = ageDivisionTypeIds.toggleFilterValue(id))
+                }
+            },
+        )
+        DivisionFilterOptions(
+            label = "Skill level",
+            options = skills,
+            selectedIds = filter.skillDivisionTypeIds,
+            onToggle = { id ->
+                onFilterChange {
+                    copy(skillDivisionTypeIds = skillDivisionTypeIds.toggleFilterValue(id))
+                }
+            },
+        )
+        Text(
+            text = "All selected division filters must match the same division.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun DivisionFilterOptions(
+    label: String,
+    options: List<DivisionTypeParameterOption>,
+    selectedIds: Set<String>,
+    onToggle: (String) -> Unit,
+) {
+    if (options.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            options.forEach { option ->
+                FilterChip(
+                    selected = option.id in selectedIds,
+                    onClick = { onToggle(option.id) },
+                    label = { Text(option.name, maxLines = 1) },
+                )
+            }
+        }
+    }
+}
+
+private fun Set<String>.toggleFilterValue(value: String): Set<String> =
+    if (value in this) this - value else this + value
+
+@Composable
 private fun DiscoverFilterLocationSection(
     locationLabel: String,
     pickerVisible: Boolean,
@@ -609,6 +701,7 @@ fun EventSearchScreen(
     val selectedSearchLocationLabel by component.selectedSearchLocationLabel.collectAsState()
     val sports by component.sports.collectAsState()
     val eventTagOptions by component.eventTags.collectAsState()
+    val divisionTypeParameters by component.divisionTypeParameters.collectAsState()
     val organizationTagOptions by component.organizationTags.collectAsState()
     val organizationFilter by component.organizationFilter.collectAsState()
     val selectedOrganizationTagSlugs by component.selectedOrganizationTagSlugs.collectAsState()
@@ -1290,6 +1383,11 @@ fun EventSearchScreen(
                             }
                         },
                     )
+                    DiscoverFilterDivisionSection(
+                        parameters = divisionTypeParameters,
+                        filter = currentFilter,
+                        onFilterChange = component::updateFilter,
+                    )
                     DiscoverFilterLocationSection(
                         locationLabel = selectedSearchLocationLabel ?: if (currentLocation != null) {
                             "My location"
@@ -1352,6 +1450,11 @@ fun EventSearchScreen(
                             }
                         },
                         expandable = false,
+                    )
+                    DiscoverFilterDivisionSection(
+                        parameters = divisionTypeParameters,
+                        filter = organizationFilter,
+                        onFilterChange = component::updateOrganizationFilter,
                     )
                     DiscoverFilterLocationSection(
                         locationLabel = selectedSearchLocationLabel ?: if (currentLocation != null) {
@@ -1456,6 +1559,8 @@ fun EventSearchScreen(
                     filterDismissSignal = filterDismissRequest,
                     filterTitle = if (selectedTab == DiscoverTab.ORGANIZATIONS) "Filter Organizations" else "Filter Events",
                     showDefaultFilterContent = selectedTab == DiscoverTab.EVENTS,
+                    showPriceFilter = selectedTab == DiscoverTab.EVENTS || selectedTab == DiscoverTab.ORGANIZATIONS,
+                    showDateFilter = selectedTab == DiscoverTab.EVENTS,
                     filterExtraContent = discoverFilterExtraContent,
                 )
             }

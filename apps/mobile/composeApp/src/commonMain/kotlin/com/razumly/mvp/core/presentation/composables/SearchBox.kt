@@ -89,6 +89,8 @@ fun SearchBox(
     filterExtraContent: (@Composable (() -> Unit))? = null,
     filterTitle: String = "Filter Events",
     showDefaultFilterContent: Boolean = true,
+    showPriceFilter: Boolean = showDefaultFilterContent,
+    showDateFilter: Boolean = showDefaultFilterContent,
     filterMaxHeight: Dp? = null,
     filterDismissSignal: Int = 0,
 ) {
@@ -198,7 +200,8 @@ fun SearchBox(
                 maxHeight = filterMaxHeight,
                 extraContent = filterExtraContent,
                 title = filterTitle,
-                showDefaultFilterContent = showDefaultFilterContent,
+                showPriceFilter = showPriceFilter,
+                showDateFilter = showDateFilter,
                 onFilterChange = onFilterChange,
                 onDismiss = { showFilterDropdown = false })
         }
@@ -210,6 +213,9 @@ private fun isFilterActive(filter: EventFilter, currentRadiusMiles: Double? = nu
     return filter.price != null ||
         filter.sportIds.isNotEmpty() ||
         filter.tagSlugs.isNotEmpty() ||
+        filter.divisionGenders.isNotEmpty() ||
+        filter.skillDivisionTypeIds.isNotEmpty() ||
+        filter.ageDivisionTypeIds.isNotEmpty() ||
         filter.date.second != null ||
         ((currentRadiusMiles ?: 0.0) > 0.0)
 }
@@ -224,7 +230,8 @@ private fun FilterDropdown(
     maxHeight: Dp? = null,
     extraContent: (@Composable (() -> Unit))? = null,
     title: String = "Filter Events",
-    showDefaultFilterContent: Boolean = true,
+    showPriceFilter: Boolean = true,
+    showDateFilter: Boolean = true,
     onFilterChange: (EventFilter.() -> EventFilter) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -272,11 +279,12 @@ private fun FilterDropdown(
                         }
                     }
 
-                    if (showDefaultFilterContent) {
+                    if (showPriceFilter) {
                         PriceFilterSection(
                             currentFilter = currentFilter, onFilterChange = onFilterChange
                         )
-
+                    }
+                    if (showDateFilter) {
                         DateFilterSection(
                             currentFilter = currentFilter,
                             { showStartPicker = true },
@@ -299,7 +307,7 @@ private fun FilterDropdown(
                         Text("Apply Filters")
                     }
                 }
-                if (showDefaultFilterContent) {
+                if (showDateFilter) {
                     PlatformDateTimePicker(
                         onDateSelected = { selectedInstant ->
                             onFilterChange {

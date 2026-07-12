@@ -17,6 +17,7 @@ private const val MAX_EVENT_TAG_LENGTH = 40
 private val eventTypeTags = mapOf(
     EventType.LEAGUE to EventTag(name = "League", slug = "league", isSystem = true),
     EventType.TOURNAMENT to EventTag(name = "Tournament", slug = "tournament", isSystem = true),
+    EventType.TRYOUT to EventTag(name = "Tryouts", slug = "tryouts", isSystem = true),
 )
 
 fun slugifyEventTagName(value: String): String {

@@ -2,7 +2,9 @@ package com.razumly.mvp.eventCreate
 
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.lockedEventTypeTagSlugs
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.eventDetail.selectableMobileEventTypes
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -106,6 +108,32 @@ class CreateEventSelectionRulesTest {
         assertFalse(updated.singleDivision)
         assertFalse(updated.allowPaymentPlans == true)
         assertEquals(end, updated.end)
+    }
+
+    @Test
+    fun mobile_creation_and_conversion_do_not_offer_tryouts() {
+        assertFalse(
+            EventType.TRYOUT in selectableMobileEventTypes(
+                isNewEvent = true,
+                rentalTimeLocked = false,
+                currentEventType = EventType.EVENT,
+            ),
+        )
+        assertFalse(
+            EventType.TRYOUT in selectableMobileEventTypes(
+                isNewEvent = false,
+                rentalTimeLocked = false,
+                currentEventType = EventType.EVENT,
+            ),
+        )
+        assertTrue(
+            EventType.TRYOUT in selectableMobileEventTypes(
+                isNewEvent = false,
+                rentalTimeLocked = false,
+                currentEventType = EventType.TRYOUT,
+            ),
+        )
+        assertEquals(setOf("tryouts"), lockedEventTypeTagSlugs(EventType.TRYOUT))
     }
 
     @Test

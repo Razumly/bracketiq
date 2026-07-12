@@ -1987,6 +1987,7 @@ fun EventDetails(
         editEvent.eventType == EventType.LEAGUE ||
             editEvent.eventType == EventType.TOURNAMENT ||
             editEvent.eventType == EventType.WEEKLY_EVENT ||
+            editEvent.eventType == EventType.TRYOUT ||
             hasRentalBackedSlots ||
             hasAvailableRentalResources ||
             (scheduleTimeLocked && editEvent.eventType == EventType.EVENT)
@@ -2004,6 +2005,7 @@ fun EventDetails(
             editEvent.eventType == EventType.LEAGUE ||
                 editEvent.eventType == EventType.TOURNAMENT ||
                 editEvent.eventType == EventType.WEEKLY_EVENT ||
+                editEvent.eventType == EventType.TRYOUT ||
                 hasRentalBackedSlots ||
                 hasAvailableRentalResources ||
                 (scheduleTimeLocked && editEvent.eventType == EventType.EVENT)

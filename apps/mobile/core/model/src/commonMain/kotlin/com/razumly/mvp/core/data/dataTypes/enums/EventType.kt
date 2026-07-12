@@ -4,5 +4,6 @@ enum class EventType {
     TOURNAMENT,
     EVENT,
     LEAGUE,
+    TRYOUT,
     WEEKLY_EVENT,
 }

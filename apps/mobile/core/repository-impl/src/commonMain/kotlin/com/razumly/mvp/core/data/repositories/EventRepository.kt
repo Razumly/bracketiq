@@ -147,6 +147,29 @@ interface IEventRepository : IMVPRepository {
         offset: Int = 0,
         includeDistanceFilter: Boolean = true,
     ): Result<Pair<List<Event>, Boolean>>
+    suspend fun getEventsInBounds(
+        bounds: Bounds,
+        dateFrom: Instant? = null,
+        dateTo: Instant? = null,
+        sports: List<String> = emptyList(),
+        tags: List<String> = emptyList(),
+        price: Pair<Double, Double>? = null,
+        divisionGenders: List<String> = emptyList(),
+        skillDivisionTypeIds: List<String> = emptyList(),
+        ageDivisionTypeIds: List<String> = emptyList(),
+        limit: Int = 50,
+        offset: Int = 0,
+        includeDistanceFilter: Boolean = true,
+    ): Result<Pair<List<Event>, Boolean>> = getEventsInBounds(
+        bounds = bounds,
+        dateFrom = dateFrom,
+        dateTo = dateTo,
+        sports = sports,
+        tags = tags,
+        limit = limit,
+        offset = offset,
+        includeDistanceFilter = includeDistanceFilter,
+    )
     suspend fun searchEvents(
         searchQuery: String,
         userLocation: LatLng?,
@@ -2064,6 +2087,10 @@ class EventRepository(
             dateTo = null,
             sports = emptyList(),
             tags = emptyList(),
+            price = null,
+            divisionGenders = emptyList(),
+            skillDivisionTypeIds = emptyList(),
+            ageDivisionTypeIds = emptyList(),
             limit = eventPageSize,
             offset = 0,
             includeDistanceFilter = true,
@@ -2076,6 +2103,34 @@ class EventRepository(
         dateTo: Instant?,
         sports: List<String>,
         tags: List<String>,
+        limit: Int,
+        offset: Int,
+        includeDistanceFilter: Boolean,
+    ): Result<Pair<List<Event>, Boolean>> = getEventsInBounds(
+        bounds = bounds,
+        dateFrom = dateFrom,
+        dateTo = dateTo,
+        sports = sports,
+        tags = tags,
+        price = null,
+        divisionGenders = emptyList(),
+        skillDivisionTypeIds = emptyList(),
+        ageDivisionTypeIds = emptyList(),
+        limit = limit,
+        offset = offset,
+        includeDistanceFilter = includeDistanceFilter,
+    )
+
+    override suspend fun getEventsInBounds(
+        bounds: Bounds,
+        dateFrom: Instant?,
+        dateTo: Instant?,
+        sports: List<String>,
+        tags: List<String>,
+        price: Pair<Double, Double>?,
+        divisionGenders: List<String>,
+        skillDivisionTypeIds: List<String>,
+        ageDivisionTypeIds: List<String>,
         limit: Int,
         offset: Int,
         includeDistanceFilter: Boolean,
@@ -2095,11 +2150,22 @@ class EventRepository(
                 },
                 dateFrom = dateFrom?.toString(),
                 dateTo = dateTo?.toString(),
+                priceMin = price?.first?.times(100.0)?.toInt(),
+                priceMax = price?.second?.times(100.0)?.toInt(),
                 sports = sports
                     .mapNotNull { sport -> sport.trim().takeIf(String::isNotBlank) }
                     .takeIf { it.isNotEmpty() },
                 tags = tags
                     .mapNotNull { tag -> tag.trim().takeIf(String::isNotBlank) }
+                    .takeIf { it.isNotEmpty() },
+                divisionGenders = divisionGenders
+                    .mapNotNull { gender -> gender.trim().uppercase().takeIf(String::isNotBlank) }
+                    .takeIf { it.isNotEmpty() },
+                skillDivisionTypeIds = skillDivisionTypeIds
+                    .mapNotNull { id -> id.trim().takeIf(String::isNotBlank) }
+                    .takeIf { it.isNotEmpty() },
+                ageDivisionTypeIds = ageDivisionTypeIds
+                    .mapNotNull { id -> id.trim().takeIf(String::isNotBlank) }
                     .takeIf { it.isNotEmpty() },
             )
             val res = api.post<EventSearchRequestDto, EventsResponseDto>(

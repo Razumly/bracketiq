@@ -11,6 +11,7 @@ import com.razumly.mvp.core.analytics.AnalyticsTracker
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventTag
+import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Facility
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.Organization
@@ -60,6 +61,7 @@ interface EventSearchComponent {
     val selectedSearchLocationLabel: StateFlow<String?>
     val sports: StateFlow<List<Sport>>
     val eventTags: StateFlow<List<EventTag>>
+    val divisionTypeParameters: StateFlow<DivisionTypeParameters>
     val organizationTags: StateFlow<List<EventTag>>
     val organizationFilter: StateFlow<EventFilter>
     val selectedOrganizationTagSlugs: StateFlow<Set<String>>
@@ -183,6 +185,8 @@ class DefaultEventSearchComponent(
     override val sports: StateFlow<List<Sport>> = _sports.asStateFlow()
     private val _eventTags = MutableStateFlow<List<EventTag>>(emptyList())
     override val eventTags: StateFlow<List<EventTag>> = _eventTags.asStateFlow()
+    private val _divisionTypeParameters = MutableStateFlow(DivisionTypeParameters())
+    override val divisionTypeParameters: StateFlow<DivisionTypeParameters> = _divisionTypeParameters.asStateFlow()
     private val _organizationTags = MutableStateFlow<List<EventTag>>(emptyList())
     override val organizationTags: StateFlow<List<EventTag>> = _organizationTags.asStateFlow()
     private val _organizationFilter = MutableStateFlow(EventFilter())
@@ -305,6 +309,7 @@ class DefaultEventSearchComponent(
 
         observeCachedEvents()
         loadSports()
+        loadDivisionTypeParameters()
         loadEventTags()
         loadOrganizationTags()
         refreshEvents(
@@ -489,6 +494,10 @@ class DefaultEventSearchComponent(
                     dateTo = activeFilter.date.second,
                     sports = selectedSportNames(activeFilter),
                     tags = activeFilter.tagSlugs.toList(),
+                    price = activeFilter.price,
+                    divisionGenders = activeFilter.divisionGenders.toList(),
+                    skillDivisionTypeIds = activeFilter.skillDivisionTypeIds.toList(),
+                    ageDivisionTypeIds = activeFilter.ageDivisionTypeIds.toList(),
                     limit = EVENTS_PAGE_SIZE,
                     offset = eventOffset,
                     includeDistanceFilter = includeDistanceFilter,
@@ -565,7 +574,11 @@ class DefaultEventSearchComponent(
         val dateRangeChanged = previous.date != updated.date
         val sportsChanged = previous.sportIds != updated.sportIds
         val tagsChanged = previous.tagSlugs != updated.tagSlugs
-        if (dateRangeChanged || sportsChanged || tagsChanged) {
+        val divisionFiltersChanged = previous.price != updated.price ||
+            previous.divisionGenders != updated.divisionGenders ||
+            previous.skillDivisionTypeIds != updated.skillDivisionTypeIds ||
+            previous.ageDivisionTypeIds != updated.ageDivisionTypeIds
+        if (dateRangeChanged || sportsChanged || tagsChanged || divisionFiltersChanged) {
             refreshEvents(force = true)
         } else {
             _events.value = applyEventFilter(_rawEvents.value, updated)
@@ -589,7 +602,11 @@ class DefaultEventSearchComponent(
         _organizationFilter.value = updated
         _selectedOrganizationTagSlugs.value = updated.tagSlugs
 
-        if (previous.tagSlugs != updated.tagSlugs) {
+        val divisionFiltersChanged = previous.price != updated.price ||
+            previous.divisionGenders != updated.divisionGenders ||
+            previous.skillDivisionTypeIds != updated.skillDivisionTypeIds ||
+            previous.ageDivisionTypeIds != updated.ageDivisionTypeIds
+        if (previous.tagSlugs != updated.tagSlugs || divisionFiltersChanged) {
             organizationsLoaded = false
             scope.launch {
                 loadOrganizations(force = true)
@@ -717,6 +734,18 @@ class DefaultEventSearchComponent(
                 }
                 .onFailure { e ->
                     _errorState.value = ErrorMessage("Failed to load event tags: ${e.userMessage()}")
+                }
+        }
+    }
+
+    private fun loadDivisionTypeParameters() {
+        scope.launch {
+            sportsRepository.getDivisionTypeParameters()
+                .onSuccess { parameters ->
+                    _divisionTypeParameters.value = parameters
+                }
+                .onFailure { error ->
+                    Napier.w("Failed to load division filters: ${error.message}")
                 }
         }
     }
@@ -949,7 +978,12 @@ class DefaultEventSearchComponent(
         val page = billingRepository.listOrganizationsPage(
             limit = DISCOVER_PAGE_SIZE,
             offset = 0,
+            includeAffiliateRentals = false,
             tagSlugs = _organizationFilter.value.tagSlugs,
+            price = _organizationFilter.value.price,
+            divisionGenders = _organizationFilter.value.divisionGenders,
+            skillDivisionTypeIds = _organizationFilter.value.skillDivisionTypeIds,
+            ageDivisionTypeIds = _organizationFilter.value.ageDivisionTypeIds,
         )
             .onFailure { e ->
                 _errorState.value = ErrorMessage("Failed to fetch organizations: ${e.userMessage()}")
@@ -977,7 +1011,12 @@ class DefaultEventSearchComponent(
         val page = billingRepository.listOrganizationsPage(
             limit = DISCOVER_PAGE_SIZE,
             offset = organizationOffset,
+            includeAffiliateRentals = false,
             tagSlugs = _organizationFilter.value.tagSlugs,
+            price = _organizationFilter.value.price,
+            divisionGenders = _organizationFilter.value.divisionGenders,
+            skillDivisionTypeIds = _organizationFilter.value.skillDivisionTypeIds,
+            ageDivisionTypeIds = _organizationFilter.value.ageDivisionTypeIds,
         )
             .onFailure { e ->
                 _errorState.value = ErrorMessage("Failed to fetch more organizations: ${e.userMessage()}")
@@ -1064,7 +1103,30 @@ class DefaultEventSearchComponent(
                 }
             }
         }
-        return applyDistanceFilter(sportFiltered)
+        val normalizedGenders = filter.divisionGenders.map(String::uppercase).toSet()
+        val hasDivisionFilters = filter.price != null ||
+            normalizedGenders.isNotEmpty() ||
+            filter.skillDivisionTypeIds.isNotEmpty() ||
+            filter.ageDivisionTypeIds.isNotEmpty()
+        val divisionFiltered = if (!hasDivisionFilters) {
+            sportFiltered
+        } else {
+            sportFiltered.filter { organization ->
+                organization.divisions.any { division ->
+                    val divisionPrice = division.price?.toDouble()?.div(100.0)
+                    val priceMatches = filter.price == null ||
+                        (divisionPrice != null && divisionPrice >= filter.price.first && divisionPrice <= filter.price.second)
+                    val genderMatches = normalizedGenders.isEmpty() ||
+                        division.gender.trim().uppercase() in normalizedGenders
+                    val skillMatches = filter.skillDivisionTypeIds.isEmpty() ||
+                        division.skillDivisionTypeId.trim() in filter.skillDivisionTypeIds
+                    val ageMatches = filter.ageDivisionTypeIds.isEmpty() ||
+                        division.ageDivisionTypeId.trim() in filter.ageDivisionTypeIds
+                    priceMatches && genderMatches && skillMatches && ageMatches
+                }
+            }
+        }
+        return applyDistanceFilter(divisionFiltered)
     }
 
     private fun applyDistanceFilter(organizations: List<Organization>): List<Organization> {

@@ -530,11 +530,15 @@ data class EventSearchFiltersDto(
     val userLocation: EventSearchUserLocationDto? = null,
     val dateFrom: String? = null,
     val dateTo: String? = null,
+    val priceMin: Int? = null,
     val priceMax: Int? = null,
     val eventTypes: List<String>? = null,
     val sports: List<String>? = null,
     val tags: List<String>? = null,
     val divisions: List<String>? = null,
+    val divisionGenders: List<String>? = null,
+    val skillDivisionTypeIds: List<String>? = null,
+    val ageDivisionTypeIds: List<String>? = null,
 )
 
 @Serializable

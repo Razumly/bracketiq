@@ -114,6 +114,27 @@ class RentalAvailabilityLoader(
                     }
                 }
 
+                EventType.TRYOUT -> {
+                    if (eventFieldIds.isNotEmpty() && eventFieldIds.intersect(selectedFieldSet).isEmpty()) {
+                        return@forEach
+                    }
+                    if (event.timeSlotIds.any { slotId -> slotId.isNotBlank() }) {
+                        slotBackedEvents.add(event)
+                    } else {
+                        eventFieldIds.intersect(selectedFieldSet).forEach { fieldId ->
+                            directBlocks.add(
+                                RentalBusyBlock(
+                                    eventId = event.id,
+                                    eventName = RENTAL_UNAVAILABLE_LABEL,
+                                    fieldId = fieldId,
+                                    start = event.start,
+                                    end = event.end,
+                                )
+                            )
+                        }
+                    }
+                }
+
                 EventType.LEAGUE, EventType.TOURNAMENT -> {
                     if (eventFieldIds.isNotEmpty() && eventFieldIds.intersect(selectedFieldSet).isEmpty()) {
                         return@forEach

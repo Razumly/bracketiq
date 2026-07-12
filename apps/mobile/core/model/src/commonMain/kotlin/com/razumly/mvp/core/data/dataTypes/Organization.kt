@@ -24,6 +24,13 @@ enum class OrganizationVerificationReviewStatus {
 }
 
 @Serializable
+enum class OrganizationFeature {
+    CLUB_TEAMS,
+    FACILITIES_RENTALS,
+    EVENT_MANAGEMENT,
+}
+
+@Serializable
 data class Organization(
     val id: String,
     val name: String,
@@ -37,6 +44,8 @@ data class Organization(
     val ownerId: String,
     val website: String?,
     val sports: List<String> = emptyList(),
+    val enabledFeatures: List<OrganizationFeature> = emptyList(),
+    val divisions: List<DivisionDetail> = emptyList(),
     val hasStripeAccount: Boolean,
     val verificationStatus: OrganizationVerificationStatus = if (hasStripeAccount) {
         OrganizationVerificationStatus.LEGACY_CONNECTED
@@ -95,6 +104,8 @@ data class OrganizationDTO(
     val ownerId: String,
     val website: String? = null,
     val sports: List<String> = emptyList(),
+    val enabledFeatures: List<OrganizationFeature> = emptyList(),
+    val divisions: List<DivisionDetail> = emptyList(),
     val hasStripeAccount: Boolean = false,
     val verificationStatus: OrganizationVerificationStatus = if (hasStripeAccount) {
         OrganizationVerificationStatus.LEGACY_CONNECTED
@@ -129,6 +140,8 @@ data class OrganizationDTO(
             ownerId = ownerId,
             website = website,
             sports = sports,
+            enabledFeatures = enabledFeatures,
+            divisions = divisions,
             hasStripeAccount = hasStripeAccount,
             verificationStatus = verificationStatus,
             verifiedAt = verifiedAt,
