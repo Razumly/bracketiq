@@ -965,11 +965,19 @@ class EventRepositoryHttpTest {
     }
 
     @Test
-    fun getEvent_preserves_cached_participant_roster_until_participant_snapshot_refresh() = runTest {
+    fun getEvent_replaces_cached_divisions_and_participant_roster_with_authoritative_response() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()
+        val removedDivisionId = "e1__division__removed"
+        val currentDivisionId = "e1__division__current"
         val cachedEvent = makeEvent(id = "e1", hostId = "h1").copy(
             teamSignup = true,
+            singleDivision = false,
+            divisions = listOf(removedDivisionId, currentDivisionId),
+            divisionDetails = listOf(
+                DivisionDetail(id = removedDivisionId, key = "removed", name = "Removed Division"),
+                DivisionDetail(id = currentDivisionId, key = "current", name = "Current Division"),
+            ),
             teamIds = (1..9).map { index -> "team_$index" },
             userIds = listOf("user_cached"),
             waitListIds = listOf("wait_cached"),
@@ -995,6 +1003,15 @@ class EventRepositoryHttpTest {
                       "start": "2026-02-10T00:00:00Z",
                       "end": "2026-02-10T01:00:00Z",
                       "teamSignup": true,
+                      "singleDivision": false,
+                      "divisions": ["$currentDivisionId"],
+                      "divisionDetails": [
+                        {
+                          "id": "$currentDivisionId",
+                          "key": "current",
+                          "name": "Current Division"
+                        }
+                      ],
                       "teamIds": ["team_1", "team_2", "team_3", "team_4", "team_5", "team_6"],
                       "userIds": [],
                       "waitListIds": [],
@@ -1013,10 +1030,12 @@ class EventRepositoryHttpTest {
         val cachedAfterRefresh = eventDao.getEventById("e1")
 
         assertEquals("Event One Updated", refreshed.name)
-        assertEquals(cachedEvent.teamIds, cachedAfterRefresh?.teamIds)
-        assertEquals(cachedEvent.userIds, cachedAfterRefresh?.userIds)
-        assertEquals(cachedEvent.waitListIds, cachedAfterRefresh?.waitListIds)
-        assertEquals(cachedEvent.freeAgentIds, cachedAfterRefresh?.freeAgentIds)
+        assertEquals(listOf(currentDivisionId), refreshed.divisions)
+        assertEquals(listOf(currentDivisionId), cachedAfterRefresh?.divisions)
+        assertEquals(listOf("team_1", "team_2", "team_3", "team_4", "team_5", "team_6"), cachedAfterRefresh?.teamIds)
+        assertEquals(emptyList(), cachedAfterRefresh?.userIds)
+        assertEquals(emptyList(), cachedAfterRefresh?.waitListIds)
+        assertEquals(emptyList(), cachedAfterRefresh?.freeAgentIds)
         assertEquals(emptyList(), eventDao.deleteEventCrossRefsCalls)
     }
 

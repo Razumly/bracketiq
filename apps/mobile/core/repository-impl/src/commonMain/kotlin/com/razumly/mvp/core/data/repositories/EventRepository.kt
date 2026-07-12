@@ -1197,7 +1197,13 @@ class EventRepository(
         }
     }
 
-    private fun Event.withPreservedCachedDivisionState(cached: Event?): Event {
+    /**
+     * The participant endpoint intentionally selects a narrow event projection and therefore
+     * cannot authoritatively describe divisions. Keep the known division configuration only for
+     * that explicitly partial response. Full event/list/search responses are canonical and must
+     * always replace cache state so server-side deletions converge locally.
+     */
+    private fun Event.withCachedDivisionStateForPartialParticipantSnapshot(cached: Event?): Event {
         val cachedDivisions = cached?.divisions?.normalizeDivisionIdentifiers().orEmpty()
         if (cached == null || cachedDivisions.isEmpty()) return this
 
@@ -1215,27 +1221,6 @@ class EventRepository(
             divisions = if (preserveDivisions) cached.divisions else divisions,
             divisionDetails = if (preserveDivisionDetails) cached.divisionDetails else divisionDetails,
         )
-    }
-
-    private fun Event.withPreservedCachedParticipantRoster(cached: Event?): Event {
-        if (cached == null) return this
-        return copy(
-            teamIds = cached.teamIds,
-            userIds = cached.userIds,
-            waitListIds = cached.waitListIds,
-            freeAgentIds = cached.freeAgentIds,
-        )
-    }
-
-    private suspend fun preserveCachedDivisionState(event: Event): Event =
-        event.withPreservedCachedDivisionState(databaseService.getEventDao.getEventById(event.id))
-
-    private suspend fun preserveCachedDivisionState(events: List<Event>): List<Event> {
-        if (events.isEmpty()) return emptyList()
-        val cachedById = databaseService.getEventDao
-            .getEventsByIds(events.map(Event::id))
-            .associateBy(Event::id)
-        return events.map { event -> event.withPreservedCachedDivisionState(cachedById[event.id]) }
     }
 
     private suspend fun fetchRemoteEventsByHost(hostId: String): List<Event> {
@@ -1541,7 +1526,7 @@ class EventRepository(
         val participantIds = snapshot.participants
         val snapshotEvent = snapshot.event
             ?.toEventOrNull()
-            ?.withPreservedCachedDivisionState(baseEvent)
+            ?.withCachedDivisionStateForPartialParticipantSnapshot(baseEvent)
         val mergedEvent = (snapshotEvent ?: baseEvent).copy(
             teamIds = normalizedParticipantIds(participantIds.teamIds),
             userIds = normalizedParticipantIds(participantIds.userIds),
@@ -1578,11 +1563,8 @@ class EventRepository(
         runCatching {
             val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
                 ?: error("Event id is required.")
-            val cachedEvent = databaseService.getEventDao.getEventById(normalizedEventId)
             val event = try {
                 fetchRemoteEvent(normalizedEventId)
-                    .withPreservedCachedDivisionState(cachedEvent)
-                    .withPreservedCachedParticipantRoster(cachedEvent)
             } catch (throwable: Throwable) {
                 if (shouldEvictEventFromCache(throwable)) {
                     databaseService.getEventDao.deleteEventWithCrossRefs(normalizedEventId)
@@ -1621,8 +1603,6 @@ class EventRepository(
         val cachedEvent = databaseService.getEventDao.getEventById(normalizedEventId)
         val bootstrapEvent = bootstrap.event
             ?.toEventOrNull()
-            ?.withPreservedCachedDivisionState(cachedEvent)
-            ?.withPreservedCachedParticipantRoster(cachedEvent)
         val baseEvent = bootstrapEvent ?: cachedEvent ?: event
         val participantSnapshot = bootstrap.participantSnapshot
             ?: EventParticipantsSnapshotResponseDto(event = bootstrap.event)
@@ -1861,12 +1841,11 @@ class EventRepository(
         event: Event,
         occurrence: EventOccurrenceSelection?,
     ): EventParticipantsSyncResult? {
-        val eventWithStableDivisions = preserveCachedDivisionState(event)
         syncCurrentUserRegistrationCache().getOrNull()
-        return syncEventParticipants(eventWithStableDivisions, occurrence)
+        return syncEventParticipants(event, occurrence)
             .onFailure {
-                databaseService.getEventDao.upsertEvent(eventWithStableDivisions)
-                persistEventRelations(eventWithStableDivisions)
+                databaseService.getEventDao.upsertEvent(event)
+                persistEventRelations(event)
             }
             .getOrNull()
     }
@@ -1899,7 +1878,7 @@ class EventRepository(
         val ids = eventIds.map(String::trim).filter(String::isNotBlank).distinct()
         if (ids.isEmpty()) return@runCatching emptyList()
 
-        val events = preserveCachedDivisionState(fetchRemoteEventsByIds(ids))
+        val events = fetchRemoteEventsByIds(ids)
         if (events.isNotEmpty()) {
             databaseService.getEventDao.upsertEvents(events)
         }
@@ -1922,7 +1901,7 @@ class EventRepository(
         }
 
         return runCatching {
-            val events = preserveCachedDivisionState(fetchRemoteEventsByOrganization(normalizedOrganizationId, limit))
+            val events = fetchRemoteEventsByOrganization(normalizedOrganizationId, limit)
             if (events.isNotEmpty()) {
                 databaseService.getEventDao.upsertEvents(events)
             }
@@ -2152,11 +2131,9 @@ class EventRepository(
                 ),
             )
 
-            val events = preserveCachedDivisionState(
-                filterHiddenEvents(
-                    res.events.mapNotNull { it.toEventOrNull() },
-                    userRepository.currentUser.value.getOrNull(),
-                ),
+            val events = filterHiddenEvents(
+                res.events.mapNotNull { it.toEventOrNull() },
+                userRepository.currentUser.value.getOrNull(),
             )
             databaseService.getEventDao.upsertEvents(events)
             val orderedEvents = if (includeDistanceFilter) {
@@ -2194,11 +2171,9 @@ class EventRepository(
                 ),
             )
 
-            val events = preserveCachedDivisionState(
-                filterHiddenEvents(
-                    res.events.mapNotNull { it.toEventOrNull() },
-                    userRepository.currentUser.value.getOrNull(),
-                ),
+            val events = filterHiddenEvents(
+                res.events.mapNotNull { it.toEventOrNull() },
+                userRepository.currentUser.value.getOrNull(),
             )
             databaseService.getEventDao.upsertEvents(events)
 
@@ -2287,7 +2262,7 @@ class EventRepository(
 
             val remoteJob = launch {
                 runCatching {
-                    val remote = preserveCachedDivisionState(fetchRemoteEventsByHost(hostId))
+                    val remote = fetchRemoteEventsByHost(hostId)
 
                     val localHostEvents = databaseService.getEventDao.getAllCachedEvents().first()
                         .filter { it.hostId == hostId }
@@ -2771,7 +2746,7 @@ class EventRepository(
 
     override suspend fun getMySchedule(): Result<UserScheduleSnapshot> = runCatching {
         val response = api.get<ProfileScheduleResponseDto>("api/profile/schedule")
-        val events = preserveCachedDivisionState(response.events.mapNotNull { it.toEventOrNull() })
+        val events = response.events.mapNotNull { it.toEventOrNull() }
         val matches = response.matches.mapNotNull { it.toMatchOrNull() }
         val teams = response.teams.mapNotNull { it.toTeamOrNull() }
         val fields = response.fields
