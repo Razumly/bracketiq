@@ -633,10 +633,17 @@ class DefaultEventDetailComponent(
     ) { eventId, fieldIds, bootstrappedEventIds ->
         Triple(eventId, fieldIds, bootstrappedEventIds.contains(eventId))
     }.flatMapLatest { (eventId, fieldIds, bootstrapped) ->
-        if (fieldIds.isEmpty() || !bootstrapped) {
+        if (fieldIds.isEmpty()) {
             flowOf(emptyList())
-        } else {
+        } else if (bootstrapped) {
             fieldRepository.getFieldsWithMatchesFlow(fieldIds)
+        } else {
+            flow {
+                fieldRepository.getFields(fieldIds).onFailure { error ->
+                    Napier.w("Failed to refresh fields for event $eventId: ${error.message}")
+                }
+                emitAll(fieldRepository.getFieldsWithMatchesFlow(fieldIds))
+            }
         }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 

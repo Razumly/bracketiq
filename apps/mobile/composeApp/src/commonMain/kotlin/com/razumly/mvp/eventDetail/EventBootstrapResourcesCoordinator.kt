@@ -112,8 +112,6 @@ internal class EventBootstrapResourcesCoordinator(
                 flowOf(emptyList())
             } else if (target.bootstrapSlots != null) {
                 flowOf(target.bootstrapSlots)
-            } else if (!target.bootstrapped) {
-                flowOf(emptyList())
             } else {
                 flow {
                     val slots = fieldRepository.getTimeSlots(slotIds)

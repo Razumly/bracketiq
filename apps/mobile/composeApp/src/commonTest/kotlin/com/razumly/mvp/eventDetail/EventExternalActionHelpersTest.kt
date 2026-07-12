@@ -49,7 +49,9 @@ class EventExternalActionHelpersTest {
             eventDirectionsPlan(event(address = " 123 Main St "))
         )
 
-        assertEquals("geo:0,0?q=123%20Main%20St", plan.url)
+        // The launch scheme is platform-specific (`geo:` on Android and Apple Maps on iOS),
+        // but both must preserve the normalized, encoded destination.
+        assertTrue(plan.url.contains("123%20Main%20St"))
     }
 
     @Test
@@ -58,7 +60,7 @@ class EventExternalActionHelpersTest {
             eventDirectionsPlan(event(address = null, lat = 40.1, long = -70.2))
         )
 
-        assertEquals("geo:0,0?q=40.1,-70.2", plan.url)
+        assertTrue(plan.url.contains("40.1,-70.2"))
     }
 
     @Test

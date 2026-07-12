@@ -99,7 +99,8 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
             harness.billingRepository.releasePurchaseCheckout()
             advance()
 
-            assertNull(harness.component.startingProductCheckoutId.value)
+            // The checkout remains locked until the PaymentSheet reports a result.
+            assertEquals(harness.product.id, harness.component.startingProductCheckoutId.value)
         }
 
     @Test
@@ -126,7 +127,8 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
             harness.billingRepository.releaseSubscriptionCheckout()
             advance()
 
-            assertNull(harness.component.startingProductCheckoutId.value)
+            // The checkout remains locked until the PaymentSheet reports a result.
+            assertEquals(harness.product.id, harness.component.startingProductCheckoutId.value)
         }
 
     @Test
@@ -458,11 +460,21 @@ private class OrganizationDetailTestBillingRepository(
         return Result.success(testPurchaseIntent())
     }
 
+    override suspend fun createProductPurchaseIntent(
+        productId: String,
+        discountCode: String?,
+    ): Result<PurchaseIntent> = createProductPurchaseIntent(productId)
+
     override suspend fun createProductSubscriptionIntent(productId: String): Result<PurchaseIntent> {
         productSubscriptionIntentCallCount += 1
         productSubscriptionGate.await()
         return Result.success(testPurchaseIntent())
     }
+
+    override suspend fun createProductSubscriptionIntent(
+        productId: String,
+        discountCode: String?,
+    ): Result<PurchaseIntent> = createProductSubscriptionIntent(productId)
 
     fun releasePurchaseCheckout() {
         productPurchaseGate.complete(Unit)

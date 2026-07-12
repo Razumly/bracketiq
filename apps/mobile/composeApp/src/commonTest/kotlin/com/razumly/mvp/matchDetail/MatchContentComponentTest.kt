@@ -1164,10 +1164,11 @@ class MatchContentComponentTest : MainDispatcherTest() {
         advance()
 
         assertTrue(harness.matchRepository.scoreSetCalls.isEmpty())
-        val confirmationSync = harness.matchRepository.updatedMatches.single()
-        assertEquals(listOf(1, 0), confirmationSync.team1Points)
-        assertEquals("COMPLETE", confirmationSync.segments.first().status)
-        assertEquals(1, confirmationSync.segments.first().scores["team-a"])
+        val confirmationSync = harness.matchRepository.operationCalls.single()
+        assertTrue(confirmationSync.finalize)
+        assertEquals(listOf(1), confirmationSync.match.team1Points)
+        assertEquals("COMPLETE", confirmationSync.match.segments.first().status)
+        assertEquals(1, confirmationSync.match.segments.first().scores["team-a"])
     }
 
     @Test
@@ -1664,12 +1665,13 @@ class MatchContentComponentTest : MainDispatcherTest() {
         harness.component.confirmSet()
         advance()
 
-        val confirmationSync = harness.matchRepository.updatedMatches.last()
+        val confirmationSync = harness.matchRepository.operationCalls.single()
+        assertTrue(confirmationSync.finalize)
         assertEquals(1, harness.matchRepository.scoreSetCalls.size)
-        assertEquals(1, harness.matchRepository.updatedMatches.size)
-        assertEquals(listOf(1, 0), confirmationSync.team1Points)
-        assertEquals("COMPLETE", confirmationSync.segments.first().status)
-        assertEquals(1, confirmationSync.segments.first().scores["team-a"])
+        assertEquals(1, harness.matchRepository.operationCalls.size)
+        assertEquals(listOf(1), confirmationSync.match.team1Points)
+        assertEquals("COMPLETE", confirmationSync.match.segments.first().status)
+        assertEquals(1, confirmationSync.match.segments.first().scores["team-a"])
     }
 
     @Test
