@@ -1247,12 +1247,19 @@ class EventRepository(
     }
 
     private suspend fun fetchRemoteEventsByIds(eventIds: List<String>): List<Event> {
-        val ids = eventIds.map(String::trim).filter(String::isNotBlank).distinct()
+        val idChunks = collectionIdChunks(eventIds)
+        val ids = idChunks.flatten()
         if (ids.isEmpty()) return emptyList()
 
-        val encodedIds = ids.joinToString(",").encodeURLQueryComponent()
-        val res = api.get<EventsResponseDto>("api/events?ids=$encodedIds&limit=${ids.size.coerceAtLeast(1)}")
-        return res.events.mapNotNull { it.toEventOrNull() }
+        val eventsById = LinkedHashMap<String, Event>()
+        for (idChunk in idChunks) {
+            val encodedIds = idChunk.joinToString(",").encodeURLQueryComponent()
+            val res = api.get<EventsResponseDto>("api/events?ids=$encodedIds&limit=${idChunk.size}")
+            res.events.mapNotNull { it.toEventOrNull() }.forEach { event ->
+                eventsById[event.id] = event
+            }
+        }
+        return ids.mapNotNull(eventsById::get)
     }
 
     private suspend fun fetchCurrentUserRegistrations(

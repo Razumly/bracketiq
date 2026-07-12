@@ -1192,9 +1192,19 @@ class TeamRepository(
     }
 
     private suspend fun fetchRemoteTeamsByIds(ids: List<String>): List<Team> {
-        val encodedIds = ids.joinToString(",") { it.trim() }.encodeURLQueryComponent()
-        val res = api.get<TeamsResponseDto>("api/teams?ids=$encodedIds&limit=200")
-        val teams = res.teams.mapNotNull { it.toTeamOrNull() }
+        val idChunks = collectionIdChunks(ids)
+        val requestedIds = idChunks.flatten()
+        if (requestedIds.isEmpty()) return emptyList()
+
+        val teamsById = LinkedHashMap<String, Team>()
+        for (idChunk in idChunks) {
+            val encodedIds = idChunk.joinToString(",").encodeURLQueryComponent()
+            val res = api.get<TeamsResponseDto>("api/teams?ids=$encodedIds&limit=${idChunk.size}")
+            res.teams.mapNotNull { it.toTeamOrNull() }.forEach { team ->
+                teamsById[team.id] = team
+            }
+        }
+        val teams = requestedIds.mapNotNull(teamsById::get)
         ensureUsersCachedForTeams(teams)
         return teams
     }

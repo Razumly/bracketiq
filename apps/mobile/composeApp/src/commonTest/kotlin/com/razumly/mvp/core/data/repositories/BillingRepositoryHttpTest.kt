@@ -882,7 +882,7 @@ class BillingRepositoryHttpTest {
 
         val engine = MockEngine { request ->
             assertEquals("/api/organizations", request.url.encodedPath)
-            assertEquals("ids=org_legacy,org_pending&limit=100", request.url.encodedQuery)
+            assertEquals("ids=org_legacy,org_pending&limit=2", request.url.encodedQuery)
             assertEquals(HttpMethod.Get, request.method)
             assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
 
@@ -924,6 +924,63 @@ class BillingRepositoryHttpTest {
         assertEquals(OrganizationVerificationReviewStatus.OPEN, organizations[1].verificationReviewStatus)
         assertEquals("Waiting on payout details", organizations[1].verificationReviewNotes)
         assertEquals("2026-04-13T21:00:00.000Z", organizations[1].verificationReviewUpdatedAt)
+    }
+
+    @Test
+    fun product_and_organization_id_queries_fetch_every_requested_id_in_safe_request_chunks() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        val productIds = (1..201).map { index -> "product_$index" }
+        val organizationIds = (1..201).map { index -> "organization_$index" }
+        val productChunks = mutableListOf<List<String>>()
+        val organizationChunks = mutableListOf<List<String>>()
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/products" -> {
+                    productChunks += request.url.parameters["ids"].orEmpty().split(',')
+                    respond(
+                        content = """{"products": []}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                "/api/organizations" -> {
+                    val chunk = request.url.parameters["ids"].orEmpty().split(',')
+                    organizationChunks += chunk
+                    assertEquals(chunk.size.toString(), request.url.parameters["limit"])
+                    respond(
+                        content = """{"organizations": []}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected request: ${request.url}")
+            }
+        }
+        val repo = BillingRepository(
+            MvpApiClient(
+                HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+                "http://example.test",
+                tokenStore,
+            ),
+            userRepo,
+            BillingRepositoryHttp_UnusedEventRepository,
+            db,
+        )
+
+        assertTrue(repo.getProductsByIds(productIds).getOrThrow().isEmpty())
+        assertTrue(repo.getOrganizationsByIds(organizationIds).getOrThrow().isEmpty())
+        listOf(productChunks to productIds, organizationChunks to organizationIds).forEach { (chunks, ids) ->
+            assertEquals(listOf(100, 100, 1), chunks.map(List<String>::size))
+            assertEquals(ids, chunks.flatten())
+        }
     }
 
     @Test

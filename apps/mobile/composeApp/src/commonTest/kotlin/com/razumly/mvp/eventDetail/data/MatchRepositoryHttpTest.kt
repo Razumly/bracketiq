@@ -1019,6 +1019,43 @@ class MatchRepositoryHttpTest {
     }
 
     @Test
+    fun getMatchesByEventIds_chunks_event_and_field_filters_without_omitting_combinations() = runTest {
+        val eventIds = (1..101).map { index -> "event_$index" }
+        val fieldIds = (1..101).map { index -> "field_$index" }
+        val requestPairs = mutableListOf<Pair<List<String>, List<String>>>()
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("/api/matches", request.url.encodedPath)
+            val eventChunk = request.url.parameters["eventIds"].orEmpty().split(',')
+            val fieldChunk = request.url.parameters["fieldIds"].orEmpty().split(',')
+            requestPairs += eventChunk to fieldChunk
+            respond(
+                content = """{"matches": []}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repository = MatchRepository(
+            api = MvpApiClient(
+                HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+                "http://example.test",
+                MatchRepositoryHttp_InMemoryAuthTokenStore(),
+            ),
+            databaseService = MatchRepositoryHttp_FakeDatabaseService(
+                MatchRepositoryHttp_FakeMatchDao(emptyList()),
+            ),
+        )
+
+        assertTrue(repository.getMatchesByEventIds(eventIds, fieldIds).getOrThrow().isEmpty())
+        val expectedEventChunks = listOf(eventIds.take(100), eventIds.takeLast(1))
+        val expectedFieldChunks = listOf(fieldIds.take(100), fieldIds.takeLast(1))
+        val expectedPairs = expectedEventChunks.flatMap { eventChunk ->
+            expectedFieldChunks.map { fieldChunk -> eventChunk to fieldChunk }
+        }
+        assertEquals(expectedPairs, requestPairs)
+    }
+
+    @Test
     fun getMatchesOfTournamentAcceptsPartialEmbeddedFieldsWithoutPersistingIncompleteFieldRows() = runTest {
         val engine = MockEngine { request ->
             assertEquals(HttpMethod.Get, request.method)

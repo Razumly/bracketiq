@@ -355,7 +355,7 @@ class TeamRepositoryTeamsFetchTest {
             assertEquals("/api/teams", request.url.encodedPath)
             assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
             assertEquals("t1,t2", request.url.parameters["ids"])
-            assertEquals("200", request.url.parameters["limit"])
+            assertEquals("2", request.url.parameters["limit"])
 
             respond(
                 content = """
@@ -413,7 +413,7 @@ class TeamRepositoryTeamsFetchTest {
         val userRepo = FakeUserRepository()
 
         val engine = MockEngine { request ->
-            assertEquals("ids=t1,t2&limit=200", request.url.encodedQuery)
+            assertEquals("ids=t1,t2&limit=2", request.url.encodedQuery)
             respond(
                 content = """
                     {
@@ -445,6 +445,38 @@ class TeamRepositoryTeamsFetchTest {
 
         assertEquals(listOf("t1", "t2"), teams.map(Team::id))
         assertEquals(listOf("t1", "t2"), teamDao.getTeams(listOf("t1", "t2")).map(Team::id))
+    }
+
+    @Test
+    fun getTeams_fetches_every_requested_id_in_safe_request_chunks() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+        val requestedIds = (1..201).map { index -> "team_$index" }
+        val requestChunks = mutableListOf<List<String>>()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/teams", request.url.encodedPath)
+            val chunk = request.url.parameters["ids"].orEmpty().split(',')
+            requestChunks += chunk
+            assertEquals(chunk.size.toString(), request.url.parameters["limit"])
+            respond(
+                content = """{"teams": []}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            tokenStore,
+        )
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        assertTrue(repo.getTeams(requestedIds).getOrThrow().isEmpty())
+        assertEquals(listOf(100, 100, 1), requestChunks.map(List<String>::size))
+        assertEquals(requestedIds, requestChunks.flatten())
     }
 
     @Test

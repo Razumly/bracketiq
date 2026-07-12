@@ -851,12 +851,13 @@ class UserRepository(
     ): List<UserData> {
         if (userIds.isEmpty()) return emptyList()
 
-        val orderedIds = userIds.distinct().filter(String::isNotBlank)
+        val idChunks = collectionIdChunks(userIds)
+        val orderedIds = idChunks.flatten()
         if (orderedIds.isEmpty()) return emptyList()
 
         val byId = LinkedHashMap<String, UserData>()
         val visibilityContextQuerySuffix = visibilityContext.toQuerySuffix()
-        orderedIds.chunked(100).forEach { chunk ->
+        idChunks.forEach { chunk ->
             val encodedIds = chunk.joinToString(",") { it.encodeURLQueryComponent() }
             val response = api.get<UsersResponseDto>("api/users?ids=$encodedIds$visibilityContextQuerySuffix")
             response.users.mapNotNull { it.toUserDataOrNull() }.forEach { user ->

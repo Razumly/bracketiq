@@ -83,14 +83,21 @@ class FieldRepository(
     }
 
     override suspend fun getFields(ids: List<String>): Result<List<Field>> {
-        val fieldIds = ids.distinct().filter(String::isNotBlank)
+        val fieldIdChunks = collectionIdChunks(ids)
+        val fieldIds = fieldIdChunks.flatten()
         if (fieldIds.isEmpty()) return Result.success(emptyList())
 
         return multiResponse(
             authoritativeIds = fieldIds,
             getRemoteData = {
-                val encodedIds = fieldIds.joinToString(",") { it.trim() }.encodeURLQueryComponent()
-                api.get<FieldsResponseDto>("api/fields?ids=$encodedIds").fields
+                val fieldsById = LinkedHashMap<String, Field>()
+                for (fieldIdChunk in fieldIdChunks) {
+                    val encodedIds = fieldIdChunk.joinToString(",").encodeURLQueryComponent()
+                    api.get<FieldsResponseDto>("api/fields?ids=$encodedIds").fields.forEach { field ->
+                        fieldsById[field.id] = field
+                    }
+                }
+                fieldsById.values.toList()
             },
             saveData = { fields -> databaseService.getFieldDao.upsertFields(fields) },
             getLocalData = { databaseService.getFieldDao.getFieldsByIds(fieldIds) },
@@ -121,11 +128,18 @@ class FieldRepository(
     }
 
     override suspend fun getTimeSlots(ids: List<String>): Result<List<TimeSlot>> = runCatching {
-        val slotIds = ids.distinct().filter(String::isNotBlank)
+        val slotIdChunks = collectionIdChunks(ids)
+        val slotIds = slotIdChunks.flatten()
         if (slotIds.isEmpty()) return@runCatching emptyList()
 
-        val encodedIds = slotIds.joinToString(",") { it.trim() }.encodeURLQueryComponent()
-        api.get<TimeSlotsResponseDto>("api/time-slots?ids=$encodedIds").timeSlots
+        val slotsById = LinkedHashMap<String, TimeSlot>()
+        for (slotIdChunk in slotIdChunks) {
+            val encodedIds = slotIdChunk.joinToString(",").encodeURLQueryComponent()
+            api.get<TimeSlotsResponseDto>("api/time-slots?ids=$encodedIds").timeSlots.forEach { slot ->
+                slotsById[slot.id] = slot
+            }
+        }
+        slotIds.mapNotNull(slotsById::get)
     }
 
     override suspend fun getTimeSlotsForField(fieldId: String): Result<List<TimeSlot>> = runCatching {
@@ -139,20 +153,24 @@ class FieldRepository(
         fieldIds: List<String>,
         rentalOnly: Boolean,
     ): Result<List<TimeSlot>> = runCatching {
-        val normalizedFieldIds = fieldIds
-            .map { fieldId -> fieldId.trim() }
-            .filter(String::isNotBlank)
-            .distinct()
+        val fieldIdChunks = collectionIdChunks(fieldIds)
+        val normalizedFieldIds = fieldIdChunks.flatten()
         if (normalizedFieldIds.isEmpty()) return@runCatching emptyList()
 
-        val encodedFieldIds = normalizedFieldIds.joinToString(",").encodeURLQueryComponent()
-        val query = buildList {
-            add("fieldIds=$encodedFieldIds")
-            if (rentalOnly) {
-                add("rentalOnly=true")
+        val slotsById = LinkedHashMap<String, TimeSlot>()
+        for (fieldIdChunk in fieldIdChunks) {
+            val encodedFieldIds = fieldIdChunk.joinToString(",").encodeURLQueryComponent()
+            val query = buildList {
+                add("fieldIds=$encodedFieldIds")
+                if (rentalOnly) {
+                    add("rentalOnly=true")
+                }
+            }.joinToString("&")
+            api.get<TimeSlotsResponseDto>("api/time-slots?$query").timeSlots.forEach { slot ->
+                slotsById[slot.id] = slot
             }
-        }.joinToString("&")
-        api.get<TimeSlotsResponseDto>("api/time-slots?$query").timeSlots
+        }
+        slotsById.values.toList()
     }
 
     override suspend fun createTimeSlot(slot: TimeSlot): Result<TimeSlot> = runCatching {

@@ -810,6 +810,104 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    fun getEventsByIds_fetches_every_requested_id_in_safe_request_chunks() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        val requestedIds = (1..201).map { index -> "event_$index" }
+        val requestChunks = mutableListOf<List<String>>()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events", request.url.encodedPath)
+            val chunk = request.url.parameters["ids"].orEmpty().split(',')
+            requestChunks += chunk
+            assertEquals(chunk.size.toString(), request.url.parameters["limit"])
+            respond(
+                content = """{"events": []}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            tokenStore,
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        assertTrue(repo.getEventsByIds(requestedIds).getOrThrow().isEmpty())
+        assertEquals(listOf(100, 100, 1), requestChunks.map(List<String>::size))
+        assertEquals(requestedIds, requestChunks.flatten())
+    }
+
+    @Test
+    fun field_and_time_slot_id_queries_fetch_every_requested_id_in_safe_request_chunks() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val fieldDao = EventRepositoryHttp_FakeFieldDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            EventRepositoryHttp_FakeEventDao(),
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+            getFieldDao = fieldDao,
+        )
+        val requestedIds = (1..201).map { index -> "item_$index" }
+        val fieldChunks = mutableListOf<List<String>>()
+        val slotChunks = mutableListOf<List<String>>()
+        val fieldSlotChunks = mutableListOf<List<String>>()
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/fields" -> {
+                    fieldChunks += request.url.parameters["ids"].orEmpty().split(',')
+                    respond(
+                        content = """{"fields": []}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                "/api/time-slots" -> {
+                    val ids = request.url.parameters["ids"]
+                    if (ids != null) {
+                        slotChunks += ids.split(',')
+                    } else {
+                        fieldSlotChunks += request.url.parameters["fieldIds"].orEmpty().split(',')
+                        assertEquals("true", request.url.parameters["rentalOnly"])
+                    }
+                    respond(
+                        content = """{"timeSlots": []}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected request: ${request.url}")
+            }
+        }
+        val repo = FieldRepository(
+            MvpApiClient(
+                HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+                "http://example.test",
+                tokenStore,
+            ),
+            db,
+        )
+
+        assertTrue(repo.getFields(requestedIds).getOrThrow().isEmpty())
+        assertTrue(repo.getTimeSlots(requestedIds).getOrThrow().isEmpty())
+        assertTrue(repo.getTimeSlotsForFields(requestedIds, rentalOnly = true).getOrThrow().isEmpty())
+        listOf(fieldChunks, slotChunks, fieldSlotChunks).forEach { chunks ->
+            assertEquals(listOf(100, 100, 1), chunks.map(List<String>::size))
+            assertEquals(requestedIds, chunks.flatten())
+        }
+    }
+
+    @Test
     fun getEventsByIds_removes_stale_cached_events_missing_from_server() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()

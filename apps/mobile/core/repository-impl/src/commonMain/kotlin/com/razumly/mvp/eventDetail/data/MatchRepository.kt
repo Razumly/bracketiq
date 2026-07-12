@@ -15,6 +15,7 @@ import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
 import com.razumly.mvp.core.data.dataTypes.normalizedMatchOfficialAssignments
 import com.razumly.mvp.core.auth.NoOpWatchMatchOperationSync
 import com.razumly.mvp.core.auth.WatchMatchOperationSync
+import com.razumly.mvp.core.data.repositories.collectionIdChunks
 import com.razumly.mvp.core.data.repositories.IMVPRepository
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.network.ApiException
@@ -1275,28 +1276,32 @@ class MatchRepository(
             .mapNotNull { fieldId -> normalizeOptionalToken(fieldId) }
             .distinct()
 
+        val eventIdChunks = collectionIdChunks(normalizedEventIds)
+        val fieldIdChunks = collectionIdChunks(normalizedFieldIds).ifEmpty { listOf(emptyList()) }
         val aggregatedMatches = mutableListOf<MatchMVP>()
-        normalizedEventIds.chunked(100).forEach { eventIdChunk ->
-            val query = buildList {
-                add(
-                    "eventIds=${
-                        eventIdChunk.joinToString(",").encodeURLQueryComponent()
-                    }"
-                )
-                if (normalizedFieldIds.isNotEmpty()) {
+        for (eventIdChunk in eventIdChunks) {
+            for (fieldIdChunk in fieldIdChunks) {
+                val query = buildList {
                     add(
-                        "fieldIds=${
-                            normalizedFieldIds.joinToString(",").encodeURLQueryComponent()
+                        "eventIds=${
+                            eventIdChunk.joinToString(",").encodeURLQueryComponent()
                         }"
                     )
-                }
-                rangeStart?.let { start -> add("start=${start.toString().encodeURLQueryComponent()}") }
-                rangeEnd?.let { end -> add("end=${end.toString().encodeURLQueryComponent()}") }
-            }.joinToString("&")
-            val responseMatches = api.get<MatchesResponseDto>("api/matches?$query").matches
-            persistEmbeddedFields(responseMatches)
-            val fetchedMatches = responseMatches.mapNotNull { match -> match.toMatchOrNull() }
-            aggregatedMatches.addAll(fetchedMatches)
+                    if (fieldIdChunk.isNotEmpty()) {
+                        add(
+                            "fieldIds=${
+                                fieldIdChunk.joinToString(",").encodeURLQueryComponent()
+                            }"
+                        )
+                    }
+                    rangeStart?.let { start -> add("start=${start.toString().encodeURLQueryComponent()}") }
+                    rangeEnd?.let { end -> add("end=${end.toString().encodeURLQueryComponent()}") }
+                }.joinToString("&")
+                val responseMatches = api.get<MatchesResponseDto>("api/matches?$query").matches
+                persistEmbeddedFields(responseMatches)
+                val fetchedMatches = responseMatches.mapNotNull { match -> match.toMatchOrNull() }
+                aggregatedMatches.addAll(fetchedMatches)
+            }
         }
 
         val dedupedMatches = mergePendingLocalState(aggregatedMatches.distinctBy { match -> match.id })

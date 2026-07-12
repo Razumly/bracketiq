@@ -1891,12 +1891,19 @@ class BillingRepository(
     }
 
     override suspend fun getProductsByIds(productIds: List<String>): Result<List<Product>> = runCatching {
-        val ids = productIds.distinct().filter(String::isNotBlank)
+        val idChunks = collectionIdChunks(productIds)
+        val ids = idChunks.flatten()
         if (ids.isEmpty()) return@runCatching emptyList()
 
-        val encodedIds = ids.joinToString(",") { it.encodeURLQueryComponent() }
-        val response = api.get<ProductsResponseDto>(path = "api/products?ids=$encodedIds")
-        response.products.mapNotNull { it.toProductOrNull() }
+        val productsById = LinkedHashMap<String, Product>()
+        for (idChunk in idChunks) {
+            val encodedIds = idChunk.joinToString(",") { it.encodeURLQueryComponent() }
+            val response = api.get<ProductsResponseDto>(path = "api/products?ids=$encodedIds")
+            response.products.mapNotNull { it.toProductOrNull() }.forEach { product ->
+                productsById[product.id] = product
+            }
+        }
+        ids.mapNotNull(productsById::get)
     }
 
     override suspend fun listProductsByOrganization(organizationId: String): Result<List<Product>> = runCatching {
@@ -2269,7 +2276,8 @@ class BillingRepository(
     }
 
     override suspend fun getOrganizationsByIds(organizationIds: List<String>): Result<List<Organization>> = runCatching {
-        val ids = organizationIds.distinct().filter(String::isNotBlank)
+        val idChunks = collectionIdChunks(organizationIds)
+        val ids = idChunks.flatten()
         if (ids.isEmpty()) return@runCatching emptyList()
         if (ids.size == 1) {
             val encodedId = ids.first().encodeURLQueryComponent()
@@ -2277,9 +2285,17 @@ class BillingRepository(
             return@runCatching listOfNotNull(response.toOrganizationOrNull())
         }
 
-        val encodedIds = ids.joinToString(",") { it.encodeURLQueryComponent() }
-        val response = api.get<OrganizationsResponseDto>(path = "api/organizations?ids=$encodedIds&limit=100")
-        response.organizations.mapNotNull { it.toOrganizationOrNull() }
+        val organizationsById = LinkedHashMap<String, Organization>()
+        for (idChunk in idChunks) {
+            val encodedIds = idChunk.joinToString(",") { it.encodeURLQueryComponent() }
+            val response = api.get<OrganizationsResponseDto>(
+                path = "api/organizations?ids=$encodedIds&limit=${idChunk.size}",
+            )
+            response.organizations.mapNotNull { it.toOrganizationOrNull() }.forEach { organization ->
+                organizationsById[organization.id] = organization
+            }
+        }
+        ids.mapNotNull(organizationsById::get)
     }
 
     override suspend fun getOrganizationReviews(organizationId: String): Result<OrganizationReviewsPayload> = runCatching {
