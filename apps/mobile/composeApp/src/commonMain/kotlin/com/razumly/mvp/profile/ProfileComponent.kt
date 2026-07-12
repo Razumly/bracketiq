@@ -64,6 +64,7 @@ import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.Platform
 import com.razumly.mvp.core.util.newId
+import com.razumly.mvp.core.util.trustedBoldSignSigningUrlOrNull
 import com.razumly.mvp.eventDetail.DiscountCodePromptState
 import io.github.aakira.napier.Napier
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
@@ -2569,9 +2570,9 @@ class DefaultProfileComponent(
                     return@onSuccess
                 }
 
-                val signingUrl = step.resolvedSigningUrl()
-                if (signingUrl.isNullOrBlank()) {
-                    _errorState.value = ErrorMessage("Document is missing a signing URL.")
+                val signingUrl = trustedBoldSignSigningUrlOrNull(step.resolvedSigningUrl())
+                if (signingUrl == null) {
+                    _errorState.value = ErrorMessage("Document has an unavailable or invalid signing URL.")
                     return@onSuccess
                 }
 

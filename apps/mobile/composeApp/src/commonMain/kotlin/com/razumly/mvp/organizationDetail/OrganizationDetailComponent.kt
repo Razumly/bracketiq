@@ -40,6 +40,7 @@ import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.newId
+import com.razumly.mvp.core.util.trustedBoldSignSigningUrlOrNull
 import com.razumly.mvp.eventDetail.TextSignaturePromptState
 import com.razumly.mvp.eventDetail.WebSignaturePromptState
 import com.razumly.mvp.eventDetail.DiscountCodePromptState
@@ -1456,10 +1457,10 @@ class DefaultOrganizationDetailComponent(
             return
         }
 
-        val signingUrl = currentStep.resolvedSigningUrl()
-        if (signingUrl.isNullOrBlank()) {
+        val signingUrl = trustedBoldSignSigningUrlOrNull(currentStep.resolvedSigningUrl())
+        if (signingUrl == null) {
             clearPendingTeamSignatureFlow()
-            _errorState.value = ErrorMessage("A required document is missing a signing URL.")
+            _errorState.value = ErrorMessage("A required document has an unavailable or invalid signing URL.")
             return
         }
 

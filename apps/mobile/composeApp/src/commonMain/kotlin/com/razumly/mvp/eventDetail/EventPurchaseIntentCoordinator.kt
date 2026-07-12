@@ -4,38 +4,20 @@ import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.BillingAddressProfile
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.network.userMessage
+import com.razumly.mvp.core.util.trustedBoldSignSigningUrlOrNull
 
 internal enum class PurchaseIntentProcessingAction {
     WAITING_FOR_SIGNATURE,
     LAUNCHING_PAYMENT_SHEET,
 }
 
-private const val BOLDSIGN_SIGNING_HOST = "app.boldsign.com"
-
 /**
  * The purchase endpoint can require an embedded signing step.  Do not hand an
  * arbitrary response URL to the embedded browser: only HTTPS BoldSign links
  * with a real path are accepted.
  */
-internal fun trustedPurchaseSigningUrlOrNull(rawUrl: String?): String? {
-    val url = rawUrl?.trim()?.takeIf(String::isNotBlank) ?: return null
-    if (url.any { it.isWhitespace() || it.code < 0x20 || it.code == 0x7f } ||
-        !url.startsWith("https://", ignoreCase = true)
-    ) {
-        return null
-    }
-
-    val authorityAndPath = url.substring("https://".length)
-    val authorityEnd = authorityAndPath.indexOfFirst { it == '/' || it == '?' || it == '#' }
-        .let { if (it == -1) authorityAndPath.length else it }
-    val authority = authorityAndPath.substring(0, authorityEnd)
-    if (!authority.equals(BOLDSIGN_SIGNING_HOST, ignoreCase = true)) return null
-
-    val pathAndQuery = authorityAndPath.substring(authorityEnd)
-    if (!pathAndQuery.startsWith('/') || pathAndQuery.length == 1 || pathAndQuery.contains('#')) return null
-
-    return url
-}
+internal fun trustedPurchaseSigningUrlOrNull(rawUrl: String?): String? =
+    trustedBoldSignSigningUrlOrNull(rawUrl)
 
 internal class EventPurchaseIntentCoordinator(
     private val registrationFlowCoordinator: EventRegistrationFlowCoordinator,

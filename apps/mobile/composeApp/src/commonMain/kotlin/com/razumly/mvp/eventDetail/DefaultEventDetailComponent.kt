@@ -3033,7 +3033,7 @@ class DefaultEventDetailComponent(
 
             var lastFailure: Throwable? = null
             for (directionsUrl in directionsUrls) {
-                val result = handler.openUrlInWebView(directionsUrl)
+                val result = handler.openDirectionsUrl(directionsUrl)
                 if (result.isSuccess) {
                     return@launch
                 }

@@ -75,6 +75,7 @@ import com.razumly.mvp.core.data.repositories.ProfileDocumentType
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
+import com.razumly.mvp.core.util.EmbeddedWebUrlPolicy
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
@@ -2202,6 +2203,10 @@ fun ProfileDocumentsScreen(component: ProfileComponent) {
         EmbeddedWebModal(
             title = prompt.title,
             url = prompt.url,
+            urlPolicy = when (prompt.mode) {
+                ProfileWebDocumentPromptMode.SIGN -> EmbeddedWebUrlPolicy.SIGNING
+                ProfileWebDocumentPromptMode.VIEW -> EmbeddedWebUrlPolicy.DOCUMENT_VIEW
+            },
             description = prompt.description,
             onDismiss = component::dismissWebDocumentPrompt,
         )

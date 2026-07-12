@@ -6,6 +6,6 @@ internal actual fun eventDirectionsUrls(destinationQuery: String): EventDirectio
     val encodedDestination = destinationQuery.encodeURLQueryComponent()
     return EventDirectionsUrls(
         primaryUrl = "geo-navigation:///directions?destination=$encodedDestination",
-        fallbackUrls = listOf("http://maps.apple.com/?daddr=$encodedDestination"),
+        fallbackUrls = listOf("https://maps.apple.com/?daddr=$encodedDestination"),
     )
 }

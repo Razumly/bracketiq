@@ -3,6 +3,7 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.network.userMessage
+import com.razumly.mvp.core.util.trustedBoldSignSigningUrlOrNull
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlin.time.Clock
@@ -395,10 +396,10 @@ internal class EventSignatureExecutionCoordinator(
             return
         }
 
-        val signingUrl = currentStep.resolvedSigningUrl()
-        if (signingUrl.isNullOrBlank()) {
+        val signingUrl = trustedBoldSignSigningUrlOrNull(currentStep.resolvedSigningUrl())
+        if (signingUrl == null) {
             clearPendingSignatureFlow()
-            setError("A required document is missing a signing URL.")
+            setError("A required document has an unavailable or invalid signing URL.")
             return
         }
 
