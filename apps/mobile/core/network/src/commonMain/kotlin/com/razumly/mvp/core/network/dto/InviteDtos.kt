@@ -9,6 +9,11 @@ data class InvitesResponseDto(
 )
 
 @Serializable
+data class InviteResponseDto(
+    val invite: Invite? = null,
+)
+
+@Serializable
 data class InviteCreateDto(
     val type: String,
     val email: String? = null,

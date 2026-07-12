@@ -7,10 +7,11 @@ import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.AuthResponseDto
+import com.razumly.mvp.core.network.dto.InviteResponseDto
 import com.razumly.mvp.core.network.dto.InvitesResponseDto
 import com.razumly.mvp.core.network.dto.MessagingTopicMessageRequestDto
 import com.razumly.mvp.core.network.dto.MessagingTopicSubscriptionDebugResponseDto
@@ -113,6 +114,12 @@ class PushNotificationsRepository(
         userDataSource.getPushToken().stateIn(scope, SharingStarted.Eagerly, "")
     private var deferredTokenSyncJob: Job? = null
     private var activeChatId: String? = null
+    private val invitePushInvalidationRefresher = InvitePushInvalidationRefresher(
+        userDataSource = userDataSource,
+        api = api,
+        databaseService = databaseService,
+        ensureAuthenticated = ::ensureAuthTokenAvailableForPushSync,
+    )
 
     private val managerListener = object : NotifierManager.Listener {
         override fun onNewToken(token: String) {
@@ -137,7 +144,7 @@ class PushNotificationsRepository(
 
         override fun onNotificationClicked(data: PayloadData) {
             scope.launch {
-                cacheInviteNotificationPayloadIfNeeded(data.toStringPayloadMap())
+                refreshInviteNotificationFromPayloadIfNeeded(data.toStringPayloadMap())
                 Napier.d(
                     tag = "PushNotificationsRepository",
                     message = "Notification clicked: $data"
@@ -150,7 +157,7 @@ class PushNotificationsRepository(
         ) {
             scope.launch {
                 val payloadData = data.toStringPayloadMap()
-                cacheInviteNotificationPayloadIfNeeded(payloadData)
+                refreshInviteNotificationFromPayloadIfNeeded(payloadData)
                 val normalizedTopicId =
                     data["topicId"]?.toString()?.trim()?.takeIf(String::isNotBlank)
                         ?: data["chatId"]?.toString()?.trim()?.takeIf(String::isNotBlank)
@@ -318,7 +325,7 @@ class PushNotificationsRepository(
 
     override fun handleNotificationPayload(data: Map<String, String>) {
         scope.launch {
-            cacheInviteNotificationPayloadIfNeeded(data.normalizedPayloadMap())
+            refreshInviteNotificationFromPayloadIfNeeded(data.normalizedPayloadMap())
         }
     }
 
@@ -605,78 +612,13 @@ class PushNotificationsRepository(
         return userIdFromTopicId(cachedTarget)
     }
 
-    private suspend fun cacheInviteNotificationPayloadIfNeeded(data: Map<String, String>) {
-        if (!data.isInviteNotificationPayload()) return
-
-        val inviteId = data.normalizedPayloadValue("inviteId")
-        if (inviteId.isNullOrBlank()) {
-            Napier.w(
-                tag = "PushNotificationsRepository",
-                message = "Invite notification payload was missing inviteId."
-            )
-            return
-        }
-
-        val resolvedUserId = data.normalizedPayloadValue("userId")
-            ?: resolveCurrentOrCachedPushUserId()
-        val invite = Invite(
-            id = inviteId,
-            type = data.inviteTypeFromPayload(),
-            email = data.normalizedPayloadValue("email").orEmpty(),
-            status = data.normalizedPayloadValue("status") ?: "PENDING",
-            eventId = data.normalizedPayloadValue("eventId"),
-            organizationId = data.normalizedPayloadValue("organizationId"),
-            teamId = data.normalizedPayloadValue("teamId"),
-            userId = resolvedUserId,
-            createdBy = data.normalizedPayloadValue("createdBy"),
-            firstName = data.normalizedPayloadValue("firstName"),
-            lastName = data.normalizedPayloadValue("lastName"),
-            childUserId = data.normalizedPayloadValue("childUserId"),
-            childFirstName = data.normalizedPayloadValue("childFirstName"),
-            childLastName = data.normalizedPayloadValue("childLastName"),
-            childFullName = data.normalizedPayloadValue("childFullName"),
-        )
-
-        runCatching {
-            databaseService.getInviteDao.upsertInvite(invite)
-        }.onFailure { throwable ->
-            Napier.w(
-                tag = "PushNotificationsRepository",
-                message = "Failed to cache invite notification $inviteId: ${throwable.message}"
-            )
-        }
-
-        if (!resolvedUserId.isNullOrBlank()) {
-            refreshInviteCacheFromBackendIfPossible(resolvedUserId)
-        }
-    }
-
-    private suspend fun refreshInviteCacheFromBackendIfPossible(userId: String) {
-        if (!ensureAuthTokenAvailableForPushSync()) return
-
-        runCatching {
-            val params = "userId=${userId.encodeURLQueryComponent()}"
-            api.get<InvitesResponseDto>("api/invites?$params").invites
-        }.onSuccess { invites ->
-            val normalizedInvites = invites.map { invite ->
-                if (invite.userId.isNullOrBlank()) invite.copy(userId = userId) else invite
-            }
-            if (normalizedInvites.isNotEmpty()) {
-                runCatching {
-                    databaseService.getInviteDao.upsertInvites(normalizedInvites)
-                }.onFailure { throwable ->
-                    Napier.w(
-                        tag = "PushNotificationsRepository",
-                        message = "Failed to cache refreshed invites for user $userId: ${throwable.message}"
-                    )
-                }
-            }
-        }.onFailure { throwable ->
-            Napier.w(
-                tag = "PushNotificationsRepository",
-                message = "Failed to refresh invites from push for user $userId: ${throwable.message}"
-            )
-        }
+    /**
+     * Push payloads are invalidation hints, not a source of invitation truth.
+     * Only a response from an authenticated invitation endpoint may change the
+     * local invitation cache.
+     */
+    private suspend fun refreshInviteNotificationFromPayloadIfNeeded(data: Map<String, String>) {
+        invitePushInvalidationRefresher.refreshFromPayload(data)
     }
 
     private suspend fun refreshChatMessagesFromPushIfNeeded(topicId: String?) {
@@ -769,16 +711,123 @@ private fun Map<String, String>.isInviteNotificationPayload(): Boolean {
         deepLink?.contains("invites") == true
 }
 
-private fun Map<String, String>.inviteTypeFromPayload(): String {
-    val explicitInviteType = normalizedPayloadValue("inviteType")
-        ?: normalizedPayloadValue("invite_type")
-    if (!explicitInviteType.isNullOrBlank()) {
-        return explicitInviteType.uppercase()
+/**
+ * Resolves invitation notifications through server-authorized data only. The
+ * notification may carry an invitation ID, but every domain field is read from
+ * the API response rather than from the untrusted transport payload.
+ */
+internal class InvitePushInvalidationRefresher(
+    private val userDataSource: CurrentUserDataSource,
+    private val api: MvpApiClient,
+    private val databaseService: DatabaseService,
+    private val ensureAuthenticated: suspend () -> Boolean,
+) {
+    suspend fun refreshFromPayload(data: Map<String, String>) {
+        if (!data.isInviteNotificationPayload()) return
+
+        // A stale push target is not proof that this device still has an
+        // authenticated session for that account. Never use a payload userId
+        // or cached target to assign invitation ownership.
+        val currentUserId = userDataSource.getUserId().first()
+            .trim()
+            .takeIf(String::isNotBlank)
+            ?: return
+        if (!ensureAuthenticated()) return
+
+        val inviteId = data.normalizedPayloadValue("inviteId")
+        if (inviteId == null) {
+            refreshCurrentUserInvites(currentUserId)
+        } else {
+            refreshInviteById(inviteId)
+        }
     }
 
-    val genericType = normalizedPayloadValue("type")?.uppercase()
-    return when (genericType) {
-        null, "INVITE", "INVITATION", "INVITATIONS" -> "TEAM"
-        else -> genericType
+    private suspend fun refreshInviteById(inviteId: String) {
+        val canonicalInvite = try {
+            api.get<InviteResponseDto>("api/invites/${inviteId.encodeURLPathPart()}").invite
+        } catch (throwable: ApiException) {
+            if (throwable.statusCode == 404) {
+                deleteCachedInviteAfterCanonicalNotFound(inviteId)
+            }
+            Napier.w(
+                tag = "PushNotificationsRepository",
+                message = "Failed to refresh invite $inviteId from push: ${throwable.message}",
+            )
+            return
+        } catch (throwable: Throwable) {
+            if (throwable is CancellationException) throw throwable
+            Napier.w(
+                tag = "PushNotificationsRepository",
+                message = "Failed to refresh invite $inviteId from push: ${throwable.message}",
+            )
+            return
+        }
+
+        if (canonicalInvite == null || canonicalInvite.id.trim().isEmpty() || canonicalInvite.userId.isNullOrBlank()) {
+            Napier.w(
+                tag = "PushNotificationsRepository",
+                message = "Authorized invite response was incomplete for $inviteId.",
+            )
+            return
+        }
+
+        try {
+            databaseService.getInviteDao.upsertInvite(canonicalInvite)
+        } catch (throwable: Throwable) {
+            if (throwable is CancellationException) throw throwable
+            Napier.w(
+                tag = "PushNotificationsRepository",
+                message = "Failed to cache canonical invite $inviteId: ${throwable.message}",
+            )
+        }
+    }
+
+    private suspend fun deleteCachedInviteAfterCanonicalNotFound(inviteId: String) {
+        try {
+            // A verified 404 is the server's canonical answer for both a
+            // deleted invite and an invite that this session may not see. It
+            // is safe to remove an older cache row, but never do this for a
+            // transient or authentication failure.
+            databaseService.getInviteDao.deleteInviteById(inviteId)
+        } catch (throwable: Throwable) {
+            if (throwable is CancellationException) throw throwable
+            Napier.w(
+                tag = "PushNotificationsRepository",
+                message = "Failed to remove canonical-missing invite $inviteId: ${throwable.message}",
+            )
+        }
+    }
+
+    private suspend fun refreshCurrentUserInvites(userId: String) {
+        val canonicalInvites = try {
+            val params = "userId=${userId.encodeURLQueryComponent()}"
+            api.get<InvitesResponseDto>("api/invites?$params").invites
+        } catch (throwable: Throwable) {
+            if (throwable is CancellationException) throw throwable
+            Napier.w(
+                tag = "PushNotificationsRepository",
+                message = "Failed to refresh invitations from push for user $userId: ${throwable.message}",
+            )
+            return
+        }
+
+        val normalizedInvites = canonicalInvites.map { invite ->
+            if (invite.userId.isNullOrBlank()) invite.copy(userId = userId) else invite
+        }
+        try {
+            // Replace rather than append so older payload-created rows disappear
+            // after a successful authenticated reconciliation.
+            databaseService.getInviteDao.replaceInvitesForUser(
+                userId = userId,
+                type = null,
+                invites = normalizedInvites,
+            )
+        } catch (throwable: Throwable) {
+            if (throwable is CancellationException) throw throwable
+            Napier.w(
+                tag = "PushNotificationsRepository",
+                message = "Failed to reconcile invitations from push for user $userId: ${throwable.message}",
+            )
+        }
     }
 }
