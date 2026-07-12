@@ -20,6 +20,23 @@ data class LoginRequestDto(
 )
 
 @Serializable
+data class LogoutDeviceTargetDto(
+    val pushToken: String,
+    val pushTarget: String? = null,
+)
+
+@Serializable
+data class LogoutRequestDto(
+    val deviceTarget: LogoutDeviceTargetDto? = null,
+)
+
+@Serializable
+data class LogoutResponseDto(
+    val ok: Boolean,
+    val deviceTargetRemoved: Boolean? = null,
+)
+
+@Serializable
 data class GoogleMobileLoginRequestDto(
     val idToken: String,
 )

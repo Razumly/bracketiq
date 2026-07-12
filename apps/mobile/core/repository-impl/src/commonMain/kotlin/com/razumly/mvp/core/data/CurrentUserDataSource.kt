@@ -96,6 +96,13 @@ class CurrentUserDataSource(private val dataStore: DataStore<Preferences>) {
         }
     }
 
+    suspend fun clearPushDeviceTarget() {
+        dataStore.edit { preferences ->
+            preferences.remove(pushToken)
+            preferences.remove(pushTarget)
+        }
+    }
+
     suspend fun setChatMuted(chatId: String, muted: Boolean) {
         val normalizedChatId = chatId.trim()
         if (normalizedChatId.isBlank()) return

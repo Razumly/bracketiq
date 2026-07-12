@@ -1012,10 +1012,9 @@ class DefaultProfileComponent(
 
     override fun onLogout() {
         scope.launch {
-            userRepository.logout().onFailure {
-                _errorState.value = ErrorMessage(it.userMessage())
-            }
-            navigationHandler.navigateToLogin()
+            userRepository.logout()
+                .onSuccess { navigationHandler.navigateToLogin() }
+                .onFailure { _errorState.value = ErrorMessage(it.userMessage()) }
         }
     }
 

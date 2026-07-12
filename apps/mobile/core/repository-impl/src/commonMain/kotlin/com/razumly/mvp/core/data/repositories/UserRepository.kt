@@ -28,6 +28,9 @@ import com.razumly.mvp.core.network.dto.GoogleMobileLoginRequestDto
 import com.razumly.mvp.core.network.dto.InviteCreateDto
 import com.razumly.mvp.core.network.dto.InvitesResponseDto
 import com.razumly.mvp.core.network.dto.LoginRequestDto
+import com.razumly.mvp.core.network.dto.LogoutDeviceTargetDto
+import com.razumly.mvp.core.network.dto.LogoutRequestDto
+import com.razumly.mvp.core.network.dto.LogoutResponseDto
 import com.razumly.mvp.core.network.dto.OkResponseDto
 import com.razumly.mvp.core.network.dto.PasswordRequestDto
 import com.razumly.mvp.core.network.dto.RegisterConflictResponseDto
@@ -610,7 +613,31 @@ class UserRepository(
     }
 
     override suspend fun logout(): Result<Unit> = runCatching {
-        runCatching { api.postNoResponse("api/auth/logout") }
+        val pushToken = currentUserDataSource.getPushToken().first().trim()
+        val pushTarget = currentUserDataSource.getPushTarget().first().trim()
+        val request = when {
+            pushToken.isNotEmpty() -> LogoutRequestDto(
+                deviceTarget = LogoutDeviceTargetDto(
+                    pushToken = pushToken,
+                    pushTarget = pushTarget.ifEmpty { null },
+                ),
+            )
+            pushTarget.isNotEmpty() -> error(
+                "Unable to clean up push notifications because this device token is unavailable. Please try again.",
+            )
+            else -> LogoutRequestDto()
+        }
+
+        val response = api.post<LogoutRequestDto, LogoutResponseDto>(
+            path = "api/auth/logout",
+            body = request,
+        )
+        check(response.ok) { "Logout failed." }
+        if (request.deviceTarget != null) {
+            check(response.deviceTargetRemoved == true) { "Push notification cleanup was not confirmed." }
+        }
+
+        currentUserDataSource.clearPushDeviceTarget()
         clearLoginState()
     }
 

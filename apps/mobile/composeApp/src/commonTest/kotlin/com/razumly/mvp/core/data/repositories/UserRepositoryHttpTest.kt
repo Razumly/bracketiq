@@ -42,13 +42,16 @@ import io.ktor.http.headersOf
 import io.ktor.http.content.OutgoingContent
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -188,7 +191,229 @@ private fun outgoingBodyText(content: OutgoingContent): String = when (content) 
     else -> error("Unsupported outgoing content ${content::class.simpleName}")
 }
 
+private val logoutTestAuthMeResponse =
+    """
+    {
+      "user": {
+        "id": "user_1",
+        "email": "user@example.test",
+        "name": "Sam Player"
+      },
+      "profile": {
+        "id": "user_1",
+        "firstName": "Sam",
+        "lastName": "Player",
+        "teamIds": [],
+        "friendIds": [],
+        "friendRequestIds": [],
+        "friendRequestSentIds": [],
+        "followingIds": [],
+        "blockedUserIds": [],
+        "hiddenEventIds": [],
+        "userName": "sam_player",
+        "hasStripeAccount": false,
+        "uploadedImages": [],
+        "profileImageId": null,
+        "chatTermsAcceptedAt": null,
+        "chatTermsVersion": null
+      }
+    }
+    """.trimIndent()
+
+private val logoutTestChatTermsResponse =
+    """
+    {
+      "accepted": false,
+      "acceptedAt": null,
+      "version": "2026-04-14",
+      "url": "/terms",
+      "summary": []
+    }
+    """.trimIndent()
+
 class UserRepositoryHttpTest {
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun logout_removes_device_target_while_authenticated_before_clearing_local_state() = runTest {
+        var logoutAuthorization: String? = null
+        var logoutBody = ""
+        val tokenStore = UserRepositoryHttp_InMemoryAuthTokenStore("session-token")
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = logoutTestAuthMeResponse,
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/chat/terms-consent" -> respond(
+                    content = logoutTestChatTermsResponse,
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/logout" -> {
+                    assertEquals(HttpMethod.Post, request.method)
+                    logoutAuthorization = request.headers[HttpHeaders.Authorization]
+                    logoutBody = outgoingBodyText(request.body)
+                    respond(
+                        content = "{\"ok\":true,\"deviceTargetRemoved\":true}",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected request ${request.method.value} ${request.url}")
+            }
+        }
+        val client = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val currentUserDataSource = CurrentUserDataSource(UserRepositoryHttp_InMemoryPreferencesDataStore())
+        val repository = UserRepository(
+            databaseService = UserRepositoryHttp_FakeDatabaseService(),
+            api = MvpApiClient(client, "http://localhost", tokenStore),
+            tokenStore = tokenStore,
+            currentUserDataSource = currentUserDataSource,
+            startupDispatcher = StandardTestDispatcher(testScheduler),
+        )
+        advanceUntilIdle()
+        currentUserDataSource.savePushToken("device-token")
+        currentUserDataSource.savePushTarget("user_user_1")
+        var authStateWhenCurrentUserCleared: StartupAuthState? = null
+        val observeCurrentUser = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            repository.currentUser.collect { currentUser ->
+                if (currentUser.isFailure) {
+                    authStateWhenCurrentUserCleared = repository.startupAuthState.value
+                }
+            }
+        }
+
+        val result = repository.logout()
+
+        observeCurrentUser.cancel()
+        assertTrue(result.isSuccess)
+        assertEquals("Bearer session-token", logoutAuthorization)
+        assertTrue(
+            logoutBody.contains("\"deviceTarget\":{\"pushToken\":\"device-token\",\"pushTarget\":\"user_user_1\"}"),
+            "Expected authenticated logout to include the stored device target, body=$logoutBody",
+        )
+        assertEquals("", tokenStore.get())
+        assertEquals("", currentUserDataSource.getPushToken().first())
+        assertEquals("", currentUserDataSource.getPushTarget().first())
+        assertTrue(repository.currentUser.value.isFailure)
+        assertTrue(repository.startupAuthState.value is StartupAuthState.Unauthenticated)
+        assertTrue(authStateWhenCurrentUserCleared is StartupAuthState.Unauthenticated)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun logout_retains_authenticated_and_push_state_when_device_cleanup_fails() = runTest {
+        var logoutAuthorization: String? = null
+        val tokenStore = UserRepositoryHttp_InMemoryAuthTokenStore("session-token")
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = logoutTestAuthMeResponse,
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/chat/terms-consent" -> respond(
+                    content = logoutTestChatTermsResponse,
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/logout" -> {
+                    logoutAuthorization = request.headers[HttpHeaders.Authorization]
+                    respond(
+                        content = "{\"error\":\"Push target cleanup failed\",\"code\":\"PUSH_TARGET_CLEANUP_FAILED\"}",
+                        status = HttpStatusCode.ServiceUnavailable,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected request ${request.method.value} ${request.url}")
+            }
+        }
+        val client = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+            expectSuccess = true
+        }
+        val currentUserDataSource = CurrentUserDataSource(UserRepositoryHttp_InMemoryPreferencesDataStore())
+        val repository = UserRepository(
+            databaseService = UserRepositoryHttp_FakeDatabaseService(),
+            api = MvpApiClient(client, "http://localhost", tokenStore),
+            tokenStore = tokenStore,
+            currentUserDataSource = currentUserDataSource,
+            startupDispatcher = StandardTestDispatcher(testScheduler),
+        )
+        advanceUntilIdle()
+        currentUserDataSource.savePushToken("device-token")
+        currentUserDataSource.savePushTarget("user_user_1")
+
+        val result = repository.logout()
+
+        assertTrue(result.isFailure)
+        assertEquals("Bearer session-token", logoutAuthorization)
+        assertEquals("session-token", tokenStore.get())
+        assertEquals("device-token", currentUserDataSource.getPushToken().first())
+        assertEquals("user_user_1", currentUserDataSource.getPushTarget().first())
+        assertEquals("user_1", repository.currentUser.value.getOrNull()?.id)
+        assertTrue(repository.startupAuthState.value is StartupAuthState.Authenticated)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun logout_does_not_revoke_session_when_a_saved_push_target_has_no_token() = runTest {
+        var logoutRequested = false
+        val tokenStore = UserRepositoryHttp_InMemoryAuthTokenStore("session-token")
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = logoutTestAuthMeResponse,
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/chat/terms-consent" -> respond(
+                    content = logoutTestChatTermsResponse,
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/logout" -> {
+                    logoutRequested = true
+                    error("Logout must not be requested without the saved push token.")
+                }
+
+                else -> error("Unexpected request ${request.method.value} ${request.url}")
+            }
+        }
+        val client = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val currentUserDataSource = CurrentUserDataSource(UserRepositoryHttp_InMemoryPreferencesDataStore())
+        val repository = UserRepository(
+            databaseService = UserRepositoryHttp_FakeDatabaseService(),
+            api = MvpApiClient(client, "http://localhost", tokenStore),
+            tokenStore = tokenStore,
+            currentUserDataSource = currentUserDataSource,
+            startupDispatcher = StandardTestDispatcher(testScheduler),
+        )
+        advanceUntilIdle()
+        currentUserDataSource.savePushTarget("user_user_1")
+
+        val result = repository.logout()
+
+        assertTrue(result.isFailure)
+        assertTrue(!logoutRequested)
+        assertEquals("session-token", tokenStore.get())
+        assertEquals("", currentUserDataSource.getPushToken().first())
+        assertEquals("user_user_1", currentUserDataSource.getPushTarget().first())
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun login_prefetches_chat_terms_consent_state() = runTest {

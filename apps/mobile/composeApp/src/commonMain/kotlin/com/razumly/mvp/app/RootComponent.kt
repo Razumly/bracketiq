@@ -614,13 +614,7 @@ class RootComponent(
     private fun clearPushTargetIfNeeded() {
         pushRegistrationRetryJob?.cancel()
         pushRegistrationRetryJob = null
-        if (registeredPushUserId == null) return
         registeredPushUserId = null
-        scope.launch {
-            pushNotificationsRepository.removeDeviceAsTarget().onFailure {
-                Napier.w("Push target cleanup failed: ${it.message}")
-            }
-        }
     }
 
     private fun refreshRegistrationCacheOnStartupIfNeeded(userId: String) {
