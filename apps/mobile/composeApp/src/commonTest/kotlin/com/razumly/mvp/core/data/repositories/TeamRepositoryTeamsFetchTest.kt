@@ -1185,7 +1185,7 @@ class TeamRepositoryTeamsFetchTest {
         val engine = MockEngine { request ->
             assertEquals("organization one", request.url.parameters["organizationId"])
             assertEquals("1", request.url.parameters["limit"])
-            assertEquals("0", request.url.parameters["offset"])
+            assertEquals("7", request.url.parameters["offset"])
             respond(
                 content = """
                     {
@@ -1214,10 +1214,10 @@ class TeamRepositoryTeamsFetchTest {
         )
         val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
 
-        val page = repo.getOrganizationTeamsPage(" organization one ", limit = -3, offset = -8).getOrThrow()
+        val page = repo.getOrganizationTeamsPage(" organization one ", limit = -3, offset = 7).getOrThrow()
 
         assertEquals(listOf("team_1"), page.teams.map { team -> team.team.id })
-        assertEquals(1, page.nextOffset)
+        assertEquals(8, page.nextOffset)
         assertFalse(page.hasMore)
     }
 

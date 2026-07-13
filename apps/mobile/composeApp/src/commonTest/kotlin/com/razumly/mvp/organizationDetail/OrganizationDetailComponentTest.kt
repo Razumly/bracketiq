@@ -355,6 +355,43 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun teamPaymentCompletionMessage_uses_the_registered_team_not_the_first_catalog_page() = runTest(testDispatcher) {
+        val pendingTeam = catalogTeam("team-on-page-two", "Page two team")
+        val refreshedTeam = pendingTeam.copy(
+            team = pendingTeam.team.copy(
+                playerRegistrations = listOf(
+                    TeamPlayerRegistration(
+                        id = "registration-pending",
+                        teamId = pendingTeam.team.id,
+                        userId = "viewer-1",
+                        status = "PENDING",
+                    ),
+                ),
+            ),
+        )
+        val repository = object : ITeamRepository by NoopTeamRepository {
+            val requestedTeamIds = mutableListOf<String>()
+
+            override suspend fun getTeamWithPlayers(teamId: String): Result<TeamWithPlayers> {
+                requestedTeamIds += teamId
+                return Result.success(refreshedTeam)
+            }
+        }
+
+        val message = resolveTeamPaymentCompletionMessage(
+            teamRepository = repository,
+            pendingTeam = pendingTeam,
+            currentUserId = "viewer-1",
+        )
+
+        assertEquals(listOf("team-on-page-two"), repository.requestedTeamIds)
+        assertEquals(
+            "Payment submitted for Page two team. Registration is pending until the bank payment clears.",
+            message,
+        )
+    }
+
+    @Test
     fun startTeamRegistration_withRequiredDocuments_waitsForClearance_thenPromptsBillingAddress_beforeCheckout() =
         runTest(testDispatcher) {
             val host = createUser(id = "org-team-host")

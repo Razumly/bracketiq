@@ -84,7 +84,7 @@ interface ITeamRepository : IMVPRepository {
         return getTeamsByOrganization(organizationId, limit).map { teams ->
             OrganizationTeamPage(
                 teams = teams,
-                nextOffset = teams.size,
+                nextOffset = offset.coerceAtLeast(0) + teams.size,
                 hasMore = false,
             )
         }
@@ -1260,7 +1260,7 @@ class TeamRepository(
         )
         val teams = response.teams.mapNotNull { it.toTeamOrNull() }
         ensureUsersCachedForTeams(teams)
-        val fallbackNextOffset = teams.size
+        val fallbackNextOffset = safeOffset + teams.size
         val nextOffset = response.pagination?.nextOffset?.takeIf { candidate -> candidate > safeOffset }
         return RemoteOrganizationTeamPage(
             teams = teams,

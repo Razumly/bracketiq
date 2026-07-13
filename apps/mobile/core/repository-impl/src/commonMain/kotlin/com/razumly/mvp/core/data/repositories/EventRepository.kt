@@ -132,7 +132,7 @@ interface IEventRepository : IMVPRepository {
         return getEventsByOrganization(organizationId, limit).map { events ->
             OrganizationEventPage(
                 events = events,
-                nextOffset = events.size,
+                nextOffset = offset.coerceAtLeast(0) + events.size,
                 hasMore = false,
             )
         }
@@ -1278,7 +1278,7 @@ class EventRepository(
         )
         val events = response.events.mapNotNull { it.toEventOrNull() }
         val pagination = response.pagination
-        val fallbackNextOffset = events.size
+        val fallbackNextOffset = safeOffset + events.size
         val nextOffset = pagination?.nextOffset?.takeIf { candidate -> candidate > safeOffset }
         return OrganizationEventPage(
             events = events,

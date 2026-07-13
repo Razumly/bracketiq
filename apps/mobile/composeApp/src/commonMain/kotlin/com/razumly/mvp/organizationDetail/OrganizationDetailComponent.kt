@@ -101,6 +101,28 @@ private fun <T> mergeOrganizationCatalogItems(
     return merged
 }
 
+internal suspend fun resolveTeamPaymentCompletionMessage(
+    teamRepository: ITeamRepository,
+    pendingTeam: TeamWithPlayers,
+    currentUserId: String,
+): String {
+    val refreshedTeam = teamRepository.getTeamWithPlayers(pendingTeam.team.id).getOrNull()
+    val paymentPending = refreshedTeam
+        ?.team
+        ?.playerRegistrations
+        ?.any { registration ->
+            registration.userId == currentUserId && registration.isPaymentPending()
+        } == true
+
+    return when {
+        paymentPending ->
+            "Payment submitted for ${pendingTeam.team.name}. Registration is pending until the bank payment clears."
+        refreshedTeam == null ->
+            "Payment submitted for ${pendingTeam.team.name}. We are confirming the registration status."
+        else -> "Registration completed for ${pendingTeam.team.name}."
+    }
+}
+
 data class RentalReservationComplete(
     val bookingId: String,
     val billId: String? = null,
@@ -433,7 +455,6 @@ class DefaultOrganizationDetailComponent(
                                     offset = 0,
                                 ).getOrThrow()
                             }.getOrNull()
-                            val refreshedTeams = refreshedPage?.teams
                             if (generation == teamsCatalogGeneration && refreshedPage != null) {
                                 _teams.value = mergeOrganizationCatalogItems(
                                     existing = emptyList(),
@@ -448,18 +469,11 @@ class DefaultOrganizationDetailComponent(
                             if (generation == teamsCatalogGeneration) {
                                 _isLoadingTeams.value = false
                             }
-                            val paymentPending = refreshedTeams
-                                ?.firstOrNull { team -> team.team.id == pendingTeam.team.id }
-                                ?.team
-                                ?.playerRegistrations
-                                ?.any { registration ->
-                                    registration.userId == currentUser.value.id && registration.isPaymentPending()
-                                } == true
-                            _message.value = if (paymentPending) {
-                                "Payment submitted for ${pendingTeam.team.name}. Registration is pending until the bank payment clears."
-                            } else {
-                                "Registration completed for ${pendingTeam.team.name}."
-                            }
+                            _message.value = resolveTeamPaymentCompletionMessage(
+                                teamRepository = teamRepository,
+                                pendingTeam = pendingTeam,
+                                currentUserId = currentUser.value.id,
+                            )
                         }
                         }
                     }

@@ -630,7 +630,7 @@ class EventRepositoryHttpTest {
         val engine = MockEngine { request ->
             assertEquals("organization one", request.url.parameters["organizationId"])
             assertEquals("1", request.url.parameters["limit"])
-            assertEquals("0", request.url.parameters["offset"])
+            assertEquals("7", request.url.parameters["offset"])
             respond(
                 content = """
                     {
@@ -657,10 +657,10 @@ class EventRepositoryHttpTest {
         )
         val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
 
-        val page = repo.getOrganizationEventsPage(" organization one ", limit = -3, offset = -8).getOrThrow()
+        val page = repo.getOrganizationEventsPage(" organization one ", limit = -3, offset = 7).getOrThrow()
 
         assertEquals(listOf("event_1"), page.events.map(Event::id))
-        assertEquals(1, page.nextOffset)
+        assertEquals(8, page.nextOffset)
         assertFalse(page.hasMore)
     }
 
