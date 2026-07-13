@@ -47,7 +47,6 @@ import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
-import com.razumly.mvp.core.presentation.util.convertPhotoResultToUploadFile
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.newId
@@ -57,12 +56,17 @@ import com.razumly.mvp.eventCreate.CreateEventComponent.Child
 import com.razumly.mvp.eventCreate.CreateEventComponent.Config
 import com.razumly.mvp.eventDetail.assignedUserIdsForRole
 import com.razumly.mvp.eventDetail.conflictListLabel
+import com.razumly.mvp.eventDetail.EventImageCoordinator
+import com.razumly.mvp.eventDetail.EventImageFailure
+import com.razumly.mvp.eventDetail.EventImageUploadOutcome
 import com.razumly.mvp.eventDetail.EventStaffRole
 import com.razumly.mvp.eventDetail.PendingStaffInviteDraft
 import com.razumly.mvp.eventDetail.mergePendingStaffInviteDraft
 import com.razumly.mvp.eventDetail.normalizeStaffInviteEmail
 import com.razumly.mvp.eventDetail.reconcileEventStaffInvites
 import com.razumly.mvp.eventDetail.resolveEffectiveLeagueSlotDivisionIds
+import com.razumly.mvp.eventDetail.eventImageFailureMessage
+import com.razumly.mvp.eventDetail.eventImageRetryError
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
@@ -155,8 +159,8 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     fun updateLeagueScoringConfig(update: LeagueScoringConfigDTO.() -> LeagueScoringConfigDTO)
     fun createAccount()
     fun acceptTermsConsent()
-    fun onUploadSelected(photo: GalleryPhotoResult)
-    fun deleteImage(url: String)
+    fun onUploadSelected(photo: GalleryPhotoResult, onRetry: () -> Unit = {})
+    fun deleteImage(url: String, onDeleted: () -> Unit = {})
 
     sealed class Child {
         data object EventInfo : Child()
@@ -222,9 +226,8 @@ class DefaultCreateEventComponent(
     override val termsConsentState = userRepository.chatTermsConsentState
     override val termsConsentLoading = userRepository.chatTermsConsentLoading
 
-    override val eventImageUrls = imageRepository
-        .getUserImageIdsFlow()
-        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+    private val imageCoordinator = EventImageCoordinator(imageRepository, scope)
+    override val eventImageUrls = imageCoordinator.eventImageIds
     private val _sports = MutableStateFlow<List<Sport>>(emptyList())
     override val sports = _sports.asStateFlow()
     private val _eventTags = MutableStateFlow<List<EventTag>>(emptyList())
@@ -397,21 +400,20 @@ class DefaultCreateEventComponent(
         }
     }
 
-    override fun onUploadSelected(photo: GalleryPhotoResult) {
+    override fun onUploadSelected(photo: GalleryPhotoResult, onRetry: () -> Unit) {
         scope.launch {
-            loadingHandler.showLoading("Uploading image...")
-            try {
-                val uploadedImageId = imageRepository.uploadImage(
-                    convertPhotoResultToUploadFile(photo)
-                ).getOrThrow()
-
-                updateEventField {
-                    copy(imageId = uploadedImageId)
+            when (val outcome = imageCoordinator.uploadSelected(photo, loadingHandler)) {
+                is EventImageUploadOutcome.Success -> {
+                    updateEventField {
+                        copy(imageId = outcome.imageId)
+                    }
                 }
-            } catch (error: Throwable) {
-                _errorState.value = ErrorMessage(error.userMessage("Failed to upload image."))
-            } finally {
-                loadingHandler.hideLoading()
+                is EventImageUploadOutcome.Failure -> {
+                    _errorState.value = eventImageRetryError(
+                        message = eventImageFailureMessage(outcome.reason),
+                        onRetry = onRetry,
+                    )
+                }
             }
         }
     }
@@ -838,11 +840,16 @@ class DefaultCreateEventComponent(
         }
     }
 
-    override fun deleteImage(url: String) {
+    override fun deleteImage(url: String, onDeleted: () -> Unit) {
         scope.launch {
-            loadingHandler.showLoading("Deleting image...")
-            imageRepository.deleteImage(url)
-            loadingHandler.hideLoading()
+            imageCoordinator.deleteImage(url, loadingHandler)
+                .onSuccess { onDeleted() }
+                .onFailure {
+                    _errorState.value = eventImageRetryError(
+                        message = eventImageFailureMessage(EventImageFailure.DELETE),
+                        onRetry = { deleteImage(url, onDeleted) },
+                    )
+                }
         }
     }
 

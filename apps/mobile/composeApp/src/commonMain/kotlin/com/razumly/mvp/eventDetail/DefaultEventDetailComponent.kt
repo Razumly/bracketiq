@@ -1715,15 +1715,30 @@ class DefaultEventDetailComponent(
         }
     }
 
-    override fun onUploadSelected(photo: GalleryPhotoResult) {
+    override fun onUploadSelected(photo: GalleryPhotoResult, onRetry: () -> Unit) {
         scope.launch {
-            imageCoordinator.uploadSelected(photo)
+            when (val outcome = imageCoordinator.uploadSelected(photo, loadingHandler)) {
+                is EventImageUploadOutcome.Success -> Unit
+                is EventImageUploadOutcome.Failure -> {
+                    _errorState.value = eventImageRetryError(
+                        message = eventImageFailureMessage(outcome.reason),
+                        onRetry = onRetry,
+                    )
+                }
+            }
         }
     }
 
-    override fun deleteImage(imageId: String) {
+    override fun deleteImage(imageId: String, onDeleted: () -> Unit) {
         scope.launch {
             imageCoordinator.deleteImage(imageId, loadingHandler)
+                .onSuccess { onDeleted() }
+                .onFailure {
+                    _errorState.value = eventImageRetryError(
+                        message = eventImageFailureMessage(EventImageFailure.DELETE),
+                        onRetry = { deleteImage(imageId, onDeleted) },
+                    )
+                }
         }
     }
 

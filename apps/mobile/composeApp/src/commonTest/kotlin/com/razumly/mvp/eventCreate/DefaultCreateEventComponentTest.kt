@@ -28,6 +28,32 @@ import kotlin.time.Instant
 
 class DefaultCreateEventComponentTest : MainDispatcherTest() {
     @Test
+    fun failed_event_image_delete_keeps_the_selection_and_retries_the_same_delete() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        harness.imageRepository.deleteFailure = IllegalStateException("offline")
+        var deletedSelections = 0
+
+        harness.component.deleteImage("event-image") { deletedSelections += 1 }
+        advance()
+
+        val failure = harness.component.errorState.value
+        assertEquals(
+            "We couldn't delete this event image. Check your connection and try again.",
+            failure?.message,
+        )
+        assertEquals("Try again", failure?.actionLabel)
+        assertEquals(0, deletedSelections)
+        assertFalse(harness.loadingHandler.loadingState.value.isLoading)
+
+        harness.imageRepository.deleteFailure = null
+        failure?.action?.invoke()
+        advance()
+
+        assertEquals(1, deletedSelections)
+        assertFalse(harness.loadingHandler.loadingState.value.isLoading)
+    }
+
+    @Test
     fun create_screen_initializes_from_seeded_event_template_draft() = runTest(testDispatcher) {
         val seededEvent = com.razumly.mvp.core.data.dataTypes.Event(
             id = "seeded-event",

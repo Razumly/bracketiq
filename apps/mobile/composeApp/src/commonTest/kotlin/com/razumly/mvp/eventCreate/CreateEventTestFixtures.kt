@@ -554,18 +554,26 @@ internal class CreateEvent_FakeSportsRepository(
 internal class CreateEvent_FakeImagesRepository : IImagesRepository {
     private val imageIds = MutableStateFlow<List<String>>(emptyList())
     private var imageCounter = 0
+    var uploadFailure: Throwable? = null
+    var deleteFailure: Throwable? = null
 
-    override suspend fun uploadImage(inputFile: MvpUploadFile): Result<String> = runCatching {
-        imageCounter += 1
-        val imageId = "image-$imageCounter"
-        imageIds.value = imageIds.value + imageId
-        imageId
+    override suspend fun uploadImage(inputFile: MvpUploadFile): Result<String> {
+        uploadFailure?.let { return Result.failure(it) }
+        return runCatching {
+            imageCounter += 1
+            val imageId = "image-$imageCounter"
+            imageIds.value = imageIds.value + imageId
+            imageId
+        }
     }
 
     override fun getUserImageIdsFlow(): Flow<List<String>> = imageIds
     override suspend fun addImageToUser(imageId: String): Result<Unit> = Result.success(Unit)
-    override suspend fun deleteImage(imageId: String): Result<Unit> = runCatching {
-        imageIds.value = imageIds.value.filterNot { it == imageId }
+    override suspend fun deleteImage(imageId: String): Result<Unit> {
+        deleteFailure?.let { return Result.failure(it) }
+        return runCatching {
+            imageIds.value = imageIds.value.filterNot { it == imageId }
+        }
     }
 }
 

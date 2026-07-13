@@ -120,7 +120,7 @@ import dev.chrisbanes.haze.ExperimentalHazeApi
 import io.github.aakira.napier.Napier
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import io.github.ismoy.imagepickerkmp.domain.models.MimeType
-import io.github.ismoy.imagepickerkmp.presentation.ui.components.GalleryPickerLauncher
+import io.github.ismoy.imagepickerkmp.features.imagepicker.ui.rememberImagePickerKMP
 import io.ktor.http.Url
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -257,8 +257,8 @@ fun EventDetails(
     onUpdateInstallmentDueDate: (Int, String) -> Unit = { _, _ -> },
     onAddInstallmentRow: () -> Unit = {},
     onRemoveInstallmentRow: (Int) -> Unit = {},
-    onUploadSelected: (GalleryPhotoResult) -> Unit,
-    onDeleteImage: (String) -> Unit,
+    onUploadSelected: (GalleryPhotoResult, () -> Unit) -> Unit,
+    onDeleteImage: (String, () -> Unit) -> Unit,
     currentUserForHostActions: UserData? = null,
     onHostMessageUser: (UserData) -> Unit = {},
     onHostSendFriendRequest: (UserData) -> Unit = {},
@@ -285,7 +285,6 @@ fun EventDetails(
     var installmentDueDatePickerIndex by remember { mutableStateOf<Int?>(null) }
     var divisionInstallmentDueDatePickerIndex by remember { mutableStateOf<Int?>(null) }
     var showImageSelector by rememberSaveable { mutableStateOf(false) }
-    var showUploadImagePicker by rememberSaveable { mutableStateOf(false) }
     // Validation states
     var isPriceValid by remember { mutableStateOf(editEvent.priceCents >= 0) }
     var isMaxParticipantsValid by remember { mutableStateOf(true) }
@@ -310,6 +309,15 @@ fun EventDetails(
     var validationErrors by remember { mutableStateOf<List<String>>(emptyList()) }
 
     val coroutineScope = rememberCoroutineScope()
+    val eventImagePicker = rememberImagePickerKMP()
+    val launchEventImagePicker = remember(eventImagePicker) {
+        {
+            eventImagePicker.launchGallery(
+                allowMultiple = false,
+                mimeTypes = listOf(MimeType.IMAGE_ALL),
+            )
+        }
+    }
     val selectedUsersById = remember { mutableStateMapOf<String, UserData>() }
     var staffSearchQuery by rememberSaveable { mutableStateOf("") }
     var staffInviteFirstName by rememberSaveable { mutableStateOf("") }
@@ -2807,21 +2815,26 @@ fun EventDetails(
         initialDate = divisionInstallmentInitialDate,
     )
 
-    // ImagePickerKMP Integration
-    if (showUploadImagePicker) {
-        GalleryPickerLauncher(
-            onPhotosSelected = { photos ->
-            showUploadImagePicker = false
-            if (photos.isNotEmpty()) {
-                onUploadSelected(photos.first())
+    LaunchedEffect(eventImagePicker.result) {
+        when (val outcome = resolveEventImagePickerOutcome(eventImagePicker.result)) {
+            EventImagePickerOutcome.Ignore -> Unit
+            is EventImagePickerOutcome.Upload -> {
+                eventImagePicker.reset()
+                onUploadSelected(
+                    outcome.photo,
+                    launchEventImagePicker,
+                )
             }
-        }, onError = { error ->
-            Napier.d("Error uploading image: $error")
-            showUploadImagePicker = false
-        }, onDismiss = {
-            showUploadImagePicker = false
-        }, allowMultiple = false, mimeTypes = listOf(MimeType.IMAGE_ALL)
-        )
+            is EventImagePickerOutcome.Failure -> {
+                eventImagePicker.reset()
+                popupHandler.showPopup(
+                    eventImageRetryError(
+                        message = outcome.message,
+                        onRetry = launchEventImagePicker,
+                    ),
+                )
+            }
+        }
     }
 
     var showImageDelete by remember { mutableStateOf(false) }
@@ -2861,7 +2874,8 @@ fun EventDetails(
                     imageIds = (imageIds + editEvent.imageId)
                         .filter(String::isNotBlank)
                         .distinct(),
-                    onUploadSelected = { showUploadImagePicker = true },
+                    initialSelectedImageId = editEvent.imageId,
+                    onUploadSelected = launchEventImagePicker,
                     onDeleteImage = {
                         showImageDelete = true
                         deleteImage = it
@@ -2881,8 +2895,9 @@ fun EventDetails(
                     text = { Text("Are you sure you want to delete this image?") },
                     confirmButton = {
                         TextButton(onClick = {
-                            onDeleteImage(deleteImage)
-                            onEditEvent { copy(imageId = "") }
+                            onDeleteImage(deleteImage) {
+                                onEditEvent { copy(imageId = "") }
+                            }
                             showImageDelete = false
                         }) {
                             Text("Delete")
