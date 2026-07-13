@@ -1573,8 +1573,15 @@ class DefaultMatchContentComponent(
         checkSetCompletion(updatedScoringMatchWithIncident)
 
         scope.launch {
-            matchRepository.saveMatchLocally(updatedScoringMatchWithIncident)
-            processIncidentQueueUntilBlocked(updatedScoringMatchWithIncident)
+            matchRepository.addMatchIncident(
+                match = scoringMatch,
+                operation = localIncident.toCreateIncidentOperation(),
+            ).onSuccess {
+                _optimisticMatch.value = null
+            }.onFailure { error ->
+                _optimisticMatch.value = null
+                _errorState.value = "Failed to save incident locally: ${error.userMessage()}"
+            }
         }
     }
 
@@ -1605,11 +1612,18 @@ class DefaultMatchContentComponent(
         _optimisticMatch.value = currentMatch.copy(match = updatedMatch)
 
         scope.launch {
-            matchRepository.saveMatchLocally(updatedMatch)
             if (incident.isPendingCreateUpload()) {
-                _optimisticMatch.value = null
+                persistMatchLocally(updatedMatch, clearOptimisticOnSuccess = true)
             } else {
-                processIncidentQueueUntilBlocked(updatedMatch)
+                matchRepository.updateMatchOperations(
+                    match = scoringMatch,
+                    incidentOperations = listOf(incident.toDeleteIncidentOperation()),
+                ).onSuccess {
+                    _optimisticMatch.value = null
+                }.onFailure { error ->
+                    _optimisticMatch.value = null
+                    _errorState.value = "Failed to save incident locally: ${error.userMessage()}"
+                }
             }
         }
     }
@@ -1930,30 +1944,14 @@ class DefaultMatchContentComponent(
         }
 
         return result.fold(
-            onSuccess = { remoteMatch ->
-                val updatedMatch = when (action.operation.action) {
-                    "DELETE" -> remoteMatch.copy(
-                        incidents = remoteMatch.incidents.filterNot { incident -> incident.id == action.incident.id },
-                    )
-                    else -> markLocalIncidentUploadStatus(
-                        match = remoteMatch,
-                        incidentId = action.incident.id,
-                        uploadStatus = null,
-                    )
-                }
+            onSuccess = { locallyQueuedMatch ->
                 incidentRetryAttempt = 0
-                matchRepository.saveMatchLocally(updatedMatch)
                 _optimisticMatch.value = null
-                updatedMatch
+                locallyQueuedMatch
             },
-            onFailure = {
-                val failedMatch = markLocalIncidentUploadStatus(
-                    match = match,
-                    incidentId = action.incident.id,
-                    uploadStatus = action.failureStatus,
-                )
-                matchRepository.saveMatchLocally(failedMatch)
-                _optimisticMatch.value = matchWithTeams.value.copy(match = failedMatch)
+            onFailure = { error ->
+                _optimisticMatch.value = null
+                _errorState.value = "Failed to save incident locally: ${error.userMessage()}"
                 null
             },
         )
@@ -2447,30 +2445,14 @@ class DefaultMatchContentComponent(
                     incident.isPendingCreateUpload() -> PendingIncidentAction(
                         incident = incident,
                         operation = incident.toCreateIncidentOperation(),
-                        failureStatus = MATCH_INCIDENT_UPLOAD_FAILED,
                     )
                     incident.isPendingDeleteUpload() -> PendingIncidentAction(
                         incident = incident,
                         operation = incident.toDeleteIncidentOperation(),
-                        failureStatus = MATCH_INCIDENT_DELETE_FAILED,
                     )
                     else -> null
                 }
             }
-
-    private fun markLocalIncidentUploadStatus(
-        match: MatchMVP,
-        incidentId: String,
-        uploadStatus: String?,
-    ): MatchMVP = match.copy(
-        incidents = match.incidents.map { incident ->
-            if (incident.id == incidentId) {
-                incident.copy(uploadStatus = uploadStatus)
-            } else {
-                incident
-            }
-        },
-    )
 
     private fun MatchMVP.removeIncidentScore(incident: MatchIncidentMVP): MatchMVP {
         val linkedDelta = incident.linkedPointDelta ?: return this
@@ -2717,7 +2699,6 @@ private data class OfficialUserLookup(
 private data class PendingIncidentAction(
     val incident: MatchIncidentMVP,
     val operation: MatchIncidentOperationDto,
-    val failureStatus: String,
 )
 
 private data class PendingDirectScoreSync(

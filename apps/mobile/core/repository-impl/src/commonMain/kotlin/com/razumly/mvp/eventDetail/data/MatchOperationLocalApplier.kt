@@ -12,7 +12,7 @@ import com.razumly.mvp.core.network.dto.MatchScoreSetDto
 import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.core.network.dto.MatchUpdateDto
 
-internal fun MatchMVP.applyLocalMatchUpdate(update: MatchUpdateDto): MatchMVP {
+fun MatchMVP.applyLocalMatchUpdate(update: MatchUpdateDto): MatchMVP {
     var next = applyLocalLifecycle(update.lifecycle)
     update.officialCheckIn?.let { checkIn ->
         next = next.applyLocalOfficialCheckIn(checkIn)
@@ -264,7 +264,15 @@ private fun MatchMVP.applyLocalIncidentScoreDelta(
     val updated = segments.toMutableList()
     val segment = updated[segmentIndex]
     val nextScore = ((segment.scores[eventTeamId] ?: 0) + delta * multiplier).coerceAtLeast(0)
-    updated[segmentIndex] = segment.copy(scores = segment.scores + (eventTeamId to nextScore))
+    val nextScores = segment.scores + (eventTeamId to nextScore)
+    updated[segmentIndex] = segment.copy(
+        status = when {
+            segment.status == "COMPLETE" -> segment.status
+            nextScores.values.any { score -> score > 0 } -> "IN_PROGRESS"
+            else -> "NOT_STARTED"
+        },
+        scores = nextScores,
+    )
     return copy(segments = updated)
 }
 
