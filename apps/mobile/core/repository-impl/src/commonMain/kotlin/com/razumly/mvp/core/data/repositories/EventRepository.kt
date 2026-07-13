@@ -113,6 +113,12 @@ data class OrganizationEventPage(
     val hasMore: Boolean,
 )
 
+data class HostEventPage(
+    val events: List<Event>,
+    val nextOffset: Int,
+    val hasMore: Boolean,
+)
+
 interface IEventRepository : IMVPRepository {
     fun getCachedEventsFlow(): Flow<Result<List<Event>>>
     fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>>
@@ -181,6 +187,22 @@ interface IEventRepository : IMVPRepository {
         filterOnly: Boolean = false,
     ): Result<List<EventTag>> = Result.success(emptyList())
     fun getEventsByHostFlow(hostId: String): Flow<Result<List<Event>>>
+    suspend fun getHostEventsPage(
+        hostId: String,
+        limit: Int = 50,
+        offset: Int = 0,
+    ): Result<HostEventPage> {
+        val safeLimit = limit.coerceAtLeast(1)
+        val safeOffset = offset.coerceAtLeast(0)
+        return getEventsByHostFlow(hostId).first().map { events ->
+            val page = events.drop(safeOffset).take(safeLimit)
+            HostEventPage(
+                events = page,
+                nextOffset = safeOffset + page.size,
+                hasMore = safeOffset + page.size < events.size,
+            )
+        }
+    }
     fun getEventTemplatesByHostFlow(hostId: String): Flow<Result<List<EventTemplateSummary>>> =
         flowOf(Result.success(emptyList()))
     suspend fun createEventTemplateFromEvent(sourceEventId: String): Result<EventTemplateSummary> =
@@ -1246,6 +1268,27 @@ class EventRepository(
         val encodedHostId = hostId.encodeURLQueryComponent()
         val res = api.get<EventsResponseDto>("api/events?hostId=$encodedHostId&limit=200")
         return res.events.mapNotNull { it.toEventOrNull() }
+    }
+
+    private suspend fun fetchRemoteEventsPageByHost(
+        hostId: String,
+        limit: Int,
+        offset: Int,
+    ): HostEventPage {
+        val encodedHostId = hostId.encodeURLQueryComponent()
+        val safeLimit = limit.coerceIn(1, 500)
+        val safeOffset = offset.coerceAtLeast(0)
+        val response = api.get<EventsResponseDto>(
+            "api/events?hostId=$encodedHostId&limit=$safeLimit&offset=$safeOffset",
+        )
+        val events = response.events.mapNotNull { it.toEventOrNull() }
+        val serverNextOffset = response.pagination?.nextOffset
+            ?.takeIf { candidate -> candidate > safeOffset }
+        return HostEventPage(
+            events = events,
+            nextOffset = serverNextOffset ?: safeOffset + events.size,
+            hasMore = response.pagination?.hasMore == true && serverNextOffset != null,
+        )
     }
 
     private suspend fun fetchRemoteEventTemplatesByHost(hostId: String): List<EventTemplateSummary> {
@@ -2357,6 +2400,35 @@ class EventRepository(
                 remoteJob.cancel()
             }
         }
+
+    override suspend fun getHostEventsPage(
+        hostId: String,
+        limit: Int,
+        offset: Int,
+    ): Result<HostEventPage> {
+        val normalizedHostId = hostId.trim()
+        if (normalizedHostId.isEmpty()) {
+            return Result.success(
+                HostEventPage(
+                    events = emptyList(),
+                    nextOffset = 0,
+                    hasMore = false,
+                ),
+            )
+        }
+
+        return runCatching {
+            val page = fetchRemoteEventsPageByHost(
+                hostId = normalizedHostId,
+                limit = limit,
+                offset = offset,
+            )
+            if (page.events.isNotEmpty()) {
+                databaseService.getEventDao.upsertEvents(page.events)
+            }
+            page
+        }
+    }
 
     override fun getEventTemplatesByHostFlow(hostId: String): Flow<Result<List<EventTemplateSummary>>> =
         flow {

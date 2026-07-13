@@ -25,6 +25,7 @@ fun EventManagementScreen(component: EventManagementComponent) {
     val offsetNavPadding =
         PaddingValues(bottom = LocalNavBarPadding.current.calculateBottomPadding().plus(32.dp))
     val lazyListState = rememberLazyListState()
+    val isLoading by component.isLoading.collectAsState()
     val isLoadingMore by component.isLoadingMore.collectAsState()
     val hasMoreEvents by component.hasMoreEvents.collectAsState()
 
@@ -56,7 +57,7 @@ fun EventManagementScreen(component: EventManagementComponent) {
             lastElementPadding = offsetNavPadding,
             lazyListState = lazyListState,
             onMapClick = { _, _ -> },
-            isLoadingMore = isLoadingMore,
+            isLoadingMore = isLoading || isLoadingMore,
             hasMoreEvents = hasMoreEvents,
             onLoadMore = { component.loadMoreEvents() }
         ) { event ->
