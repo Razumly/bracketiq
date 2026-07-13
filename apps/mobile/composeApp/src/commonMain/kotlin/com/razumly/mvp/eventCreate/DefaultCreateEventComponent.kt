@@ -1295,6 +1295,8 @@ class DefaultCreateEventComponent(
     }
 
     private fun validateCreateEventDraft(event: Event): String? {
+        validateConfiguredLeagueSlots(event)?.let { return it }
+
         val hasRentalBackedEventSlots = event.eventType == EventType.EVENT &&
             _leagueSlots.value.any { slot -> slot.isRentalBacked() }
         if (hasRentalBackedEventSlots) {
@@ -1304,6 +1306,48 @@ class DefaultCreateEventComponent(
         if (selectedDivisionIds.isEmpty()) {
             return "Add at least one division before creating this event."
         }
+        return null
+    }
+
+    private fun validateConfiguredLeagueSlots(event: Event): String? {
+        if (!shouldUseConfiguredLeagueSlots(event)) {
+            return null
+        }
+
+        val validFieldIds = _localFields.value
+            .map { field -> field.id.trim() }
+            .filter(String::isNotBlank)
+            .toSet()
+
+        _leagueSlots.value.forEachIndexed { index, rawSlot ->
+            val slot = normalizeRentalSlotResourceSelection(rawSlot, validFieldIds)
+            val label = "Schedule slot ${index + 1}"
+            if (slot.normalizedScheduledFieldIds().none(validFieldIds::contains)) {
+                return "$label needs at least one field."
+            }
+
+            if (!slot.repeating) {
+                val slotStart = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start
+                val slotEnd = slot.endDate
+                if (slotEnd == null || slotEnd <= slotStart) {
+                    return "$label needs an end date after its start."
+                }
+                return@forEachIndexed
+            }
+
+            if (slot.normalizedDaysOfWeek().isEmpty()) {
+                return "$label needs at least one day."
+            }
+            val startMinutes = slot.startTimeMinutes
+            val endMinutes = slot.endTimeMinutes
+            if (startMinutes == null || endMinutes == null) {
+                return "$label needs a start and end time."
+            }
+            if (endMinutes <= startMinutes) {
+                return "$label must end after it starts."
+            }
+        }
+
         return null
     }
 

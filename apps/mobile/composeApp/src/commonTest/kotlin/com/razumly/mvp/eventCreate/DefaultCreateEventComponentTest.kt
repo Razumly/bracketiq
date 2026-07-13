@@ -941,7 +941,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_league_creation_when_fields_and_slots_submitted_then_only_valid_slots_are_created_and_mapped() = runTest(testDispatcher) {
+    fun given_league_creation_with_invalid_configured_slot_when_submitted_then_creation_is_blocked() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         harness.component.setLoadingHandler(harness.loadingHandler)
         advance()
@@ -997,34 +997,18 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        assertEquals(1, harness.eventRepository.createEventCalls.size)
-        assertEquals(1, harness.onEventCreatedCount)
+        assertEquals(0, harness.eventRepository.createEventCalls.size)
+        assertEquals(0, harness.onEventCreatedCount)
         assertEquals(0, harness.fieldRepository.createdFields.size)
         assertEquals(0, harness.fieldRepository.createdTimeSlots.size)
-
-        val createCall = harness.eventRepository.createEventCalls.single()
-        val payloadFields = createCall.fields.orEmpty()
-        val payloadSlots = createCall.timeSlots.orEmpty()
-        val createdFieldIds = payloadFields.map { it.id }
-
-        assertEquals(2, payloadFields.size)
-        assertEquals(1, payloadSlots.size)
-        assertEquals(createdFieldIds, createCall.event.fieldIds)
-        assertEquals(payloadSlots.map { it.id }, createCall.event.timeSlotIds)
-        assertEquals(listOf("a"), payloadFields[0].divisions)
-        assertEquals(listOf("b", "open"), payloadFields[1].divisions)
-        assertEquals("Tournament Center", payloadFields[0].location)
-        assertEquals("Tournament Center", payloadFields[1].location)
-        assertEquals(createdFieldIds.first(), payloadSlots[0].scheduledFieldId)
-        assertEquals(listOf(createdFieldIds.first()), payloadSlots[0].scheduledFieldIds)
-        assertEquals(1, payloadSlots[0].dayOfWeek)
-        assertEquals(listOf(1, 3), payloadSlots[0].daysOfWeek)
-        assertEquals(3, createCall.leagueScoringConfig?.pointsForWin)
-        assertEquals(emptyList(), createCall.requiredTemplateIds)
+        assertEquals(
+            "Schedule slot 2 must end after it starts.",
+            harness.component.errorState.value?.message,
+        )
     }
 
     @Test
-    fun given_repeating_league_slot_without_end_time_when_submitted_then_slot_is_filtered_from_payload() = runTest(testDispatcher) {
+    fun given_repeating_league_slot_without_end_time_when_submitted_then_creation_is_blocked() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         harness.component.setLoadingHandler(harness.loadingHandler)
         advance()
@@ -1062,9 +1046,78 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        val createCall = harness.eventRepository.createEventCalls.single()
-        assertEquals(emptyList(), createCall.timeSlots.orEmpty())
-        assertEquals(emptyList(), createCall.event.timeSlotIds)
+        assertEquals(0, harness.eventRepository.createEventCalls.size)
+        assertEquals(
+            "Schedule slot 1 needs a start and end time.",
+            harness.component.errorState.value?.message,
+        )
+    }
+
+    @Test
+    fun given_configured_league_slot_without_a_field_when_submitted_then_creation_is_blocked() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        harness.component.setLoadingHandler(harness.loadingHandler)
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        harness.component.selectFieldCount(1)
+        harness.component.setUseManualTimeSlots(true)
+        advance()
+
+        harness.component.updateLeagueTimeSlot(0) {
+            copy(
+                repeating = true,
+                dayOfWeek = 1,
+                daysOfWeek = listOf(1),
+                startTimeMinutes = 600,
+                endTimeMinutes = 660,
+                scheduledFieldId = null,
+                scheduledFieldIds = emptyList(),
+            )
+        }
+        advance()
+
+        harness.component.createEvent()
+        advance()
+
+        assertEquals(0, harness.eventRepository.createEventCalls.size)
+        assertEquals(
+            "Schedule slot 1 needs at least one field.",
+            harness.component.errorState.value?.message,
+        )
+    }
+
+    @Test
+    fun given_one_time_league_slot_without_a_valid_end_when_submitted_then_creation_is_blocked() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        harness.component.setLoadingHandler(harness.loadingHandler)
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        harness.component.selectFieldCount(1)
+        harness.component.setUseManualTimeSlots(true)
+        advance()
+        val localFieldId = harness.component.localFields.value.first().id
+
+        harness.component.updateLeagueTimeSlot(0) {
+            copy(
+                repeating = false,
+                startDate = instant(1_700_000_000_000),
+                endDate = null,
+                scheduledFieldId = localFieldId,
+                scheduledFieldIds = listOf(localFieldId),
+            )
+        }
+        advance()
+
+        harness.component.createEvent()
+        advance()
+
+        assertEquals(0, harness.eventRepository.createEventCalls.size)
+        assertEquals(
+            "Schedule slot 1 needs an end date after its start.",
+            harness.component.errorState.value?.message,
+        )
     }
 
     @Test
