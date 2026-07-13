@@ -237,6 +237,9 @@ class DefaultEventSearchComponent(
     private var suggestOrganizationsJob: Job? = null
     private var suggestTeamsJob: Job? = null
     private var cachedEventsSyncJob: Job? = null
+    private var eventPageLoadJob: Job? = null
+    private val discoverEventRequests = DiscoverRequestGenerationTracker()
+    private val discoverOrganizationRequests = DiscoverRequestGenerationTracker()
     private var isAwaitingInitialEventLocation = true
     private var eventOffset = 0
     private var organizationFieldIdsFromFieldsCache: Map<String, List<String>> = emptyMap()
@@ -467,10 +470,12 @@ class DefaultEventSearchComponent(
     ) {
         if (_isLoadingMore.value || !_hasMoreEvents.value || _isLoading.value) return
 
-        scope.launch {
-            if (showLoading) {
-                _isLoadingMore.value = true
-            }
+        val generation = discoverEventRequests.currentGeneration()
+        _isLoading.value = true
+        if (showLoading) {
+            _isLoadingMore.value = true
+        }
+        eventPageLoadJob = scope.launch {
             try {
                 val activeFilter = _filter.value
                 val currentLocation = activeSearchLocation()
@@ -494,13 +499,16 @@ class DefaultEventSearchComponent(
                     includeDistanceFilter = includeDistanceFilter,
                 )
                     .onSuccess { (eventsPage, hasMore) ->
+                        if (!discoverEventRequests.isCurrent(generation)) return@onSuccess
                         loadOrganizationsForEvents(eventsPage)
+                        if (!discoverEventRequests.isCurrent(generation)) return@onSuccess
                         eventOffset += eventsPage.size
                         _hasMoreEvents.value = hasMore
                         _rawEvents.value = mergeEvents(_rawEvents.value, eventsPage)
-                        _events.value = applyEventFilter(_rawEvents.value, activeFilter)
+                        _events.value = applyEventFilter(_rawEvents.value, _filter.value)
                     }
                     .onFailure { e ->
+                        if (!discoverEventRequests.isCurrent(generation)) return@onFailure
                         if (reportErrors) {
                             _errorState.value = ErrorMessage("Failed to load more events: ${e.userMessage()}")
                         } else {
@@ -508,8 +516,12 @@ class DefaultEventSearchComponent(
                         }
                     }
             } finally {
-                if (showLoading) {
-                    _isLoadingMore.value = false
+                if (discoverEventRequests.isCurrent(generation)) {
+                    _isLoading.value = false
+                    if (showLoading) {
+                        _isLoadingMore.value = false
+                    }
+                    eventPageLoadJob = null
                 }
             }
         }
@@ -530,7 +542,14 @@ class DefaultEventSearchComponent(
         clearExisting: Boolean,
         reportErrors: Boolean,
     ) {
-        if (!force && _isLoadingMore.value) return
+        if (!force && (_isLoadingMore.value || _isLoading.value)) return
+        if (force) {
+            discoverEventRequests.invalidate()
+            eventPageLoadJob?.cancel()
+            eventPageLoadJob = null
+            _isLoading.value = false
+            _isLoadingMore.value = false
+        }
         if (shouldWaitForLocationBeforeEventSearch()) {
             isAwaitingInitialEventLocation = true
             if (showLoading) {
@@ -931,7 +950,7 @@ class DefaultEventSearchComponent(
     }
 
     private suspend fun loadOrganizations(force: Boolean = false): List<Organization> {
-        if (_isLoadingOrganizations.value) return _organizations.value
+        if (!force && _isLoadingOrganizations.value) return _organizations.value
         if (organizationsLoaded && !force) {
             val source = if (_allOrganizations.value.isNotEmpty()) {
                 _allOrganizations.value
@@ -943,57 +962,81 @@ class DefaultEventSearchComponent(
             return filtered
         }
 
+        val generation = if (force) {
+            discoverOrganizationRequests.invalidate()
+        } else {
+            discoverOrganizationRequests.currentGeneration()
+        }
+        val activeTagSlugs = _organizationFilter.value.tagSlugs
         _isLoadingOrganizations.value = true
-        organizationOffset = 0
-        _hasMoreOrganizations.value = true
-        val page = billingRepository.listOrganizationsPage(
-            limit = DISCOVER_PAGE_SIZE,
-            offset = 0,
-            tagSlugs = _organizationFilter.value.tagSlugs,
-        )
-            .onFailure { e ->
-                _errorState.value = ErrorMessage("Failed to fetch organizations: ${e.userMessage()}")
+        try {
+            val page = billingRepository.listOrganizationsPage(
+                limit = DISCOVER_PAGE_SIZE,
+                offset = 0,
+                tagSlugs = activeTagSlugs,
+            )
+                .onFailure { e ->
+                    if (discoverOrganizationRequests.isCurrent(generation)) {
+                        _errorState.value = ErrorMessage("Failed to fetch organizations: ${e.userMessage()}")
+                    }
+                }
+                .getOrNull()
+            if (!discoverOrganizationRequests.isCurrent(generation)) return _organizations.value
+
+            val organizations = page?.items.orEmpty()
+            val sortedOrganizations = organizations.sortedBy { organization -> organization.name.lowercase() }
+            _allOrganizations.value = sortedOrganizations
+            organizationFieldIdsFromFieldsCache = emptyMap()
+            organizationOffset = page?.pagination?.nextOffset ?: organizations.size
+            _hasMoreOrganizations.value = page?.pagination?.hasMore ?: false
+
+            val filtered = applyOrganizationFilters(sortedOrganizations)
+            _organizations.value = filtered
+            organizationsLoaded = true
+            return filtered
+        } finally {
+            if (discoverOrganizationRequests.isCurrent(generation)) {
+                _isLoadingOrganizations.value = false
             }
-            .getOrNull()
-        val organizations = page?.items.orEmpty()
-
-        val sortedOrganizations = organizations.sortedBy { organization -> organization.name.lowercase() }
-        _allOrganizations.value = sortedOrganizations
-        organizationFieldIdsFromFieldsCache = emptyMap()
-        organizationOffset = page?.pagination?.nextOffset ?: organizations.size
-        _hasMoreOrganizations.value = page?.pagination?.hasMore ?: false
-
-        val filtered = applyOrganizationFilters(sortedOrganizations)
-        _organizations.value = filtered
-        organizationsLoaded = true
-        _isLoadingOrganizations.value = false
-        return filtered
+        }
     }
 
     private suspend fun loadMoreOrganizationsPage() {
         if (_isLoadingOrganizations.value || !_hasMoreOrganizations.value) return
 
+        val generation = discoverOrganizationRequests.currentGeneration()
+        val offset = organizationOffset
+        val activeTagSlugs = _organizationFilter.value.tagSlugs
         _isLoadingOrganizations.value = true
-        val page = billingRepository.listOrganizationsPage(
-            limit = DISCOVER_PAGE_SIZE,
-            offset = organizationOffset,
-            tagSlugs = _organizationFilter.value.tagSlugs,
-        )
-            .onFailure { e ->
-                _errorState.value = ErrorMessage("Failed to fetch more organizations: ${e.userMessage()}")
-            }
-            .getOrNull()
-        val organizations = page?.items.orEmpty()
-        val merged = mergeOrganizations(_allOrganizations.value, organizations)
-            .sortedBy { organization -> organization.name.lowercase() }
-        _allOrganizations.value = merged
-        organizationOffset = page?.pagination?.nextOffset ?: organizationOffset + organizations.size
-        _hasMoreOrganizations.value = page?.pagination?.hasMore ?: false
+        try {
+            val page = billingRepository.listOrganizationsPage(
+                limit = DISCOVER_PAGE_SIZE,
+                offset = offset,
+                tagSlugs = activeTagSlugs,
+            )
+                .onFailure { e ->
+                    if (discoverOrganizationRequests.isCurrent(generation)) {
+                        _errorState.value = ErrorMessage("Failed to fetch more organizations: ${e.userMessage()}")
+                    }
+                }
+                .getOrNull()
+            if (!discoverOrganizationRequests.isCurrent(generation)) return
 
-        val filtered = applyOrganizationFilters(merged)
-        _organizations.value = filtered
-        organizationsLoaded = true
-        _isLoadingOrganizations.value = false
+            val organizations = page?.items.orEmpty()
+            val merged = mergeOrganizations(_allOrganizations.value, organizations)
+                .sortedBy { organization -> organization.name.lowercase() }
+            _allOrganizations.value = merged
+            organizationOffset = page?.pagination?.nextOffset ?: offset + organizations.size
+            _hasMoreOrganizations.value = page?.pagination?.hasMore ?: false
+
+            val filtered = applyOrganizationFilters(merged)
+            _organizations.value = filtered
+            organizationsLoaded = true
+        } finally {
+            if (discoverOrganizationRequests.isCurrent(generation)) {
+                _isLoadingOrganizations.value = false
+            }
+        }
     }
 
     private suspend fun resolveOrganizationsWithFieldIds(
