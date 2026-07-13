@@ -757,7 +757,7 @@ class UserRepositoryHttpTest {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun updateUser_omits_teamIds_from_patch_and_uses_server_memberships() = runTest {
+    fun updateUser_omits_server_managed_relationships_and_uses_server_memberships() = runTest {
         var requestBody = ""
         val engine = MockEngine { request ->
             assertEquals("/api/users/user_1", request.url.encodedPath)
@@ -771,15 +771,15 @@ class UserRepositoryHttpTest {
                         "firstName": "Sam",
                         "lastName": "Player",
                         "teamIds": ["team_server"],
-                        "friendIds": [],
-                        "friendRequestIds": [],
-                        "friendRequestSentIds": [],
-                        "followingIds": [],
+                        "friendIds": ["friend_server"],
+                        "friendRequestIds": ["incoming_server"],
+                        "friendRequestSentIds": ["outgoing_server"],
+                        "followingIds": ["following_server"],
                         "blockedUserIds": [],
                         "hiddenEventIds": [],
                         "userName": "sam_player",
-                        "hasStripeAccount": false,
-                        "uploadedImages": [],
+                        "hasStripeAccount": true,
+                        "uploadedImages": ["image_server"],
                         "profileImageId": null,
                         "chatTermsAcceptedAt": null,
                         "chatTermsVersion": null
@@ -806,13 +806,13 @@ class UserRepositoryHttpTest {
                 firstName = "Sam",
                 lastName = "Player",
                 teamIds = listOf("team_client"),
-                friendIds = emptyList(),
-                friendRequestIds = emptyList(),
-                friendRequestSentIds = emptyList(),
-                followingIds = emptyList(),
+                friendIds = listOf("friend_client"),
+                friendRequestIds = listOf("incoming_client"),
+                friendRequestSentIds = listOf("outgoing_client"),
+                followingIds = listOf("following_client"),
                 userName = "sam_player",
-                hasStripeAccount = false,
-                uploadedImages = emptyList(),
+                hasStripeAccount = true,
+                uploadedImages = listOf("image_client"),
                 profileImageId = null,
                 id = "user_1",
             )
@@ -823,20 +823,36 @@ class UserRepositoryHttpTest {
                 firstName = "Sam",
                 lastName = "Player",
                 teamIds = listOf("team_client"),
-                friendIds = emptyList(),
-                friendRequestIds = emptyList(),
-                friendRequestSentIds = emptyList(),
-                followingIds = emptyList(),
+                friendIds = listOf("friend_client"),
+                friendRequestIds = listOf("incoming_client"),
+                friendRequestSentIds = listOf("outgoing_client"),
+                followingIds = listOf("following_client"),
                 userName = "sam_player",
-                hasStripeAccount = false,
-                uploadedImages = emptyList(),
+                hasStripeAccount = true,
+                uploadedImages = listOf("image_client"),
                 profileImageId = null,
                 id = "user_1",
             )
         ).getOrThrow()
 
-        assertTrue(!requestBody.contains("\"teamIds\""), "Expected teamIds to be omitted from user PATCH payloads.")
+        listOf(
+            "teamIds",
+            "friendIds",
+            "friendRequestIds",
+            "friendRequestSentIds",
+            "followingIds",
+            "hasStripeAccount",
+            "uploadedImages",
+            "notificationSettings",
+        ).forEach { field ->
+            assertTrue(!requestBody.contains("\"$field\""), "Expected $field to be omitted from user PATCH payloads.")
+        }
         assertEquals(listOf("team_server"), updated.teamIds)
+        assertEquals(listOf("friend_server"), updated.friendIds)
+        assertEquals(listOf("incoming_server"), updated.friendRequestIds)
+        assertEquals(listOf("outgoing_server"), updated.friendRequestSentIds)
+        assertEquals(listOf("following_server"), updated.followingIds)
+        assertEquals(listOf("image_server"), updated.uploadedImages)
         assertEquals(listOf("team_server"), repository.currentUser.value.getOrThrow().teamIds)
     }
 
