@@ -32,7 +32,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,13 +71,10 @@ fun ProfileDetailsScreen(
     val lastUploadedImageId by component.lastUploadedImageId.collectAsState()
 
     // Form state
-    var email by remember { mutableStateOf("") }
-    var firstName by remember { mutableStateOf("") }
-    var lastName by remember { mutableStateOf("") }
-    var profileImageId by remember { mutableStateOf<String?>(null) }
+    var draftState by remember { mutableStateOf(ProfileDetailsDraftState()) }
+    val draft = draftState.draft
     var currentPassword by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
-    var userName by remember { mutableStateOf("") }
     var confirmNewPassword by remember { mutableStateOf("") }
     var currentPasswordVisible by remember { mutableStateOf(false) }
     var newPasswordVisible by remember { mutableStateOf(false) }
@@ -95,44 +91,25 @@ fun ProfileDetailsScreen(
             .filter(String::isNotBlank)
             .distinct()
     }
-    val selectableImageIds = remember(uploadedImageIds, profileImageId) {
-        (uploadedImageIds + listOfNotNull(profileImageId?.trim()?.takeIf(String::isNotBlank))).distinct()
+    val selectableImageIds = remember(uploadedImageIds, draft.profileImageId) {
+        (uploadedImageIds + listOfNotNull(draft.profileImageId?.trim()?.takeIf(String::isNotBlank))).distinct()
     }
-    val avatarDisplayName = remember(firstName, lastName, userName) {
-        listOf(firstName.trim(), lastName.trim())
+    val avatarDisplayName = remember(draft.firstName, draft.lastName, draft.userName) {
+        listOf(draft.firstName.trim(), draft.lastName.trim())
             .filter(String::isNotBlank)
             .joinToString(" ")
-            .ifBlank { userName.trim().ifBlank { "User" } }
+            .ifBlank { draft.userName.trim().ifBlank { "User" } }
     }
 
-    val isEmailValid by remember {
-        derivedStateOf {
-            email.isNotBlank() && email.matches(emailAddressRegex)
-        }
-    }
-    val isFirstNameValid by remember { derivedStateOf { firstName.isNotBlank() } }
-    val isLastNameValid by remember { derivedStateOf { lastName.isNotBlank() } }
-    val isPasswordValid by remember {
-        derivedStateOf {
-            if (newPassword.isBlank() && confirmNewPassword.isBlank()) return@derivedStateOf true
-            // Server requires currentPassword + newPassword >= 8
-            currentPassword.isNotBlank() && newPassword.length >= 8 && newPassword == confirmNewPassword
-        }
-    }
-    val passwordsMatch by remember {
-        derivedStateOf { newPassword.isBlank() || newPassword == confirmNewPassword }
-    }
-
-    val isFormValid by remember {
-        derivedStateOf {
-            isEmailValid && isFirstNameValid && isLastNameValid && isPasswordValid
-        }
-    }
-    val canConfirmDeleteAccount by remember {
-        derivedStateOf {
-            deleteAccountConfirmationText.trim().equals(DELETE_ACCOUNT_CONFIRMATION_TEXT, ignoreCase = true)
-        }
-    }
+    val isEmailValid = draft.email.isNotBlank() && draft.email.matches(emailAddressRegex)
+    val isFirstNameValid = draft.firstName.isNotBlank()
+    val isLastNameValid = draft.lastName.isNotBlank()
+    val isPasswordValid = (newPassword.isBlank() && confirmNewPassword.isBlank()) ||
+        (currentPassword.isNotBlank() && newPassword.length >= 8 && newPassword == confirmNewPassword)
+    val passwordsMatch = newPassword.isBlank() || newPassword == confirmNewPassword
+    val isFormValid = isEmailValid && isFirstNameValid && isLastNameValid && isPasswordValid
+    val canConfirmDeleteAccount = deleteAccountConfirmationText.trim()
+        .equals(DELETE_ACCOUNT_CONFIRMATION_TEXT, ignoreCase = true)
     val passwordKeyboardOptions = remember {
         KeyboardOptions(
             keyboardType = KeyboardType.Password,
@@ -140,13 +117,14 @@ fun ProfileDetailsScreen(
         )
     }
 
-    // Initialize form with current data
+    // Only hydrate a clean draft. Repository refreshes can change either full object while the
+    // user is editing this form (for example after deleting an uploaded image).
     LaunchedEffect(currentUser, currentAccount) {
-        userName = currentUser.userName
-        firstName = currentUser.firstName
-        lastName = currentUser.lastName
-        email = currentAccount.email
-        profileImageId = currentUser.profileImageId
+        draftState = reconcileProfileDetailsDraft(
+            state = draftState,
+            currentUser = currentUser,
+            currentAccount = currentAccount,
+        )
     }
 
     LaunchedEffect(lastUploadedImageId) {
@@ -155,7 +133,9 @@ fun ProfileDetailsScreen(
             if (showImageSelector) {
                 pendingProfileImageId = uploadedId
             } else {
-                profileImageId = uploadedId
+                draftState = draftState.copy(
+                    draft = draftState.draft.copy(profileImageId = uploadedId),
+                )
             }
             component.consumeUploadedImageSelection()
         }
@@ -211,16 +191,20 @@ fun ProfileDetailsScreen(
                         if (pendingProfileImageId == imageId) {
                             pendingProfileImageId = null
                         }
-                        if (profileImageId == imageId) {
-                            profileImageId = null
+                        if (draft.profileImageId == imageId) {
+                            draftState = draftState.copy(
+                                draft = draftState.draft.copy(profileImageId = null),
+                            )
                         }
                     },
                     onConfirm = {
-                        profileImageId = pendingProfileImageId
+                        draftState = draftState.copy(
+                            draft = draftState.draft.copy(profileImageId = pendingProfileImageId),
+                        )
                         showImageSelector = false
                     },
                     onCancel = {
-                        pendingProfileImageId = profileImageId
+                        pendingProfileImageId = draft.profileImageId
                         showImageSelector = false
                     },
                 )
@@ -322,19 +306,27 @@ fun ProfileDetailsScreen(
             )
 
             StandardTextField(
-                value = userName,
-                onValueChange = { userName = it },
+                value = draft.userName,
+                onValueChange = { userName ->
+                    draftState = draftState.copy(
+                        draft = draftState.draft.copy(userName = userName),
+                    )
+                },
                 label = "Username",
-                isError = userName.isBlank(),
-                supportingText = if (userName.isBlank()) "Required" else ""
+                isError = draft.userName.isBlank(),
+                supportingText = if (draft.userName.isBlank()) "Required" else ""
             )
 
             StandardTextField(
-                value = email,
-                onValueChange = { email = it },
+                value = draft.email,
+                onValueChange = { email ->
+                    draftState = draftState.copy(
+                        draft = draftState.draft.copy(email = email),
+                    )
+                },
                 label = "Email",
                 keyboardType = "email",
-                isError = !isEmailValid && email.isNotBlank(),
+                isError = !isEmailValid && draft.email.isNotBlank(),
                 supportingText = "Email changes are not supported yet",
                 enabled = false,
                 readOnly = true,
@@ -345,21 +337,29 @@ fun ProfileDetailsScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 StandardTextField(
-                    value = firstName,
-                    onValueChange = { firstName = it },
+                    value = draft.firstName,
+                    onValueChange = { firstName ->
+                        draftState = draftState.copy(
+                            draft = draftState.draft.copy(firstName = firstName),
+                        )
+                    },
                     label = "First Name",
                     modifier = Modifier.weight(1f),
-                    isError = !isFirstNameValid && firstName.isNotBlank(),
-                    supportingText = if (!isFirstNameValid && firstName.isNotBlank()) "Required" else ""
+                    isError = !isFirstNameValid && draft.firstName.isNotBlank(),
+                    supportingText = if (!isFirstNameValid && draft.firstName.isNotBlank()) "Required" else ""
                 )
 
                 StandardTextField(
-                    value = lastName,
-                    onValueChange = { lastName = it },
+                    value = draft.lastName,
+                    onValueChange = { lastName ->
+                        draftState = draftState.copy(
+                            draft = draftState.draft.copy(lastName = lastName),
+                        )
+                    },
                     label = "Last Name",
                     modifier = Modifier.weight(1f),
-                    isError = !isLastNameValid && lastName.isNotBlank(),
-                    supportingText = if (!isLastNameValid && lastName.isNotBlank()) "Required" else ""
+                    isError = !isLastNameValid && draft.lastName.isNotBlank(),
+                    supportingText = if (!isLastNameValid && draft.lastName.isNotBlank()) "Required" else ""
                 )
             }
 
@@ -376,7 +376,7 @@ fun ProfileDetailsScreen(
             ) {
                 NetworkAvatar(
                     displayName = avatarDisplayName,
-                    imageRef = profileImageId,
+                    imageRef = draft.profileImageId,
                     size = 80.dp,
                     contentDescription = "Profile picture",
                 )
@@ -385,7 +385,7 @@ fun ProfileDetailsScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Button(onClick = {
-                        pendingProfileImageId = profileImageId
+                        pendingProfileImageId = draft.profileImageId
                         showImageSelector = true
                     }) {
                         Text("Change Profile Photo")
@@ -478,13 +478,13 @@ fun ProfileDetailsScreen(
             Button(
                 onClick = {
                     component.updateProfile(
-                        firstName = firstName,
-                        lastName = lastName,
-                        email = email,
+                        firstName = draft.firstName,
+                        lastName = draft.lastName,
+                        email = draft.email,
                         currentPassword = currentPassword,
                         newPassword = newPassword,
-                        userName = userName,
-                        profileImageId = profileImageId,
+                        userName = draft.userName,
+                        profileImageId = draft.profileImageId,
                     )
                 },
                 modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
