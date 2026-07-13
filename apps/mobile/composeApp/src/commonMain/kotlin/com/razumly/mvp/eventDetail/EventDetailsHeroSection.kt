@@ -55,6 +55,7 @@ internal data class EventDetailsHeroState(
     val editEvent: Event,
     val eventNameInput: String,
     val isValid: Boolean,
+    val showValidationErrors: Boolean,
     val isLocationValid: Boolean,
     val isColorLoaded: Boolean,
     val heroSpacerHeight: Dp,
@@ -109,6 +110,7 @@ internal fun LazyListScope.eventDetailsHeroSection(
                     }
                 }
                 val imageErrorText = when {
+                    !state.showValidationErrors -> null
                     state.editEvent.imageId.isBlank() -> "Select an image for the event."
                     !state.isColorLoaded -> "Image is still loading."
                     else -> null
@@ -172,7 +174,7 @@ internal fun LazyListScope.eventDetailsHeroSection(
                     label = "titleTransition",
                 ) { editMode ->
                     if (editMode) {
-                        val hasNameError = state.eventNameInput.isBlank()
+                        val hasNameError = state.showValidationErrors && state.eventNameInput.isBlank()
                         StandardTextField(
                             value = state.eventNameInput,
                             onValueChange = actions.onEventNameInputChange,
@@ -215,7 +217,7 @@ internal fun LazyListScope.eventDetailsHeroSection(
                         Icon(Icons.Default.Place, contentDescription = null)
                         Text("Edit Location")
                     }
-                    if (!state.isLocationValid) {
+                    if (state.showValidationErrors && !state.isLocationValid) {
                         Text(
                             text = "Select a Location",
                             color = MaterialTheme.colorScheme.error,

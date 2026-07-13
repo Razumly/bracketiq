@@ -327,6 +327,12 @@ fun CreateOrEditTeamScreen(
         mutableStateOf(formatRegistrationCostInput(team.team.registrationPriceCents))
     }
     var registrationSettingsEdited by remember(team.team.id) { mutableStateOf(false) }
+    var hasAttemptedTeamSubmit by remember(team.team.id, isNewTeam) { mutableStateOf(false) }
+    var teamNameTouched by remember(team.team.id) { mutableStateOf(false) }
+    var teamNameWasFocused by remember(team.team.id) { mutableStateOf(false) }
+    var teamSizeTouched by remember(team.team.id) { mutableStateOf(false) }
+    var teamSizeWasFocused by remember(team.team.id) { mutableStateOf(false) }
+    var teamDivisionTouched by remember(team.team.id) { mutableStateOf(false) }
     var showSearchDialog by remember { mutableStateOf(false) }
     var invitedPlayers by remember { mutableStateOf(team.pendingPlayers) }
     var playersInTeam by remember { mutableStateOf(team.players) }
@@ -620,6 +626,10 @@ fun CreateOrEditTeamScreen(
         optionLabels.map { label -> DropdownOption(value = label, label = label) }
     }
     val isTeamNameValid = normalizedTeamName.isNotBlank()
+    val showTeamNameError = !isTeamNameValid && (hasAttemptedTeamSubmit || teamNameTouched)
+    val showTeamSizeError = !isTeamSizeValid && (hasAttemptedTeamSubmit || teamSizeTouched)
+    val showTeamDivisionError = !isTeamDivisionValid &&
+        (hasAttemptedTeamSubmit || teamDivisionTouched)
     LaunchedEffect(team.team.id, resolvedEventSportName) {
         if (sportInput.isBlank() && resolvedEventSportName.isNotBlank()) {
             sportInput = resolvedEventSportName
@@ -873,17 +883,25 @@ fun CreateOrEditTeamScreen(
                 StandardTextField(
                     value = teamName,
                     onValueChange = {
+                        teamNameTouched = true
                         teamName = it
                     },
                     modifier = Modifier.fillMaxWidth(),
                     label = "Team Name",
-                    isError = !isTeamNameValid,
-                    supportingText = if (!isTeamNameValid) {
+                    isError = showTeamNameError,
+                    supportingText = if (showTeamNameError) {
                         "Team name is required."
                     } else {
                         ""
                     },
-                    readOnly = !canEditFields
+                    readOnly = !canEditFields,
+                    onFocusChanged = { isFocused ->
+                        if (isFocused) {
+                            teamNameWasFocused = true
+                        } else if (teamNameWasFocused) {
+                            teamNameTouched = true
+                        }
+                    },
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -895,17 +913,27 @@ fun CreateOrEditTeamScreen(
                 ) {
                     StandardTextField(
                         value = teamSizeInput,
-                        onValueChange = { teamSizeInput = it },
+                        onValueChange = {
+                            teamSizeTouched = true
+                            teamSizeInput = it
+                        },
                         modifier = Modifier.weight(1f),
                         label = "Team Size",
                         keyboardType = "number",
                         inputFilter = { value -> value.filter(Char::isDigit) },
                         readOnly = !canEditFields,
-                        isError = !isTeamSizeValid,
-                        supportingText = if (!isTeamSizeValid) {
+                        isError = showTeamSizeError,
+                        supportingText = if (showTeamSizeError) {
                             "Enter a team size greater than 0."
                         } else {
                             ""
+                        },
+                        onFocusChanged = { isFocused ->
+                            if (isFocused) {
+                                teamSizeWasFocused = true
+                            } else if (teamSizeWasFocused) {
+                                teamSizeTouched = true
+                            }
                         },
                     )
                     PlatformDropdown(
@@ -983,6 +1011,7 @@ fun CreateOrEditTeamScreen(
                         PlatformDropdown(
                             selectedValue = divisionGenderInput,
                             onSelectionChange = { value ->
+                                teamDivisionTouched = true
                                 divisionGenderInput = value
                             },
                             options = genderOptions,
@@ -994,6 +1023,7 @@ fun CreateOrEditTeamScreen(
                         PlatformDropdown(
                             selectedValue = skillDivisionTypeInput,
                             onSelectionChange = { value ->
+                                teamDivisionTouched = true
                                 skillDivisionTypeInput = value
                             },
                             options = skillDivisionOptions,
@@ -1007,6 +1037,7 @@ fun CreateOrEditTeamScreen(
                     PlatformDropdown(
                         selectedValue = ageDivisionTypeInput,
                         onSelectionChange = { value ->
+                            teamDivisionTouched = true
                             ageDivisionTypeInput = value
                         },
                         options = ageDivisionOptions,
@@ -1015,7 +1046,7 @@ fun CreateOrEditTeamScreen(
                         placeholder = "Select age",
                         enabled = canEditFields,
                     )
-                    if (!isTeamDivisionValid) {
+                    if (showTeamDivisionError) {
                         Text(
                             text = "Select gender, skill division, and age division.",
                             style = MaterialTheme.typography.bodySmall,
@@ -1227,6 +1258,10 @@ fun CreateOrEditTeamScreen(
                 ) {
                     if (showEditDetails) {
                         Button(onClick = {
+                            if (!isTeamSizeValid || !isTeamDivisionValid || !isTeamNameValid) {
+                                hasAttemptedTeamSubmit = true
+                                return@Button
+                            }
                             onFinish(
                                 buildUpdatedTeam(
                                     activePlayers = playersInTeam,
@@ -1235,7 +1270,7 @@ fun CreateOrEditTeamScreen(
                                     resolvedSize = resolvedTeamSize,
                                 )
                             )
-                        }, enabled = !isBusy && isTeamSizeValid && isTeamDivisionValid && isTeamNameValid) {
+                        }, enabled = !isBusy) {
                             if (isSaving) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(18.dp),

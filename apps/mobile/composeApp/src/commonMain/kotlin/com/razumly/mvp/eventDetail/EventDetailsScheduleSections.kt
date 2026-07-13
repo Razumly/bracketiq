@@ -75,6 +75,7 @@ internal data class EventDetailsScheduleState(
     val allowLocalResourceCreationWithRentalResources: Boolean,
     val isFieldCountValid: Boolean,
     val isLeagueSlotsValid: Boolean,
+    val showValidationErrors: Boolean,
     val scheduleTimeLocked: Boolean,
 )
 
@@ -206,7 +207,7 @@ internal fun LazyListScope.eventDetailsScheduleSection(
                 lockedDivisionIds = state.editEvent.divisions.normalizeDivisionIdentifiers(),
                 allowDivisionEditsWhenReadOnly = state.allowDivisionEditsWhenReadOnly,
                 allowLocalResourceCreationWithRentalResources = state.allowLocalResourceCreationWithRentalResources,
-                fieldCountError = if (!state.isFieldCountValid) {
+                fieldCountError = if (state.showValidationErrors && !state.isFieldCountValid) {
                     "Resource count must be at least 1."
                 } else {
                     null
@@ -214,7 +215,8 @@ internal fun LazyListScope.eventDetailsScheduleSection(
                 readOnly = state.scheduleTimeLocked,
             )
             if (
-                !state.isLeagueSlotsValid &&
+                state.showValidationErrors &&
+                    !state.isLeagueSlotsValid &&
                 (
                     state.editEvent.eventType == EventType.LEAGUE ||
                         state.editEvent.eventType == EventType.TOURNAMENT ||

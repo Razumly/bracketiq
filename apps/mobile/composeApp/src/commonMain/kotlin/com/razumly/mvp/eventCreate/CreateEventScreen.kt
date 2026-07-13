@@ -71,6 +71,7 @@ fun CreateEventScreen(
 ) {
     var canProceed by remember { mutableStateOf(false) }
     var validationErrors by remember { mutableStateOf<List<String>>(emptyList()) }
+    var hasAttemptedEventSubmit by remember { mutableStateOf(false) }
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
     var pendingMapPlace by remember { mutableStateOf<MVPPlace?>(null) }
     val defaultEvent by component.defaultEvent.collectAsState()
@@ -390,6 +391,7 @@ fun CreateEventScreen(
                                 if (canProceed) {
                                     component.nextStep()
                                 } else {
+                                    hasAttemptedEventSubmit = true
                                     errorHandler.showPopup(buildValidationPopupMessage(validationErrors))
                                 }
                             }
@@ -415,6 +417,7 @@ fun CreateEventScreen(
                                 if (canProceed) {
                                     component.createEvent()
                                 } else {
+                                    hasAttemptedEventSubmit = true
                                     errorHandler.showPopup(buildValidationPopupMessage(validationErrors))
                                 }
                             }
@@ -443,6 +446,7 @@ fun CreateEventScreen(
                             navPadding = LocalNavBarPadding.current,
                             editView = isEditing,
                             isNewEvent = true,
+                            showValidationErrors = hasAttemptedEventSubmit,
                             rentalTimeLocked = false,
                             onAddCurrentUser = component::addUserToEvent,
                             imageScheme = imageScheme,

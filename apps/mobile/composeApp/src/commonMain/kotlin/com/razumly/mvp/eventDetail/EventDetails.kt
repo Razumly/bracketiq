@@ -182,6 +182,7 @@ fun EventDetails(
     navPadding: PaddingValues = PaddingValues(),
     topInset: Dp = 0.dp,
     isNewEvent: Boolean,
+    showValidationErrors: Boolean = true,
     rentalTimeLocked: Boolean = false,
     onHostCreateAccount: () -> Unit,
     onOpenLocationMap: () -> Unit,
@@ -2022,7 +2023,7 @@ fun EventDetails(
         }
         listOfNotNull(fieldSummary, slotSummary).joinToString(" - ")
     }
-    val showSectionMissingBadges = isNewEvent && editView
+    val showSectionMissingBadges = isNewEvent && editView && showValidationErrors
     val basicsMissingRequiredCount = if (showSectionMissingBadges) {
         listOf(
             !isSportValid,
@@ -2328,6 +2329,7 @@ fun EventDetails(
                     state = EventDetailsHeroState(
                         editView = editView,
                         isNewEvent = isNewEvent,
+                        showValidationErrors = showValidationErrors,
                         event = event,
                         editEvent = editEvent,
                         eventNameInput = eventNameInput,
@@ -2370,6 +2372,7 @@ fun EventDetails(
                         sports = sports,
                         eventTagOptions = eventTagOptions,
                         isSportValid = isSportValid,
+                        showValidationErrors = showValidationErrors,
                         scheduleTimeLocked = scheduleTimeLocked,
                         rentalTimeLocked = rentalTimeLocked,
                     ),
@@ -2400,6 +2403,7 @@ fun EventDetails(
                         registrationSummary = registrationSummary,
                         refundSummary = refundSummary,
                         isTeamSizeValid = isTeamSizeValid,
+                        showValidationErrors = showValidationErrors,
                         isOrganizationEvent = isOrganizationEvent,
                         organizationTemplatesLoading = organizationTemplatesLoading,
                         organizationTemplatesError = organizationTemplatesError,
@@ -2592,6 +2596,7 @@ fun EventDetails(
                                 divisionInputsExpanded = divisionInputsExpanded,
                                 hostHasAccount = hostHasAccount,
                                 isNewEvent = isNewEvent,
+                                showValidationErrors = showValidationErrors,
                                 addSelfToEvent = addSelfToEvent,
                             ),
                             actions = EventDetailsDivisionEditorFormActions(
@@ -2623,6 +2628,7 @@ fun EventDetails(
                             divisionEditorReady = divisionEditorReady,
                             isSkillLevelValid = isSkillLevelValid,
                             isLeaguePlayoffTeamsValid = isLeaguePlayoffTeamsValid,
+                            showValidationErrors = showValidationErrors,
                             divisionDetails = divisionDetailsForSettings,
                         ),
                         actions = EventDetailsDivisionEditorActions(
@@ -2688,6 +2694,7 @@ fun EventDetails(
                         allowLocalResourceCreationWithRentalResources = allowLocalResourceCreationWithRentalResources,
                         isFieldCountValid = isFieldCountValid,
                         isLeagueSlotsValid = isLeagueSlotsValid,
+                        showValidationErrors = showValidationErrors,
                         scheduleTimeLocked = scheduleTimeLocked,
                     ),
                     actions = EventDetailsScheduleActions(

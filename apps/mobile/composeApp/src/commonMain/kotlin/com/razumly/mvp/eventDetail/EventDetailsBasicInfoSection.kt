@@ -87,6 +87,7 @@ internal data class EventDetailsBasicInfoState(
     val sports: List<Sport>,
     val eventTagOptions: List<EventTag>,
     val isSportValid: Boolean,
+    val showValidationErrors: Boolean,
     val scheduleTimeLocked: Boolean,
     val rentalTimeLocked: Boolean,
 )
@@ -175,8 +176,12 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                     },
                     label = "Sport",
                     placeholder = if (state.sports.isEmpty()) "No sports available" else "Select a sport",
-                    isError = !state.isSportValid,
-                    supportingText = if (!state.isSportValid) "Select a sport to continue." else "",
+                    isError = state.showValidationErrors && !state.isSportValid,
+                    supportingText = if (state.showValidationErrors && !state.isSportValid) {
+                        "Select a sport to continue."
+                    } else {
+                        ""
+                    },
                     enabled = state.sports.isNotEmpty(),
                     modifier = Modifier.weight(1f),
                 )
