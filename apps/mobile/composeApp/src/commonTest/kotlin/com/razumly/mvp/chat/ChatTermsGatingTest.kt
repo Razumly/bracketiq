@@ -83,6 +83,28 @@ class ChatTermsGatingTest : MainDispatcherTest() {
         assertTrue(harness.component.errorState.value?.contains("Network unavailable") == true)
         assertEquals(emptyList(), harness.messageRepository.createdMessages)
     }
+
+    @Test
+    fun destroying_chat_component_clears_only_its_owned_active_chat() = runTest(testDispatcher) {
+        val harness = ChatGroupHarness(acceptedTerms = true)
+        advance()
+
+        assertEquals("chat_1", harness.pushNotificationsRepository.activeChatId)
+        harness.destroy()
+
+        assertEquals(null, harness.pushNotificationsRepository.activeChatId)
+    }
+
+    @Test
+    fun destroying_chat_component_does_not_clear_a_newer_active_chat() = runTest(testDispatcher) {
+        val harness = ChatGroupHarness(acceptedTerms = true)
+        advance()
+
+        harness.pushNotificationsRepository.setActiveChat("chat_2")
+        harness.destroy()
+
+        assertEquals("chat_2", harness.pushNotificationsRepository.activeChatId)
+    }
 }
 
 private class ChatGroupHarness(
@@ -106,16 +128,24 @@ private class ChatGroupHarness(
     )
     val chatGroupRepository = ChatTerms_FakeChatGroupRepository(chat)
     val messageRepository = ChatTerms_FakeMessageRepository()
+    val lifecycle = createTestLifecycle()
+    val pushNotificationsRepository = ChatTerms_FakePushNotificationsRepository()
     val component = DefaultChatGroupComponent(
-        componentContext = createTestComponentContext(),
+        componentContext = createTestComponentContext(lifecycle),
         userRepository = userRepository,
         chatGroupRepository = chatGroupRepository,
         messageUser = null,
         initialChatGroup = chat,
         messagesRepository = messageRepository,
-        pushNotificationsRepository = ChatTerms_FakePushNotificationsRepository(),
+        pushNotificationsRepository = pushNotificationsRepository,
         navigationHandler = ChatTerms_FakeNavigationHandler(),
     )
+
+    fun destroy() {
+        lifecycle.onPause()
+        lifecycle.onStop()
+        lifecycle.onDestroy()
+    }
 }
 
 private class ChatTerms_FakeChatGroupRepository(
@@ -166,6 +196,8 @@ private class ChatTerms_FakeMessageRepository : IMessageRepository {
 }
 
 private class ChatTerms_FakePushNotificationsRepository : IPushNotificationsRepository {
+    var activeChatId: String? = null
+
     override suspend fun subscribeUserToTeamNotifications(userId: String, teamId: String): Result<Unit> =
         Result.success(Unit)
     override suspend fun unsubscribeUserFromTeamNotifications(userId: String, teamId: String): Result<Unit> =
@@ -201,7 +233,16 @@ private class ChatTerms_FakePushNotificationsRepository : IPushNotificationsRepo
     override suspend fun createEventTopic(event: Event): Result<Unit> = Result.success(Unit)
     override suspend fun createTournamentTopic(event: Event): Result<Unit> = Result.success(Unit)
     override suspend fun createChatGroupTopic(chatGroup: ChatGroup): Result<Unit> = Result.success(Unit)
-    override fun setActiveChat(chatGroupId: String?) = Unit
+    override fun setActiveChat(chatGroupId: String?) {
+        activeChatId = chatGroupId?.trim()?.takeIf(String::isNotBlank)
+    }
+
+    override fun clearActiveChatIfMatches(chatGroupId: String?) {
+        val expectedChatId = chatGroupId?.trim()?.takeIf(String::isNotBlank) ?: return
+        if (activeChatId == expectedChatId) {
+            activeChatId = null
+        }
+    }
     override suspend fun addDeviceAsTarget(): Result<Unit> = Result.success(Unit)
     override suspend fun removeDeviceAsTarget(): Result<Unit> = Result.success(Unit)
     override suspend fun getDeviceTargetDebugStatus(syncBeforeCheck: Boolean): Result<PushDeviceTargetDebugStatus> =
@@ -226,11 +267,15 @@ private class ChatTerms_FakeNavigationHandler : INavigationHandler {
     override fun navigateBack() = Unit
 }
 
-private fun createTestComponentContext(): DefaultComponentContext {
-    val lifecycle = LifecycleRegistry()
-    lifecycle.onCreate()
-    lifecycle.onStart()
-    lifecycle.onResume()
+private fun createTestLifecycle(): LifecycleRegistry {
+    return LifecycleRegistry().also { lifecycle ->
+        lifecycle.onCreate()
+        lifecycle.onStart()
+        lifecycle.onResume()
+    }
+}
+
+private fun createTestComponentContext(lifecycle: LifecycleRegistry = createTestLifecycle()): DefaultComponentContext {
     return DefaultComponentContext(
         lifecycle = lifecycle,
         backHandler = BackDispatcher(),

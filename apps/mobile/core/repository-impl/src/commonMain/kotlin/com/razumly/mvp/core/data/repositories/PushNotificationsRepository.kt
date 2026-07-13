@@ -81,6 +81,7 @@ interface IPushNotificationsRepository {
     suspend fun createTournamentTopic(event: Event): Result<Unit>
     suspend fun createChatGroupTopic(chatGroup: ChatGroup): Result<Unit>
     fun setActiveChat(chatGroupId: String?)
+    fun clearActiveChatIfMatches(chatGroupId: String?)
 
     suspend fun addDeviceAsTarget(): Result<Unit>
     suspend fun removeDeviceAsTarget(): Result<Unit>
@@ -321,6 +322,16 @@ class PushNotificationsRepository(
         activeChatId = chatGroupId
             ?.trim()
             ?.takeIf(String::isNotBlank)
+    }
+
+    override fun clearActiveChatIfMatches(chatGroupId: String?) {
+        val expectedChatId = chatGroupId
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: return
+        if (activeChatId == expectedChatId) {
+            activeChatId = null
+        }
     }
 
     override fun handleNotificationPayload(data: Map<String, String>) {

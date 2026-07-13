@@ -2616,6 +2616,7 @@ private object NoopPushNotificationsRepository : IPushNotificationsRepository {
     override suspend fun createChatGroupTopic(chatGroup: com.razumly.mvp.core.data.dataTypes.ChatGroup): Result<Unit> =
         Result.success(Unit)
     override fun setActiveChat(chatGroupId: String?) = Unit
+    override fun clearActiveChatIfMatches(chatGroupId: String?) = Unit
     override suspend fun addDeviceAsTarget(): Result<Unit> = Result.success(Unit)
     override suspend fun removeDeviceAsTarget(): Result<Unit> = Result.success(Unit)
     override suspend fun getDeviceTargetDebugStatus(syncBeforeCheck: Boolean): Result<com.razumly.mvp.core.data.repositories.PushDeviceTargetDebugStatus> =

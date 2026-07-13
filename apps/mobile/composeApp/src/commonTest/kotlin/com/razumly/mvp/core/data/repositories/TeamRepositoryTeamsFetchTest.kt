@@ -337,6 +337,8 @@ private object FakePushNotificationsRepository : IPushNotificationsRepository {
 
     override fun setActiveChat(chatGroupId: String?) {}
 
+    override fun clearActiveChatIfMatches(chatGroupId: String?) {}
+
     override suspend fun addDeviceAsTarget(): Result<Unit> = Result.success(Unit)
     override suspend fun removeDeviceAsTarget(): Result<Unit> = Result.success(Unit)
     override suspend fun getDeviceTargetDebugStatus(syncBeforeCheck: Boolean): Result<PushDeviceTargetDebugStatus> =

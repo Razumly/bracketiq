@@ -2,6 +2,7 @@ package com.razumly.mvp.chat
 
 import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.essenty.lifecycle.doOnDestroy
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.chat.data.IMessageRepository
@@ -70,6 +71,7 @@ class DefaultChatGroupComponent(
 ) : ChatGroupComponent, ComponentContext by componentContext {
 
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
+    private var ownedActiveChatId: String? = null
 
     private val _errorState = MutableStateFlow<String?>(null)
     override val errorState = _errorState.asStateFlow()
@@ -103,6 +105,7 @@ class DefaultChatGroupComponent(
     override val currentUser: UserData
         get() = currentUserState.value
     init {
+        lifecycle.doOnDestroy(::clearOwnedActiveChat)
         scope.launch {
             chatTermsState
                 .map { state -> state.accepted }
@@ -136,7 +139,7 @@ class DefaultChatGroupComponent(
                 .map { it?.chatGroup?.id?.trim().orEmpty() }
                 .distinctUntilChanged()
                 .collect { chatId ->
-                    pushNotificationsRepository.setActiveChat(chatId.ifBlank { null })
+                    setOwnedActiveChat(chatId.ifBlank { null })
                     if (chatId.isBlank()) {
                         _isChatMuted.value = false
                         return@collect
@@ -194,7 +197,7 @@ class DefaultChatGroupComponent(
     }
 
     override fun onBack() {
-        pushNotificationsRepository.setActiveChat(null)
+        clearOwnedActiveChat()
         navigationHandler.navigateBack()
     }
 
@@ -246,7 +249,7 @@ class DefaultChatGroupComponent(
         }
         scope.launch {
             chatGroupRepository.deleteChatGroup(currentChat.id).onSuccess {
-                pushNotificationsRepository.setActiveChat(null)
+                clearOwnedActiveChat()
                 navigationHandler.navigateBack()
             }.onFailure {
                 _errorState.value = it.userMessage("Failed to delete chat.")
@@ -262,7 +265,7 @@ class DefaultChatGroupComponent(
         }
         scope.launch {
             chatGroupRepository.deleteUserFromChatGroup(currentChat, currentUser.id).onSuccess {
-                pushNotificationsRepository.setActiveChat(null)
+                clearOwnedActiveChat()
                 navigationHandler.navigateBack()
             }.onFailure {
                 _errorState.value = it.userMessage("Failed to leave chat.")
@@ -335,7 +338,7 @@ class DefaultChatGroupComponent(
                 leaveChat = leaveChat,
             ).onSuccess { removedChatIds ->
                 if (leaveChat || removedChatIds.contains(currentChat.id)) {
-                    pushNotificationsRepository.setActiveChat(null)
+                    clearOwnedActiveChat()
                     navigationHandler.navigateBack()
                 } else {
                     _errorState.value = "Chat reported."
@@ -344,6 +347,17 @@ class DefaultChatGroupComponent(
                 _errorState.value = it.userMessage("Failed to report chat.")
             }
         }
+    }
+
+    private fun setOwnedActiveChat(chatGroupId: String?) {
+        ownedActiveChatId = chatGroupId
+        pushNotificationsRepository.setActiveChat(chatGroupId)
+    }
+
+    private fun clearOwnedActiveChat() {
+        val chatGroupId = ownedActiveChatId ?: return
+        pushNotificationsRepository.clearActiveChatIfMatches(chatGroupId)
+        ownedActiveChatId = null
     }
 
     override fun dismissChatTermsPrompt() {
