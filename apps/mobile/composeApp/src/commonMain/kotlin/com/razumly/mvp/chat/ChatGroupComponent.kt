@@ -45,6 +45,7 @@ interface ChatGroupComponent {
     val currentUser: UserData
     val messageInput: StateFlow<String>
     val chatGroup: StateFlow<ChatGroupWithRelations?>
+    val isChatLoading: StateFlow<Boolean>
     val errorState: StateFlow<String?>
     val feedback: StateFlow<ChatFeedback?>
     val suggestedPlayers: StateFlow<List<UserData>>
@@ -99,9 +100,12 @@ class DefaultChatGroupComponent(
     override val isCheckingChatTerms = userRepository.chatTermsConsentLoading
     private val _showChatTermsPrompt = MutableStateFlow(false)
     override val showChatTermsPrompt = _showChatTermsPrompt.asStateFlow()
+    private val _isChatLoading = MutableStateFlow(true)
+    override val isChatLoading = _isChatLoading.asStateFlow()
 
     override val chatGroup = chatGroupRepository.getChatGroupFlow(messageUser, initialChatGroup)
         .map { result ->
+            _isChatLoading.value = false
             val chatGroup = result.getOrElse {
                 _errorState.value = it.userMessage()
                 null

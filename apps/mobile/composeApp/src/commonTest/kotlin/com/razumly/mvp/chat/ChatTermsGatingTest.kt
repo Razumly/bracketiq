@@ -21,6 +21,7 @@ import com.razumly.mvp.eventCreate.CreateEvent_FakeUserRepository
 import com.razumly.mvp.eventCreate.MainDispatcherTest
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -37,8 +38,26 @@ class ChatTermsGatingTest : MainDispatcherTest() {
         advance()
 
         assertEquals("chat_1", harness.component.chatGroup.value?.chatGroup?.id)
+        assertFalse(harness.component.isChatLoading.value)
         assertEquals(listOf("chat_1"), harness.messageRepository.loadedChatIds)
         assertFalse(harness.component.showChatTermsPrompt.value)
+    }
+
+    @Test
+    fun chat_stays_loading_without_a_resolved_group_and_preserves_its_draft() = runTest(testDispatcher) {
+        val harness = ChatGroupHarness(
+            acceptedTerms = true,
+            chatGroupInitiallyLoading = true,
+        )
+
+        advance()
+
+        assertTrue(harness.component.isChatLoading.value)
+        assertNull(harness.component.chatGroup.value)
+
+        harness.component.onMessageInputChange("Keep this draft")
+
+        assertEquals("Keep this draft", harness.component.messageInput.value)
     }
 
     @Test
@@ -153,6 +172,7 @@ class ChatTermsGatingTest : MainDispatcherTest() {
 
 private class ChatGroupHarness(
     acceptedTerms: Boolean,
+    chatGroupInitiallyLoading: Boolean = false,
 ) {
     val userRepository = CreateEvent_FakeUserRepository().also { repository ->
         repository.chatTermsConsent = repository.chatTermsConsent.copy(
@@ -170,7 +190,10 @@ private class ChatGroupHarness(
         users = emptyList(),
         messages = emptyList(),
     )
-    val chatGroupRepository = ChatTerms_FakeChatGroupRepository(chat)
+    val chatGroupRepository = ChatTerms_FakeChatGroupRepository(
+        chat = chat,
+        initiallyLoading = chatGroupInitiallyLoading,
+    )
     val messageRepository = ChatTerms_FakeMessageRepository()
     val lifecycle = createTestLifecycle()
     val pushNotificationsRepository = ChatTerms_FakePushNotificationsRepository()
@@ -194,6 +217,7 @@ private class ChatGroupHarness(
 
 private class ChatTerms_FakeChatGroupRepository(
     private val chat: ChatGroupWithRelations,
+    private val initiallyLoading: Boolean = false,
 ) : IChatGroupRepository {
     var reportChatFailure: Throwable? = null
     var reportChatRemovedChatIds: List<String> = emptyList()
@@ -207,7 +231,11 @@ private class ChatTerms_FakeChatGroupRepository(
     override fun getChatGroupFlow(
         user: UserData?,
         chatGroup: ChatGroupWithRelations?,
-    ): Flow<Result<ChatGroupWithRelations>> = flowOf(Result.success(chat))
+    ): Flow<Result<ChatGroupWithRelations>> = if (initiallyLoading) {
+        emptyFlow()
+    } else {
+        flowOf(Result.success(chat))
+    }
 
     override suspend fun refreshChatGroupsAndMessages(): Result<Unit> = Result.success(Unit)
     override suspend fun createChatGroup(newChatGroup: ChatGroupWithRelations): Result<Unit> = Result.success(Unit)

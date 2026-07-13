@@ -9,6 +9,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -28,6 +29,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -56,7 +58,6 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
@@ -84,6 +85,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
     val verticalShift = 4.dp
     val input by component.messageInput.collectAsState()
     val chatGroupWithRelations by component.chatGroup.collectAsState()
+    val isChatLoading by component.isChatLoading.collectAsState()
     val errorMessage by component.errorState.collectAsState()
     val feedback by component.feedback.collectAsState()
     val friends by component.friends.collectAsState()
@@ -92,11 +94,27 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
     val chatTermsState by component.chatTermsState.collectAsState()
     val isCheckingChatTerms by component.isCheckingChatTerms.collectAsState()
     val showChatTermsPrompt by component.showChatTermsPrompt.collectAsState()
+    if (isChatLoading) {
+        ChatAvailabilityScreen(
+            isLoading = true,
+            errorMessage = errorMessage,
+            onBack = component::onBack,
+        )
+        return
+    }
+    val resolvedChatGroup = chatGroupWithRelations ?: run {
+        ChatAvailabilityScreen(
+            isLoading = false,
+            errorMessage = errorMessage,
+            onBack = component::onBack,
+        )
+        return
+    }
     val currentUserId = component.currentUser.id
-    val chatGroup = chatGroupWithRelations?.chatGroup ?: ChatGroup.empty()
+    val chatGroup = resolvedChatGroup.chatGroup
     val chatId = chatGroup.id
-    val messages = chatGroupWithRelations?.messages ?: listOf()
-    val users = chatGroupWithRelations?.users ?: listOf()
+    val messages = resolvedChatGroup.messages
+    val users = resolvedChatGroup.users
     val isHost = chatGroup.hostId == currentUserId
     val participantNames = users
         .mapNotNull { user -> user.fullName.asMeaningfulText() }
@@ -488,6 +506,58 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
         )
     }
 
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun ChatAvailabilityScreen(
+    isLoading: Boolean,
+    errorMessage: String?,
+    onBack: () -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Chat") },
+                navigationIcon = {
+                    PlatformBackButton(onBack = onBack, arrow = true)
+                },
+            )
+        },
+    ) { paddingValues ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(horizontal = 24.dp),
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator()
+                    Text("Loading chat…")
+                } else {
+                    Text("This chat is unavailable.")
+                    errorMessage
+                        ?.trim()
+                        ?.takeIf(String::isNotBlank)
+                        ?.let { message ->
+                            Text(
+                                text = message,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    TextButton(onClick = onBack) {
+                        Text("Go back")
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
