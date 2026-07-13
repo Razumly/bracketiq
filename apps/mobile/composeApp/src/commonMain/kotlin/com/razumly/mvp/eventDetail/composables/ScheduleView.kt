@@ -65,8 +65,11 @@ import com.kizitonwose.calendar.core.DayPosition
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
+import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
 import com.razumly.mvp.core.data.dataTypes.assignedOfficialUserIds
 import com.razumly.mvp.core.data.dataTypes.normalizedOfficialAssignments
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.util.getScreenHeight
 import com.razumly.mvp.core.presentation.util.getImageUrl
@@ -959,7 +962,7 @@ private fun formatScheduleDateTimeWindow(
     }
 }
 
-private fun matchIncludesTrackedUsers(
+internal fun matchIncludesTrackedUsers(
     match: MatchWithRelations,
     trackedUserIds: Set<String>,
 ): Boolean {
@@ -971,11 +974,14 @@ private fun matchIncludesTrackedUsers(
 
     val teams = listOfNotNull(match.team1, match.team2, match.teamOfficial)
     return teams.any { team ->
-        trackedUserIds.contains(team.captainId) ||
-            (!team.managerId.isNullOrBlank() && trackedUserIds.contains(team.managerId)) ||
-            (!team.headCoachId.isNullOrBlank() && trackedUserIds.contains(team.headCoachId)) ||
-            team.playerIds.any { playerId -> trackedUserIds.contains(playerId) } ||
-            team.coachIds.any { coachId -> trackedUserIds.contains(coachId) }
+        val syncedTeam = team.withSynchronizedMembership()
+        trackedUserIds.contains(syncedTeam.captainId) ||
+            syncedTeam.activePlayerRegistrations().any { registration ->
+                trackedUserIds.contains(registration.userId)
+            } ||
+            syncedTeam.activeStaffAssignments().any { assignment ->
+                trackedUserIds.contains(assignment.userId)
+            }
     }
 }
 
