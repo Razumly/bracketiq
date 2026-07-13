@@ -15,6 +15,13 @@ import kotlin.test.assertTrue
 
 class ParticipantsViewTeamFilterTest {
     @Test
+    fun givenBillingActionInFlight_whenCheckingActionAvailability_thenAllActionsRemainDisabled() {
+        assertTrue(canStartParticipantBillingAction(inFlightActionId = null))
+        assertFalse(canStartParticipantBillingAction(inFlightActionId = "proof-1"))
+        assertFalse(canStartParticipantBillingAction(inFlightActionId = "payment-1"))
+    }
+
+    @Test
     fun givenTeamSignupLeague_whenBuildingParticipantTeams_thenPlaceholderSlotsAreExcluded() {
         val event = Event(
             eventType = EventType.LEAGUE,

@@ -122,6 +122,9 @@ enum class ParticipantsSection(val label: String) {
     FREE_AGENTS("Free Agents"),
 }
 
+internal fun canStartParticipantBillingAction(inFlightActionId: String?): Boolean =
+    inFlightActionId == null
+
 internal fun visibleParticipantTeams(
     event: Event,
     teams: Iterable<TeamWithPlayers>,
@@ -1464,8 +1467,11 @@ fun ParticipantsView(
                                                                 placeholder = "0",
                                                             )
                                                             OutlinedButton(
-                                                                enabled = reviewingProofId == null || reviewingProofId == proof.id,
+                                                                enabled = canStartParticipantBillingAction(reviewingProofId),
                                                                 onClick = {
+                                                                    if (!canStartParticipantBillingAction(reviewingProofId)) {
+                                                                        return@OutlinedButton
+                                                                    }
                                                                     val amountCents = parseCentsInputToCents(
                                                                         proofAmountDraftByProofId[proof.id]
                                                                             ?: payment.amountCents.toString(),
@@ -1496,8 +1502,11 @@ fun ParticipantsView(
                                                                 Text("Accept")
                                                             }
                                                             OutlinedButton(
-                                                                enabled = reviewingProofId == null || reviewingProofId == proof.id,
+                                                                enabled = canStartParticipantBillingAction(reviewingProofId),
                                                                 onClick = {
+                                                                    if (!canStartParticipantBillingAction(reviewingProofId)) {
+                                                                        return@OutlinedButton
+                                                                    }
                                                                     reviewingProofId = proof.id
                                                                     refundError = null
                                                                     coroutineScope.launch {
@@ -1539,9 +1548,11 @@ fun ParticipantsView(
                                                         placeholder = "0",
                                                     )
                                                     OutlinedButton(
-                                                        enabled = refundingPaymentId == null ||
-                                                            refundingPaymentId == payment.id,
+                                                        enabled = canStartParticipantBillingAction(refundingPaymentId),
                                                         onClick = {
+                                                            if (!canStartParticipantBillingAction(refundingPaymentId)) {
+                                                                return@OutlinedButton
+                                                            }
                                                             val amountCents =
                                                                 parseCentsInputToCents(
                                                                     refundAmountDraftByPaymentId[payment.id]
