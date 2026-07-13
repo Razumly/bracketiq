@@ -28,7 +28,6 @@ import com.razumly.mvp.core.data.dataTypes.daos.RefundRequestDao
 import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.AuthTokenStore
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.configureMvpHttpClient
@@ -1315,7 +1314,7 @@ class BillingRepositoryHttpTest {
     }
 
     @Test
-    fun listSubscriptions_returns_empty_when_candidate_paths_404_with_api_exception() = runTest {
+    fun listSubscriptions_returns_empty_for_successful_empty_response() = runTest {
         val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
         val userRepo = BillingRepositoryHttp_FakeUserRepository(
             currentUser = billingMakeUser("u1"),
@@ -1331,10 +1330,10 @@ class BillingRepositoryHttpTest {
             } else {
                 "${request.url.encodedPath}?$encodedQuery"
             }
-            throw ApiException(
-                statusCode = HttpStatusCode.NotFound.value,
-                url = request.url.toString(),
-                responseBody = """{"error":"Not found"}""",
+            respond(
+                content = """{"subscriptions":[]}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
             )
         }
 
@@ -1349,14 +1348,13 @@ class BillingRepositoryHttpTest {
         assertEquals(
             listOf(
                 "/api/subscriptions?userId=u1&limit=100",
-                "/api/users/u1/subscriptions?limit=100",
             ),
             requestedUrls,
         )
     }
 
     @Test
-    fun listSubscriptions_fails_when_api_exception_is_not_404() = runTest {
+    fun listSubscriptions_surfaces_contract_failure_without_legacy_fallback() = runTest {
         val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
         val userRepo = BillingRepositoryHttp_FakeUserRepository(
             currentUser = billingMakeUser("u1"),
@@ -1366,12 +1364,47 @@ class BillingRepositoryHttpTest {
         val requestedUrls = mutableListOf<String>()
 
         val engine = MockEngine { request ->
-            requestedUrls += request.url.encodedPath
-            throw ApiException(
-                statusCode = HttpStatusCode.InternalServerError.value,
-                url = request.url.toString(),
-                responseBody = """{"error":"Server error"}""",
+            val encodedQuery = request.url.encodedQuery
+            requestedUrls += if (encodedQuery.isBlank()) {
+                request.url.encodedPath
+            } else {
+                "${request.url.encodedPath}?$encodedQuery"
+            }
+            respond(
+                content = """{"error":"Not found"}""",
+                status = HttpStatusCode.NotFound,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
             )
+        }
+
+        val http = billingRepositoryHttpProductionClient(engine)
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val result = repo.listSubscriptions(userId = "u1")
+
+        assertTrue(result.isFailure)
+        assertEquals(listOf("/api/subscriptions?userId=u1&limit=100"), requestedUrls)
+    }
+
+    @Test
+    fun listSubscriptions_surfaces_network_failure_without_legacy_fallback() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        val requestedUrls = mutableListOf<String>()
+
+        val engine = MockEngine { request ->
+            val encodedQuery = request.url.encodedQuery
+            requestedUrls += if (encodedQuery.isBlank()) {
+                request.url.encodedPath
+            } else {
+                "${request.url.encodedPath}?$encodedQuery"
+            }
+            throw IllegalStateException("Network unavailable")
         }
 
         val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
@@ -1381,7 +1414,7 @@ class BillingRepositoryHttpTest {
         val result = repo.listSubscriptions(userId = "u1")
 
         assertTrue(result.isFailure)
-        assertEquals(listOf("/api/subscriptions"), requestedUrls)
+        assertEquals(listOf("/api/subscriptions?userId=u1&limit=100"), requestedUrls)
     }
 
     @Test

@@ -52,7 +52,6 @@ import com.razumly.mvp.core.network.dto.StripeHostLinkRequestDto
 import com.razumly.mvp.core.network.dto.UpdateRefundRequestDto
 import com.razumly.mvp.core.util.jsonMVP
 import io.github.aakira.napier.Napier
-import io.ktor.client.plugins.ClientRequestException
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.delay
@@ -1839,31 +1838,9 @@ class BillingRepository(
 
     override suspend fun listSubscriptions(userId: String, limit: Int): Result<List<Subscription>> = runCatching {
         val encodedUserId = userId.encodeURLQueryComponent()
-        val candidatePaths = listOf(
-            "api/subscriptions?userId=$encodedUserId&limit=$limit",
-            "api/users/$encodedUserId/subscriptions?limit=$limit",
-        )
-
-        var lastError: Throwable? = null
-        for (path in candidatePaths) {
-            val attempt = runCatching { api.get<SubscriptionsResponseDto>(path = path) }
-            if (attempt.isSuccess) {
-                return@runCatching attempt.getOrThrow().subscriptions.mapNotNull { it.toSubscriptionOrNull() }
-            }
-
-            val throwable = attempt.exceptionOrNull()
-            if (throwable != null && throwable.isNotFound()) {
-                lastError = throwable
-                continue
-            }
-
-            if (throwable != null) throw throwable
-        }
-
-        if (lastError != null) {
-            Napier.i("No subscriptions list endpoint available; returning empty memberships.")
-        }
-        emptyList()
+        api.get<SubscriptionsResponseDto>(
+            path = "api/subscriptions?userId=$encodedUserId&limit=$limit",
+        ).subscriptions.mapNotNull { it.toSubscriptionOrNull() }
     }
 
     override suspend fun cancelSubscription(subscriptionId: String): Result<Boolean> = runCatching {
@@ -2442,14 +2419,6 @@ class BillingRepository(
 private fun buildEmbeddedSigningRedirectUrl(eventId: String): String? {
     val normalizedEventId = eventId.trim().takeIf(String::isNotBlank) ?: return null
     return "https://bracket-iq.com/events/$normalizedEventId"
-}
-
-private fun Throwable.isNotFound(): Boolean {
-    return when (this) {
-        is ClientRequestException -> this.response.status == HttpStatusCode.NotFound
-        is ApiException -> this.statusCode == HttpStatusCode.NotFound.value
-        else -> false
-    }
 }
 
 @Serializable
