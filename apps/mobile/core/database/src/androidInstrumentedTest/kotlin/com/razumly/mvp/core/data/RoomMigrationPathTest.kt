@@ -4,11 +4,13 @@ import androidx.room.Room
 import androidx.room.testing.MigrationTestHelper
 import androidx.test.platform.app.InstrumentationRegistry
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.PENDING_RENTAL_ORDER_LEGACY_UNKNOWN_PAYER_ID
 import com.razumly.mvp.core.data.dataTypes.PENDING_RENTAL_ORDER_STATUS_REJECTED
 import com.razumly.mvp.core.db.MVP_DATABASE_VERSION
 import com.razumly.mvp.core.db.MVPDatabaseService
 import kotlinx.coroutines.runBlocking
+import kotlin.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -172,6 +174,63 @@ class RoomMigrationPathTest {
 
             val cached = database.getFieldDao.getFieldsByIds(listOf("field-1")).single()
             assertEquals("facility-1", cached.facilityId)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun messageDao_orders_cached_messages_by_time_then_id() = runBlocking {
+        val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(
+            InstrumentationRegistry.getInstrumentation().targetContext,
+        ).allowMainThreadQueries().build()
+
+        try {
+            database.getMessageDao.upsertMessages(
+                listOf(
+                    MessageMVP(
+                        id = "message_z",
+                        userId = "user_1",
+                        body = "later",
+                        attachmentUrls = emptyList(),
+                        chatId = "chat_1",
+                        readByIds = emptyList(),
+                        sentTime = Instant.parse("2026-07-12T12:01:00Z"),
+                    ),
+                    MessageMVP(
+                        id = "message_b",
+                        userId = "user_1",
+                        body = "tie second",
+                        attachmentUrls = emptyList(),
+                        chatId = "chat_1",
+                        readByIds = emptyList(),
+                        sentTime = Instant.parse("2026-07-12T12:00:00Z"),
+                    ),
+                    MessageMVP(
+                        id = "message_a",
+                        userId = "user_2",
+                        body = "tie first",
+                        attachmentUrls = emptyList(),
+                        chatId = "chat_1",
+                        readByIds = emptyList(),
+                        sentTime = Instant.parse("2026-07-12T12:00:00Z"),
+                    ),
+                    MessageMVP(
+                        id = "other_chat",
+                        userId = "user_1",
+                        body = "ignore",
+                        attachmentUrls = emptyList(),
+                        chatId = "chat_2",
+                        readByIds = emptyList(),
+                        sentTime = Instant.parse("2026-07-12T11:59:00Z"),
+                    ),
+                ),
+            )
+
+            assertEquals(
+                listOf("message_a", "message_b", "message_z"),
+                database.getMessageDao.getMessagesInChatGroup("chat_1").map { message -> message.id },
+            )
         } finally {
             database.close()
         }

@@ -26,6 +26,6 @@ interface MessageDao {
     @Query("SELECT * FROM MessageMVP WHERE id = :id")
     suspend fun getMessageById(id: String): MessageMVP?
 
-    @Query("SELECT * FROM MessageMVP WHERE chatId = :chatGroupId")
+    @Query("SELECT * FROM MessageMVP WHERE chatId = :chatGroupId ORDER BY sentTime ASC, id ASC")
     suspend fun getMessagesInChatGroup(chatGroupId: String): List<MessageMVP>
 }
