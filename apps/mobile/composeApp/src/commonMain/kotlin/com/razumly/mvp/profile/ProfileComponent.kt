@@ -257,6 +257,41 @@ data class ProfileConnectionsState(
     val error: String? = null,
 )
 
+/**
+ * Identifies the most recent connection-search request so an older response can never
+ * replace results for the query currently shown to the user.
+ */
+internal class ConnectionSearchRequestTracker {
+    private var latestRequestId = 0L
+
+    fun begin(query: String): ConnectionSearchRequest {
+        latestRequestId += 1
+        return ConnectionSearchRequest(
+            id = latestRequestId,
+            query = query,
+        )
+    }
+
+    fun isCurrent(request: ConnectionSearchRequest, currentQuery: String): Boolean =
+        request.id == latestRequestId && request.query == currentQuery
+}
+
+internal data class ConnectionSearchRequest(
+    val id: Long,
+    val query: String,
+)
+
+internal class ConnectionRefreshRequestTracker {
+    private var latestRequestId = 0L
+
+    fun begin(): Long {
+        latestRequestId += 1
+        return latestRequestId
+    }
+
+    fun isCurrent(requestId: Long): Boolean = requestId == latestRequestId
+}
+
 data class ProfileDocumentsState(
     val isLoading: Boolean = false,
     val unsignedDocuments: List<ProfileDocumentCard> = emptyList(),
@@ -755,6 +790,10 @@ class DefaultProfileComponent(
     private var loadingHandler: LoadingHandler? = null
     private var eventTemplatesJob: Job? = null
     private var discountTargetsJob: Job? = null
+    private var connectionsRefreshJob: Job? = null
+    private var connectionSearchJob: Job? = null
+    private val connectionsRefreshRequests = ConnectionRefreshRequestTracker()
+    private val connectionSearchRequests = ConnectionSearchRequestTracker()
     private var childrenTabVisibilityUserId: String? = null
     private var pendingDocumentSyncJob: Job? = null
     private var pendingBillingAddressAction: (() -> Unit)? = null
@@ -2038,9 +2077,16 @@ class DefaultProfileComponent(
     }
 
     override fun refreshConnections() {
-        scope.launch {
+        connectionsRefreshJob?.cancel()
+        val refreshRequestId = connectionsRefreshRequests.begin()
+
+        connectionsRefreshJob = scope.launch {
             val currentUser = userRepository.currentUser.value.getOrNull()
+            if (!connectionsRefreshRequests.isCurrent(refreshRequestId)) return@launch
+
             if (currentUser == null) {
+                connectionSearchJob?.cancel()
+                connectionSearchRequests.begin("")
                 _connectionsState.value = ProfileConnectionsState(
                     isLoading = false,
                     error = "Unable to load connections for the current user.",
@@ -2076,18 +2122,9 @@ class DefaultProfileComponent(
                 emptyList()
             }
 
-            val existingState = _connectionsState.value
-            val refreshedQuery = existingState.searchQuery
-            val searchResults = if (refreshedQuery.trim().length >= 2) {
-                userRepository.searchPlayers(refreshedQuery)
-                    .getOrElse { emptyList() }
-                    .filter { it.id != currentUser.id }
-                    .distinctBy { it.id }
-            } else {
-                emptyList()
-            }
+            if (!connectionsRefreshRequests.isCurrent(refreshRequestId)) return@launch
 
-            _connectionsState.value = existingState.copy(
+            _connectionsState.value = _connectionsState.value.copy(
                 isLoading = false,
                 currentUser = currentUser,
                 friends = friends,
@@ -2095,19 +2132,19 @@ class DefaultProfileComponent(
                 blockedUsers = blockedUsers,
                 incomingFriendRequests = incomingFriendRequests,
                 outgoingFriendRequests = outgoingFriendRequests,
-                searchResults = searchResults,
                 error = failureMessage,
             )
         }
     }
 
     override fun searchConnections(query: String) {
-        val normalizedQuery = query
+        connectionSearchJob?.cancel()
+        val request = connectionSearchRequests.begin(query)
         _connectionsState.value = _connectionsState.value.copy(
-            searchQuery = normalizedQuery,
+            searchQuery = request.query,
         )
 
-        if (normalizedQuery.trim().length < 2) {
+        if (request.query.trim().length < 2) {
             _connectionsState.value = _connectionsState.value.copy(
                 isSearching = false,
                 searchResults = emptyList(),
@@ -2116,15 +2153,20 @@ class DefaultProfileComponent(
             return
         }
 
-        scope.launch {
-            val currentUserId = userRepository.currentUser.value.getOrNull()?.id
-            _connectionsState.value = _connectionsState.value.copy(
-                isSearching = true,
-                error = null,
-            )
+        _connectionsState.value = _connectionsState.value.copy(
+            isSearching = true,
+            searchResults = emptyList(),
+            error = null,
+        )
 
-            userRepository.searchPlayers(normalizedQuery)
+        connectionSearchJob = scope.launch {
+            val currentUserId = userRepository.currentUser.value.getOrNull()?.id
+
+            userRepository.searchPlayers(request.query)
                 .onSuccess { users ->
+                    if (!connectionSearchRequests.isCurrent(request, _connectionsState.value.searchQuery)) {
+                        return@onSuccess
+                    }
                     _connectionsState.value = _connectionsState.value.copy(
                         isSearching = false,
                         searchResults = users
@@ -2133,6 +2175,9 @@ class DefaultProfileComponent(
                     )
                 }
                 .onFailure { throwable ->
+                    if (!connectionSearchRequests.isCurrent(request, _connectionsState.value.searchQuery)) {
+                        return@onFailure
+                    }
                     _connectionsState.value = _connectionsState.value.copy(
                         isSearching = false,
                         searchResults = emptyList(),
