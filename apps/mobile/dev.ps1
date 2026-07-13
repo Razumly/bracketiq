@@ -40,6 +40,12 @@ function Get-PropertyValue([string]$Path, [string]$Key) {
     return $null
 }
 
+function Assert-NativeExitCode([string]$Operation, [int]$ExitCode) {
+    if ($ExitCode -ne 0) {
+        throw "$Operation failed with exit code $ExitCode."
+    }
+}
+
 function Get-ApiBaseUrlFromRepo {
     $fromSecrets = Get-PropertyValue (Join-Path $RepoRoot "secrets.properties") "MVP_API_BASE_URL"
     if ($fromSecrets) {
@@ -102,6 +108,8 @@ function Ensure-BackendDeps([string]$Dir, [string]$Pm) {
             "yarn" { & yarn install }
             default { & npm install }
         }
+        $installExitCode = $LASTEXITCODE
+        Assert-NativeExitCode "Backend dependency installation ($Pm)" $installExitCode
     } finally {
         Pop-Location
     }
@@ -137,7 +145,7 @@ function Wait-ForPort([int]$Port, [int]$TimeoutSeconds) {
         Start-Sleep -Seconds 1
     }
 
-    Write-Host "Timed out waiting for port $Port. The backend may still be starting." -ForegroundColor Yellow
+    throw "Timed out waiting for backend on port $Port. Aborting so Android is not launched against an unavailable backend."
 }
 
 function Resolve-AdbDevice([string]$Preferred) {
@@ -145,7 +153,11 @@ function Resolve-AdbDevice([string]$Preferred) {
         return $Preferred
     }
 
-    $deviceLine = (& adb devices) | Select-String -Pattern "\\tdevice$" | Select-Object -First 1
+    $devices = & adb devices
+    $adbExitCode = $LASTEXITCODE
+    Assert-NativeExitCode "adb device discovery" $adbExitCode
+
+    $deviceLine = $devices | Select-String -Pattern "\\tdevice$" | Select-Object -First 1
     if (-not $deviceLine) {
         throw "No adb device/emulator found. Start an emulator (or connect a device) and re-run."
     }
@@ -160,6 +172,8 @@ function Install-And-LaunchAndroid([string]$DeviceSerial) {
     Push-Location $RepoRoot
     try {
         & .\\gradlew :composeApp:assembleDebug
+        $buildExitCode = $LASTEXITCODE
+        Assert-NativeExitCode "Android debug build" $buildExitCode
     } finally {
         Pop-Location
     }
@@ -169,10 +183,14 @@ function Install-And-LaunchAndroid([string]$DeviceSerial) {
     }
 
     Write-Host "Installing APK to $DeviceSerial ..." -ForegroundColor Cyan
-    & adb -s $DeviceSerial install -r $apk | Out-Null
+    & adb -s $DeviceSerial install -r $apk
+    $installExitCode = $LASTEXITCODE
+    Assert-NativeExitCode "APK installation" $installExitCode
 
     Write-Host "Launching app on $DeviceSerial ..." -ForegroundColor Cyan
-    & adb -s $DeviceSerial shell am start -n "com.razumly.mvp/.MainActivity" | Out-Null
+    & adb -s $DeviceSerial shell am start -n "com.razumly.mvp/.MainActivity"
+    $launchExitCode = $LASTEXITCODE
+    Assert-NativeExitCode "Android app launch" $launchExitCode
 }
 
 $backendRepo = Resolve-BackendDir $BackendDir
