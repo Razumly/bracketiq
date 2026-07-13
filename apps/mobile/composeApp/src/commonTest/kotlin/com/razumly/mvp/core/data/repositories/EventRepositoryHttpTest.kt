@@ -977,6 +977,47 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    fun listFields_returns_an_authoritative_empty_response_instead_of_cached_fields() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val fieldDao = EventRepositoryHttp_FakeFieldDao()
+        val staleCachedField = Field(
+            id = "field_stale",
+            fieldNumber = 1,
+            name = "Removed facility field",
+            organizationId = "organization_1",
+        )
+        fieldDao.upsertField(staleCachedField)
+        assertEquals(listOf(staleCachedField), fieldDao.getAllFields())
+        val database = EventRepositoryHttp_FakeDatabaseService(
+            EventRepositoryHttp_FakeEventDao(),
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+            getFieldDao = fieldDao,
+        )
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("/api/fields", request.url.encodedPath)
+            respond(
+                content = """{"fields": []}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repository = FieldRepository(
+            MvpApiClient(
+                HttpClient(engine) { configureMvpHttpClient() },
+                "http://example.test",
+                tokenStore,
+            ),
+            database,
+        )
+
+        val fields = repository.listFields().getOrThrow()
+
+        assertTrue(fields.isEmpty())
+    }
+
+    @Test
     fun getEventsByIds_removes_stale_cached_events_missing_from_server() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()

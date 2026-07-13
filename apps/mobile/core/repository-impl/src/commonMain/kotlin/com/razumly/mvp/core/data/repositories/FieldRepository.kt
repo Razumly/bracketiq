@@ -121,10 +121,8 @@ class FieldRepository(
         val fields = api.get<FieldsResponseDto>(path).fields
         if (fields.isNotEmpty()) {
             databaseService.getFieldDao.upsertFields(fields)
-            fields
-        } else {
-            databaseService.getFieldDao.getAllFields()
         }
+        fields
     }
 
     override suspend fun getTimeSlots(ids: List<String>): Result<List<TimeSlot>> = runCatching {
