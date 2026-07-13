@@ -551,11 +551,16 @@ class WearMatchRepository(
     private suspend fun refreshRemoteSchedule(sessionUserId: String): WearScheduleResponseDto {
         val schedule = api.get<WearScheduleResponseDto>("api/profile/schedule")
         val detailMatches = fetchOfficialEventDetailMatches(schedule.events, sessionUserId)
-        val remoteSchedule = schedule
+        val mergedAndTrimmedSchedule = schedule
             .copy(matches = (detailMatches + schedule.matches).distinctBy { it.resolvedId() })
             .trimForOfficial(sessionUserId)
-            .withLocalOverlays()
+        val remoteSchedule = reconcileAuthoritativeWearSchedule(
+            remoteSchedule = mergedAndTrimmedSchedule,
+            operationStore = operationStore,
+            applyOperation = { match, operation -> match.applyLocalOperation(operation) },
+        )
         operationStore.cacheSchedule(remoteSchedule)
+        remoteSchedule.matches.forEach(operationStore::cacheMatch)
         return remoteSchedule
     }
 
@@ -582,10 +587,10 @@ class WearMatchRepository(
             lastError = null,
             lastAttemptAt = null,
         )
-        val cachedMatch = operationStore.cachedMatches()[matchId]
-            ?: operationStore.cachedSchedule()
-                ?.matches
-                ?.firstOrNull { it.resolvedId() == matchId }
+        val cachedMatch = operationStore.cachedSchedule()
+            ?.matches
+            ?.firstOrNull { it.resolvedId() == matchId }
+            ?: operationStore.cachedMatches()[matchId]
             ?: return false
         operationStore.upsertOperation(importedOperation)
         val updatedMatch = cachedMatch.applyLocalOperation(importedOperation)
@@ -615,14 +620,11 @@ class WearMatchRepository(
                 break
             }
             operationStore.markAcked(operation.id)
-            val remaining = operationStore.localOverlayOperations(operation.matchId)
-            val cachedMatch = if (remaining.isEmpty()) {
-                remoteMatch
-            } else {
-                remaining.fold(remoteMatch) { current, pending ->
-                    current.applyLocalOperation(pending)
-                }
-            }
+            val cachedMatch = reconcileAuthoritativeWearMatch(
+                remoteMatch = remoteMatch,
+                operationStore = operationStore,
+                applyOperation = { current, pending -> current.applyLocalOperation(pending) },
+            )
             operationStore.cacheMatch(cachedMatch)
             syncedCount += 1
         }
@@ -647,21 +649,6 @@ class WearMatchRepository(
             }
         }
         return response.match ?: throw WearApiException("Match response did not include the updated match.")
-    }
-
-    private fun WearScheduleResponseDto.withLocalOverlays(): WearScheduleResponseDto {
-        val operationsByMatchId = operationStore.localOverlayOperations()
-            .mapNotNull { operation -> operation.matchId.normalizedId()?.let { it to operation } }
-            .groupBy({ it.first }, { it.second })
-        if (operationsByMatchId.isEmpty()) return this
-        return copy(
-            matches = matches.map { match ->
-                val matchId = match.resolvedId() ?: return@map match
-                operationsByMatchId[matchId]
-                    .orEmpty()
-                    .fold(match) { current, operation -> current.applyLocalOperation(operation) }
-            },
-        )
     }
 
     private fun WearScoreSetDto.withClientOperation(operation: WearPendingMatchOperation): WearScoreSetDto =
@@ -1006,6 +993,37 @@ data class WearSession(
     val userId: String,
     val label: String,
 )
+
+internal fun reconcileAuthoritativeWearSchedule(
+    remoteSchedule: WearScheduleResponseDto,
+    operationStore: WearMatchOperationStore,
+    applyOperation: (WearMatchDto, WearPendingMatchOperation) -> WearMatchDto,
+): WearScheduleResponseDto {
+    operationStore.removeImportedOperations()
+    val operationsByMatchId = operationStore.localOverlayOperations()
+        .mapNotNull { operation -> operation.matchId.normalizedId()?.let { it to operation } }
+        .groupBy({ it.first }, { it.second })
+    if (operationsByMatchId.isEmpty()) return remoteSchedule
+    return remoteSchedule.copy(
+        matches = remoteSchedule.matches.map { match ->
+            val matchId = match.resolvedId() ?: return@map match
+            operationsByMatchId[matchId]
+                .orEmpty()
+                .fold(match) { current, operation -> applyOperation(current, operation) }
+        },
+    )
+}
+
+internal fun reconcileAuthoritativeWearMatch(
+    remoteMatch: WearMatchDto,
+    operationStore: WearMatchOperationStore,
+    applyOperation: (WearMatchDto, WearPendingMatchOperation) -> WearMatchDto,
+): WearMatchDto {
+    val matchId = remoteMatch.resolvedId() ?: return remoteMatch
+    operationStore.removeImportedOperations(matchId)
+    return operationStore.localOverlayOperations(matchId)
+        .fold(remoteMatch) { current, operation -> applyOperation(current, operation) }
+}
 
 fun WearIncidentTypeDefinitionDto.isScoring(): Boolean =
     (linkedPointDelta ?: 0) != 0 ||

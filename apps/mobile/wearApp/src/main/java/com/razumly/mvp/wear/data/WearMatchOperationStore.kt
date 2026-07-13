@@ -189,6 +189,26 @@ class WearMatchOperationStore internal constructor(
             .toList()
     }
 
+    /**
+     * Phone-imported operations are only an optimistic bridge until a fresh
+     * server schedule is available. Keeping them after that point would let a
+     * stale phone snapshot permanently override the authoritative response.
+     */
+    fun removeImportedOperations(matchId: String? = null): Int = serialized {
+        val normalizedMatchId = matchId.normalizedId()
+        val snapshot = storage.snapshot()
+        val operations = decodeOperations(snapshot)
+        val retained = operations.filterNot { operation ->
+            operation.status == WEAR_MATCH_OPERATION_STATUS_IMPORTED &&
+                (normalizedMatchId == null || operation.matchId.normalizedId() == normalizedMatchId)
+        }
+        val removedCount = operations.size - retained.size
+        if (removedCount > 0) {
+            writeOperations(snapshot, retained)
+        }
+        removedCount
+    }
+
     fun markAttempting(operationId: String) {
         updateOperation(operationId) { operation ->
             operation.copy(
