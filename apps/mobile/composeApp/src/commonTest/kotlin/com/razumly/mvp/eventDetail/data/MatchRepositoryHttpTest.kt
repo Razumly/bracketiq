@@ -41,6 +41,7 @@ import io.ktor.http.content.OutgoingContent
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -396,6 +397,47 @@ class MatchRepositoryHttpTest {
         assertEquals(1, syncResult.getOrThrow())
         assertEquals(listOf("/api/events/event_1/matches/match_1/score"), requestedPaths)
         assertEquals(MATCH_OPERATION_STATUS_ACKED, outboxDao.operations.single().status)
+    }
+
+    @Test
+    fun concurrentScoreEnqueues_assignDistinctMonotonicClientSequences() = runTest {
+        val localMatch = MatchMVP(
+            id = "match_1",
+            matchId = 1,
+            eventId = "event_1",
+            team1Id = "team_1",
+            team2Id = "team_2",
+        )
+        val matchDao = MatchRepositoryHttp_FakeMatchDao(listOf(localMatch))
+        val outboxDao = MatchRepositoryHttp_FakeOutboxDao()
+        val repository = MatchRepository(
+            api = MvpApiClient(
+                HttpClient(MockEngine { error("No network call is expected while enqueueing.") }),
+                "http://example.test",
+                MatchRepositoryHttp_InMemoryAuthTokenStore(),
+            ),
+            databaseService = MatchRepositoryHttp_FakeDatabaseService(
+                getMatchDao = matchDao,
+                getMatchOperationOutboxDao = outboxDao,
+            ),
+            autoSyncOperations = false,
+        )
+
+        val results = (1..8).map { points ->
+            async {
+                repository.setMatchScore(
+                    match = localMatch,
+                    segmentId = "segment_1",
+                    sequence = 1,
+                    eventTeamId = "team_1",
+                    points = points,
+                )
+            }
+        }.awaitAll()
+
+        assertTrue(results.all { result -> result.isSuccess })
+        assertEquals((1L..8L).toList(), outboxDao.operations.map { operation -> operation.clientSequence })
+        assertEquals(8, outboxDao.operations.map { operation -> operation.id }.toSet().size)
     }
 
     @Test
