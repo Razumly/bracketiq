@@ -68,6 +68,7 @@ private const val MATCH_INCIDENT_DELETE_FAILED = "DELETE_FAILED"
 private val INCIDENT_RETRY_DELAYS_MS = longArrayOf(3_000L, 15_000L, 30_000L)
 private const val INCIDENT_CONFIRM_NO_PROGRESS_TIMEOUT_MS = 10_000L
 private const val DIRECT_SCORE_DEBOUNCE_MS = 500L
+private const val MATCH_CHECK_IN_RETRY_DELAY_MS = 3_000L
 private const val MATCH_DETAIL_CLEANUP_KEY = "Cleanup_MatchDetail"
 private const val MATCH_DETAIL_REALTIME_PAUSE_PREFIX = "match-detail-open:"
 private const val OFFICIAL_MATCH_OPEN_MINUTES_BEFORE = 60
@@ -369,6 +370,7 @@ class DefaultMatchContentComponent(
     private val shownTeamCheckInPromptKeys = mutableSetOf<String>()
     private val confirmedTeamCheckInPromptKeys = mutableSetOf<String>()
     private var lastLoadedMatchCheckInKey: String? = null
+    private var scheduledMatchCheckInRetryKey: String? = null
 
     private val _showSetConfirmDialog = MutableStateFlow(false)
     override val showSetConfirmDialog = _showSetConfirmDialog.asStateFlow()
@@ -1228,6 +1230,7 @@ class DefaultMatchContentComponent(
         val currentMatch = matchWithTeams.value.match
         if (!isMatchTeamCheckInEnabled(currentEvent)) {
             lastLoadedMatchCheckInKey = null
+            scheduledMatchCheckInRetryKey = null
             _matchTeamCheckIns.value = emptyMap()
             return
         }
@@ -1250,9 +1253,29 @@ class DefaultMatchContentComponent(
                         eventTeamId?.let { it to checkIn }
                     }
                     .toMap()
+                if (scheduledMatchCheckInRetryKey == loadKey) {
+                    scheduledMatchCheckInRetryKey = null
+                }
             }.onFailure {
-                // Managers/coaches are allowed to POST check-ins but the read route is host/official-only.
+                // A read can fail transiently even though the official remains authorized. Keep the
+                // in-flight key until the bounded retry begins so concurrent collectors do not send
+                // duplicate reads; later event/match refreshes can retry after that attempt too.
+                scheduleMatchCheckInRetry(loadKey)
             }
+        }
+    }
+
+    private fun scheduleMatchCheckInRetry(loadKey: String) {
+        if (scheduledMatchCheckInRetryKey == loadKey) return
+        scheduledMatchCheckInRetryKey = loadKey
+        scope.launch {
+            delay(MATCH_CHECK_IN_RETRY_DELAY_MS)
+            val currentEvent = event.value ?: return@launch
+            val currentMatch = matchWithTeams.value.match
+            val currentLoadKey = "${currentEvent.id}:${currentMatch.id}"
+            if (scheduledMatchCheckInRetryKey != loadKey || currentLoadKey != loadKey) return@launch
+            lastLoadedMatchCheckInKey = null
+            refreshMatchCheckInsIfAllowed()
         }
     }
 

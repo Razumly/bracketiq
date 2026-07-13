@@ -19,6 +19,7 @@ import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchTimekeepingConfigMVP
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -32,6 +33,8 @@ import com.razumly.mvp.core.network.dto.MatchActionOperationDto
 import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
 import com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto
 import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
+import com.razumly.mvp.core.network.dto.TeamCheckInDto
+import com.razumly.mvp.core.network.dto.TeamCheckInsResponseDto
 import com.razumly.mvp.eventCreate.CreateEvent_FakeEventRepository
 import com.razumly.mvp.eventCreate.CreateEvent_FakeMatchRepository
 import com.razumly.mvp.eventCreate.CreateEvent_FakeUserRepository
@@ -914,6 +917,50 @@ class MatchContentComponentTest : MainDispatcherTest() {
         assertFalse(harness.component.isOfficial.value)
         assertFalse(harness.component.officialCheckedIn.value)
         assertTrue(harness.component.showOfficialCheckInDialog.value)
+    }
+
+    @Test
+    fun given_transient_match_check_in_read_failure_then_component_retries_and_recovers() = runTest(testDispatcher) {
+        val user = createUser(id = "user-1", teamIds = listOf("team-c"))
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(
+            teamSignup = true,
+            teamCheckInMode = TeamCheckInMode.MATCH,
+        )
+        val match = createMatch(
+            eventId = event.id,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = true,
+        )
+        val harness = MatchDetailHarness(
+            event = event,
+            initialMatch = match,
+            currentUser = user,
+            teams = listOf(
+                createTeam(id = "team-a", captainId = "captain-a"),
+                createTeam(id = "team-b", captainId = "captain-b"),
+                createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
+            ),
+            matchTeamCheckInFailure = IllegalStateException("offline"),
+            matchTeamCheckInsResponse = TeamCheckInsResponseDto(
+                checkIns = listOf(
+                    TeamCheckInDto(eventTeamId = "team-a", status = "CHECKED_IN"),
+                ),
+            ),
+        )
+
+        testDispatcher.scheduler.runCurrent()
+
+        assertEquals(1, harness.matchRepository.matchTeamCheckInCalls.size)
+        assertTrue(harness.component.matchTeamCheckIns.value.isEmpty())
+
+        harness.matchRepository.matchTeamCheckInFailure = null
+        testDispatcher.scheduler.advanceTimeBy(3_000)
+        testDispatcher.scheduler.runCurrent()
+
+        assertEquals(2, harness.matchRepository.matchTeamCheckInCalls.size)
+        assertEquals("CHECKED_IN", harness.component.matchTeamCheckIns.value["team-a"]?.status)
     }
 
     @Test
@@ -2446,6 +2493,8 @@ private class MatchDetailHarness(
     scoreSetDelaySequence: List<Long> = emptyList(),
     operationFailure: Throwable? = null,
     updateFailure: Throwable? = null,
+    matchTeamCheckInFailure: Throwable? = null,
+    matchTeamCheckInsResponse: TeamCheckInsResponseDto = TeamCheckInsResponseDto(),
 ) {
     val matchRepository = MatchDetailFakeMatchRepository(
         initialMatch = repositoryMatch,
@@ -2454,6 +2503,8 @@ private class MatchDetailHarness(
         scoreSetDelaySequence = scoreSetDelaySequence,
         operationFailure = operationFailure,
         updateFailure = updateFailure,
+        matchTeamCheckInFailure = matchTeamCheckInFailure,
+        matchTeamCheckInsResponse = matchTeamCheckInsResponse,
     )
 
     val component = DefaultMatchContentComponent(
@@ -2489,19 +2540,33 @@ private class MatchDetailFakeMatchRepository(
     scoreSetDelaySequence: List<Long> = emptyList(),
     operationFailure: Throwable? = null,
     updateFailure: Throwable? = null,
+    matchTeamCheckInFailure: Throwable? = null,
+    matchTeamCheckInsResponse: TeamCheckInsResponseDto = TeamCheckInsResponseDto(),
 ) : IMatchRepository by CreateEvent_FakeMatchRepository() {
     private val matchFlow = MutableStateFlow(Result.success(initialMatch.toMatchWithRelations()))
     private val scoreSetDelaySequence = scoreSetDelaySequence.toMutableList()
     var operationFailure: Throwable? = operationFailure
     var updateFailure: Throwable? = updateFailure
+    var matchTeamCheckInFailure: Throwable? = matchTeamCheckInFailure
+    var matchTeamCheckInsResponse: TeamCheckInsResponseDto = matchTeamCheckInsResponse
     val savedMatches = mutableListOf<MatchMVP>()
     val updatedMatches = mutableListOf<MatchMVP>()
     val operationCalls = mutableListOf<MatchOperationCall>()
     val scoreSetCalls = mutableListOf<MatchScoreSetCall>()
     val incidentCalls = mutableListOf<MatchIncidentCall>()
+    val matchTeamCheckInCalls = mutableListOf<Pair<String, String>>()
 
     override suspend fun getMatch(matchId: String): Result<MatchMVP> =
         Result.success(matchFlow.value.getOrThrow().match)
+
+    override suspend fun getMatchTeamCheckIns(
+        eventId: String,
+        matchId: String,
+    ): Result<TeamCheckInsResponseDto> {
+        matchTeamCheckInCalls += eventId to matchId
+        matchTeamCheckInFailure?.let { return Result.failure(it) }
+        return Result.success(matchTeamCheckInsResponse)
+    }
 
     override fun getMatchFlow(matchId: String): Flow<Result<MatchWithRelations>> = matchFlow
 
