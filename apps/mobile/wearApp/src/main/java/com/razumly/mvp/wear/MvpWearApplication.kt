@@ -1,6 +1,7 @@
 package com.razumly.mvp.wear
 
 import android.app.Application
+import android.util.Log
 import com.razumly.mvp.wear.data.WearApiClient
 import com.razumly.mvp.wear.data.WearAuthTokenStore
 import com.razumly.mvp.wear.data.WearMatchNetworkSync
@@ -14,6 +15,13 @@ class MvpWearApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         val tokenStore = WearAuthTokenStore(applicationContext)
+        if (!tokenStore.isSecureStorageAvailable) {
+            Log.e(
+                WEAR_APPLICATION_TAG,
+                tokenStore.unavailableMessage ?: "Secure watch auth storage is unavailable.",
+            )
+            return
+        }
         val operationStore = WearMatchOperationStore(applicationContext)
         val repository = WearMatchRepository(
             api = WearApiClient(tokenStore),
@@ -26,5 +34,9 @@ class MvpWearApplication : Application() {
             operationStore = operationStore,
             repository = repository,
         ).also { it.start() }
+    }
+
+    private companion object {
+        const val WEAR_APPLICATION_TAG = "MvpWearApplication"
     }
 }

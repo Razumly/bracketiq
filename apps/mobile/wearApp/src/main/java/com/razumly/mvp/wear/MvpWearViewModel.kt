@@ -73,6 +73,10 @@ class MvpWearViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun signIn() {
+        tokenStore.unavailableMessage?.let { message ->
+            _state.update { it.copy(isLoading = false, error = message) }
+            return
+        }
         val email = state.value.email.trim()
         val password = state.value.password
         if (email.isBlank() || password.isBlank()) {
@@ -504,6 +508,17 @@ class MvpWearViewModel(application: Application) : AndroidViewModel(application)
     private fun bootstrap() {
         viewModelScope.launch {
             if (demoMode) return@launch
+            tokenStore.unavailableMessage?.let { message ->
+                _state.update {
+                    it.copy(
+                        route = WearRoute.LOGIN,
+                        isAuthenticated = false,
+                        isLoading = false,
+                        error = message,
+                    )
+                }
+                return@launch
+            }
             _state.update { it.copy(isLoading = true, error = null) }
             val session = try {
                 withContext(Dispatchers.IO) { repository.bootstrapSession() }
