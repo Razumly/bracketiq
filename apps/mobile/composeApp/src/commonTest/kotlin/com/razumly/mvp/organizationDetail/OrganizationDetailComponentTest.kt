@@ -73,6 +73,30 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
         assertEquals("Great experience", harness.billingRepository.lastSavedBody)
         assertEquals(1, harness.component.reviews.value?.summary?.reviewCount)
         assertEquals(5, harness.component.reviews.value?.viewerReview?.rating)
+        assertEquals(OrganizationReviewSaveStatus.SUCCEEDED, harness.component.reviewSaveStatus.value)
+    }
+
+    @Test
+    fun given_review_save_failure_then_component_keeps_the_existing_review_until_a_retry_succeeds() = runTest(testDispatcher) {
+        val harness = OrganizationDetailHarness(product = createProduct(period = "SINGLE"))
+        advance()
+        harness.billingRepository.reviewSaveFailure = IllegalStateException("offline")
+
+        harness.component.saveReview(5, "Keep this draft")
+        advance()
+
+        assertEquals(1, harness.billingRepository.saveReviewCallCount)
+        assertEquals(0, harness.component.reviews.value?.summary?.reviewCount)
+        assertEquals(OrganizationReviewSaveStatus.FAILED, harness.component.reviewSaveStatus.value)
+        assertTrue(harness.component.errorState.value != null)
+
+        harness.billingRepository.reviewSaveFailure = null
+        harness.component.saveReview(5, "Keep this draft")
+        advance()
+
+        assertEquals(2, harness.billingRepository.saveReviewCallCount)
+        assertEquals(1, harness.component.reviews.value?.summary?.reviewCount)
+        assertEquals(OrganizationReviewSaveStatus.SUCCEEDED, harness.component.reviewSaveStatus.value)
     }
 
     @Test
@@ -402,6 +426,7 @@ private class OrganizationDetailTestBillingRepository(
         private set
     var lastSavedBody: String? = null
         private set
+    var reviewSaveFailure: Throwable? = null
     private var reviewPayload = OrganizationReviewsPayload(
         summary = OrganizationReviewSummary(),
         viewerIsAuthenticated = true,
@@ -430,6 +455,7 @@ private class OrganizationDetailTestBillingRepository(
         saveReviewCallCount += 1
         lastSavedRating = rating
         lastSavedBody = body
+        reviewSaveFailure?.let { failure -> return Result.failure(failure) }
         val review = OrganizationReview(
             id = "review-1",
             organizationId = organizationId,

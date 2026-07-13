@@ -123,6 +123,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val isLoadingProducts by component.isLoadingProducts.collectAsState()
     val isLoadingReviews by component.isLoadingReviews.collectAsState()
     val isMutatingReview by component.isMutatingReview.collectAsState()
+    val reviewSaveStatus by component.reviewSaveStatus.collectAsState()
     val isLoadingRentals by component.isLoadingRentals.collectAsState()
     val billingAddressPrompt by component.billingAddressPrompt.collectAsState()
     val currentUser by component.currentUser.collectAsState()
@@ -439,6 +440,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                         payload = reviews,
                         isLoading = isLoadingReviews,
                         isMutating = isMutatingReview,
+                        reviewSaveStatus = reviewSaveStatus,
                         bottomPadding = bottomPadding,
                         onRefresh = { component.refreshReviews(force = true) },
                         onSave = component::saveReview,

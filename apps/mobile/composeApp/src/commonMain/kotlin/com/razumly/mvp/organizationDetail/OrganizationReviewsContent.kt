@@ -32,6 +32,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -192,6 +193,7 @@ internal fun OrganizationReviewsTabContent(
     payload: OrganizationReviewsPayload?,
     isLoading: Boolean,
     isMutating: Boolean,
+    reviewSaveStatus: OrganizationReviewSaveStatus,
     bottomPadding: Dp,
     onRefresh: () -> Unit,
     onSave: (Int, String?) -> Unit,
@@ -204,6 +206,14 @@ internal fun OrganizationReviewsTabContent(
     var draftBody by remember { mutableStateOf("") }
     var pendingDelete by remember { mutableStateOf<OrganizationReview?>(null) }
     var pendingReport by remember { mutableStateOf<OrganizationReview?>(null) }
+
+    LaunchedEffect(reviewSaveStatus) {
+        if (reviewSaveStatus == OrganizationReviewSaveStatus.SUCCEEDED && editorOpen) {
+            editorOpen = false
+            draftRating = 0
+            draftBody = ""
+        }
+    }
 
     fun openEditor() {
         draftRating = payload?.viewerReview?.rating ?: 0
@@ -361,7 +371,6 @@ internal fun OrganizationReviewsTabContent(
                             enabled = draftRating in 1..5 && !isMutating,
                             onClick = {
                                 onSave(draftRating, draftBody.trim().takeIf(String::isNotBlank))
-                                editorOpen = false
                             },
                         ) {
                             if (isMutating) {

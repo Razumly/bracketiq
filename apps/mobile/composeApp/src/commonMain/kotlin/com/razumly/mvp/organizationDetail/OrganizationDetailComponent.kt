@@ -74,6 +74,13 @@ data class RentalReservationComplete(
     val totalCents: Int,
 )
 
+enum class OrganizationReviewSaveStatus {
+    IDLE,
+    SAVING,
+    SUCCEEDED,
+    FAILED,
+}
+
 private data class PendingRentalReservation(
     val publicSlug: String,
     val context: RentalCreateContext,
@@ -123,6 +130,7 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     val isLoadingProducts: StateFlow<Boolean>
     val isLoadingReviews: StateFlow<Boolean>
     val isMutatingReview: StateFlow<Boolean>
+    val reviewSaveStatus: StateFlow<OrganizationReviewSaveStatus>
     val isLoadingRentals: StateFlow<Boolean>
     val errorState: StateFlow<ErrorMessage?>
     val message: StateFlow<String?>
@@ -244,6 +252,9 @@ class DefaultOrganizationDetailComponent(
 
     private val _isMutatingReview = MutableStateFlow(false)
     override val isMutatingReview: StateFlow<Boolean> = _isMutatingReview.asStateFlow()
+
+    private val _reviewSaveStatus = MutableStateFlow(OrganizationReviewSaveStatus.IDLE)
+    override val reviewSaveStatus: StateFlow<OrganizationReviewSaveStatus> = _reviewSaveStatus.asStateFlow()
 
     private val _isLoadingRentals = MutableStateFlow(false)
     override val isLoadingRentals: StateFlow<Boolean> = _isLoadingRentals.asStateFlow()
@@ -575,16 +586,19 @@ class DefaultOrganizationDetailComponent(
 
     override fun saveReview(rating: Int, body: String?) {
         if (_isMutatingReview.value) return
+        _isMutatingReview.value = true
+        _reviewSaveStatus.value = OrganizationReviewSaveStatus.SAVING
         scope.launch {
-            _isMutatingReview.value = true
             billingRepository.saveOrganizationReview(organizationId, rating, body)
                 .onSuccess { payload ->
                     _reviews.value = payload
                     reviewsLoaded = true
                     _message.value = "Your review has been published."
+                    _reviewSaveStatus.value = OrganizationReviewSaveStatus.SUCCEEDED
                 }
                 .onFailure { error ->
                     _errorState.value = ErrorMessage(error.userMessage("Failed to save your review."))
+                    _reviewSaveStatus.value = OrganizationReviewSaveStatus.FAILED
                 }
             _isMutatingReview.value = false
         }
