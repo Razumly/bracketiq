@@ -57,13 +57,13 @@ class MessageRepository(
         val unreadMessages = databaseService.getMessageDao.getMessagesInChatGroup(normalizedChatId)
             .filter { message -> message.isUnreadFor(normalizedUserId) }
 
+        api.postNoResponse("api/chat/groups/${normalizedChatId.encodeURLPathPart()}/messages/read")
+
         if (unreadMessages.isNotEmpty()) {
             val readMessages = unreadMessages.map { message ->
                 message.copy(readByIds = (message.readByIds + normalizedUserId).distinct())
             }
             databaseService.getMessageDao.upsertMessages(readMessages)
         }
-
-        api.postNoResponse("api/chat/groups/${normalizedChatId.encodeURLPathPart()}/messages/read")
     }
 }
