@@ -2,6 +2,9 @@ package com.razumly.mvp.teamManagement
 
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
+import com.arkivanov.essenty.backhandler.BackHandler
+import com.arkivanov.essenty.lifecycle.coroutines.withLifecycle
+import com.arkivanov.essenty.lifecycle.doOnDestroy
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Sport
@@ -95,7 +98,7 @@ class DefaultTeamManagementComponent(
     override val selectedFreeAgentId: String?,
     private val navigationHandler: INavigationHandler
 ) : ComponentContext by componentContext, TeamManagementComponent {
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val scope = teamManagementCoroutineScope()
     private var loadingHandler: LoadingHandler? = null
 
     override val onBack = navigationHandler::navigateBack
@@ -255,6 +258,12 @@ class DefaultTeamManagementComponent(
 
     init {
         backHandler.register(teamEditorBackCallback)
+        lifecycle.doOnDestroy(
+            TeamManagementLifecycleCleanup(
+                backHandler = backHandler,
+                backCallback = teamEditorBackCallback,
+            )::onDestroy,
+        )
         scope.launch {
             currentUserState
                 .map { user -> user.friendIds }
@@ -547,6 +556,21 @@ class DefaultTeamManagementComponent(
         team.captain?.let { captain -> put(captain.id, captain) }
         team.players.forEach { put(it.id, it) }
         team.pendingPlayers.forEach { put(it.id, it) }
+    }
+}
+
+internal fun ComponentContext.teamManagementCoroutineScope() =
+    CoroutineScope(Dispatchers.Main + SupervisorJob()).withLifecycle(lifecycle)
+
+internal class TeamManagementLifecycleCleanup(
+    private val backHandler: BackHandler,
+    private val backCallback: BackCallback,
+) {
+    fun onDestroy() {
+        backCallback.isEnabled = false
+        if (backHandler.isRegistered(backCallback)) {
+            backHandler.unregister(backCallback)
+        }
     }
 }
 
