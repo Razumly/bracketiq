@@ -4,6 +4,8 @@ import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.UserData
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class ProfileDetailsDraftTest {
 
@@ -129,6 +131,44 @@ class ProfileDetailsDraftTest {
         assertEquals(submittedDraft, actual.draft)
         assertEquals(submittedDraft, actual.baseline)
     }
+
+    @Test
+    fun given_empty_or_whitespace_username_when_other_profile_fields_are_valid_then_save_is_disabled() {
+        listOf("", "  \t\n  ").forEach { userName ->
+            val validation = validateProfileDetailsForm(
+                draft = validDraft(userName = userName),
+                currentPassword = "",
+                newPassword = "",
+                confirmNewPassword = "",
+            )
+
+            assertFalse(validation.isUserNameValid)
+            assertFalse(validation.canSave)
+            assertEquals(null, validation.normalizedUserName)
+        }
+    }
+
+    @Test
+    fun given_username_with_outer_whitespace_when_other_profile_fields_are_valid_then_it_is_trimmed_and_save_is_enabled() {
+        val validation = validateProfileDetailsForm(
+            draft = validDraft(userName = "  sam-edited  "),
+            currentPassword = "",
+            newPassword = "",
+            confirmNewPassword = "",
+        )
+
+        assertTrue(validation.isUserNameValid)
+        assertTrue(validation.canSave)
+        assertEquals("sam-edited", validation.normalizedUserName)
+    }
+
+    private fun validDraft(userName: String): ProfileDetailsDraft = ProfileDetailsDraft(
+        userName = userName,
+        firstName = "Samuel",
+        lastName = "Razumovskiy",
+        email = "samuel@example.test",
+        profileImageId = "image_1",
+    )
 
     private fun user(
         id: String = "user_1",

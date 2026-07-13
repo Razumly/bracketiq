@@ -51,7 +51,6 @@ import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
-import com.razumly.mvp.core.util.emailAddressRegex
 import com.razumly.mvp.eventDetail.composables.SelectEventImage
 import io.github.ismoy.imagepickerkmp.domain.models.MimeType
 import io.github.ismoy.imagepickerkmp.presentation.ui.components.GalleryPickerLauncher
@@ -101,13 +100,12 @@ fun ProfileDetailsScreen(
             .ifBlank { draft.userName.trim().ifBlank { "User" } }
     }
 
-    val isEmailValid = draft.email.isNotBlank() && draft.email.matches(emailAddressRegex)
-    val isFirstNameValid = draft.firstName.isNotBlank()
-    val isLastNameValid = draft.lastName.isNotBlank()
-    val isPasswordValid = (newPassword.isBlank() && confirmNewPassword.isBlank()) ||
-        (currentPassword.isNotBlank() && newPassword.length >= 8 && newPassword == confirmNewPassword)
-    val passwordsMatch = newPassword.isBlank() || newPassword == confirmNewPassword
-    val isFormValid = isEmailValid && isFirstNameValid && isLastNameValid && isPasswordValid
+    val formValidation = validateProfileDetailsForm(
+        draft = draft,
+        currentPassword = currentPassword,
+        newPassword = newPassword,
+        confirmNewPassword = confirmNewPassword,
+    )
     val canConfirmDeleteAccount = deleteAccountConfirmationText.trim()
         .equals(DELETE_ACCOUNT_CONFIRMATION_TEXT, ignoreCase = true)
     val passwordKeyboardOptions = remember {
@@ -313,8 +311,8 @@ fun ProfileDetailsScreen(
                     )
                 },
                 label = "Username",
-                isError = draft.userName.isBlank(),
-                supportingText = if (draft.userName.isBlank()) "Required" else ""
+                isError = !formValidation.isUserNameValid,
+                supportingText = if (!formValidation.isUserNameValid) "Username is required" else ""
             )
 
             StandardTextField(
@@ -326,7 +324,7 @@ fun ProfileDetailsScreen(
                 },
                 label = "Email",
                 keyboardType = "email",
-                isError = !isEmailValid && draft.email.isNotBlank(),
+                isError = !formValidation.isEmailValid && draft.email.isNotBlank(),
                 supportingText = "Email changes are not supported yet",
                 enabled = false,
                 readOnly = true,
@@ -345,8 +343,8 @@ fun ProfileDetailsScreen(
                     },
                     label = "First Name",
                     modifier = Modifier.weight(1f),
-                    isError = !isFirstNameValid && draft.firstName.isNotBlank(),
-                    supportingText = if (!isFirstNameValid && draft.firstName.isNotBlank()) "Required" else ""
+                    isError = !formValidation.isFirstNameValid && draft.firstName.isNotBlank(),
+                    supportingText = if (!formValidation.isFirstNameValid && draft.firstName.isNotBlank()) "Required" else ""
                 )
 
                 StandardTextField(
@@ -358,8 +356,8 @@ fun ProfileDetailsScreen(
                     },
                     label = "Last Name",
                     modifier = Modifier.weight(1f),
-                    isError = !isLastNameValid && draft.lastName.isNotBlank(),
-                    supportingText = if (!isLastNameValid && draft.lastName.isNotBlank()) "Required" else ""
+                    isError = !formValidation.isLastNameValid && draft.lastName.isNotBlank(),
+                    supportingText = if (!formValidation.isLastNameValid && draft.lastName.isNotBlank()) "Required" else ""
                 )
             }
 
@@ -466,29 +464,33 @@ fun ProfileDetailsScreen(
                         }
                     },
                     supportingText = {
-                        if (confirmNewPassword.isNotBlank() && !passwordsMatch) {
+                        if (confirmNewPassword.isNotBlank() && !formValidation.passwordsMatch) {
                             Text("Passwords do not match", color = MaterialTheme.colorScheme.error)
                         }
                     },
-                    isError = confirmNewPassword.isNotBlank() && !passwordsMatch
+                    isError = confirmNewPassword.isNotBlank() && !formValidation.passwordsMatch
                 )
             }
 
             // Save Button
             Button(
                 onClick = {
-                    component.updateProfile(
-                        firstName = draft.firstName,
-                        lastName = draft.lastName,
-                        email = draft.email,
-                        currentPassword = currentPassword,
-                        newPassword = newPassword,
-                        userName = draft.userName,
-                        profileImageId = draft.profileImageId,
-                    )
+                    formValidation.normalizedUserName?.let { normalizedUserName ->
+                        val submittedDraft = draft.copy(userName = normalizedUserName)
+                        draftState = draftState.copy(draft = submittedDraft)
+                        component.updateProfile(
+                            firstName = submittedDraft.firstName,
+                            lastName = submittedDraft.lastName,
+                            email = submittedDraft.email,
+                            currentPassword = currentPassword,
+                            newPassword = newPassword,
+                            userName = submittedDraft.userName,
+                            profileImageId = submittedDraft.profileImageId,
+                        )
+                    }
                 },
                 modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
-                enabled = isFormValid
+                enabled = formValidation.canSave,
             ) {
                 Text("Save Profile Changes")
             }
