@@ -12,6 +12,7 @@ import com.razumly.mvp.core.data.repositories.ChatTermsConsentState
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.util.newId
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
@@ -24,12 +25,21 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+enum class ChatCreationStatus {
+    IDLE,
+    CREATING,
+    SUCCEEDED,
+    FAILED,
+}
+
 interface ChatListComponent {
     val newChat: StateFlow<ChatGroupWithRelations>
     val selectedChat: StateFlow<ChatGroup?>
     val chatGroups: StateFlow<List<ChatGroupWithRelations>>
     val chatSummaries: StateFlow<Map<String, ChatGroupSummary>>
     val errorState: StateFlow<String?>
+    val chatCreationStatus: StateFlow<ChatCreationStatus>
+    val chatCreationError: StateFlow<String?>
     val suggestedPlayers: StateFlow<List<UserData>>
     val currentUser: UserData
     val friends: StateFlow<List<UserData>>
@@ -39,6 +49,8 @@ interface ChatListComponent {
 
     fun onChatSelected(chat: ChatGroupWithRelations)
     fun onChatCreated()
+    fun clearChatCreationFeedback()
+    fun retryLoadingChats()
     fun updateNewChatField(update: ChatGroup.() -> ChatGroup)
     fun addUserToNewChat(user: UserData)
     fun removeUserFromNewChat(user: UserData)
@@ -85,6 +97,11 @@ class DefaultChatListComponent(
     private val _errorState = MutableStateFlow<String?>(null)
     override val errorState = _errorState.asStateFlow()
 
+    private val _chatCreationStatus = MutableStateFlow(ChatCreationStatus.IDLE)
+    override val chatCreationStatus = _chatCreationStatus.asStateFlow()
+    private val _chatCreationError = MutableStateFlow<String?>(null)
+    override val chatCreationError = _chatCreationError.asStateFlow()
+
     private val _suggestedPlayers = MutableStateFlow<List<UserData>>(listOf())
     override val suggestedPlayers = _suggestedPlayers.asStateFlow()
 
@@ -112,9 +129,7 @@ class DefaultChatListComponent(
                 .collect { accepted ->
                     if (accepted) {
                         _showChatTermsPrompt.value = false
-                        chatGroupRepository.refreshChatGroupsAndMessages().onFailure {
-                            _errorState.value = it.userMessage("Failed to load chats.")
-                        }
+                        refreshChatGroups()
                     }
                 }
         }
@@ -167,37 +182,82 @@ class DefaultChatListComponent(
     }
 
     override fun onChatCreated() {
+        if (_chatCreationStatus.value == ChatCreationStatus.CREATING) return
+
+        _chatCreationStatus.value = ChatCreationStatus.CREATING
+        _chatCreationError.value = null
+        _errorState.value = null
         scope.launch {
-            val currentUserId = currentUser.id.trim()
-            if (currentUserId.isBlank()) {
-                _errorState.value = "Unable to create chat until your user profile is loaded."
-                return@launch
-            }
+            try {
+                val currentUserId = currentUser.id.trim()
+                if (currentUserId.isBlank()) {
+                    failChatCreation("Unable to create chat until your user profile is loaded.")
+                    return@launch
+                }
 
-            val normalizedUserIds = (newChat.value.chatGroup.userIds + currentUserId)
-                .map { userId -> userId.trim() }
-                .filter(String::isNotBlank)
-                .distinct()
-            val chatToCreate = newChat.value.copy(
-                chatGroup = newChat.value.chatGroup.copy(
-                    userIds = normalizedUserIds,
-                    hostId = currentUserId,
-                ),
-                users = newChat.value.users
-                    .filterNot { it.id == currentUserId }
-                    .distinctBy { it.id }
-            )
+                val normalizedUserIds = (newChat.value.chatGroup.userIds + currentUserId)
+                    .map { userId -> userId.trim() }
+                    .filter(String::isNotBlank)
+                    .distinct()
+                val chatToCreate = newChat.value.copy(
+                    chatGroup = newChat.value.chatGroup.copy(
+                        userIds = normalizedUserIds,
+                        hostId = currentUserId,
+                    ),
+                    users = newChat.value.users
+                        .filterNot { it.id == currentUserId }
+                        .distinctBy { it.id }
+                )
 
-            val created = chatGroupRepository.createChatGroup(chatToCreate)
-            if (created.isFailure) {
-                _errorState.value = created.exceptionOrNull()?.userMessage()
-                return@launch
+                val created = chatGroupRepository.createChatGroup(chatToCreate)
+                if (created.isFailure) {
+                    failChatCreation(
+                        created.exceptionOrNull()?.userMessage("Failed to create chat.")
+                            ?: "Failed to create chat.",
+                    )
+                    return@launch
+                }
+                refreshChatGroups(
+                    fallbackMessage = "Chat created, but the chat list could not refresh. Try again.",
+                )
+                _newChat.value = createEmptyDraftChat(currentUserId)
+                _chatCreationStatus.value = ChatCreationStatus.SUCCEEDED
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (throwable: Throwable) {
+                failChatCreation(throwable.userMessage("Failed to create chat."))
             }
-            chatGroupRepository.refreshChatGroupsAndMessages().onFailure {
-                _errorState.value = it.userMessage()
-            }
-            _newChat.value = createEmptyDraftChat(currentUserId)
         }
+    }
+
+    override fun retryLoadingChats() {
+        _errorState.value = null
+        refreshChatGroups()
+    }
+
+    override fun clearChatCreationFeedback() {
+        if (_chatCreationStatus.value == ChatCreationStatus.CREATING) return
+
+        val creationError = _chatCreationError.value
+        if (creationError != null && _errorState.value == creationError) {
+            _errorState.value = null
+        }
+        _chatCreationError.value = null
+        _chatCreationStatus.value = ChatCreationStatus.IDLE
+    }
+
+    private fun refreshChatGroups(fallbackMessage: String = "Failed to load chats.") {
+        scope.launch {
+            chatGroupRepository.refreshChatGroupsAndMessages().onFailure {
+                _errorState.value = it.userMessage(fallbackMessage)
+            }
+        }
+    }
+
+    private fun failChatCreation(message: String) {
+        _chatCreationError.value = message
+        _errorState.value = message
+        _chatCreationStatus.value = ChatCreationStatus.FAILED
     }
 
     override fun addUserToNewChat(user: UserData) {

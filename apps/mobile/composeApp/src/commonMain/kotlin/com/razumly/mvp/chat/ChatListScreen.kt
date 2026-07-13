@@ -13,9 +13,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -23,7 +20,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -56,6 +52,7 @@ import com.razumly.mvp.core.presentation.composables.TermsConsentDialog
 fun ChatListScreen(component: ChatListComponent) {
     val chatList by component.chatGroups.collectAsState()
     val chatSummaries by component.chatSummaries.collectAsState()
+    val errorMessage by component.errorState.collectAsState()
     val chatTermsState by component.chatTermsState.collectAsState()
     val isCheckingChatTerms by component.isCheckingChatTerms.collectAsState()
     val showChatTermsPrompt by component.showChatTermsPrompt.collectAsState()
@@ -79,7 +76,10 @@ fun ChatListScreen(component: ChatListComponent) {
         floatingActionButton = {
             if (!showNewChatDialog) {
                 FloatingActionButton(
-                    onClick = { showNewChatDialog = true },
+                    onClick = {
+                        component.clearChatCreationFeedback()
+                        showNewChatDialog = true
+                    },
                     modifier = Modifier.padding(bottom = navBottomPadding),
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -103,6 +103,17 @@ fun ChatListScreen(component: ChatListComponent) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            errorMessage
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+                ?.let { message ->
+                    item {
+                        ChatListErrorBanner(
+                            message = message,
+                            onRetry = component::retryLoadingChats,
+                        )
+                    }
+                }
             items(chatList) {
                 ChatListItem(
                     modifier = Modifier.clickable { component.onChatSelected(it) },
@@ -131,7 +142,10 @@ fun ChatListScreen(component: ChatListComponent) {
 @Composable
 fun NewChatDialog(component: ChatListComponent, onDismiss: () -> Unit) {
     val newChat by component.newChat.collectAsState()
+    val chatCreationStatus by component.chatCreationStatus.collectAsState()
+    val chatCreationError by component.chatCreationError.collectAsState()
     var showSearchDialog by remember { mutableStateOf(false) }
+    var waitingForCreationResult by remember { mutableStateOf(false) }
     val suggestions by component.suggestedPlayers.collectAsState()
     val friends by component.friends.collectAsState()
     val currentUserId = component.currentUser.id
@@ -139,11 +153,26 @@ fun NewChatDialog(component: ChatListComponent, onDismiss: () -> Unit) {
     val selectedOtherUsers = newChat.users.filter { it.id != currentUserId }
     var isValid by remember { mutableStateOf(false) }
 
+    fun dismissDialog() {
+        if (chatCreationStatus == ChatCreationStatus.CREATING) return
+        waitingForCreationResult = false
+        component.clearChatCreationFeedback()
+        onDismiss()
+    }
+
     LaunchedEffect(newChat) {
         isValid = newChat.chatGroup.userIds.distinct().size > 1
     }
+    LaunchedEffect(chatCreationStatus, waitingForCreationResult) {
+        if (!waitingForCreationResult) return@LaunchedEffect
+        when (chatCreationStatus) {
+            ChatCreationStatus.SUCCEEDED -> dismissDialog()
+            ChatCreationStatus.FAILED -> waitingForCreationResult = false
+            ChatCreationStatus.IDLE, ChatCreationStatus.CREATING -> Unit
+        }
+    }
 
-    Dialog(onDismissRequest = { onDismiss() }) {
+    Dialog(onDismissRequest = ::dismissDialog) {
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -161,6 +190,12 @@ fun NewChatDialog(component: ChatListComponent, onDismiss: () -> Unit) {
                     modifier = Modifier.fillMaxWidth(),
                     label = "Chat Name (Optional)",
                 )
+                chatCreationError
+                    ?.trim()
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { message ->
+                        ChatCreationErrorMessage(message)
+                    }
                 LazyColumn {
                     items(selectedOtherUsers) {
                         Row(
@@ -183,14 +218,26 @@ fun NewChatDialog(component: ChatListComponent, onDismiss: () -> Unit) {
                     }
                 }
                 Row {
-                    IconButton(enabled = isValid, onClick = {
-                        component.onChatCreated()
-                        onDismiss()
-                    }) {
-                        Icon(Icons.Default.Check, contentDescription = "Create Chat")
+                    Button(
+                        enabled = isValid && chatCreationStatus != ChatCreationStatus.CREATING,
+                        onClick = {
+                            waitingForCreationResult = true
+                            component.onChatCreated()
+                        },
+                    ) {
+                        Text(
+                            when (chatCreationStatus) {
+                                ChatCreationStatus.CREATING -> "Creating…"
+                                ChatCreationStatus.FAILED -> "Retry"
+                                ChatCreationStatus.IDLE, ChatCreationStatus.SUCCEEDED -> "Create chat"
+                            }
+                        )
                     }
-                    IconButton(onClick = { onDismiss() }) {
-                        Icon(Icons.Default.Close, contentDescription = "Cancel")
+                    TextButton(
+                        enabled = chatCreationStatus != ChatCreationStatus.CREATING,
+                        onClick = ::dismissDialog,
+                    ) {
+                        Text("Cancel")
                     }
                 }
             }
@@ -211,4 +258,39 @@ fun NewChatDialog(component: ChatListComponent, onDismiss: () -> Unit) {
             )
         }
     }
+}
+
+@Composable
+internal fun ChatListErrorBanner(
+    message: String,
+    onRetry: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Unable to update chats", style = MaterialTheme.typography.titleSmall)
+            Text(message, style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = onRetry) {
+                Text("Retry")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChatCreationErrorMessage(message: String) {
+    Text(
+        text = "Couldn't create this chat. Your draft is still here. $message",
+        color = MaterialTheme.colorScheme.error,
+        style = MaterialTheme.typography.bodySmall,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
