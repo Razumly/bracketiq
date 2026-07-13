@@ -1,30 +1,45 @@
 package com.razumly.mvp.eventDetail
 
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import com.razumly.mvp.core.data.dataTypes.enums.EventType
 
 class EventNotificationCoordinatorTest {
     @Test
-    fun send_event_notification_passes_event_payload_and_event_topic_for_league() = runTest {
+    fun send_event_notification_routes_every_event_type_with_the_exact_payload() = runTest {
         val calls = mutableListOf<NotificationCall>()
         val coordinator = EventNotificationCoordinator { eventId, title, body, isTournament ->
             calls += NotificationCall(eventId, title, body, isTournament)
             Result.success(Unit)
         }
-
-        val result = coordinator.sendEventNotification(
-            eventId = "event-1",
-            eventType = EventType.LEAGUE,
-            title = "Schedule update",
-            message = "Court changed.",
+        val scenarios = listOf(
+            EventRoutingScenario(EventType.TOURNAMENT, isTournament = true),
+            EventRoutingScenario(EventType.LEAGUE, isTournament = false),
+            EventRoutingScenario(EventType.EVENT, isTournament = false),
+            EventRoutingScenario(EventType.WEEKLY_EVENT, isTournament = false),
         )
 
-        assertTrue(result.isSuccess)
+        scenarios.forEachIndexed { index, scenario ->
+            val result = coordinator.sendEventNotification(
+                eventId = "event-$index",
+                eventType = scenario.eventType,
+                title = "Schedule update $index",
+                message = "Court changed $index.",
+            )
+
+            assertTrue(result.isSuccess)
+        }
         assertEquals(
-            listOf(NotificationCall("event-1", "Schedule update", "Court changed.", false)),
+            scenarios.mapIndexed { index, scenario ->
+                NotificationCall(
+                    eventId = "event-$index",
+                    title = "Schedule update $index",
+                    body = "Court changed $index.",
+                    isTournament = scenario.isTournament,
+                )
+            },
             calls,
         )
     }
@@ -49,6 +64,11 @@ class EventNotificationCoordinatorTest {
         val eventId: String,
         val title: String,
         val body: String,
+        val isTournament: Boolean,
+    )
+
+    private data class EventRoutingScenario(
+        val eventType: EventType,
         val isTournament: Boolean,
     )
 }

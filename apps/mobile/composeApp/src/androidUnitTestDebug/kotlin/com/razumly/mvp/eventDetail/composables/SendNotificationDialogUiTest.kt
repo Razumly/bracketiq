@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -16,6 +17,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import kotlinx.coroutines.CompletableDeferred
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import org.junit.Rule
@@ -34,12 +36,16 @@ class SendNotificationDialogUiTest {
         val sendResult = CompletableDeferred<Result<Unit>>()
         var isVisible by mutableStateOf(true)
         var didSend by mutableStateOf(false)
+        var sentPayload: NotificationPayload? = null
 
         composeRule.setContent {
             MaterialTheme {
                 if (isVisible) {
                     SendNotificationDialog(
-                        onSend = { _, _ -> sendResult.await() },
+                        onSend = { title, message ->
+                            sentPayload = NotificationPayload(title, message)
+                            sendResult.await()
+                        },
                         onSent = {
                             didSend = true
                             isVisible = false
@@ -50,10 +56,14 @@ class SendNotificationDialogUiTest {
             }
         }
 
-        enterMessageAndSubmit()
+        enterMessageAndSubmit(
+            title = "  Schedule update  ",
+            message = "  Court changed.  ",
+        )
 
         composeRule.onNodeWithText("Sending notification...").assertIsDisplayed()
         composeRule.onNodeWithText("Cancel").assertIsNotEnabled()
+        assertEquals(NotificationPayload("Schedule update", "Court changed."), sentPayload)
         assertTrue(isVisible)
         assertFalse(didSend)
 
@@ -66,28 +76,53 @@ class SendNotificationDialogUiTest {
 
     @Test
     fun dialog_keeps_input_open_and_shows_error_when_send_fails() {
+        var isVisible by mutableStateOf(true)
         var didSend by mutableStateOf(false)
+        var didDismiss by mutableStateOf(false)
 
         composeRule.setContent {
             MaterialTheme {
-                SendNotificationDialog(
-                    onSend = { _, _ -> Result.failure(IllegalStateException("No connection")) },
-                    onSent = { didSend = true },
-                    onDismiss = {},
-                )
+                if (isVisible) {
+                    SendNotificationDialog(
+                        onSend = { _, _ -> Result.failure(IllegalStateException("No connection")) },
+                        onSent = {
+                            didSend = true
+                            isVisible = false
+                        },
+                        onDismiss = {
+                            didDismiss = true
+                            isVisible = false
+                        },
+                    )
+                }
             }
         }
 
-        enterMessageAndSubmit()
+        enterMessageAndSubmit(
+            title = "Schedule update",
+            message = "Court changed.",
+        )
 
         composeRule.onNodeWithText("No connection").assertIsDisplayed()
         composeRule.onAllNodesWithText("Send Notification").assertCountEquals(2)
+        composeRule.onAllNodes(hasSetTextAction())[0].assertTextContains("Schedule update")
+        composeRule.onAllNodes(hasSetTextAction())[1].assertTextContains("Court changed.")
+        assertTrue(isVisible)
         assertFalse(didSend)
+        assertFalse(didDismiss)
     }
 
-    private fun enterMessageAndSubmit() {
-        composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("Schedule update")
-        composeRule.onAllNodes(hasSetTextAction())[1].performTextInput("Court changed.")
+    private fun enterMessageAndSubmit(
+        title: String = "Schedule update",
+        message: String = "Court changed.",
+    ) {
+        composeRule.onAllNodes(hasSetTextAction())[0].performTextInput(title)
+        composeRule.onAllNodes(hasSetTextAction())[1].performTextInput(message)
         composeRule.onAllNodesWithText("Send Notification")[1].performClick()
     }
+
+    private data class NotificationPayload(
+        val title: String,
+        val message: String,
+    )
 }
