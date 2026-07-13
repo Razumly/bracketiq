@@ -26,7 +26,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -80,16 +80,71 @@ class ChatGroupRepository(
     ): Flow<Result<ChatGroupWithRelations>> {
         val normalizedMessageUserId = messageUserId?.trim()?.takeIf(String::isNotBlank)
         val normalizedChatId = chatId?.trim()?.takeIf(String::isNotBlank)
+        if (normalizedMessageUserId != null) {
+            return directMessageFlow(normalizedMessageUserId)
+        }
+
         return chatGroupsFlow.map { result ->
-            result.fold(onSuccess = { list ->
-                normalizedMessageUserId?.let { userId -> findOrCreateDirectMessage(userId) }
-                    ?: list.find { it.chatGroup.id == normalizedChatId }
-                        ?.let { foundChatGroup ->
-                            Result.success(foundChatGroup)
-                        } ?: Result.failure(Exception("Chat group not found"))
-            }, onFailure = { error ->
-                Result.failure(error)
-            })
+            result.mapCatching { list ->
+                list.find { it.chatGroup.id == normalizedChatId }
+                    ?: throw Exception("Chat group not found")
+            }
+        }
+    }
+
+    /**
+     * Resolves the server-owned direct-message ID once for each collector, then
+     * keeps observing Room without feeding every database invalidation back
+     * into another create request. A cached pair is emitted immediately and is
+     * retained as an offline fallback if canonical resolution fails.
+     */
+    private fun directMessageFlow(otherUserId: String): Flow<Result<ChatGroupWithRelations>> = flow {
+        val currentUserId = userRepository.currentUser.value.getOrThrow().id
+        var didAttemptCanonicalResolution = false
+        var canonicalChatId: String? = null
+        var lastResolvedChat: ChatGroupWithRelations? = null
+
+        chatGroupsFlow.collect { result ->
+            val upstreamError = result.exceptionOrNull()
+            if (upstreamError != null) {
+                val cachedChat = lastResolvedChat
+                emit(
+                    if (cachedChat != null) Result.success(cachedChat)
+                    else Result.failure(upstreamError)
+                )
+                return@collect
+            }
+            val chatGroups = result.getOrThrow()
+            val observedChat = canonicalChatId
+                ?.let { id -> chatGroups.find { group -> group.chatGroup.id == id } }
+                ?: chatGroups.find { group ->
+                    val participantIds = group.chatGroup.userIds.distinct()
+                    participantIds.size == 2 &&
+                        currentUserId in participantIds &&
+                        otherUserId in participantIds
+                }
+                ?: lastResolvedChat
+
+            if (observedChat != null) {
+                lastResolvedChat = observedChat
+                emit(Result.success(observedChat))
+            }
+
+            if (!didAttemptCanonicalResolution) {
+                didAttemptCanonicalResolution = true
+                val canonicalResult = findOrCreateDirectMessage(otherUserId)
+                val canonicalError = canonicalResult.exceptionOrNull()
+                if (canonicalError != null) {
+                    if (observedChat == null) {
+                        emit(Result.failure(canonicalError))
+                    }
+                    return@collect
+                }
+                val canonicalChat = canonicalResult.getOrThrow()
+                canonicalChatId = canonicalChat.chatGroup.id
+                lastResolvedChat = canonicalChat
+                emit(Result.success(canonicalChat))
+            }
         }
     }
 
@@ -159,6 +214,11 @@ class ChatGroupRepository(
         )
 
     override suspend fun createChatGroup(newChatGroup: ChatGroupWithRelations): Result<Unit> =
+        createChatGroupCanonical(newChatGroup).map { }
+
+    private suspend fun createChatGroupCanonical(
+        newChatGroup: ChatGroupWithRelations,
+    ): Result<ChatGroup> =
         singleResponse(networkCall = {
             api.post<CreateChatGroupRequestDto, ChatGroupApiDto>(
                 path = "api/chat/groups",
@@ -176,7 +236,7 @@ class ChatGroupRepository(
             chatGroup.setDisplayName(resolveDisplayName(chatGroup, otherUsers, team))
                 .setImageUrl(resolveImageUrl(chatGroup, otherUsers, team))
             databaseService.getChatGroupDao.upsertChatGroupWithRelations(chatGroup)
-        }, onReturn = { })
+        }, onReturn = { chatGroup -> chatGroup })
 
     override suspend fun updateChatGroup(newChatGroup: ChatGroup): Result<ChatGroup> =
         singleResponse(networkCall = {
@@ -336,21 +396,6 @@ class ChatGroupRepository(
         runCatching {
             val currentUserId = userRepository.currentUser.value.getOrThrow().id
 
-            val existingChats = chatGroupsFlow.first().getOrThrow()
-            val existingDM = existingChats.find { chatGroup ->
-                chatGroup.chatGroup.userIds.size == 2 && chatGroup.chatGroup.userIds.contains(
-                    otherUserId
-                ) && chatGroup.chatGroup.userIds.contains(
-                    currentUserId
-                )
-            }
-
-            if (existingDM != null) {
-                return@runCatching existingChats.find { it.chatGroup.id == existingDM.chatGroup.id }
-                    ?: throw Exception("Chat group not found")
-            }
-
-            // Create new DM chat
             val otherUser = userRepository.getUsers(listOf(otherUserId)).getOrThrow().first()
             val currentUser = userRepository.currentUser.value.getOrThrow()
 
@@ -363,9 +408,11 @@ class ChatGroupRepository(
                 ), users = listOf(currentUser, otherUser), messages = listOf()
             )
 
-            createChatGroup(newChatGroup).getOrThrow()
-
-            newChatGroup
+            // The server atomically creates or returns the one canonical row
+            // for this participant pair. Its ID may differ from our proposed
+            // ID when another client won the race, so return that row.
+            val canonicalChatGroup = createChatGroupCanonical(newChatGroup).getOrThrow()
+            newChatGroup.copy(chatGroup = canonicalChatGroup)
         }
 }
 
