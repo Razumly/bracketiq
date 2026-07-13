@@ -1629,7 +1629,7 @@ class DefaultMatchContentComponent(
                     .syncLegacyScoresFromSegments(maxSets)
 
                 val persistedMatch = if (isMatchOver(updatedScoringMatch)) {
-                    val endTime = updatedScoringMatch.end ?: updatedScoringMatch.start ?: Clock.System.now()
+                    val endTime = Clock.System.now()
                     syncMatchImmediatelyBlocking(
                         match = updatedScoringMatch,
                         finalize = true,

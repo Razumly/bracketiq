@@ -1331,7 +1331,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_final_set_is_confirmed_when_confirming_again_then_no_second_sync_occurs() = runTest(testDispatcher) {
+    fun given_final_set_is_confirmed_when_confirming_again_then_completion_uses_the_actual_finish_time_once() = runTest(testDispatcher) {
         val user = createUser(id = "user-1", teamIds = listOf("team-c"))
         val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(
             eventType = EventType.LEAGUE,
@@ -1350,6 +1350,8 @@ class MatchContentComponentTest : MainDispatcherTest() {
             team2Points = listOf(18),
             setResults = listOf(0),
             segments = listOf(createSegment(sequence = 1, team1Score = 21, team2Score = 18)),
+            start = Instant.parse("2025-01-01T12:00:00Z"),
+            end = Instant.parse("2025-01-01T13:00:00Z"),
         )
         val harness = MatchDetailHarness(
             event = event,
@@ -1371,8 +1373,11 @@ class MatchContentComponentTest : MainDispatcherTest() {
         assertEquals("COMPLETE", harness.component.matchWithTeams.value.match.segments.first().status)
         assertEquals("COMPLETE", harness.component.matchWithTeams.value.match.status)
         assertEquals("FINAL", harness.component.matchWithTeams.value.match.resultStatus)
+        val completionOperation = harness.matchRepository.operationCalls.single()
+        assertTrue(completionOperation.time != match.start)
+        assertTrue(completionOperation.time != match.end)
         assertEquals(
-            harness.matchRepository.operationCalls.single().time?.toString(),
+            completionOperation.time?.toString(),
             harness.component.matchWithTeams.value.match.actualEnd,
         )
         assertEquals(1, harness.matchRepository.operationCalls.size)
