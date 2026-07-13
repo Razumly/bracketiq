@@ -17,7 +17,9 @@ class MainActivity : ComponentActivity() {
         applyDemoRoute(intent)
         setContent {
             val state = viewModel.state.collectAsStateWithLifecycle().value
-            BackHandler(enabled = state.route != WearRoute.LOGIN && state.route != WearRoute.MATCHES) {
+            BackHandler(
+                enabled = !state.isLoading && state.route != WearRoute.LOGIN && state.route != WearRoute.MATCHES,
+            ) {
                 viewModel.back()
             }
             MvpWearApp(

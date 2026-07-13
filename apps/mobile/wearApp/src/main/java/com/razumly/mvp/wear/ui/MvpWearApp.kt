@@ -116,11 +116,7 @@ fun MvpWearApp(
                 WearRoute.TIME_PICK -> TimePickScreen(state, actions)
             }
             if (state.isLoading) {
-                LoadingPill(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 10.dp),
-                )
+                LoadingScrim()
             }
         }
     }
@@ -249,10 +245,10 @@ private fun MatchDetailScreen(
             val active = match.raw.activeSegment() != null
             when {
                 !match.officialCheckedIn -> {
-                    PrimaryChip(label = "Check in", onClick = actions.onCheckIn)
+                    PrimaryChip(label = "Check in", enabled = !state.isLoading, onClick = actions.onCheckIn)
                 }
                 active -> {
-                    PrimaryChip(label = "Timer", onClick = actions.onOpenTimer)
+                    PrimaryChip(label = "Timer", enabled = !state.isLoading, onClick = actions.onOpenTimer)
                 }
                 match.isFinished() -> {
                     SecondaryChip(label = "Finished", enabled = false, onClick = {})
@@ -265,19 +261,30 @@ private fun MatchDetailScreen(
                     ) {
                         PrimaryChip(
                             label = match.startSegmentActionLabel(),
+                            enabled = !state.isLoading,
                             onClick = actions.onStartTimer,
                         )
                         SecondaryChip(
                             label = "Finish Match",
+                            enabled = !state.isLoading,
                             onClick = actions.onEndMatch,
                         )
                     }
                 }
                 match.canStartSegmentFromDetail() -> {
-                    PrimaryChip(label = match.startSegmentActionLabel(), onClick = actions.onStartTimer)
+                    PrimaryChip(
+                        label = match.startSegmentActionLabel(),
+                        enabled = !state.isLoading,
+                        onClick = actions.onStartTimer,
+                    )
                 }
                 else -> {
-                    PrimaryChip(label = "Finish Match", color = Danger, onClick = actions.onEndMatch)
+                    PrimaryChip(
+                        label = "Finish Match",
+                        enabled = !state.isLoading,
+                        color = Danger,
+                        onClick = actions.onEndMatch,
+                    )
                 }
             }
             StatusText(message = state.error, danger = true)
@@ -309,7 +316,7 @@ private fun TimerScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Background)
-            .clickable(onClick = actions.onTimerTapped),
+            .clickable(enabled = !state.isLoading, onClick = actions.onTimerTapped),
         contentAlignment = Alignment.Center,
     ) {
         BasicText(
@@ -362,7 +369,7 @@ private fun TeamScorePickerScreen(
                     .fillMaxWidth()
                     .background(HomeBlue)
                     .clickable(
-                        enabled = match.team1 != null,
+                        enabled = !state.isLoading && match.team1 != null,
                         onClick = { match.team1?.id?.let(actions.onTeamSelected) },
                     ),
             )
@@ -372,7 +379,7 @@ private fun TeamScorePickerScreen(
                     .fillMaxWidth()
                     .background(AwayRed)
                     .clickable(
-                        enabled = match.team2 != null,
+                        enabled = !state.isLoading && match.team2 != null,
                         onClick = { match.team2?.id?.let(actions.onTeamSelected) },
                     ),
             )
@@ -419,6 +426,7 @@ private fun TeamScorePickerScreen(
             iconSize = actionIconSize,
             plusFontSize = actionPlusSize,
             textFontSize = actionTextSize,
+            enabled = !state.isLoading,
             onClick = actions.onShowActionMenu,
         )
     }
@@ -441,15 +449,18 @@ private fun ActionMenuScreen(
     ) {
         ActionOptionChip(
             label = "Incidents",
+            enabled = !state.isLoading,
             onClick = actions.onShowIncidentList,
         )
         ActionOptionChip(
             label = "Reset Time",
+            enabled = !state.isLoading,
             onClick = actions.onResetTimer,
         )
         ActionOptionChip(
             label = match.endSegmentActionLabel(),
             color = Danger,
+            enabled = !state.isLoading,
             onClick = actions.onEndSegment,
         )
         StatusText(message = state.error, danger = true)
@@ -565,6 +576,7 @@ private fun IncidentEditorScreen(
                 label = "Cancel",
                 modifier = Modifier.weight(1f),
                 color = Danger,
+                enabled = !state.isLoading,
                 contentAlignment = Alignment.CenterEnd,
                 onClick = actions.onCancelIncident,
             )
@@ -572,6 +584,7 @@ private fun IncidentEditorScreen(
                 label = if (state.isLoading) "Finished" else "Finish",
                 modifier = Modifier.weight(1f),
                 color = Accent,
+                enabled = !state.isLoading,
                 contentAlignment = Alignment.CenterStart,
                 onClick = actions.onFinishIncident,
             )
@@ -853,12 +866,13 @@ private fun BackCircleButton(
 private fun ActionOptionChip(
     label: String,
     color: Color = SurfaceAlt,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     if (color == Danger) {
-        PrimaryChip(label = label, color = color, onClick = onClick)
+        PrimaryChip(label = label, color = color, enabled = enabled, onClick = onClick)
     } else {
-        SecondaryChip(label = label, onClick = onClick)
+        SecondaryChip(label = label, enabled = enabled, onClick = onClick)
     }
 }
 
@@ -1064,6 +1078,7 @@ private fun CenterActionPill(
     iconSize: androidx.compose.ui.unit.Dp,
     plusFontSize: TextUnit,
     textFontSize: TextUnit,
+    enabled: Boolean,
     onClick: () -> Unit,
 ) {
     Row(
@@ -1072,7 +1087,7 @@ private fun CenterActionPill(
             .height(height)
             .clip(RoundedCornerShape(14.dp))
             .background(Color(0xFFF3F5F8))
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
@@ -1393,6 +1408,19 @@ private fun LoadingPill(modifier: Modifier = Modifier) {
             text = "Loading",
             style = TextStyle(color = Warning, fontSize = 10.sp, fontWeight = FontWeight.Bold),
         )
+    }
+}
+
+@Composable
+private fun LoadingScrim() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Background.copy(alpha = 0.78f))
+            .clickable(onClick = {}),
+        contentAlignment = Alignment.Center,
+    ) {
+        LoadingPill()
     }
 }
 

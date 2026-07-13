@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MvpWearViewModel(application: Application) : AndroidViewModel(application) {
     private val tokenStore = WearAuthTokenStore(application.applicationContext)
@@ -44,6 +45,7 @@ class MvpWearViewModel(application: Application) : AndroidViewModel(application)
     private val _state = MutableStateFlow(MvpWearUiState())
     val state: StateFlow<MvpWearUiState> = _state.asStateFlow()
     private var demoMode = false
+    private val matchActionGate = WearMatchActionGate()
 
     init {
         bootstrap()
@@ -566,31 +568,17 @@ class MvpWearViewModel(application: Application) : AndroidViewModel(application)
         action: suspend (WearMatch) -> WearMatchDto,
     ) {
         val match = state.value.selectedMatch ?: return
-        viewModelScope.launch {
-            _state.update { it.copy(isLoading = false, error = null, message = null) }
-            val updatedRaw = try {
-                withContext(Dispatchers.IO) { action(match) }
-            } catch (throwable: Throwable) {
-                _state.update {
-                    it.copy(
-                        isLoading = false,
-                        error = throwable.toUserMessage(),
-                    )
-                }
-                return@launch
-            }
+        launchBusy {
+            val updatedRaw = withContext(Dispatchers.IO) { action(match) }
             val updatedMatch = match.withUpdatedRaw(updatedRaw, state.value.currentUserId)
             _state.update {
                 it.withUpdatedMatch(updatedMatch).copy(
                     route = successRoute,
                     message = successMessage,
                     error = null,
-                    isLoading = false,
                 )
             }
-            viewModelScope.launch {
-                runCatching { reloadMatches(preserveSelection = true) }
-            }
+            runCatching { reloadMatches(preserveSelection = true) }
         }
     }
 
@@ -623,20 +611,17 @@ class MvpWearViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun launchBusy(block: suspend () -> Unit) {
+        if (!matchActionGate.tryStart()) return
+        _state.update { it.copy(isLoading = true, error = null, message = null) }
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, error = null) }
-            runCatching { block() }
-                .onFailure { throwable ->
-                    _state.update {
-                        it.copy(
-                            isLoading = false,
-                            error = throwable.toUserMessage(),
-                        )
-                    }
-                }
-                .onSuccess {
-                    _state.update { it.copy(isLoading = false) }
-                }
+            try {
+                block()
+            } catch (throwable: Throwable) {
+                _state.update { it.copy(error = throwable.toUserMessage()) }
+            } finally {
+                matchActionGate.finish()
+                _state.update { it.copy(isLoading = false) }
+            }
         }
     }
 }
@@ -666,6 +651,16 @@ enum class WearIncidentField {
     TEAM,
     PLAYER,
     TIME,
+}
+
+internal class WearMatchActionGate {
+    private val inFlight = AtomicBoolean(false)
+
+    fun tryStart(): Boolean = inFlight.compareAndSet(false, true)
+
+    fun finish() {
+        inFlight.set(false)
+    }
 }
 
 data class MvpWearUiState(
