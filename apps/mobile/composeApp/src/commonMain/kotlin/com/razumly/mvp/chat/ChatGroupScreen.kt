@@ -45,7 +45,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -63,11 +66,15 @@ import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.TermsConsentDialog
 import com.razumly.mvp.core.presentation.util.timeFormat
+import com.razumly.mvp.chat.composables.isChatListNearBottom
+import com.razumly.mvp.chat.composables.resolveChatScrollUpdate
 import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.Month
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import androidx.compose.ui.window.Dialog
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
@@ -87,6 +94,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
     val showChatTermsPrompt by component.showChatTermsPrompt.collectAsState()
     val currentUserId = component.currentUser.id
     val chatGroup = chatGroupWithRelations?.chatGroup ?: ChatGroup.empty()
+    val chatId = chatGroup.id
     val messages = chatGroupWithRelations?.messages ?: listOf()
     val users = chatGroupWithRelations?.users ?: listOf()
     val isHost = chatGroup.hostId == currentUserId
@@ -100,6 +108,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
         ?: participantNames
         ?: "Chat"
     val listState = rememberLazyListState()
+    val scrollScope = rememberCoroutineScope()
     val density = LocalDensity.current
     val imeBottom = WindowInsets.ime.getBottom(density)
     val focusManager = LocalFocusManager.current
@@ -120,11 +129,45 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
     var showReportChatDialog by remember { mutableStateOf(false) }
     var showReportLeaveDialog by remember { mutableStateOf(false) }
     var reportNotes by remember { mutableStateOf("") }
+    var previousMessageCount by remember(chatId) { mutableStateOf(0) }
+    var unseenMessageCount by remember(chatId) { mutableStateOf(0) }
+    var wasNearBottom by remember(chatId) { mutableStateOf(true) }
+    val currentMessageCount by rememberUpdatedState(messages.size)
 
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
+    LaunchedEffect(listState, chatId) {
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collect {
+                val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                val isNearBottom = isChatListNearBottom(
+                    lastVisibleItemIndex = lastVisibleIndex,
+                    messageCount = currentMessageCount,
+                )
+                wasNearBottom = isNearBottom
+                if (isNearBottom) {
+                    unseenMessageCount = 0
+                }
+            }
+    }
+
+    LaunchedEffect(latestMessageKey, messages.size, currentUserId) {
+        if (messages.isEmpty()) {
+            previousMessageCount = 0
+            unseenMessageCount = 0
+            return@LaunchedEffect
         }
+        val update = resolveChatScrollUpdate(
+            previousMessageCount = previousMessageCount,
+            currentMessageCount = messages.size,
+            isNearBottom = wasNearBottom,
+            latestMessageUserId = messages.last().userId,
+            currentUserId = currentUserId,
+            currentUnseenMessageCount = unseenMessageCount,
+        )
+        if (update.shouldAutoScroll) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
+        unseenMessageCount = update.unseenMessageCount
+        previousMessageCount = messages.size
     }
 
     LaunchedEffect(imeBottom) {
@@ -249,6 +292,27 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                             }
                         }
                     )
+                }
+            }
+
+            if (unseenMessageCount > 0 && messages.isNotEmpty()) {
+                TextButton(
+                    onClick = {
+                        scrollScope.launch {
+                            listState.animateScrollToItem(messages.lastIndex)
+                            unseenMessageCount = 0
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                ) {
+                    val label = if (unseenMessageCount == 1) {
+                        "1 new message"
+                    } else {
+                        "$unseenMessageCount new messages"
+                    }
+                    Text(label)
                 }
             }
 
