@@ -1205,6 +1205,18 @@ fun WearMatch.canUseTieBreaker(): Boolean =
         rules.supportsShootout ||
         rules.canUseShootout
 
+fun WearMatch.displayScoreFor(teamId: String?): Int {
+    val normalizedTeamId = teamId.normalizedId() ?: return 0
+    return if (rules.scoringModel.equals("SETS", ignoreCase = true)) {
+        (raw.activeSegment() ?: raw.nextPlayableSegment(rules))
+            ?.scores
+            ?.get(normalizedTeamId)
+            ?: 0
+    } else {
+        raw.orderedSegments().sumOf { segment -> segment.scores[normalizedTeamId] ?: 0 }
+    }
+}
+
 fun WearMatch.regulationComplete(): Boolean {
     val regulationCount = rules.segmentCount.coerceAtLeast(1)
     val regulationSegments = raw.orderedSegments().filter { it.sequence <= regulationCount }

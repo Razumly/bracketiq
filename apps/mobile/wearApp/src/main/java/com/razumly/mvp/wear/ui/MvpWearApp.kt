@@ -64,6 +64,7 @@ import com.razumly.mvp.wear.data.WearPlayer
 import com.razumly.mvp.wear.data.WearTeam
 import com.razumly.mvp.wear.data.activeSegment
 import com.razumly.mvp.wear.data.canStartSegmentFromDetail
+import com.razumly.mvp.wear.data.displayScoreFor
 import com.razumly.mvp.wear.data.isScoring
 import com.razumly.mvp.wear.data.nextPlayableSegment
 import com.razumly.mvp.wear.data.orderedSegments
@@ -396,14 +397,14 @@ private fun TeamScorePickerScreen(
                 .offset(y = -nameOffset),
         )
         ScoreValue(
-            score = match.scoreFor(match.team1?.id),
+            score = match.displayScoreFor(match.team1?.id),
             fontSize = scoreTextSize,
             modifier = Modifier
                 .align(Alignment.Center)
                 .offset(y = -scoreOffset),
         )
         ScoreValue(
-            score = match.scoreFor(match.team2?.id),
+            score = match.displayScoreFor(match.team2?.id),
             fontSize = scoreTextSize,
             modifier = Modifier
                 .align(Alignment.Center)
@@ -646,10 +647,10 @@ private fun IncidentTeamScreen(
         footer = { BottomActionButton(label = "Cancel", color = Danger, onClick = actions.onCancelIncident) },
     ) {
         match.team1?.let { team ->
-            TeamChip(team = team, score = match.scoreFor(team.id), onClick = { actions.onTeamSelected(team.id) })
+            TeamChip(team = team, score = match.displayScoreFor(team.id), onClick = { actions.onTeamSelected(team.id) })
         }
         match.team2?.let { team ->
-            TeamChip(team = team, score = match.scoreFor(team.id), onClick = { actions.onTeamSelected(team.id) })
+            TeamChip(team = team, score = match.displayScoreFor(team.id), onClick = { actions.onTeamSelected(team.id) })
         }
         StatusText(message = state.error, danger = true)
     }
@@ -1494,11 +1495,6 @@ private fun WearMatch.endSegmentActionLabel(): String {
 
 private fun WearMatch.startTimeLabel(): String? =
     startIso?.let(::formatStartTime)
-
-private fun WearMatch.scoreFor(teamId: String?): Int {
-    if (teamId == null) return 0
-    return raw.orderedSegments().sumOf { segment -> segment.scores[teamId] ?: 0 }
-}
 
 private fun WearMatch.teamFor(teamId: String?): WearTeam? =
     listOfNotNull(team1, team2).firstOrNull { it.id == teamId }
