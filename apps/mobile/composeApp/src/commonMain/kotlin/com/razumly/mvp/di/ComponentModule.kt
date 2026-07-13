@@ -253,7 +253,6 @@ val componentModule = module {
         DefaultPlayerInteractionComponent(
             componentContext = params.get(),
             userRepository = get(),
-            chatRepository = get()
         )
     }
 }
