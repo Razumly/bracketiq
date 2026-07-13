@@ -140,7 +140,7 @@ enum class OrganizationReviewSaveStatus {
     FAILED,
 }
 
-private data class PendingRentalReservation(
+internal data class PendingRentalReservation(
     val publicSlug: String,
     val context: RentalCreateContext,
     val selections: List<RentalOrderSelectionRequest>,
@@ -1433,7 +1433,7 @@ class DefaultOrganizationDetailComponent(
         presentPaymentSheet(email, name, billingAddress)
     }
 
-    private suspend fun completePendingRentalReservation(pending: PendingRentalReservation) {
+    internal suspend fun completePendingRentalReservation(pending: PendingRentalReservation) {
         if (::loadingHandler.isInitialized) {
             loadingHandler.showLoading("Reserving resources...")
         }

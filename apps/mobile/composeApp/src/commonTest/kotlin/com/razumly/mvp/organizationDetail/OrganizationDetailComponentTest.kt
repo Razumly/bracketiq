@@ -32,6 +32,8 @@ import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.OrganizationEventPage
 import com.razumly.mvp.core.data.repositories.OrganizationTeamPage
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
+import com.razumly.mvp.core.data.repositories.RentalOrderResult
+import com.razumly.mvp.core.data.repositories.RentalOrderSelectionRequest
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.TeamRegistrationConsent
 import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
@@ -455,6 +457,45 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun paidRental_orderFailure_surfaces_durableRetry_without_reporting_a_false_booking() =
+        runTest(testDispatcher) {
+            val harness = OrganizationDetailHarness(product = createProduct(period = "SINGLE"))
+            advance()
+            harness.billingRepository.rentalOrderResult = Result.failure(
+                IllegalStateException("temporary booking outage"),
+            )
+            val pending = paidRentalReservation()
+
+            harness.component.completePendingRentalReservation(pending)
+
+            assertEquals(
+                listOf(
+                    RentalOrderCall(
+                        publicSlug = pending.publicSlug,
+                        eventId = "booking-paid-1",
+                        selections = pending.selections,
+                        paymentIntentId = "pi_paid_1",
+                        payerUserId = "payer-1",
+                    )
+                ),
+                harness.billingRepository.rentalOrderCalls,
+            )
+            assertNull(harness.component.completedRentalReservation.value)
+            assertNull(harness.component.message.value)
+            assertTrue(
+                harness.component.errorState.value?.message.orEmpty().contains(
+                    "Payment was recorded, but the reservation is still being finalized.",
+                ),
+            )
+            assertTrue(
+                harness.component.errorState.value?.message.orEmpty().contains(
+                    "It will retry automatically; do not submit another payment.",
+                ),
+            )
+            assertFalse(harness.component.isReservingRental.value)
+        }
+
+    @Test
     fun teamPaymentCompletionMessage_uses_the_registered_team_not_the_first_catalog_page() = runTest(testDispatcher) {
         val pendingTeam = catalogTeam("team-on-page-two", "Page two team")
         val refreshedTeam = pendingTeam.copy(
@@ -700,6 +741,14 @@ private class OrganizationDetailHarness(
     )
 }
 
+private data class RentalOrderCall(
+    val publicSlug: String,
+    val eventId: String,
+    val selections: List<RentalOrderSelectionRequest>,
+    val paymentIntentId: String?,
+    val payerUserId: String?,
+)
+
 private class OrganizationDetailTestBillingRepository(
     private val organization: Organization,
     private val products: List<Product>,
@@ -720,6 +769,10 @@ private class OrganizationDetailTestBillingRepository(
     var lastSavedBody: String? = null
         private set
     var reviewSaveFailure: Throwable? = null
+    val rentalOrderCalls = mutableListOf<RentalOrderCall>()
+    var rentalOrderResult: Result<RentalOrderResult> = Result.failure(
+        UnsupportedOperationException("Rental order result is not configured."),
+    )
     private var reviewPayload = OrganizationReviewsPayload(
         summary = OrganizationReviewSummary(),
         viewerIsAuthenticated = true,
@@ -739,6 +792,25 @@ private class OrganizationDetailTestBillingRepository(
 
     override suspend fun getOrganizationReviews(organizationId: String): Result<OrganizationReviewsPayload> =
         Result.success(reviewPayload)
+
+    override suspend fun createRentalOrder(
+        publicSlug: String,
+        eventId: String,
+        selections: List<RentalOrderSelectionRequest>,
+        paymentIntentId: String?,
+        payerUserId: String?,
+        renterOrganizationId: String?,
+        sportId: String?,
+    ): Result<RentalOrderResult> {
+        rentalOrderCalls += RentalOrderCall(
+            publicSlug = publicSlug,
+            eventId = eventId,
+            selections = selections,
+            paymentIntentId = paymentIntentId,
+            payerUserId = payerUserId,
+        )
+        return rentalOrderResult
+    }
 
     override suspend fun saveOrganizationReview(
         organizationId: String,
@@ -872,6 +944,34 @@ private class QueuedRentalAvailabilityFieldRepository :
         return responses.removeFirst().await()
     }
 }
+
+private fun paidRentalReservation(): PendingRentalReservation = PendingRentalReservation(
+    publicSlug = "summit-sports",
+    context = RentalCreateContext(
+        organizationId = "org-1",
+        organizationName = "Summit Sports",
+        organizationLocation = "Portland, OR",
+        organizationCoordinates = null,
+        selectedFieldIds = listOf("field-1"),
+        selectedTimeSlotIds = listOf("slot-1"),
+        rentalPriceCents = 2500,
+        rentalBookingId = "booking-paid-1",
+        startEpochMillis = Instant.parse("2026-07-14T17:00:00Z").toEpochMilliseconds(),
+        endEpochMillis = Instant.parse("2026-07-14T18:00:00Z").toEpochMilliseconds(),
+    ),
+    selections = listOf(
+        RentalOrderSelectionRequest(
+            key = "selection-1",
+            scheduledFieldIds = listOf("field-1"),
+            startDate = "2026-07-14T17:00:00Z",
+            endDate = "2026-07-14T18:00:00Z",
+            timeZone = "America/Los_Angeles",
+        )
+    ),
+    payerUserId = "payer-1",
+    paymentIntentId = "pi_paid_1",
+    pendingOrderId = "booking-paid-1:pi_paid_1",
+)
 
 private fun rentalSnapshot(
     rangeStart: Instant,
