@@ -210,7 +210,6 @@ class DefaultChatGroupComponent(
             return
         }
         val currentChatGroup = chatGroup.value ?: return
-        _messageInput.value = ""
         val chatId = currentChatGroup.chatGroup.id
         val message = MessageMVP(
             id = newId(),
@@ -227,6 +226,9 @@ class DefaultChatGroupComponent(
             if (createResult.isFailure) {
                 _errorState.value = createResult.exceptionOrNull()?.userMessage()
                 return@launch
+            }
+            if (_messageInput.value.trim() == text) {
+                _messageInput.value = ""
             }
             pushNotificationsRepository.sendChatGroupNotification(
                 chatId, "New message from ${currentUser.fullName}", text

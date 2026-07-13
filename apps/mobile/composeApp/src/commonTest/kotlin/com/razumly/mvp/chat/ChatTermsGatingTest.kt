@@ -68,6 +68,21 @@ class ChatTermsGatingTest : MainDispatcherTest() {
         assertEquals("Hello", harness.messageRepository.createdMessages.single().body)
         assertEquals("chat_1", harness.messageRepository.createdMessages.single().chatId)
     }
+
+    @Test
+    fun accepted_user_keeps_message_draft_when_send_fails() = runTest(testDispatcher) {
+        val harness = ChatGroupHarness(acceptedTerms = true)
+        harness.messageRepository.createMessageFailure = IllegalStateException("Network unavailable")
+        advance()
+
+        harness.component.onMessageInputChange("Keep this draft")
+        harness.component.sendMessage()
+        advance()
+
+        assertEquals("Keep this draft", harness.component.messageInput.value)
+        assertTrue(harness.component.errorState.value?.contains("Network unavailable") == true)
+        assertEquals(emptyList(), harness.messageRepository.createdMessages)
+    }
 }
 
 private class ChatGroupHarness(
@@ -134,6 +149,7 @@ private class ChatTerms_FakeChatGroupRepository(
 private class ChatTerms_FakeMessageRepository : IMessageRepository {
     val loadedChatIds = mutableListOf<String>()
     val createdMessages = mutableListOf<MessageMVP>()
+    var createMessageFailure: Throwable? = null
 
     override suspend fun getMessagesInChatGroup(chatGroupId: String): Result<List<MessageMVP>> {
         loadedChatIds += chatGroupId
@@ -141,6 +157,7 @@ private class ChatTerms_FakeMessageRepository : IMessageRepository {
     }
 
     override suspend fun createMessage(newMessage: MessageMVP): Result<Unit> {
+        createMessageFailure?.let { return Result.failure(it) }
         createdMessages += newMessage
         return Result.success(Unit)
     }
