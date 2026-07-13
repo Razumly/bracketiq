@@ -22,6 +22,34 @@ class ParticipantsViewTeamFilterTest {
     }
 
     @Test
+    fun givenStaleParticipantBillingRequest_whenCheckingApplicability_thenResultIsIgnored() {
+        assertTrue(
+            isCurrentParticipantBillingRequest(
+                activeRequestGeneration = 4,
+                requestGeneration = 4,
+                activeBillingTeamId = "team-b",
+                requestBillingTeamId = "team-b",
+            )
+        )
+        assertFalse(
+            isCurrentParticipantBillingRequest(
+                activeRequestGeneration = 5,
+                requestGeneration = 4,
+                activeBillingTeamId = "team-b",
+                requestBillingTeamId = "team-b",
+            )
+        )
+        assertFalse(
+            isCurrentParticipantBillingRequest(
+                activeRequestGeneration = 4,
+                requestGeneration = 4,
+                activeBillingTeamId = "team-b",
+                requestBillingTeamId = "team-a",
+            )
+        )
+    }
+
+    @Test
     fun givenTeamSignupLeague_whenBuildingParticipantTeams_thenPlaceholderSlotsAreExcluded() {
         val event = Event(
             eventType = EventType.LEAGUE,

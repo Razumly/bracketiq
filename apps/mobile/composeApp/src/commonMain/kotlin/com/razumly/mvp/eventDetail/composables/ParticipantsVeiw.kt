@@ -40,6 +40,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -124,6 +125,14 @@ enum class ParticipantsSection(val label: String) {
 
 internal fun canStartParticipantBillingAction(inFlightActionId: String?): Boolean =
     inFlightActionId == null
+
+internal fun isCurrentParticipantBillingRequest(
+    activeRequestGeneration: Int,
+    requestGeneration: Int,
+    activeBillingTeamId: String?,
+    requestBillingTeamId: String,
+): Boolean =
+    activeRequestGeneration == requestGeneration && activeBillingTeamId == requestBillingTeamId
 
 internal fun visibleParticipantTeams(
     event: Event,
@@ -642,6 +651,7 @@ fun ParticipantsView(
     var refundSnapshot by remember { mutableStateOf<EventTeamBillingSnapshot?>(null) }
     var refundError by remember { mutableStateOf<String?>(null) }
     var refundLoading by remember { mutableStateOf(false) }
+    var refundRequestGeneration by remember { mutableIntStateOf(0) }
     var refundingPaymentId by remember { mutableStateOf<String?>(null) }
     var refundAmountDraftByPaymentId by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var reviewingProofId by remember { mutableStateOf<String?>(null) }
@@ -909,6 +919,7 @@ fun ParticipantsView(
     }
 
     fun closeRefundModal() {
+        refundRequestGeneration += 1
         refundContext = null
         refundSnapshot = null
         refundError = null
@@ -918,13 +929,29 @@ fun ParticipantsView(
     }
 
     fun loadRefundSnapshot(context: ParticipantBillingContext) {
+        val requestGeneration = refundRequestGeneration + 1
+        refundRequestGeneration = requestGeneration
         refundContext = context
         refundLoading = true
         refundError = null
         refundSnapshot = null
         refundAmountDraftByPaymentId = emptyMap()
         coroutineScope.launch {
-            component.getParticipantBillingSnapshot(context.billingTeamId)
+            val result = runCatching {
+                component.getParticipantBillingSnapshot(context.billingTeamId)
+            }.getOrElse { throwable ->
+                Result.failure(throwable)
+            }
+            if (!isCurrentParticipantBillingRequest(
+                    activeRequestGeneration = refundRequestGeneration,
+                    requestGeneration = requestGeneration,
+                    activeBillingTeamId = refundContext?.billingTeamId,
+                    requestBillingTeamId = context.billingTeamId,
+                )
+            ) {
+                return@launch
+            }
+            result
                 .onSuccess { snapshot ->
                     refundSnapshot = snapshot
                     refundAmountDraftByPaymentId = snapshot.bills
@@ -936,7 +963,15 @@ fun ParticipantsView(
                 .onFailure { throwable ->
                     refundError = throwable.userMessage("Failed to load billing details.")
                 }
-            refundLoading = false
+            if (isCurrentParticipantBillingRequest(
+                    activeRequestGeneration = refundRequestGeneration,
+                    requestGeneration = requestGeneration,
+                    activeBillingTeamId = refundContext?.billingTeamId,
+                    requestBillingTeamId = context.billingTeamId,
+                )
+            ) {
+                refundLoading = false
+            }
         }
     }
 
