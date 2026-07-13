@@ -12,6 +12,15 @@ import kotlin.test.assertTrue
 class EventDetailsValidationTest {
 
     @Test
+    fun given_blank_event_name_when_otherwise_valid_then_validation_fails() {
+        val result = validateEvent(baseLeagueEvent(maxParticipants = 2).copy(name = "   "))
+
+        assertFalse(result.isNameValid)
+        assertFalse(result.isValid)
+        assertTrue("Event name is required." in result.validationErrors)
+    }
+
+    @Test
     fun given_single_division_team_event_when_max_teams_blank_then_validation_fails() {
         val result = validateEvent(baseLeagueEvent(maxParticipants = 0))
 

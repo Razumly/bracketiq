@@ -384,7 +384,8 @@ internal fun computeEventValidationResult(
     )
     val isPaymentPlansValid = paymentPlanValidationErrors.isEmpty()
 
-    val isValid = isPriceValid &&
+    val isValid = isNameValid &&
+        isPriceValid &&
         isMaxParticipantsValid &&
         isTeamSizeValid &&
         isWinnerSetCountValid &&
