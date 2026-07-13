@@ -24,13 +24,14 @@ object WearScreenshotDemo {
         val match = demoMatch(
             longNames = normalizedRoute.contains("long"),
             fallbackTeams = normalizedRoute.contains("fallback"),
+            setScoring = normalizedRoute == "score-sets",
         )
         val selectedIncident = match.raw.incidents.firstOrNull()
         val route = when (normalizedRoute) {
             "matches" -> WearRoute.MATCHES
             "detail" -> WearRoute.MATCH_DETAIL
             "timer" -> WearRoute.TIMER
-            "score", "teampick", "score-long", "teampick-long", "score-fallback" -> WearRoute.TEAM_PICK
+            "score", "teampick", "score-long", "teampick-long", "score-fallback", "score-sets" -> WearRoute.TEAM_PICK
             "action" -> WearRoute.ACTION_MENU
             "incidents" -> WearRoute.INCIDENT_LIST
             "editor" -> WearRoute.INCIDENT_EDITOR
@@ -68,7 +69,11 @@ object WearScreenshotDemo {
         )
     }
 
-    private fun demoMatch(longNames: Boolean, fallbackTeams: Boolean): WearMatch {
+    private fun demoMatch(
+        longNames: Boolean,
+        fallbackTeams: Boolean,
+        setScoring: Boolean,
+    ): WearMatch {
         val homePlayers = listOf(
             WearPlayer(
                 participantUserId = "p_home_9",
@@ -106,9 +111,9 @@ object WearScreenshotDemo {
         val startedAt = Instant.now().minusSeconds(28 * 60L + 15).toString()
         val scheduledStart = Instant.parse("2026-06-13T23:00:00Z").toString()
         val rules = WearResolvedMatchRulesDto(
-            scoringModel = "POINTS_ONLY",
-            segmentCount = 2,
-            segmentLabel = "Half",
+            scoringModel = if (setScoring) "SETS" else "POINTS_ONLY",
+            segmentCount = if (setScoring) 3 else 2,
+            segmentLabel = if (setScoring) "Set" else "Half",
             supportsDraw = false,
             supportsOvertime = true,
             supportsShootout = true,
@@ -160,7 +165,13 @@ object WearScreenshotDemo {
             matchId = "match_showcase",
             sequence = 2,
             status = "IN_PROGRESS",
-            scores = if (fallbackTeams) emptyMap() else mapOf(home!!.id to 3, away!!.id to 2),
+            scores = if (fallbackTeams) {
+                emptyMap()
+            } else if (setScoring) {
+                mapOf(home!!.id to 1, away!!.id to 0)
+            } else {
+                mapOf(home!!.id to 3, away!!.id to 2)
+            },
             startedAt = startedAt,
         )
         val incidents = listOf(
@@ -224,7 +235,22 @@ object WearScreenshotDemo {
             actualStart = startedAt,
             matchRulesSnapshot = rules,
             resolvedMatchRules = rules,
-            segments = listOf(activeSegment),
+            segments = if (setScoring) {
+                listOf(
+                    WearMatchSegmentDto(
+                        id = "segment_1",
+                        eventId = "event_showcase",
+                        matchId = "match_showcase",
+                        sequence = 1,
+                        status = "COMPLETE",
+                        scores = mapOf(home!!.id to 25, away!!.id to 20),
+                        winnerEventTeamId = home.id,
+                    ),
+                    activeSegment,
+                )
+            } else {
+                listOf(activeSegment)
+            },
             incidents = incidents,
             start = scheduledStart,
             division = "Premier",
