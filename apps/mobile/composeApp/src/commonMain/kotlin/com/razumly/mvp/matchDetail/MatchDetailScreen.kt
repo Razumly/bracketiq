@@ -49,7 +49,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -93,6 +92,7 @@ import com.razumly.mvp.core.presentation.guides.matchOfficialPreCheckInGuide
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.presentation.util.playMatchTimerAlert
+import com.razumly.mvp.core.presentation.util.toTeamDisplayLabel
 import com.razumly.mvp.core.util.Platform
 import com.razumly.mvp.eventDetail.composables.DropdownField
 import com.razumly.mvp.eventMap.EventMap
@@ -150,6 +150,11 @@ private data class MatchLocationTarget(
     val place: MVPPlace?,
     val warningDistanceMiles: Double?,
 )
+
+internal fun matchTeamDisplayLabel(
+    team: TeamWithRelations?,
+    fallbackLabel: String,
+): String = team?.toTeamDisplayLabel(fallbackLabel) ?: fallbackLabel
 
 internal data class MatchParticipantOption(
     val selectionId: String,
@@ -868,31 +873,8 @@ fun MatchDetailScreen(
         }
     }
 
-    val team1Text = remember(team1) {
-        derivedStateOf {
-            when {
-                team1?.team?.name != null -> team1.team.name
-                team1?.players != null -> team1.players.joinToString(" & ") {
-                    "${it.firstName}.${it.lastName.first()}"
-                }
-
-                else -> "Team 1"
-            }
-        }
-    }.value
-
-    val team2Text = remember(team2) {
-        derivedStateOf {
-            when {
-                team2?.team?.name != null -> team2.team.name
-                team2?.players != null -> team2.players.joinToString(" & ") {
-                    "${it.firstName}.${it.lastName.first()}"
-                }
-
-                else -> "Team 2"
-            }
-        }
-    }.value
+    val team1Text = remember(team1) { matchTeamDisplayLabel(team1, fallbackLabel = "Team 1") }
+    val team2Text = remember(team2) { matchTeamDisplayLabel(team2, fallbackLabel = "Team 2") }
 
     val canUseMatchStatusActions = (canManageMatchActions || (isOfficial && officialCheckedIn && officialMatchWindowOpen)) &&
         !matchFinished

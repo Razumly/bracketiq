@@ -1,9 +1,29 @@
 package com.razumly.mvp.core.presentation.util
 
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
+import com.razumly.mvp.core.data.dataTypes.UserData
 
-fun TeamWithPlayers.toTeamDisplayLabel(): String {
-    val explicitName = team.name.trim()
+fun TeamWithPlayers.toTeamDisplayLabel(fallbackLabel: String = "Team"): String =
+    teamDisplayLabel(
+        teamName = team.name,
+        players = players,
+        fallbackLabel = fallbackLabel,
+    )
+
+fun TeamWithRelations.toTeamDisplayLabel(fallbackLabel: String = "Team"): String =
+    teamDisplayLabel(
+        teamName = team.name,
+        players = players,
+        fallbackLabel = fallbackLabel,
+    )
+
+private fun teamDisplayLabel(
+    teamName: String,
+    players: List<UserData>,
+    fallbackLabel: String,
+): String {
+    val explicitName = teamName.trim()
     if (explicitName.isNotEmpty()) {
         return explicitName
     }
@@ -34,5 +54,5 @@ fun TeamWithPlayers.toTeamDisplayLabel(): String {
         return playerNames.joinToString(" & ")
     }
 
-    return "Team"
+    return fallbackLabel.trim().ifBlank { "Team" }
 }
