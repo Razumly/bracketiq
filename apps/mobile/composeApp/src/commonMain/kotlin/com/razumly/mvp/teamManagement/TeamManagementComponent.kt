@@ -50,6 +50,7 @@ interface TeamManagementComponent {
     val currentTeams: StateFlow<List<TeamWithPlayers>>
     val isCurrentTeamsLoading: StateFlow<Boolean>
     val selectedTeam: StateFlow<TeamWithPlayers?>
+    val errorState: StateFlow<String?>
     val staffUsersById: StateFlow<Map<String, UserData>>
     val teamMemberCompliance: StateFlow<Map<String, EventTeamComplianceSummary>>
     val loadingTeamMemberComplianceId: StateFlow<String?>
@@ -60,6 +61,7 @@ interface TeamManagementComponent {
     val onBack: () -> Unit
 
     fun setLoadingHandler(handler: LoadingHandler)
+    fun clearError()
     fun selectTeam(team: TeamWithPlayers?)
     fun createTeam(team: Team, onResult: (Result<Unit>) -> Unit = {})
     fun joinTeam(team: Team)
@@ -104,6 +106,7 @@ class DefaultTeamManagementComponent(
         deselectTeam()
     }
     private val _errorState = MutableStateFlow<String?>(null)
+    override val errorState = _errorState.asStateFlow()
     private val _divisionTypeParameters = MutableStateFlow(DivisionTypeParameters())
     override val divisionTypeParameters = _divisionTypeParameters.asStateFlow()
 
@@ -288,6 +291,10 @@ class DefaultTeamManagementComponent(
 
     override fun setLoadingHandler(handler: LoadingHandler) {
         loadingHandler = handler
+    }
+
+    override fun clearError() {
+        _errorState.value = null
     }
 
     override fun selectTeam(team: TeamWithPlayers?) {
