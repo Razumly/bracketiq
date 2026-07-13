@@ -2595,7 +2595,16 @@ class BillingRepositoryHttpTest {
                           "userId": "user_1",
                           "hostId": "host_1",
                           "reason": "weather",
-                          "status": "PENDING"
+                          "status": "PENDING",
+                          "slotId": "slot_1",
+                          "occurrenceDate": "2026-07-16",
+                          "billIds": ["bill_1"],
+                          "paymentIds": ["payment_1", "payment_2"],
+                          "requestedAmountCents": 12345,
+                          "currency": "cad",
+                          "policyDecision": "WEATHER_REFUND",
+                          "scopeVersion": 2,
+                          "scopeHash": "scope_hash_1"
                         },
                         {
                           "id": "refund_2",
@@ -2628,6 +2637,12 @@ class BillingRepositoryHttpTest {
         val refunds = repo.getRefundsWithRelations().getOrThrow()
 
         assertEquals(3, refunds.size)
+        assertEquals(12345, refunds.first().refundRequest.requestedAmountCents)
+        assertEquals("cad", refunds.first().refundRequest.currency)
+        assertEquals(listOf("payment_1", "payment_2"), refunds.first().refundRequest.paymentIds)
+        assertEquals("2026-07-16", refunds.first().refundRequest.occurrenceDate)
+        assertEquals("WEATHER_REFUND", refunds.first().refundRequest.policyDecision)
+        assertEquals("scope_hash_1", refunds.first().refundRequest.scopeHash)
         assertEquals(listOf(listOf("user_1", "user_2")), requestedUserIds)
         assertEquals(listOf(listOf("event_1", "event_2")), requestedEventIds)
         assertEquals(listOf("refund_1", "refund_2", "refund_3"), refundDao.storedRefunds.map { refund -> refund.id })

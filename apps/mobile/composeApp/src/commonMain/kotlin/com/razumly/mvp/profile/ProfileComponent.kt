@@ -383,6 +383,20 @@ internal fun discountPercentForFinalPrice(
     return (discountAmount * 100.0 / original).coerceIn(0.0, 100.0)
 }
 
+/**
+ * A requested profile document must resolve to exactly its own server-issued signing step.
+ * Returning all matches lets the caller distinguish missing and ambiguous server responses
+ * without ever falling back to a different document.
+ */
+internal fun matchingSignStepsForTemplate(
+    steps: List<SignStep>,
+    templateId: String,
+): List<SignStep> {
+    val requestedTemplateId = templateId.trim()
+    if (requestedTemplateId.isEmpty()) return emptyList()
+    return steps.filter { step -> step.templateId.trim() == requestedTemplateId }
+}
+
 data class ProfileMyScheduleState(
     val isLoading: Boolean = false,
     val events: List<Event> = emptyList(),
@@ -2546,10 +2560,7 @@ class DefaultProfileComponent(
             )
 
             signLinksResult.onSuccess { steps ->
-                val requestedTemplateId = document.templateId.trim()
-                val matchingSteps = steps.filter { step ->
-                    step.templateId?.trim() == requestedTemplateId
-                }
+                val matchingSteps = matchingSignStepsForTemplate(steps, document.templateId)
                 val step = matchingSteps.singleOrNull()
                 if (step == null) {
                     _errorState.value = ErrorMessage(
