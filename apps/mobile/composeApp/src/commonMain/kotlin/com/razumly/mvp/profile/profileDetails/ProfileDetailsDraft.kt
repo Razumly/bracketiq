@@ -23,36 +23,46 @@ internal data class ProfileDetailsFormValidation(
     val isEmailValid: Boolean,
     val isFirstNameValid: Boolean,
     val isLastNameValid: Boolean,
-    val isPasswordValid: Boolean,
-    val passwordsMatch: Boolean,
 ) {
     val isUserNameValid: Boolean
         get() = normalizedUserName != null
 
     val canSave: Boolean
-        get() = isEmailValid && isFirstNameValid && isLastNameValid && isUserNameValid && isPasswordValid
+        get() = isEmailValid && isFirstNameValid && isLastNameValid && isUserNameValid
+}
+
+internal data class PasswordChangeFormValidation(
+    val hasCurrentPassword: Boolean,
+    val isNewPasswordLongEnough: Boolean,
+    val passwordsMatch: Boolean,
+) {
+    val canSubmit: Boolean
+        get() = hasCurrentPassword && isNewPasswordLongEnough && passwordsMatch
 }
 
 /** Mirrors the server username contract: trim outer whitespace and require a remaining value. */
 internal fun validateProfileDetailsForm(
     draft: ProfileDetailsDraft,
-    currentPassword: String,
-    newPassword: String,
-    confirmNewPassword: String,
 ): ProfileDetailsFormValidation {
     val normalizedUserName = draft.userName.trim().takeIf(String::isNotBlank)
-    val isPasswordValid = (newPassword.isBlank() && confirmNewPassword.isBlank()) ||
-        (currentPassword.isNotBlank() && newPassword.length >= 8 && newPassword == confirmNewPassword)
 
     return ProfileDetailsFormValidation(
         normalizedUserName = normalizedUserName,
         isEmailValid = draft.email.isNotBlank() && draft.email.matches(emailAddressRegex),
         isFirstNameValid = draft.firstName.isNotBlank(),
         isLastNameValid = draft.lastName.isNotBlank(),
-        isPasswordValid = isPasswordValid,
-        passwordsMatch = newPassword.isBlank() || newPassword == confirmNewPassword,
     )
 }
+
+internal fun validatePasswordChangeForm(
+    currentPassword: String,
+    newPassword: String,
+    confirmNewPassword: String,
+): PasswordChangeFormValidation = PasswordChangeFormValidation(
+    hasCurrentPassword = currentPassword.isNotBlank(),
+    isNewPasswordLongEnough = newPassword.length >= 8,
+    passwordsMatch = newPassword == confirmNewPassword,
+)
 
 internal fun reconcileProfileDetailsDraft(
     state: ProfileDetailsDraftState,

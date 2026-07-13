@@ -333,8 +333,6 @@ interface IUserRepository : IMVPRepository {
         firstName: String,
         lastName: String,
         email: String,
-        currentPassword: String,
-        newPassword: String,
         userName: String,
         profileImageId: String?,
     ): Result<Unit>
@@ -1384,18 +1382,11 @@ class UserRepository(
         firstName: String,
         lastName: String,
         email: String,
-        currentPassword: String,
-        newPassword: String,
         userName: String,
         profileImageId: String?,
     ): Result<Unit> = runCatching {
         val currentUserData = currentUser.value.getOrThrow()
         val normalizedProfileImageId = profileImageId?.trim()?.takeIf(String::isNotBlank)
-
-        if (newPassword.isNotBlank()) {
-            if (currentPassword.isBlank()) error("Current password is required")
-            updatePassword(currentPassword, newPassword).getOrThrow()
-        }
 
         val updatedUser = currentUserData.copy(
             firstName = normalizeRequiredName(firstName),

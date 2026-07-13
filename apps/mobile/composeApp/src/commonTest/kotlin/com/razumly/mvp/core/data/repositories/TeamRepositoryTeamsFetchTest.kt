@@ -257,8 +257,6 @@ private class FakeUserRepository : IUserRepository {
         firstName: String,
         lastName: String,
         email: String,
-        currentPassword: String,
-        newPassword: String,
         userName: String,
         profileImageId: String?,
     ): Result<Unit> = error("unused")

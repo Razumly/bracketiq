@@ -324,8 +324,6 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
         firstName: String,
         lastName: String,
         email: String,
-        currentPassword: String,
-        newPassword: String,
         userName: String,
         profileImageId: String?,
     ): Result<Unit> = Result.success(Unit)

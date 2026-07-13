@@ -137,9 +137,6 @@ class ProfileDetailsDraftTest {
         listOf("", "  \t\n  ").forEach { userName ->
             val validation = validateProfileDetailsForm(
                 draft = validDraft(userName = userName),
-                currentPassword = "",
-                newPassword = "",
-                confirmNewPassword = "",
             )
 
             assertFalse(validation.isUserNameValid)
@@ -152,14 +149,38 @@ class ProfileDetailsDraftTest {
     fun given_username_with_outer_whitespace_when_other_profile_fields_are_valid_then_it_is_trimmed_and_save_is_enabled() {
         val validation = validateProfileDetailsForm(
             draft = validDraft(userName = "  sam-edited  "),
-            currentPassword = "",
-            newPassword = "",
-            confirmNewPassword = "",
         )
 
         assertTrue(validation.isUserNameValid)
         assertTrue(validation.canSave)
         assertEquals("sam-edited", validation.normalizedUserName)
+    }
+
+    @Test
+    fun given_valid_profile_and_invalid_password_draft_when_validated_then_profile_save_stays_available() {
+        val profileValidation = validateProfileDetailsForm(validDraft(userName = "sam-edited"))
+        val passwordValidation = validatePasswordChangeForm(
+            currentPassword = "",
+            newPassword = "short",
+            confirmNewPassword = "different",
+        )
+
+        assertTrue(profileValidation.canSave)
+        assertFalse(passwordValidation.canSubmit)
+    }
+
+    @Test
+    fun given_matching_current_and_new_passwords_when_validated_then_password_change_is_available() {
+        val validation = validatePasswordChangeForm(
+            currentPassword = "current-password",
+            newPassword = "new-password",
+            confirmNewPassword = "new-password",
+        )
+
+        assertTrue(validation.hasCurrentPassword)
+        assertTrue(validation.isNewPasswordLongEnough)
+        assertTrue(validation.passwordsMatch)
+        assertTrue(validation.canSubmit)
     }
 
     private fun validDraft(userName: String): ProfileDetailsDraft = ProfileDetailsDraft(

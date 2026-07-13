@@ -68,6 +68,7 @@ fun ProfileDetailsScreen(
     val currentUser by component.currentUser.collectAsState()
     val currentAccount by component.currentAccount.collectAsState()
     val lastUploadedImageId by component.lastUploadedImageId.collectAsState()
+    val passwordChangeCompleted by component.passwordChangeCompleted.collectAsState()
 
     // Form state
     var draftState by remember { mutableStateOf(ProfileDetailsDraftState()) }
@@ -102,6 +103,8 @@ fun ProfileDetailsScreen(
 
     val formValidation = validateProfileDetailsForm(
         draft = draft,
+    )
+    val passwordChangeValidation = validatePasswordChangeForm(
         currentPassword = currentPassword,
         newPassword = newPassword,
         confirmNewPassword = confirmNewPassword,
@@ -136,6 +139,18 @@ fun ProfileDetailsScreen(
                 )
             }
             component.consumeUploadedImageSelection()
+        }
+    }
+
+    LaunchedEffect(passwordChangeCompleted) {
+        if (passwordChangeCompleted) {
+            currentPassword = ""
+            newPassword = ""
+            confirmNewPassword = ""
+            currentPasswordVisible = false
+            newPasswordVisible = false
+            confirmNewPasswordVisible = false
+            component.consumePasswordChangeCompletion()
         }
     }
 
@@ -391,9 +406,10 @@ fun ProfileDetailsScreen(
                 }
             }
 
-            // Password Section
+            // Password changes are intentionally a separate mutation from Profile Save so a
+            // later profile-validation or network failure cannot hide a successful password change.
             Text(
-                "Change Password (Optional)",
+                "Change Password",
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(top = 8.dp)
             )
@@ -414,11 +430,11 @@ fun ProfileDetailsScreen(
                     }
                 },
                 supportingText = {
-                    if (newPassword.isNotBlank() && currentPassword.isBlank()) {
+                    if (newPassword.isNotBlank() && !passwordChangeValidation.hasCurrentPassword) {
                         Text("Required to change password", color = MaterialTheme.colorScheme.error)
                     }
                 },
-                isError = newPassword.isNotBlank() && currentPassword.isBlank()
+                isError = newPassword.isNotBlank() && !passwordChangeValidation.hasCurrentPassword
             )
 
             OutlinedTextField(
@@ -437,14 +453,14 @@ fun ProfileDetailsScreen(
                     }
                 },
                 supportingText = {
-                    if (newPassword.isNotBlank() && newPassword.length < 8) {
+                    if (newPassword.isNotBlank() && !passwordChangeValidation.isNewPasswordLongEnough) {
                         Text(
                             "Password must be at least 8 characters",
                             color = MaterialTheme.colorScheme.error
                         )
                     }
                 },
-                isError = newPassword.isNotBlank() && newPassword.length < 8
+                isError = newPassword.isNotBlank() && !passwordChangeValidation.isNewPasswordLongEnough
             )
 
             if (newPassword.isNotBlank()) {
@@ -464,12 +480,25 @@ fun ProfileDetailsScreen(
                         }
                     },
                     supportingText = {
-                        if (confirmNewPassword.isNotBlank() && !formValidation.passwordsMatch) {
+                        if (confirmNewPassword.isNotBlank() && !passwordChangeValidation.passwordsMatch) {
                             Text("Passwords do not match", color = MaterialTheme.colorScheme.error)
                         }
                     },
-                    isError = confirmNewPassword.isNotBlank() && !formValidation.passwordsMatch
+                    isError = confirmNewPassword.isNotBlank() && !passwordChangeValidation.passwordsMatch
                 )
+            }
+
+            Button(
+                onClick = {
+                    component.changePassword(
+                        currentPassword = currentPassword,
+                        newPassword = newPassword,
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = passwordChangeValidation.canSubmit,
+            ) {
+                Text("Change Password")
             }
 
             // Save Button
@@ -482,8 +511,6 @@ fun ProfileDetailsScreen(
                             firstName = submittedDraft.firstName,
                             lastName = submittedDraft.lastName,
                             email = submittedDraft.email,
-                            currentPassword = currentPassword,
-                            newPassword = newPassword,
                             userName = submittedDraft.userName,
                             profileImageId = submittedDraft.profileImageId,
                         )

@@ -2580,8 +2580,6 @@ private class EventDetailFakeUserRepository(
         firstName: String,
         lastName: String,
         email: String,
-        currentPassword: String,
-        newPassword: String,
         userName: String,
         profileImageId: String?,
     ): Result<Unit> = Result.success(Unit)

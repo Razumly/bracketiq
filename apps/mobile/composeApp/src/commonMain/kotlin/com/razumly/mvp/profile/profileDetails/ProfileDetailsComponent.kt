@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 interface ProfileDetailsComponent : IPaymentProcessor {
     val errorState: StateFlow<ErrorMessage?>
     val message: StateFlow<String?>
+    val passwordChangeCompleted: StateFlow<Boolean>
     val currentUser: StateFlow<UserData>
     val currentAccount: StateFlow<AuthAccount>
     val lastUploadedImageId: StateFlow<String?>
@@ -35,6 +36,7 @@ interface ProfileDetailsComponent : IPaymentProcessor {
     fun setLoadingHandler(loadingHandler: LoadingHandler)
     fun onUploadSelected(photo: GalleryPhotoResult)
     fun consumeUploadedImageSelection()
+    fun consumePasswordChangeCompletion()
     fun deleteImage(imageId: String)
     fun deleteAccount(confirmationText: String)
 
@@ -42,11 +44,11 @@ interface ProfileDetailsComponent : IPaymentProcessor {
         firstName: String,
         lastName: String,
         email: String,
-        currentPassword: String,
-        newPassword: String,
         userName: String,
         profileImageId: String?,
     )
+
+    fun changePassword(currentPassword: String, newPassword: String)
 }
 
 class DefaultProfileDetailsComponent(
@@ -62,6 +64,9 @@ class DefaultProfileDetailsComponent(
 
     private val _message = MutableStateFlow<String?>(null)
     override val message = _message.asStateFlow()
+
+    private val _passwordChangeCompleted = MutableStateFlow(false)
+    override val passwordChangeCompleted = _passwordChangeCompleted.asStateFlow()
 
     private val _lastUploadedImageId = MutableStateFlow<String?>(null)
     override val lastUploadedImageId = _lastUploadedImageId.asStateFlow()
@@ -117,6 +122,10 @@ class DefaultProfileDetailsComponent(
         _lastUploadedImageId.value = null
     }
 
+    override fun consumePasswordChangeCompletion() {
+        _passwordChangeCompleted.value = false
+    }
+
     override fun deleteImage(imageId: String) {
         scope.launch {
             if (::loadingHandler.isInitialized) {
@@ -157,8 +166,6 @@ class DefaultProfileDetailsComponent(
         firstName: String,
         lastName: String,
         email: String,
-        currentPassword: String,
-        newPassword: String,
         userName: String,
         profileImageId: String?,
     ) {
@@ -168,8 +175,6 @@ class DefaultProfileDetailsComponent(
                 firstName = firstName,
                 lastName = lastName,
                 email = email,
-                currentPassword = currentPassword,
-                newPassword = newPassword,
                 userName = userName,
                 profileImageId = profileImageId,
             )
@@ -178,6 +183,21 @@ class DefaultProfileDetailsComponent(
                 }
                 .onSuccess {
                     _message.value = "Profile updated successfully"
+                }
+            loadingHandler.hideLoading()
+        }
+    }
+
+    override fun changePassword(currentPassword: String, newPassword: String) {
+        scope.launch {
+            loadingHandler.showLoading("Changing password...")
+            userRepository.updatePassword(currentPassword, newPassword)
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage("Failed to change password: ${error.userMessage()}")
+                }
+                .onSuccess {
+                    _passwordChangeCompleted.value = true
+                    _message.value = "Password changed successfully"
                 }
             loadingHandler.hideLoading()
         }
