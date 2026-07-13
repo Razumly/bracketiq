@@ -115,6 +115,18 @@ data class MessageApiDto(
 @Serializable
 data class MessagesResponseDto(
     val messages: List<MessageApiDto> = emptyList(),
+    val pagination: MessagesPaginationDto = MessagesPaginationDto(),
+)
+
+@Serializable
+data class MessagesPaginationDto(
+    val index: Int = 0,
+    val limit: Int = 100,
+    val totalCount: Int = 0,
+    val nextIndex: Int = 0,
+    val remainingCount: Int = 0,
+    val hasMore: Boolean = false,
+    val order: String = "desc",
 )
 
 @Serializable

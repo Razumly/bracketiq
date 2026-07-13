@@ -7,6 +7,26 @@ import kotlin.test.assertTrue
 
 class ChatScrollPolicyTest {
     @Test
+    fun older_history_prepend_keeps_the_existing_latest_message_anchor() {
+        assertTrue(
+            isOlderHistoryPrepend(
+                previousMessageCount = 100,
+                currentMessageCount = 150,
+                previousLatestMessageKey = "latest-message",
+                currentLatestMessageKey = "latest-message",
+            ),
+        )
+        assertFalse(
+            isOlderHistoryPrepend(
+                previousMessageCount = 100,
+                currentMessageCount = 101,
+                previousLatestMessageKey = "previous-latest",
+                currentLatestMessageKey = "new-latest",
+            ),
+        )
+    }
+
+    @Test
     fun nearBottomIncomingMessage_autoScrolls() {
         assertTrue(
             shouldAutoScrollToLatest(

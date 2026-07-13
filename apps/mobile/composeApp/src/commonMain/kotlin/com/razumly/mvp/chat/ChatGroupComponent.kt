@@ -6,6 +6,7 @@ import com.arkivanov.essenty.lifecycle.doOnDestroy
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.chat.data.IMessageRepository
+import com.razumly.mvp.chat.data.MessageHistoryPage
 import com.razumly.mvp.chat.data.isUnreadFor
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
@@ -46,6 +47,8 @@ interface ChatGroupComponent {
     val messageInput: StateFlow<String>
     val chatGroup: StateFlow<ChatGroupWithRelations?>
     val isChatLoading: StateFlow<Boolean>
+    val canLoadOlderMessages: StateFlow<Boolean>
+    val isLoadingOlderMessages: StateFlow<Boolean>
     val errorState: StateFlow<String?>
     val feedback: StateFlow<ChatFeedback?>
     val suggestedPlayers: StateFlow<List<UserData>>
@@ -57,6 +60,7 @@ interface ChatGroupComponent {
 
     fun onBack()
     fun onMessageInputChange(newText: String)
+    fun loadOlderMessages()
     fun sendMessage()
     fun dismissFeedback()
     fun deleteChat()
@@ -109,6 +113,12 @@ class DefaultChatGroupComponent(
     override val showChatTermsPrompt = _showChatTermsPrompt.asStateFlow()
     private val _isChatLoading = MutableStateFlow(true)
     override val isChatLoading = _isChatLoading.asStateFlow()
+    private val _canLoadOlderMessages = MutableStateFlow(false)
+    override val canLoadOlderMessages = _canLoadOlderMessages.asStateFlow()
+    private val _isLoadingOlderMessages = MutableStateFlow(false)
+    override val isLoadingOlderMessages = _isLoadingOlderMessages.asStateFlow()
+    private var messageHistoryChatId: String? = null
+    private var nextMessageHistoryIndex = 0
 
     override val chatGroup = chatGroupRepository.getChatGroupFlow(
         messageUserId = normalizedMessageUserId,
@@ -120,7 +130,12 @@ class DefaultChatGroupComponent(
                 _errorState.value = it.userMessage()
                 null
             }
-            chatGroup?.copy(messages = chatGroup.messages.sortedBy { it.sentTime })
+            chatGroup?.copy(
+                messages = chatGroup.messages.sortedWith(
+                    compareBy<MessageMVP> { message -> message.sentTime }
+                        .thenBy { message -> message.id },
+                ),
+            )
         }
         .stateIn(scope, SharingStarted.Eagerly, null)
 
@@ -187,10 +202,15 @@ class DefaultChatGroupComponent(
                 }
                 .distinctUntilChanged()
                 .collect { chatId ->
-                    if (chatId.isBlank()) return@collect
-                    messagesRepository.getMessagesInChatGroup(chatId).onFailure { error ->
-                        Napier.w("Failed to load messages for opened chat $chatId: ${error.message}")
+                    messageHistoryChatId = chatId.takeIf(String::isNotBlank)
+                    nextMessageHistoryIndex = 0
+                    _canLoadOlderMessages.value = false
+                    if (chatId.isBlank()) {
+                        _isLoadingOlderMessages.value = false
+                        return@collect
                     }
+                    _isLoadingOlderMessages.value = true
+                    loadMessageHistoryPage(chatId = chatId, index = 0, reportFailure = false)
                 }
         }
         scope.launch {
@@ -231,6 +251,54 @@ class DefaultChatGroupComponent(
 
     override fun onMessageInputChange(newText: String) {
         _messageInput.value = newText
+    }
+
+    override fun loadOlderMessages() {
+        val chatId = chatGroup.value?.chatGroup?.id?.trim().orEmpty()
+        if (
+            chatId.isBlank() ||
+            chatId != messageHistoryChatId ||
+            !_canLoadOlderMessages.value ||
+            _isLoadingOlderMessages.value
+        ) {
+            return
+        }
+        val index = nextMessageHistoryIndex
+        _isLoadingOlderMessages.value = true
+        scope.launch {
+            loadMessageHistoryPage(chatId = chatId, index = index, reportFailure = true)
+        }
+    }
+
+    private suspend fun loadMessageHistoryPage(
+        chatId: String,
+        index: Int,
+        reportFailure: Boolean,
+    ) {
+        messagesRepository.getMessageHistoryPage(
+            chatGroupId = chatId,
+            index = index,
+        ).onSuccess { page ->
+            if (messageHistoryChatId != chatId) return@onSuccess
+            applyMessageHistoryPage(index = index, page = page)
+            if (reportFailure) {
+                _errorState.value = null
+            }
+        }.onFailure { error ->
+            if (messageHistoryChatId != chatId) return@onFailure
+            Napier.w("Failed to load messages for opened chat $chatId: ${error.message}")
+            if (reportFailure) {
+                _errorState.value = error.userMessage("Failed to load earlier messages.")
+            }
+        }
+        if (messageHistoryChatId == chatId) {
+            _isLoadingOlderMessages.value = false
+        }
+    }
+
+    private fun applyMessageHistoryPage(index: Int, page: MessageHistoryPage) {
+        nextMessageHistoryIndex = page.nextIndex
+        _canLoadOlderMessages.value = page.hasMore && page.nextIndex > index
     }
 
     override fun sendMessage() {

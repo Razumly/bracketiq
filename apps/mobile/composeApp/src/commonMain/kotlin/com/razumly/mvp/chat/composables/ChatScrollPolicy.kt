@@ -16,6 +16,16 @@ internal fun isChatListNearBottom(
     messageCount: Int,
 ): Boolean = messageCount == 0 || lastVisibleItemIndex >= messageCount - 2
 
+internal fun isOlderHistoryPrepend(
+    previousMessageCount: Int,
+    currentMessageCount: Int,
+    previousLatestMessageKey: String,
+    currentLatestMessageKey: String,
+): Boolean = previousMessageCount > 0 &&
+    currentMessageCount > previousMessageCount &&
+    previousLatestMessageKey.isNotBlank() &&
+    previousLatestMessageKey == currentLatestMessageKey
+
 internal data class ChatScrollUpdate(
     val shouldAutoScroll: Boolean,
     val unseenMessageCount: Int,

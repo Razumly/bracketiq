@@ -5,6 +5,7 @@ import com.arkivanov.essenty.backhandler.BackDispatcher
 import com.arkivanov.essenty.lifecycle.LifecycleRegistry
 import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.chat.data.IMessageRepository
+import com.razumly.mvp.chat.data.MessageHistoryPage
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.ChatGroupSummary
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
@@ -41,6 +42,81 @@ class ChatTermsGatingTest : MainDispatcherTest() {
         assertFalse(harness.component.isChatLoading.value)
         assertEquals(listOf("chat_1"), harness.messageRepository.loadedChatIds)
         assertFalse(harness.component.showChatTermsPrompt.value)
+    }
+
+    @Test
+    fun chat_history_loads_newest_page_then_only_one_older_page_for_repeated_taps() = runTest(testDispatcher) {
+        val harness = ChatGroupHarness(
+            acceptedTerms = true,
+            historyPages = mapOf(
+                0 to Result.success(
+                    MessageHistoryPage(messages = emptyList(), nextIndex = 2, hasMore = true),
+                ),
+                2 to Result.success(
+                    MessageHistoryPage(messages = emptyList(), nextIndex = 3, hasMore = false),
+                ),
+            ),
+        )
+        advance()
+
+        assertEquals(
+            listOf(Triple("chat_1", 0, 100)),
+            harness.messageRepository.historyPageRequests,
+        )
+        assertTrue(harness.component.canLoadOlderMessages.value)
+        assertFalse(harness.component.isLoadingOlderMessages.value)
+
+        harness.component.loadOlderMessages()
+        harness.component.loadOlderMessages()
+
+        assertTrue(harness.component.isLoadingOlderMessages.value)
+        advance()
+
+        assertEquals(
+            listOf(
+                Triple("chat_1", 0, 100),
+                Triple("chat_1", 2, 100),
+            ),
+            harness.messageRepository.historyPageRequests,
+        )
+        assertFalse(harness.component.canLoadOlderMessages.value)
+        assertFalse(harness.component.isLoadingOlderMessages.value)
+        assertNull(harness.component.errorState.value)
+    }
+
+    @Test
+    fun failed_older_history_page_stays_retryable() = runTest(testDispatcher) {
+        val harness = ChatGroupHarness(
+            acceptedTerms = true,
+            historyPages = mapOf(
+                0 to Result.success(
+                    MessageHistoryPage(messages = emptyList(), nextIndex = 2, hasMore = true),
+                ),
+                2 to Result.failure(IllegalStateException("History unavailable")),
+            ),
+        )
+        advance()
+
+        harness.component.loadOlderMessages()
+        advance()
+
+        assertTrue(harness.component.canLoadOlderMessages.value)
+        assertFalse(harness.component.isLoadingOlderMessages.value)
+        assertTrue(harness.component.errorState.value?.contains("History unavailable") == true)
+
+        harness.messageRepository.historyPages[2] = Result.success(
+            MessageHistoryPage(messages = emptyList(), nextIndex = 3, hasMore = false),
+        )
+        harness.component.loadOlderMessages()
+        advance()
+
+        assertEquals(
+            listOf(0, 2, 2),
+            harness.messageRepository.historyPageRequests.map { request -> request.second },
+        )
+        assertFalse(harness.component.canLoadOlderMessages.value)
+        assertFalse(harness.component.isLoadingOlderMessages.value)
+        assertNull(harness.component.errorState.value)
     }
 
     @Test
@@ -173,6 +249,7 @@ class ChatTermsGatingTest : MainDispatcherTest() {
 private class ChatGroupHarness(
     acceptedTerms: Boolean,
     chatGroupInitiallyLoading: Boolean = false,
+    historyPages: Map<Int, Result<MessageHistoryPage>> = emptyMap(),
 ) {
     val userRepository = CreateEvent_FakeUserRepository().also { repository ->
         repository.chatTermsConsent = repository.chatTermsConsent.copy(
@@ -194,7 +271,7 @@ private class ChatGroupHarness(
         chat = chat,
         initiallyLoading = chatGroupInitiallyLoading,
     )
-    val messageRepository = ChatTerms_FakeMessageRepository()
+    val messageRepository = ChatTerms_FakeMessageRepository(historyPages)
     val lifecycle = createTestLifecycle()
     val pushNotificationsRepository = ChatTerms_FakePushNotificationsRepository()
     val component = DefaultChatGroupComponent(
@@ -258,14 +335,30 @@ private class ChatTerms_FakeChatGroupRepository(
     }
 }
 
-private class ChatTerms_FakeMessageRepository : IMessageRepository {
+private class ChatTerms_FakeMessageRepository(
+    historyPages: Map<Int, Result<MessageHistoryPage>> = emptyMap(),
+) : IMessageRepository {
     val loadedChatIds = mutableListOf<String>()
+    val historyPageRequests = mutableListOf<Triple<String, Int, Int>>()
+    val historyPages = historyPages.toMutableMap()
     val createdMessages = mutableListOf<MessageMVP>()
     var createMessageFailure: Throwable? = null
 
     override suspend fun getMessagesInChatGroup(chatGroupId: String): Result<List<MessageMVP>> {
         loadedChatIds += chatGroupId
         return Result.success(emptyList())
+    }
+
+    override suspend fun getMessageHistoryPage(
+        chatGroupId: String,
+        index: Int,
+        limit: Int,
+    ): Result<MessageHistoryPage> {
+        loadedChatIds += chatGroupId
+        historyPageRequests += Triple(chatGroupId, index, limit)
+        return historyPages[index] ?: Result.success(
+            MessageHistoryPage(messages = emptyList(), nextIndex = index, hasMore = false),
+        )
     }
 
     override suspend fun createMessage(newMessage: MessageMVP): Result<Unit> {

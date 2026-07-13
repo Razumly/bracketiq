@@ -68,6 +68,7 @@ import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.TermsConsentDialog
 import com.razumly.mvp.core.presentation.util.timeFormat
 import com.razumly.mvp.chat.composables.isChatListNearBottom
+import com.razumly.mvp.chat.composables.isOlderHistoryPrepend
 import com.razumly.mvp.chat.composables.resolveChatScrollUpdate
 import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.Month
@@ -86,6 +87,8 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
     val input by component.messageInput.collectAsState()
     val chatGroupWithRelations by component.chatGroup.collectAsState()
     val isChatLoading by component.isChatLoading.collectAsState()
+    val canLoadOlderMessages by component.canLoadOlderMessages.collectAsState()
+    val isLoadingOlderMessages by component.isLoadingOlderMessages.collectAsState()
     val errorMessage by component.errorState.collectAsState()
     val feedback by component.feedback.collectAsState()
     val friends by component.friends.collectAsState()
@@ -148,16 +151,18 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
     var showReportLeaveDialog by remember { mutableStateOf(false) }
     var reportNotes by remember { mutableStateOf("") }
     var previousMessageCount by remember(chatId) { mutableStateOf(0) }
+    var previousLatestMessageKey by remember(chatId) { mutableStateOf("") }
     var unseenMessageCount by remember(chatId) { mutableStateOf(0) }
     var wasNearBottom by remember(chatId) { mutableStateOf(true) }
     val currentMessageCount by rememberUpdatedState(messages.size)
+    val historyHeaderCount = if (canLoadOlderMessages || isLoadingOlderMessages) 1 else 0
 
-    LaunchedEffect(listState, chatId) {
+    LaunchedEffect(listState, chatId, historyHeaderCount) {
         snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
             .collect {
                 val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
                 val isNearBottom = isChatListNearBottom(
-                    lastVisibleItemIndex = lastVisibleIndex,
+                    lastVisibleItemIndex = lastVisibleIndex - historyHeaderCount,
                     messageCount = currentMessageCount,
                 )
                 wasNearBottom = isNearBottom
@@ -167,10 +172,21 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
             }
     }
 
-    LaunchedEffect(latestMessageKey, messages.size, currentUserId) {
+    LaunchedEffect(latestMessageKey, messages.size, currentUserId, historyHeaderCount) {
         if (messages.isEmpty()) {
             previousMessageCount = 0
+            previousLatestMessageKey = ""
             unseenMessageCount = 0
+            return@LaunchedEffect
+        }
+        if (isOlderHistoryPrepend(
+                previousMessageCount = previousMessageCount,
+                currentMessageCount = messages.size,
+                previousLatestMessageKey = previousLatestMessageKey,
+                currentLatestMessageKey = latestMessageKey,
+            )
+        ) {
+            previousMessageCount = messages.size
             return@LaunchedEffect
         }
         val update = resolveChatScrollUpdate(
@@ -182,15 +198,16 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
             currentUnseenMessageCount = unseenMessageCount,
         )
         if (update.shouldAutoScroll) {
-            listState.animateScrollToItem(messages.lastIndex)
+            listState.animateScrollToItem(messages.lastIndex + historyHeaderCount)
         }
         unseenMessageCount = update.unseenMessageCount
         previousMessageCount = messages.size
+        previousLatestMessageKey = latestMessageKey
     }
 
-    LaunchedEffect(imeBottom) {
+    LaunchedEffect(imeBottom, historyHeaderCount) {
         if (imeBottom > 0 && messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
+            listState.animateScrollToItem(messages.lastIndex + historyHeaderCount)
         }
     }
 
@@ -291,6 +308,23 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                 ),
                 verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.Bottom)
             ) {
+                if (canLoadOlderMessages || isLoadingOlderMessages) {
+                    item(key = "load-earlier-messages") {
+                        TextButton(
+                            onClick = component::loadOlderMessages,
+                            enabled = !isLoadingOlderMessages,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                if (isLoadingOlderMessages) {
+                                    "Loading earlier messages…"
+                                } else {
+                                    "Load earlier messages"
+                                },
+                            )
+                        }
+                    }
+                }
                 itemsIndexed(
                     items = messages,
                     key = { index, message -> messageKey(message, index) }
@@ -317,7 +351,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                 TextButton(
                     onClick = {
                         scrollScope.launch {
-                            listState.animateScrollToItem(messages.lastIndex)
+                            listState.animateScrollToItem(messages.lastIndex + historyHeaderCount)
                             unseenMessageCount = 0
                         }
                     },
