@@ -26,6 +26,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ChatTermsGatingTest : MainDispatcherTest() {
@@ -67,6 +68,49 @@ class ChatTermsGatingTest : MainDispatcherTest() {
         assertEquals(1, harness.messageRepository.createdMessages.size)
         assertEquals("Hello", harness.messageRepository.createdMessages.single().body)
         assertEquals("chat_1", harness.messageRepository.createdMessages.single().chatId)
+    }
+
+    @Test
+    fun accepted_user_sees_notification_warning_after_message_is_persisted() = runTest(testDispatcher) {
+        val harness = ChatGroupHarness(acceptedTerms = true)
+        harness.pushNotificationsRepository.chatGroupNotificationFailure = IllegalStateException("Relay unavailable")
+        advance()
+
+        harness.component.onMessageInputChange("Hello")
+        harness.component.sendMessage()
+        advance()
+
+        assertEquals("", harness.component.messageInput.value)
+        assertEquals(1, harness.messageRepository.createdMessages.size)
+        assertNull(harness.component.errorState.value)
+        assertEquals(
+            ChatFeedback(
+                message = "Message sent, but recipients may not receive a notification.",
+                kind = ChatFeedbackKind.WARNING,
+            ),
+            harness.component.feedback.value,
+        )
+
+        harness.component.dismissFeedback()
+        assertNull(harness.component.feedback.value)
+    }
+
+    @Test
+    fun reporting_chat_without_leaving_emits_success_feedback_not_error() = runTest(testDispatcher) {
+        val harness = ChatGroupHarness(acceptedTerms = true)
+        advance()
+
+        harness.component.reportChat(notes = "Spam", leaveChat = false)
+        advance()
+
+        assertNull(harness.component.errorState.value)
+        assertEquals(
+            ChatFeedback(
+                message = "Chat reported.",
+                kind = ChatFeedbackKind.SUCCESS,
+            ),
+            harness.component.feedback.value,
+        )
     }
 
     @Test
@@ -151,6 +195,8 @@ private class ChatGroupHarness(
 private class ChatTerms_FakeChatGroupRepository(
     private val chat: ChatGroupWithRelations,
 ) : IChatGroupRepository {
+    var reportChatFailure: Throwable? = null
+    var reportChatRemovedChatIds: List<String> = emptyList()
     override val chatGroupsFlow: Flow<Result<List<ChatGroupWithRelations>>> =
         flowOf(Result.success(listOf(chat)))
     override val chatSummariesFlow: Flow<Map<String, ChatGroupSummary>> =
@@ -174,6 +220,14 @@ private class ChatTerms_FakeChatGroupRepository(
     override suspend fun getCurrentUserMuteStatus(chatGroupId: String): Result<Boolean> = Result.success(false)
     override suspend fun setCurrentUserMuteStatus(chatGroupId: String, muted: Boolean): Result<Boolean> =
         Result.success(muted)
+    override suspend fun reportChat(
+        chatGroupId: String,
+        notes: String?,
+        leaveChat: Boolean,
+    ): Result<List<String>> {
+        reportChatFailure?.let { return Result.failure(it) }
+        return Result.success(reportChatRemovedChatIds)
+    }
 }
 
 private class ChatTerms_FakeMessageRepository : IMessageRepository {
@@ -197,6 +251,7 @@ private class ChatTerms_FakeMessageRepository : IMessageRepository {
 
 private class ChatTerms_FakePushNotificationsRepository : IPushNotificationsRepository {
     var activeChatId: String? = null
+    var chatGroupNotificationFailure: Throwable? = null
 
     override suspend fun subscribeUserToTeamNotifications(userId: String, teamId: String): Result<Unit> =
         Result.success(Unit)
@@ -227,7 +282,7 @@ private class ChatTerms_FakePushNotificationsRepository : IPushNotificationsRepo
     override suspend fun sendMatchNotification(matchId: String, title: String, body: String): Result<Unit> =
         Result.success(Unit)
     override suspend fun sendChatGroupNotification(chatGroupId: String, title: String, body: String): Result<Unit> =
-        Result.success(Unit)
+        chatGroupNotificationFailure?.let { Result.failure(it) } ?: Result.success(Unit)
     override suspend fun createTeamTopic(team: Team): Result<Unit> = Result.success(Unit)
     override suspend fun deleteTopic(id: String): Result<Unit> = Result.success(Unit)
     override suspend fun createEventTopic(event: Event): Result<Unit> = Result.success(Unit)

@@ -31,11 +31,22 @@ import kotlinx.coroutines.launch
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
+enum class ChatFeedbackKind {
+    SUCCESS,
+    WARNING,
+}
+
+data class ChatFeedback(
+    val message: String,
+    val kind: ChatFeedbackKind,
+)
+
 interface ChatGroupComponent {
     val currentUser: UserData
     val messageInput: StateFlow<String>
     val chatGroup: StateFlow<ChatGroupWithRelations?>
     val errorState: StateFlow<String?>
+    val feedback: StateFlow<ChatFeedback?>
     val suggestedPlayers: StateFlow<List<UserData>>
     val friends: StateFlow<List<UserData>>
     val isChatMuted: StateFlow<Boolean>
@@ -46,6 +57,7 @@ interface ChatGroupComponent {
     fun onBack()
     fun onMessageInputChange(newText: String)
     fun sendMessage()
+    fun dismissFeedback()
     fun deleteChat()
     fun leaveChat()
     fun searchPlayers(query: String)
@@ -75,6 +87,8 @@ class DefaultChatGroupComponent(
 
     private val _errorState = MutableStateFlow<String?>(null)
     override val errorState = _errorState.asStateFlow()
+    private val _feedback = MutableStateFlow<ChatFeedback?>(null)
+    override val feedback = _feedback.asStateFlow()
     private val _suggestedPlayers = MutableStateFlow<List<UserData>>(listOf())
     override val suggestedPlayers = _suggestedPlayers.asStateFlow()
     private val _friends = MutableStateFlow<List<UserData>>(listOf())
@@ -224,6 +238,8 @@ class DefaultChatGroupComponent(
             sentTime = Clock.System.now()
         )
 
+        _errorState.value = null
+        _feedback.value = null
         scope.launch {
             val createResult = messagesRepository.createMessage(message)
             if (createResult.isFailure) {
@@ -236,9 +252,16 @@ class DefaultChatGroupComponent(
             pushNotificationsRepository.sendChatGroupNotification(
                 chatId, "New message from ${currentUser.fullName}", text
             ).onFailure {
-                _errorState.value = it.userMessage()
+                _feedback.value = ChatFeedback(
+                    message = "Message sent, but recipients may not receive a notification.",
+                    kind = ChatFeedbackKind.WARNING,
+                )
             }
         }
+    }
+
+    override fun dismissFeedback() {
+        _feedback.value = null
     }
 
     override fun deleteChat() {
@@ -332,6 +355,7 @@ class DefaultChatGroupComponent(
         val currentChat = chatGroup.value?.chatGroup ?: return
         scope.launch {
             _errorState.value = null
+            _feedback.value = null
             chatGroupRepository.reportChat(
                 chatGroupId = currentChat.id,
                 notes = notes,
@@ -341,7 +365,10 @@ class DefaultChatGroupComponent(
                     clearOwnedActiveChat()
                     navigationHandler.navigateBack()
                 } else {
-                    _errorState.value = "Chat reported."
+                    _feedback.value = ChatFeedback(
+                        message = "Chat reported.",
+                        kind = ChatFeedbackKind.SUCCESS,
+                    )
                 }
             }.onFailure {
                 _errorState.value = it.userMessage("Failed to report chat.")

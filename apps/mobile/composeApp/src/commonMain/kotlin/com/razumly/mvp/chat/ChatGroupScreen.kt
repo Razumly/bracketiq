@@ -78,6 +78,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
     val input by component.messageInput.collectAsState()
     val chatGroupWithRelations by component.chatGroup.collectAsState()
     val errorMessage by component.errorState.collectAsState()
+    val feedback by component.feedback.collectAsState()
     val friends by component.friends.collectAsState()
     val suggestedPlayers by component.suggestedPlayers.collectAsState()
     val isChatMuted by component.isChatMuted.collectAsState()
@@ -214,6 +215,10 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
             }
+            ChatFeedbackBanner(
+                feedback = feedback,
+                onDismiss = component::dismissFeedback,
+            )
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -419,6 +424,37 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
         )
     }
 
+}
+
+@Composable
+internal fun ChatFeedbackBanner(
+    feedback: ChatFeedback?,
+    onDismiss: () -> Unit,
+) {
+    val item = feedback ?: return
+    val (containerColor, contentColor) = when (item.kind) {
+        ChatFeedbackKind.SUCCESS ->
+            MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+        ChatFeedbackKind.WARNING ->
+            MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
+    }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = item.message,
+                style = MaterialTheme.typography.bodySmall,
+                color = contentColor,
+            )
+            TextButton(onClick = onDismiss) {
+                Text("Dismiss")
+            }
+        }
+    }
 }
 
 private fun String?.asMeaningfulText(): String? =
