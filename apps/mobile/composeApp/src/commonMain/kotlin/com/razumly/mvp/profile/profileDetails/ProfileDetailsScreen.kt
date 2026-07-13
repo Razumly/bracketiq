@@ -53,7 +53,7 @@ import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventDetail.composables.SelectEventImage
 import io.github.ismoy.imagepickerkmp.domain.models.MimeType
-import io.github.ismoy.imagepickerkmp.presentation.ui.components.GalleryPickerLauncher
+import io.github.ismoy.imagepickerkmp.features.imagepicker.ui.rememberImagePickerKMP
 
 private const val DELETE_ACCOUNT_CONFIRMATION_TEXT = "delete my account"
 
@@ -79,7 +79,6 @@ fun ProfileDetailsScreen(
     var currentPasswordVisible by remember { mutableStateOf(false) }
     var newPasswordVisible by remember { mutableStateOf(false) }
     var confirmNewPasswordVisible by remember { mutableStateOf(false) }
-    var showUploadImagePicker by remember { mutableStateOf(false) }
     var showImageSelector by rememberSaveable { mutableStateOf(false) }
     var pendingProfileImageId by remember { mutableStateOf<String?>(null) }
     var showDeleteAccountDialog by rememberSaveable { mutableStateOf(false) }
@@ -99,6 +98,15 @@ fun ProfileDetailsScreen(
             .filter(String::isNotBlank)
             .joinToString(" ")
             .ifBlank { draft.userName.trim().ifBlank { "User" } }
+    }
+    val profilePhotoPicker = rememberImagePickerKMP()
+    val launchProfilePhotoPicker = remember(profilePhotoPicker) {
+        {
+            profilePhotoPicker.launchGallery(
+                allowMultiple = false,
+                mimeTypes = listOf(MimeType.IMAGE_ALL),
+            )
+        }
     }
 
     val formValidation = validateProfileDetailsForm(
@@ -171,21 +179,26 @@ fun ProfileDetailsScreen(
         }
     }
 
-    if (showUploadImagePicker) {
-        GalleryPickerLauncher(
-            onPhotosSelected = { photos ->
-                showUploadImagePicker = false
-                photos.firstOrNull()?.let(component::onUploadSelected)
-            },
-            onError = {
-                showUploadImagePicker = false
-            },
-            onDismiss = {
-                showUploadImagePicker = false
-            },
-            allowMultiple = false,
-            mimeTypes = listOf(MimeType.IMAGE_ALL),
-        )
+    LaunchedEffect(profilePhotoPicker.result) {
+        when (val outcome = resolveProfilePhotoPickerOutcome(profilePhotoPicker.result)) {
+            ProfilePhotoPickerOutcome.Ignore -> Unit
+            is ProfilePhotoPickerOutcome.Upload -> {
+                profilePhotoPicker.reset()
+                component.onUploadSelected(
+                    photo = outcome.photo,
+                    onRetry = launchProfilePhotoPicker,
+                )
+            }
+            is ProfilePhotoPickerOutcome.Failure -> {
+                profilePhotoPicker.reset()
+                popupHandler.showPopup(
+                    profilePhotoRetryError(
+                        message = outcome.message,
+                        onRetry = launchProfilePhotoPicker,
+                    ),
+                )
+            }
+        }
     }
 
     if (showImageSelector) {
@@ -198,7 +211,7 @@ fun ProfileDetailsScreen(
                     },
                     imageIds = selectableImageIds,
                     initialSelectedImageId = pendingProfileImageId,
-                    onUploadSelected = { showUploadImagePicker = true },
+                    onUploadSelected = launchProfilePhotoPicker,
                     onDeleteImage = { imageId ->
                         component.deleteImage(imageId)
                         if (pendingProfileImageId == imageId) {

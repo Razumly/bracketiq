@@ -16,6 +16,7 @@ import com.razumly.mvp.core.util.LoadingHandler
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -34,7 +35,7 @@ interface ProfileDetailsComponent : IPaymentProcessor {
 
     fun onBackClicked()
     fun setLoadingHandler(loadingHandler: LoadingHandler)
-    fun onUploadSelected(photo: GalleryPhotoResult)
+    fun onUploadSelected(photo: GalleryPhotoResult, onRetry: () -> Unit = {})
     fun consumeUploadedImageSelection()
     fun consumePasswordChangeCompletion()
     fun deleteImage(imageId: String)
@@ -100,20 +101,38 @@ class DefaultProfileDetailsComponent(
         this.loadingHandler = loadingHandler
     }
 
-    override fun onUploadSelected(photo: GalleryPhotoResult) {
+    override fun onUploadSelected(photo: GalleryPhotoResult, onRetry: () -> Unit) {
         scope.launch {
             if (::loadingHandler.isInitialized) {
                 loadingHandler.showLoading("Uploading image...")
             }
-            imageRepository.uploadImage(convertPhotoResultToUploadFile(photo))
-                .onFailure { error ->
-                    _errorState.value = ErrorMessage("Failed to upload image: ${error.userMessage()}")
+            try {
+                val uploadFile = try {
+                    convertPhotoResultToUploadFile(photo)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    _errorState.value = profilePhotoRetryError(
+                        message = profilePhotoUploadFailureMessage(ProfilePhotoUploadFailure.CONVERSION),
+                        onRetry = onRetry,
+                    )
+                    return@launch
                 }
-                .onSuccess { imageId ->
-                    _lastUploadedImageId.value = imageId
+
+                try {
+                    _lastUploadedImageId.value = imageRepository.uploadImage(uploadFile).getOrThrow()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    _errorState.value = profilePhotoRetryError(
+                        message = profilePhotoUploadFailureMessage(ProfilePhotoUploadFailure.UPLOAD),
+                        onRetry = onRetry,
+                    )
                 }
-            if (::loadingHandler.isInitialized) {
-                loadingHandler.hideLoading()
+            } finally {
+                if (::loadingHandler.isInitialized) {
+                    loadingHandler.hideLoading()
+                }
             }
         }
     }
