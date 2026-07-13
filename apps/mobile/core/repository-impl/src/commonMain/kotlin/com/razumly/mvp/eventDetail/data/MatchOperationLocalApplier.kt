@@ -159,9 +159,11 @@ private fun MatchMVP.applyLocalSegmentOperations(operations: List<MatchSegmentOp
             updated += next
         }
     }
+    // Segment results are safe to show optimistically, but their aggregate does not establish a
+    // match winner. The server owns that evaluation because it depends on the scoring model,
+    // configured segment count, completion state, totals, and ties.
     return copy(
         segments = updated.sortedBy { it.sequence },
-        winnerEventTeamId = resolveWinnerFromLocalSegments(updated) ?: winnerEventTeamId,
     ).syncLegacyScoresFromLocalSegments()
 }
 
@@ -280,15 +282,4 @@ private fun MatchMVP.syncLegacyScoresFromLocalSegments(): MatchMVP {
             }
         },
     )
-}
-
-private fun resolveWinnerFromLocalSegments(segments: List<MatchSegmentMVP>): String? {
-    val completedWinners = segments
-        .filter { it.status == "COMPLETE" }
-        .mapNotNull { it.winnerEventTeamId?.trim()?.takeIf(String::isNotBlank) }
-    return completedWinners
-        .groupingBy { it }
-        .eachCount()
-        .maxByOrNull { it.value }
-        ?.key
 }

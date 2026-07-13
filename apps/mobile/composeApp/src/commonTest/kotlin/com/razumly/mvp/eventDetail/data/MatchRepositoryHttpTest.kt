@@ -785,6 +785,114 @@ class MatchRepositoryHttpTest {
     }
 
     @Test
+    fun updateMatchOperationsDoesNotDeclareMatchWinnerFromFirstCompletedSet() = runTest {
+        val localMatch = MatchMVP(
+            id = "match_1",
+            matchId = 1,
+            eventId = "event_1",
+            team1Id = "team_1",
+            team2Id = "team_2",
+            segments = listOf(
+                MatchSegmentMVP(
+                    id = "match_1_segment_1",
+                    eventId = "event_1",
+                    matchId = "match_1",
+                    sequence = 1,
+                ),
+            ),
+        )
+        val matchDao = MatchRepositoryHttp_FakeMatchDao(listOf(localMatch))
+        val repository = MatchRepository(
+            api = MvpApiClient(
+                HttpClient(MockEngine { error("No request expected while syncing is disabled") }),
+                "http://example.test",
+                MatchRepositoryHttp_InMemoryAuthTokenStore(),
+            ),
+            databaseService = MatchRepositoryHttp_FakeDatabaseService(matchDao),
+            autoSyncOperations = false,
+        )
+
+        val result = repository.updateMatchOperations(
+            match = localMatch,
+            segmentOperations = listOf(
+                MatchSegmentOperationDto(
+                    id = "match_1_segment_1",
+                    sequence = 1,
+                    status = "COMPLETE",
+                    scores = mapOf("team_1" to 21, "team_2" to 15),
+                    winnerEventTeamId = "team_1",
+                ),
+            ),
+        )
+
+        assertTrue(result.isSuccess)
+        assertEquals("team_1", result.getOrThrow().segments.single().winnerEventTeamId)
+        assertEquals(null, result.getOrThrow().winnerEventTeamId)
+        assertEquals(null, matchDao.getMatchById("match_1")?.match?.winnerEventTeamId)
+    }
+
+    @Test
+    fun updateMatchOperationsDoesNotUsePluralityOfSegmentWinsForPointsMatch() = runTest {
+        val localMatch = MatchMVP(
+            id = "match_1",
+            matchId = 1,
+            eventId = "event_1",
+            team1Id = "team_1",
+            team2Id = "team_2",
+            segments = (1..3).map { sequence ->
+                MatchSegmentMVP(
+                    id = "match_1_segment_$sequence",
+                    eventId = "event_1",
+                    matchId = "match_1",
+                    sequence = sequence,
+                )
+            },
+        )
+        val matchDao = MatchRepositoryHttp_FakeMatchDao(listOf(localMatch))
+        val repository = MatchRepository(
+            api = MvpApiClient(
+                HttpClient(MockEngine { error("No request expected while syncing is disabled") }),
+                "http://example.test",
+                MatchRepositoryHttp_InMemoryAuthTokenStore(),
+            ),
+            databaseService = MatchRepositoryHttp_FakeDatabaseService(matchDao),
+            autoSyncOperations = false,
+        )
+
+        val result = repository.updateMatchOperations(
+            match = localMatch,
+            segmentOperations = listOf(
+                MatchSegmentOperationDto(
+                    id = "match_1_segment_1",
+                    sequence = 1,
+                    status = "COMPLETE",
+                    scores = mapOf("team_1" to 1, "team_2" to 0),
+                    winnerEventTeamId = "team_1",
+                ),
+                MatchSegmentOperationDto(
+                    id = "match_1_segment_2",
+                    sequence = 2,
+                    status = "COMPLETE",
+                    scores = mapOf("team_1" to 1, "team_2" to 0),
+                    winnerEventTeamId = "team_1",
+                ),
+                MatchSegmentOperationDto(
+                    id = "match_1_segment_3",
+                    sequence = 3,
+                    status = "COMPLETE",
+                    scores = mapOf("team_1" to 0, "team_2" to 10),
+                    winnerEventTeamId = "team_2",
+                ),
+            ),
+        )
+
+        assertTrue(result.isSuccess)
+        assertEquals(listOf(1, 1, 0), result.getOrThrow().team1Points)
+        assertEquals(listOf(0, 0, 10), result.getOrThrow().team2Points)
+        assertEquals(null, result.getOrThrow().winnerEventTeamId)
+    }
+
+    @Test
     fun getMatchPreservesIgnoredLocalScoreFieldsWhileApplyingRemoteNonScoreFields() = runTest {
         val requestedPaths = mutableListOf<String>()
         val engine = MockEngine { request ->
