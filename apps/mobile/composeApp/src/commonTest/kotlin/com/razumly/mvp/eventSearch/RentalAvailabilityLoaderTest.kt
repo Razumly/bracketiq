@@ -169,6 +169,70 @@ class RentalAvailabilityLoaderTest {
     }
 
     @Test
+    fun loadBusyBlocks_expandsWeeklyEventSlotsIntoScheduledOccurrences() = runTest {
+        val weeklySlot = TimeSlot(
+            id = "weekly_slot_1",
+            dayOfWeek = 0,
+            daysOfWeek = listOf(0, 2),
+            startTimeMinutes = 18 * 60,
+            endTimeMinutes = 19 * 60,
+            startDate = Instant.parse("2026-06-01T00:00:00Z"),
+            timeZone = "UTC",
+            repeating = true,
+            endDate = null,
+            scheduledFieldId = "field_1",
+            scheduledFieldIds = listOf("field_1"),
+            price = null,
+        )
+        val weeklyEvent = Event(
+            id = "weekly_event_1",
+            name = "Weekly Evening Clinic",
+            hostId = "host_1",
+            organizationId = "org_1",
+            fieldIds = listOf("field_1"),
+            timeSlotIds = listOf(weeklySlot.id),
+            start = Instant.parse("2026-06-01T00:00:00Z"),
+            end = Instant.parse("2026-06-12T23:59:00Z"),
+            eventType = EventType.WEEKLY_EVENT,
+        )
+        val loader = RentalAvailabilityLoader(
+            eventRepository = CreateEvent_FakeEventRepository(listOf(weeklyEvent)),
+            matchRepository = CreateEvent_FakeMatchRepository(),
+            fieldRepository = RentalAvailability_FakeFieldRepository(listOf(weeklySlot)),
+        )
+
+        val blocks = loader.loadBusyBlocks(
+            organizationId = "org_1",
+            fieldIds = listOf("field_1"),
+        ).getOrThrow()
+
+        assertEquals(
+            listOf(
+                "2026-06-01T18:00:00Z",
+                "2026-06-03T18:00:00Z",
+                "2026-06-08T18:00:00Z",
+                "2026-06-10T18:00:00Z",
+            ),
+            blocks.map { block -> block.start.toString() },
+        )
+        assertEquals(
+            listOf(
+                "2026-06-01T19:00:00Z",
+                "2026-06-03T19:00:00Z",
+                "2026-06-08T19:00:00Z",
+                "2026-06-10T19:00:00Z",
+            ),
+            blocks.map { block -> block.end.toString() },
+        )
+        assertFalse(
+            blocks.any { block ->
+                block.start < Instant.parse("2026-06-02T19:00:00Z") &&
+                    Instant.parse("2026-06-02T18:00:00Z") < block.end
+            },
+        )
+    }
+
+    @Test
     fun loadBusyBlocks_hidesEventNamesBehindUnavailableRentalBlocks() = runTest {
         val directEvent = Event(
             id = "event_1",

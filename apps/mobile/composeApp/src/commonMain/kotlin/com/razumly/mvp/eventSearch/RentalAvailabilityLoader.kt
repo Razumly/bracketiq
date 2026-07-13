@@ -100,7 +100,7 @@ class RentalAvailabilityLoader(
         events.forEach { event ->
             val eventFieldIds = normalizeIds(event.fieldIds)
             when (event.eventType) {
-                EventType.EVENT, EventType.WEEKLY_EVENT -> {
+                EventType.EVENT -> {
                     eventFieldIds.intersect(selectedFieldSet).forEach { fieldId ->
                         directBlocks.add(
                             RentalBusyBlock(
@@ -111,6 +111,15 @@ class RentalAvailabilityLoader(
                                 end = event.end,
                             )
                         )
+                    }
+                }
+
+                EventType.WEEKLY_EVENT -> {
+                    if (eventFieldIds.isNotEmpty() && eventFieldIds.intersect(selectedFieldSet).isEmpty()) {
+                        return@forEach
+                    }
+                    if (event.timeSlotIds.any { slotId -> slotId.isNotBlank() }) {
+                        slotBackedEvents.add(event)
                     }
                 }
 
@@ -220,7 +229,7 @@ class RentalAvailabilityLoader(
             return emptyList()
         }
 
-        return if (repeating) {
+        return if (repeating || event.eventType == EventType.WEEKLY_EVENT) {
             toRepeatingRentalBusyBlocks(event, fieldIds)
         } else {
             toSingleRentalBusyBlocks(event, fieldIds)
