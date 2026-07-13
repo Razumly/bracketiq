@@ -83,6 +83,7 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
@@ -509,8 +510,8 @@ internal fun TimeSlot.matchesRentalSelection(
 
     if (repeating) {
         val selectedDayIndex = selectedStartLocal.dayOfWeek.toRentalDayIndex()
-        val slotDayIndex = toMondayBasedDayIndex(slotTimeZone) ?: slotStartLocal.dayOfWeek.toRentalDayIndex()
-        if (selectedDayIndex != slotDayIndex) {
+        val slotDayIndexes = normalizedDaysOfWeek()
+        if (slotDayIndexes.isNotEmpty() && selectedDayIndex !in slotDayIndexes) {
             return false
         }
 
