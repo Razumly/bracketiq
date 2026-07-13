@@ -154,8 +154,15 @@ internal class EventRentalResourcesCoordinator {
     ): RentalResourceDraftSyncResult {
         val selectedOptions = selectedOptions()
         val rentalFields = selectedFields(selectedOptions)
-        val rentalFieldIds = rentalFields.map { field -> field.id.trim() }.filter(String::isNotBlank).toSet()
-        val customFields = currentFields.filterNot { field -> rentalFieldIds.contains(field.id.trim()) }
+        val selectedRentalFieldIds = rentalFields
+            .map { field -> field.id.trim() }
+            .filter(String::isNotBlank)
+            .toSet()
+        val knownRentalFieldIds = _availableResources.value
+            .map { option -> option.field.id.trim() }
+            .filter(String::isNotBlank)
+            .toSet()
+        val customFields = currentFields.filterNot { field -> knownRentalFieldIds.contains(field.id.trim()) }
         val nextFields = (rentalFields + customFields)
             .distinctBy { field -> field.id.trim() }
             .mapIndexed { index, field -> field.copy(fieldNumber = index + 1) }
@@ -172,7 +179,7 @@ internal class EventRentalResourcesCoordinator {
             .filterNot { slot -> slot.isRentalBacked() || rentalSlotIds.contains(slot.id) }
             .map { slot ->
                 val remainingFieldIds = slot.normalizedScheduledFieldIds().filter { fieldId ->
-                    validFieldIds.contains(fieldId) && !rentalFieldIds.contains(fieldId)
+                    validFieldIds.contains(fieldId) && !selectedRentalFieldIds.contains(fieldId)
                 }
                 slot.copy(
                     scheduledFieldId = remainingFieldIds.firstOrNull(),

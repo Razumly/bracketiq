@@ -118,6 +118,49 @@ class EventRentalResourcesCoordinatorTest {
         assertEquals(listOf("custom-field"), draft.timeSlots.first().normalizedScheduledFieldIds())
     }
 
+    @Test
+    fun deselecting_rental_resource_removes_its_field_and_custom_slot_references() {
+        val coordinator = EventRentalResourcesCoordinator()
+        val rentalField = field("rental-field")
+        val rentalOption = rentalOption(
+            id = "resource-1",
+            bookingId = "booking-1",
+            bookingItemId = "item-1",
+            field = rentalField,
+            eventTimeSlotId = "rental-slot",
+        )
+        coordinator.applyLoadedResources(
+            options = listOf(rentalOption),
+            slots = emptyList(),
+            eventId = "event-1",
+        )
+        coordinator.setSelected("resource-1", selected = true)
+        coordinator.setSelected("resource-1", selected = false)
+
+        val draft = coordinator.buildEditDraft(
+            event = Event(id = "event-1", timeZone = "UTC"),
+            currentFields = listOf(rentalField, field("custom-field", fieldNumber = 2)),
+            currentSlots = listOf(
+                slot(
+                    id = "custom-slot",
+                    scheduledFieldIds = listOf("rental-field", "custom-field"),
+                ),
+                slot(
+                    id = "rental-slot",
+                    scheduledFieldIds = listOf("rental-field"),
+                    rentalBookingId = "booking-1",
+                    rentalBookingItemId = "item-1",
+                ),
+            ),
+            defaultDivisionIds = listOf("division-a"),
+        )
+
+        assertEquals(listOf("custom-field"), draft.fields.map { field -> field.id })
+        assertEquals(listOf("custom-field"), draft.event.fieldIds)
+        assertEquals(listOf("custom-slot"), draft.timeSlots.map { slot -> slot.id })
+        assertEquals(listOf("custom-field"), draft.timeSlots.single().normalizedScheduledFieldIds())
+    }
+
     private fun rentalOption(
         id: String,
         bookingId: String = "booking-$id",
