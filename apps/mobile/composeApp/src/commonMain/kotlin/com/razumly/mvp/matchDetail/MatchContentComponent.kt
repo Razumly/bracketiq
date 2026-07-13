@@ -254,6 +254,7 @@ class DefaultMatchContentComponent(
     private var pendingDirectScoreSync: PendingDirectScoreSync? = null
     private var incidentQueueRetryJob: Job? = null
     private var incidentRetryAttempt = 0
+    private var incidentQueueStartupDrainMatchId: String? = null
 
     override val matchWithTeams = _optimisticMatch.flatMapLatest { optimisticMatch ->
         if (optimisticMatch != null) {
@@ -668,6 +669,7 @@ class DefaultMatchContentComponent(
         _isOfficial.value = isOfficial
         _officialCheckedIn.value = checkedIn
         _assignedTeamOfficialPendingCheckIn.value = canCheckIn && !checkedIn && isAssignedTeamOfficial
+        resumePersistedIncidentQueueIfNeeded()
         if (!shouldShowPrompt) {
             _showOfficialCheckInDialog.value = false
             return
@@ -1775,7 +1777,10 @@ class DefaultMatchContentComponent(
             }
     }
 
-    private suspend fun processIncidentQueueUntilBlocked(initialMatch: MatchMVP? = null) {
+    private suspend fun processIncidentQueueUntilBlocked(
+        initialMatch: MatchMVP? = null,
+        rescheduleOnFailure: Boolean = true,
+    ) {
         incidentQueueMutex.withLock {
             var queuedMatch = initialMatch
             while (true) {
@@ -1788,10 +1793,29 @@ class DefaultMatchContentComponent(
                 val updatedMatch = executeIncidentAction(currentMatch, action)
                 queuedMatch = updatedMatch
                 if (updatedMatch == null) {
-                    scheduleIncidentQueueRetry()
+                    if (rescheduleOnFailure) {
+                        scheduleIncidentQueueRetry()
+                    }
                     return@withLock
                 }
             }
+        }
+    }
+
+    private fun resumePersistedIncidentQueueIfNeeded() {
+        if (!_isOfficial.value || _officialCheckedIn.value != true) return
+        val currentMatch = matchWithTeams.value.match
+        val matchId = currentMatch.id.trim()
+        if (matchId.isBlank() || incidentQueueStartupDrainMatchId == matchId) return
+        incidentQueueStartupDrainMatchId = matchId
+        scope.launch {
+            // A reopened screen gets one immediate recovery attempt.  Do not create an
+            // unbounded background retry chain here: failures remain persisted and the
+            // normal queue triggers resume them on the next user action or screen open.
+            processIncidentQueueUntilBlocked(
+                initialMatch = currentMatch,
+                rescheduleOnFailure = false,
+            )
         }
     }
 

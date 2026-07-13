@@ -2373,6 +2373,65 @@ class MatchContentComponentTest : MainDispatcherTest() {
         assertTrue(operationCall.incidentOperations.isEmpty())
         assertEquals("COMPLETE", operationCall.segmentOperations.single().status)
     }
+
+    @Test
+    fun given_persisted_failed_incident_when_reopening_as_official_then_queue_resumes() = runTest(testDispatcher) {
+        val user = createUser(id = "user-1", teamIds = listOf("team-c"))
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(
+            usesSets = false,
+            autoCreatePointMatchIncidents = true,
+        )
+        val pendingIncident = MatchIncidentMVP(
+            id = "client:match-incident:match-1:segment-1:1",
+            eventId = event.id,
+            matchId = "match-1",
+            segmentId = "segment-1",
+            eventTeamId = "team-a",
+            participantUserId = "player-a",
+            officialUserId = user.id,
+            incidentType = "GOAL",
+            sequence = 1,
+            linkedPointDelta = 1,
+            minute = 5,
+            uploadStatus = "FAILED",
+        )
+        val match = createMatch(
+            eventId = event.id,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = true,
+        ).copy(
+            actualStart = TEST_ACTUAL_START,
+            resolvedMatchRules = ResolvedMatchRulesMVP(
+                scoringModel = "POINTS_ONLY",
+                segmentCount = 1,
+                segmentLabel = "Total",
+                autoCreatePointIncidentType = "GOAL",
+                pointIncidentRequiresParticipant = true,
+            ),
+            team1Points = listOf(1),
+            team2Points = listOf(0),
+            segments = listOf(createSegment(sequence = 1, team1Score = 1, team2Score = 0)),
+            incidents = listOf(pendingIncident),
+        )
+        val harness = MatchDetailHarness(
+            event = event,
+            initialMatch = match,
+            currentUser = user,
+            teams = listOf(
+                createTeam(id = "team-a", captainId = "captain-a"),
+                createTeam(id = "team-b", captainId = "captain-b"),
+                createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
+            ),
+        )
+
+        advance()
+
+        assertEquals(1, harness.matchRepository.incidentCalls.size)
+        assertEquals(pendingIncident.id, harness.matchRepository.incidentCalls.single().operation.id)
+        assertEquals(null, harness.component.matchWithTeams.value.match.incidents.single().uploadStatus)
+    }
 }
 
 private class MatchDetailHarness(
