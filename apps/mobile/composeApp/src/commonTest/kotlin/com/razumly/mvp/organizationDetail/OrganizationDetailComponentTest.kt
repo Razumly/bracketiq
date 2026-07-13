@@ -19,7 +19,10 @@ import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
+import com.razumly.mvp.core.data.repositories.OrganizationEventPage
+import com.razumly.mvp.core.data.repositories.OrganizationTeamPage
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.TeamRegistrationConsent
@@ -41,6 +44,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -156,48 +160,198 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
         }
 
     @Test
-    fun refreshTeams_loads_organization_teams_by_organization_id() = runTest(testDispatcher) {
-        val expectedTeam = Team(
-            division = "Open",
-            name = "Org Team",
-            captainId = "captain-1",
-            playerIds = listOf("captain-1"),
-            pending = emptyList(),
-            teamSize = 6,
-            organizationId = "org-1",
-            id = "team-1",
-        )
-        val capturedOrganizationIds = mutableListOf<String>()
-        val teamRepository = object : ITeamRepository by NoopTeamRepository {
-            override suspend fun getTeamsByOrganization(
-                organizationId: String,
-                limit: Int,
-            ): Result<List<TeamWithPlayers>> {
-                capturedOrganizationIds += organizationId
-                return Result.success(
-                    listOf(
-                        TeamWithPlayers(
-                            team = expectedTeam,
-                            captain = null,
-                            players = emptyList(),
-                            pendingPlayers = emptyList(),
+    fun organizationEventCatalog_loads_more_without_duplicates_and_keeps_rows_after_a_failure() = runTest(testDispatcher) {
+        val eventRepository = QueuedOrganizationEventRepository(
+            pages = ArrayDeque(
+                listOf(
+                    CompletableDeferred(
+                        Result.success(
+                            OrganizationEventPage(
+                                events = listOf(catalogEvent("event-1"), catalogEvent("event-2")),
+                                nextOffset = 2,
+                                hasMore = true,
+                            ),
                         ),
                     ),
-                )
-            }
-        }
+                    CompletableDeferred(
+                        Result.success(
+                            OrganizationEventPage(
+                                events = listOf(
+                                    catalogEvent("event-2", "Updated event 2"),
+                                    catalogEvent("event-3"),
+                                ),
+                                nextOffset = 4,
+                                hasMore = true,
+                            ),
+                        ),
+                    ),
+                    CompletableDeferred(Result.failure(IllegalStateException("offline"))),
+                    CompletableDeferred(
+                        Result.success(
+                            OrganizationEventPage(
+                                events = listOf(catalogEvent("event-4")),
+                                nextOffset = 5,
+                                hasMore = false,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val harness = OrganizationDetailHarness(
+            product = createProduct(period = "SINGLE"),
+            eventRepository = eventRepository,
+        )
+        advance()
+
+        assertEquals(listOf("event-1", "event-2"), harness.component.events.value.map(Event::id))
+        assertTrue(harness.component.canLoadMoreEvents.value)
+
+        harness.component.loadMoreEvents()
+        harness.component.loadMoreEvents()
+        advance()
+
+        assertEquals(listOf("event-1", "event-2", "event-3"), harness.component.events.value.map(Event::id))
+        assertEquals("Updated event 2", harness.component.events.value[1].name)
+        assertTrue(harness.component.canLoadMoreEvents.value)
+
+        harness.component.loadMoreEvents()
+        advance()
+
+        assertEquals(listOf("event-1", "event-2", "event-3"), harness.component.events.value.map(Event::id))
+        assertTrue(harness.component.canLoadMoreEvents.value)
+        assertEquals("Failed to load more events. Try again.", harness.component.errorState.value?.message)
+
+        harness.component.loadMoreEvents()
+        advance()
+
+        assertEquals(listOf("event-1", "event-2", "event-3", "event-4"), harness.component.events.value.map(Event::id))
+        assertFalse(harness.component.canLoadMoreEvents.value)
+        harness.component.loadMoreEvents()
+        advance()
+        assertEquals(listOf(0, 2, 4, 4), eventRepository.requests.map(CatalogPageRequest::offset))
+        assertTrue(eventRepository.requests.all { request ->
+            request.organizationId == "org-1" && request.limit == 50
+        })
+    }
+
+    @Test
+    fun organizationTeamCatalog_loads_more_without_duplicates_and_keeps_rows_after_a_failure() = runTest(testDispatcher) {
+        val teamRepository = QueuedOrganizationTeamRepository(
+            pages = ArrayDeque(
+                listOf(
+                    CompletableDeferred(
+                        Result.success(
+                            OrganizationTeamPage(
+                                teams = listOf(catalogTeam("team-1")),
+                                nextOffset = 1,
+                                hasMore = true,
+                            ),
+                        ),
+                    ),
+                    CompletableDeferred(Result.failure(IllegalStateException("offline"))),
+                    CompletableDeferred(
+                        Result.success(
+                            OrganizationTeamPage(
+                                teams = listOf(
+                                    catalogTeam("team-1", "Updated team 1"),
+                                    catalogTeam("team-2"),
+                                ),
+                                nextOffset = 3,
+                                hasMore = false,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
         val harness = OrganizationDetailHarness(
             product = createProduct(period = "SINGLE"),
             teamRepository = teamRepository,
         )
         advance()
 
-        harness.component.refreshTeams(force = true)
+        assertEquals(listOf("team-1"), harness.component.teams.value.map { team -> team.team.id })
+        assertTrue(harness.component.canLoadMoreTeams.value)
+
+        harness.component.loadMoreTeams()
+        harness.component.loadMoreTeams()
         advance()
 
-        assertEquals(2, capturedOrganizationIds.size)
-        assertEquals(listOf("org-1", "org-1"), capturedOrganizationIds)
         assertEquals(listOf("team-1"), harness.component.teams.value.map { team -> team.team.id })
+        assertTrue(harness.component.canLoadMoreTeams.value)
+        assertEquals("Failed to load more teams. Try again.", harness.component.errorState.value?.message)
+
+        harness.component.loadMoreTeams()
+        advance()
+
+        assertEquals(listOf("team-1", "team-2"), harness.component.teams.value.map { team -> team.team.id })
+        assertEquals("Updated team 1", harness.component.teams.value.first().team.name)
+        assertFalse(harness.component.canLoadMoreTeams.value)
+        harness.component.loadMoreTeams()
+        advance()
+        assertEquals(listOf(0, 1, 1), teamRepository.requests.map(CatalogPageRequest::offset))
+        assertTrue(teamRepository.requests.all { request ->
+            request.organizationId == "org-1" && request.limit == 50
+        })
+    }
+
+    @Test
+    fun organizationEventCatalog_ignores_a_stale_load_more_page_after_a_forced_refresh() = runTest(testDispatcher) {
+        val staleLoadMore = CompletableDeferred<Result<OrganizationEventPage>>()
+        val refreshedFirstPage = CompletableDeferred<Result<OrganizationEventPage>>()
+        val eventRepository = QueuedOrganizationEventRepository(
+            pages = ArrayDeque(
+                listOf(
+                    CompletableDeferred(
+                        Result.success(
+                            OrganizationEventPage(
+                                events = listOf(catalogEvent("event-initial")),
+                                nextOffset = 1,
+                                hasMore = true,
+                            ),
+                        ),
+                    ),
+                    staleLoadMore,
+                    refreshedFirstPage,
+                ),
+            ),
+        )
+        val harness = OrganizationDetailHarness(
+            product = createProduct(period = "SINGLE"),
+            eventRepository = eventRepository,
+        )
+        advance()
+
+        harness.component.loadMoreEvents()
+        advance()
+        harness.component.refreshEvents(force = true)
+        advance()
+
+        refreshedFirstPage.complete(
+            Result.success(
+                OrganizationEventPage(
+                    events = listOf(catalogEvent("event-fresh")),
+                    nextOffset = 1,
+                    hasMore = false,
+                ),
+            ),
+        )
+        advance()
+        staleLoadMore.complete(
+            Result.success(
+                OrganizationEventPage(
+                    events = listOf(catalogEvent("event-stale")),
+                    nextOffset = 2,
+                    hasMore = false,
+                ),
+            ),
+        )
+        advance()
+
+        assertEquals(listOf("event-fresh"), harness.component.events.value.map(Event::id))
+        assertFalse(harness.component.canLoadMoreEvents.value)
+        assertEquals(listOf(0, 1, 0), eventRepository.requests.map(CatalogPageRequest::offset))
     }
 
     @Test
@@ -371,6 +525,7 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
 
 private class OrganizationDetailHarness(
     val product: Product,
+    private val eventRepository: IEventRepository = CreateEvent_FakeEventRepository(),
     private val teamRepository: ITeamRepository = NoopTeamRepository,
 ) {
     private val organization = Organization(
@@ -398,7 +553,7 @@ private class OrganizationDetailHarness(
         organizationId = organization.id,
         initialTab = OrganizationDetailTab.STORE,
         billingRepository = billingRepository,
-        eventRepository = CreateEvent_FakeEventRepository(),
+        eventRepository = eventRepository,
         teamRepository = teamRepository,
         fieldRepository = CreateEvent_FakeFieldRepository(),
         matchRepository = NoopMatchRepository,
@@ -511,6 +666,66 @@ private class OrganizationDetailTestBillingRepository(
     }
 }
 
+private data class CatalogPageRequest(
+    val organizationId: String,
+    val limit: Int,
+    val offset: Int,
+)
+
+private class QueuedOrganizationEventRepository(
+    private val pages: ArrayDeque<CompletableDeferred<Result<OrganizationEventPage>>>,
+) : IEventRepository by CreateEvent_FakeEventRepository() {
+    val requests = mutableListOf<CatalogPageRequest>()
+
+    override suspend fun getOrganizationEventsPage(
+        organizationId: String,
+        limit: Int,
+        offset: Int,
+    ): Result<OrganizationEventPage> {
+        requests += CatalogPageRequest(organizationId, limit, offset)
+        check(pages.isNotEmpty()) { "Unexpected organization event page request." }
+        return pages.removeFirst().await()
+    }
+}
+
+private class QueuedOrganizationTeamRepository(
+    private val pages: ArrayDeque<CompletableDeferred<Result<OrganizationTeamPage>>>,
+) : ITeamRepository by NoopTeamRepository {
+    val requests = mutableListOf<CatalogPageRequest>()
+
+    override suspend fun getOrganizationTeamsPage(
+        organizationId: String,
+        limit: Int,
+        offset: Int,
+    ): Result<OrganizationTeamPage> {
+        requests += CatalogPageRequest(organizationId, limit, offset)
+        check(pages.isNotEmpty()) { "Unexpected organization team page request." }
+        return pages.removeFirst().await()
+    }
+}
+
+private fun catalogEvent(id: String, name: String = id): Event = Event(
+    id = id,
+    name = name,
+    organizationId = "org-1",
+)
+
+private fun catalogTeam(id: String, name: String = id): TeamWithPlayers = TeamWithPlayers(
+    team = Team(
+        division = "Open",
+        name = name,
+        captainId = "captain-$id",
+        playerIds = listOf("captain-$id"),
+        pending = emptyList(),
+        teamSize = 6,
+        organizationId = "org-1",
+        id = id,
+    ),
+    captain = null,
+    players = emptyList(),
+    pendingPlayers = emptyList(),
+)
+
 private object NoopTeamRepository : ITeamRepository {
     override fun getTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> =
         flowOf(Result.success(emptyList()))
@@ -522,6 +737,11 @@ private object NoopTeamRepository : ITeamRepository {
 
     override suspend fun getTeamsWithPlayers(ids: List<String>): Result<List<TeamWithPlayers>> =
         Result.success(emptyList())
+
+    override suspend fun getTeamsByOrganization(
+        organizationId: String,
+        limit: Int,
+    ): Result<List<TeamWithPlayers>> = Result.success(emptyList())
 
     override suspend fun addPlayerToTeam(team: Team, player: UserData): Result<Unit> = Result.success(Unit)
 

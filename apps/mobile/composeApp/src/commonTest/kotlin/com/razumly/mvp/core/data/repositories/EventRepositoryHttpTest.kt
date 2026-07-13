@@ -566,6 +566,105 @@ private object EventRepositoryHttp_UnusedTeamRepository : ITeamRepository {
 
 class EventRepositoryHttpTest {
     @Test
+    fun getOrganizationEventsPage_includes_offset_and_maps_server_pagination() = runTest {
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        val engine = MockEngine { request ->
+            assertEquals("/api/events", request.url.encodedPath)
+            assertEquals("org_1", request.url.parameters["organizationId"])
+            assertEquals("50", request.url.parameters["limit"])
+            assertEquals("25", request.url.parameters["offset"])
+            respond(
+                content = """
+                    {
+                      "events": [
+                        {
+                          "id": "event_26",
+                          "name": "Organization Event",
+                          "hostId": "host_1",
+                          "coordinates": [-80.0, 25.0],
+                          "start": "2026-07-13T12:00:00Z",
+                          "end": "2026-07-13T13:00:00Z"
+                        }
+                      ],
+                      "pagination": {
+                        "limit": 50,
+                        "offset": 25,
+                        "nextOffset": 26,
+                        "hasMore": true
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            EventRepositoryHttp_InMemoryAuthTokenStore("t123"),
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val page = repo.getOrganizationEventsPage("org_1", limit = 50, offset = 25).getOrThrow()
+
+        assertEquals(listOf("event_26"), page.events.map(Event::id))
+        assertEquals(26, page.nextOffset)
+        assertTrue(page.hasMore)
+    }
+
+    @Test
+    fun getOrganizationEventsPage_sanitizes_values_and_treats_missing_pagination_as_terminal() = runTest {
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        val engine = MockEngine { request ->
+            assertEquals("organization one", request.url.parameters["organizationId"])
+            assertEquals("1", request.url.parameters["limit"])
+            assertEquals("0", request.url.parameters["offset"])
+            respond(
+                content = """
+                    {
+                      "events": [
+                        {
+                          "id": "event_1",
+                          "name": "Legacy Organization Event",
+                          "hostId": "host_1",
+                          "coordinates": [-80.0, 25.0],
+                          "start": "2026-07-13T12:00:00Z",
+                          "end": "2026-07-13T13:00:00Z"
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            EventRepositoryHttp_InMemoryAuthTokenStore("t123"),
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val page = repo.getOrganizationEventsPage(" organization one ", limit = -3, offset = -8).getOrThrow()
+
+        assertEquals(listOf("event_1"), page.events.map(Event::id))
+        assertEquals(1, page.nextOffset)
+        assertFalse(page.hasMore)
+    }
+
+    @Test
     fun getCachedEventsFlow_filters_hidden_events_from_cached_results() = runTest {
         val eventDao = EventRepositoryHttp_FakeEventDao()
         eventDao.upsertEvents(

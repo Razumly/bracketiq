@@ -60,6 +60,12 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.jsonObject
 
+data class OrganizationTeamPage(
+    val teams: List<TeamWithPlayers>,
+    val nextOffset: Int,
+    val hasMore: Boolean,
+)
+
 interface ITeamRepository : IMVPRepository {
     fun getTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>>
     fun getCachedTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> = getTeamsFlow(ids)
@@ -70,6 +76,19 @@ interface ITeamRepository : IMVPRepository {
         organizationId: String,
         limit: Int = 200,
     ): Result<List<TeamWithPlayers>> = Result.failure(NotImplementedError("Organization team lookup is not implemented."))
+    suspend fun getOrganizationTeamsPage(
+        organizationId: String,
+        limit: Int = 50,
+        offset: Int = 0,
+    ): Result<OrganizationTeamPage> {
+        return getTeamsByOrganization(organizationId, limit).map { teams ->
+            OrganizationTeamPage(
+                teams = teams,
+                nextOffset = teams.size,
+                hasMore = false,
+            )
+        }
+    }
     suspend fun searchTeamsForEventInvite(
         query: String,
         eventId: String? = null,
@@ -616,6 +635,47 @@ class TeamRepository(
         }
         databaseService.getTeamDao.upsertTeamsWithRelations(teams)
         databaseService.getTeamDao.getTeamsWithPlayersFlowByIds(teams.map(Team::id)).first()
+    }
+
+    override suspend fun getOrganizationTeamsPage(
+        organizationId: String,
+        limit: Int,
+        offset: Int,
+    ): Result<OrganizationTeamPage> = runCatching {
+        val normalizedOrganizationId = organizationId.trim()
+        val safeOffset = offset.coerceAtLeast(0)
+        if (normalizedOrganizationId.isBlank()) {
+            return@runCatching OrganizationTeamPage(
+                teams = emptyList(),
+                nextOffset = 0,
+                hasMore = false,
+            )
+        }
+
+        val page = fetchRemoteTeamsPageByOrganization(
+            organizationId = normalizedOrganizationId,
+            limit = limit,
+            offset = safeOffset,
+        )
+        if (page.teams.isEmpty()) {
+            return@runCatching OrganizationTeamPage(
+                teams = emptyList(),
+                nextOffset = page.nextOffset,
+                hasMore = page.hasMore,
+            )
+        }
+
+        databaseService.getTeamDao.upsertTeamsWithRelations(page.teams)
+        val remoteTeamIds = page.teams.map(Team::id)
+        val hydratedById = databaseService.getTeamDao
+            .getTeamsWithPlayersFlowByIds(remoteTeamIds)
+            .first()
+            .associateBy { teamWithPlayers -> teamWithPlayers.team.id }
+        OrganizationTeamPage(
+            teams = remoteTeamIds.mapNotNull(hydratedById::get),
+            nextOffset = page.nextOffset,
+            hasMore = page.hasMore,
+        )
     }
 
     override suspend fun searchTeamsForEventInvite(
@@ -1186,6 +1246,34 @@ class TeamRepository(
         ensureUsersCachedForTeams(teams)
         return teams
     }
+
+    private suspend fun fetchRemoteTeamsPageByOrganization(
+        organizationId: String,
+        limit: Int,
+        offset: Int,
+    ): RemoteOrganizationTeamPage {
+        val encodedOrganizationId = organizationId.encodeURLQueryComponent()
+        val safeLimit = limit.coerceIn(1, 200)
+        val safeOffset = offset.coerceAtLeast(0)
+        val response = api.get<TeamsResponseDto>(
+            "api/teams?organizationId=$encodedOrganizationId&limit=$safeLimit&offset=$safeOffset",
+        )
+        val teams = response.teams.mapNotNull { it.toTeamOrNull() }
+        ensureUsersCachedForTeams(teams)
+        val fallbackNextOffset = teams.size
+        val nextOffset = response.pagination?.nextOffset?.takeIf { candidate -> candidate > safeOffset }
+        return RemoteOrganizationTeamPage(
+            teams = teams,
+            nextOffset = nextOffset ?: fallbackNextOffset,
+            hasMore = response.pagination?.hasMore == true && nextOffset != null,
+        )
+    }
+
+    private data class RemoteOrganizationTeamPage(
+        val teams: List<Team>,
+        val nextOffset: Int,
+        val hasMore: Boolean,
+    )
 
     private suspend fun fetchRemoteTeamsForSearch(limit: Int): List<Team> {
         val safeLimit = limit.coerceIn(1, 200)

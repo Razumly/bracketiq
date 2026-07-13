@@ -68,6 +68,39 @@ import kotlin.time.Instant
 private fun Product.isSinglePurchase(): Boolean =
     period.trim().equals("SINGLE", ignoreCase = true)
 
+private const val ORGANIZATION_CATALOG_PAGE_SIZE = 50
+
+private fun <T> mergeOrganizationCatalogItems(
+    existing: List<T>,
+    incoming: List<T>,
+    id: (T) -> String,
+): List<T> {
+    val merged = existing.toMutableList()
+    val indexById = buildMap {
+        existing.forEachIndexed { index, item ->
+            id(item).trim().takeIf(String::isNotBlank)?.let { stableId ->
+                put(stableId, index)
+            }
+        }
+    }.toMutableMap()
+
+    incoming.forEach { item ->
+        val stableId = id(item).trim()
+        if (stableId.isBlank()) {
+            merged += item
+            return@forEach
+        }
+        val existingIndex = indexById[stableId]
+        if (existingIndex == null) {
+            indexById[stableId] = merged.size
+            merged += item
+        } else {
+            merged[existingIndex] = item
+        }
+    }
+    return merged
+}
+
 data class RentalReservationComplete(
     val bookingId: String,
     val billId: String? = null,
@@ -127,6 +160,10 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     val isLoadingOrganization: StateFlow<Boolean>
     val isLoadingEvents: StateFlow<Boolean>
     val isLoadingTeams: StateFlow<Boolean>
+    val canLoadMoreEvents: StateFlow<Boolean>
+    val canLoadMoreTeams: StateFlow<Boolean>
+    val isLoadingMoreEvents: StateFlow<Boolean>
+    val isLoadingMoreTeams: StateFlow<Boolean>
     val isLoadingProducts: StateFlow<Boolean>
     val isLoadingReviews: StateFlow<Boolean>
     val isMutatingReview: StateFlow<Boolean>
@@ -149,6 +186,8 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     fun refreshOrganization(force: Boolean = false)
     fun refreshEvents(force: Boolean = false)
     fun refreshTeams(force: Boolean = false)
+    fun loadMoreEvents()
+    fun loadMoreTeams()
     fun refreshProducts(force: Boolean = false)
     fun refreshReviews(force: Boolean = false)
     fun saveReview(rating: Int, body: String?)
@@ -244,6 +283,15 @@ class DefaultOrganizationDetailComponent(
     private val _isLoadingTeams = MutableStateFlow(false)
     override val isLoadingTeams: StateFlow<Boolean> = _isLoadingTeams.asStateFlow()
 
+    private val _canLoadMoreEvents = MutableStateFlow(false)
+    override val canLoadMoreEvents: StateFlow<Boolean> = _canLoadMoreEvents.asStateFlow()
+    private val _canLoadMoreTeams = MutableStateFlow(false)
+    override val canLoadMoreTeams: StateFlow<Boolean> = _canLoadMoreTeams.asStateFlow()
+    private val _isLoadingMoreEvents = MutableStateFlow(false)
+    override val isLoadingMoreEvents: StateFlow<Boolean> = _isLoadingMoreEvents.asStateFlow()
+    private val _isLoadingMoreTeams = MutableStateFlow(false)
+    override val isLoadingMoreTeams: StateFlow<Boolean> = _isLoadingMoreTeams.asStateFlow()
+
     private val _isLoadingProducts = MutableStateFlow(false)
     override val isLoadingProducts: StateFlow<Boolean> = _isLoadingProducts.asStateFlow()
 
@@ -290,6 +338,10 @@ class DefaultOrganizationDetailComponent(
     private var organizationLoaded = false
     private var eventsLoaded = false
     private var teamsLoaded = false
+    private var nextEventsOffset = 0
+    private var nextTeamsOffset = 0
+    private var eventsCatalogGeneration = 0L
+    private var teamsCatalogGeneration = 0L
     private var productsLoaded = false
     private var reviewsLoaded = false
     private var rentalsLoaded = false
@@ -371,10 +423,30 @@ class DefaultOrganizationDetailComponent(
                             refreshProducts(force = true)
                         }
                         OrganizationCheckoutOwner.TEAM -> if (pendingTeam != null) {
-                            val refreshedTeams = teamRepository.getTeamsByOrganization(organizationId).getOrNull()
-                            if (refreshedTeams != null) {
-                                _teams.value = refreshedTeams
+                            val generation = ++teamsCatalogGeneration
+                            _isLoadingTeams.value = true
+                            _isLoadingMoreTeams.value = false
+                            val refreshedPage = runCatching {
+                                teamRepository.getOrganizationTeamsPage(
+                                    organizationId = organizationId,
+                                    limit = ORGANIZATION_CATALOG_PAGE_SIZE,
+                                    offset = 0,
+                                ).getOrThrow()
+                            }.getOrNull()
+                            val refreshedTeams = refreshedPage?.teams
+                            if (generation == teamsCatalogGeneration && refreshedPage != null) {
+                                _teams.value = mergeOrganizationCatalogItems(
+                                    existing = emptyList(),
+                                    incoming = refreshedPage.teams,
+                                    id = { team -> team.team.id },
+                                )
+                                nextTeamsOffset = refreshedPage.nextOffset.coerceAtLeast(0)
+                                _canLoadMoreTeams.value = refreshedPage.hasMore
                                 teamsLoaded = true
+                                updateVisibleTabs()
+                            }
+                            if (generation == teamsCatalogGeneration) {
+                                _isLoadingTeams.value = false
                             }
                             val paymentPending = refreshedTeams
                                 ?.firstOrNull { team -> team.team.id == pendingTeam.team.id }
@@ -487,42 +559,150 @@ class DefaultOrganizationDetailComponent(
     }
 
     override fun refreshEvents(force: Boolean) {
-        scope.launch {
-            if (_isLoadingEvents.value) return@launch
-            if (eventsLoaded && !force) return@launch
+        if (_isLoadingEvents.value && !force) return
+        if (eventsLoaded && !force) return
 
-            _isLoadingEvents.value = true
-            eventRepository.getEventsByOrganization(organizationId, limit = 300)
-                .onSuccess { loadedEvents ->
-                    _events.value = loadedEvents
+        val generation = ++eventsCatalogGeneration
+        _isLoadingEvents.value = true
+        _isLoadingMoreEvents.value = false
+        scope.launch {
+            runCatching {
+                eventRepository.getOrganizationEventsPage(
+                    organizationId = organizationId,
+                    limit = ORGANIZATION_CATALOG_PAGE_SIZE,
+                    offset = 0,
+                ).getOrThrow()
+            }.onSuccess { page ->
+                if (generation == eventsCatalogGeneration) {
+                    _events.value = mergeOrganizationCatalogItems(
+                        existing = emptyList(),
+                        incoming = page.events,
+                        id = Event::id,
+                    )
+                    nextEventsOffset = page.nextOffset.coerceAtLeast(0)
+                    _canLoadMoreEvents.value = page.hasMore
+                    eventsLoaded = true
                 }
-                .onFailure { error ->
+            }.onFailure { error ->
+                if (generation == eventsCatalogGeneration) {
                     _errorState.value = ErrorMessage("Failed to load organization events: ${error.userMessage()}")
-                    _events.value = emptyList()
+                    eventsLoaded = true
                 }
-            _isLoadingEvents.value = false
-            eventsLoaded = true
-            updateVisibleTabs()
+            }
+            if (generation == eventsCatalogGeneration) {
+                _isLoadingEvents.value = false
+                updateVisibleTabs()
+            }
+        }
+    }
+
+    override fun loadMoreEvents() {
+        if (!_canLoadMoreEvents.value || _isLoadingMoreEvents.value || _isLoadingEvents.value) return
+
+        val generation = eventsCatalogGeneration
+        val offset = nextEventsOffset
+        _isLoadingMoreEvents.value = true
+        scope.launch {
+            runCatching {
+                eventRepository.getOrganizationEventsPage(
+                    organizationId = organizationId,
+                    limit = ORGANIZATION_CATALOG_PAGE_SIZE,
+                    offset = offset,
+                ).getOrThrow()
+            }.onSuccess { page ->
+                if (generation == eventsCatalogGeneration) {
+                    _events.value = mergeOrganizationCatalogItems(
+                        existing = _events.value,
+                        incoming = page.events,
+                        id = Event::id,
+                    )
+                    nextEventsOffset = page.nextOffset.coerceAtLeast(offset)
+                    _canLoadMoreEvents.value = page.hasMore
+                    eventsLoaded = true
+                    updateVisibleTabs()
+                }
+            }.onFailure {
+                if (generation == eventsCatalogGeneration) {
+                    _errorState.value = ErrorMessage("Failed to load more events. Try again.")
+                }
+            }
+            if (generation == eventsCatalogGeneration) {
+                _isLoadingMoreEvents.value = false
+            }
         }
     }
 
     override fun refreshTeams(force: Boolean) {
-        scope.launch {
-            if (_isLoadingTeams.value) return@launch
-            if (teamsLoaded && !force) return@launch
+        if (_isLoadingTeams.value && !force) return
+        if (teamsLoaded && !force) return
 
-            _isLoadingTeams.value = true
-            teamRepository.getTeamsByOrganization(organizationId)
-                .onSuccess { teamsWithPlayers ->
-                    _teams.value = teamsWithPlayers
+        val generation = ++teamsCatalogGeneration
+        _isLoadingTeams.value = true
+        _isLoadingMoreTeams.value = false
+        scope.launch {
+            runCatching {
+                teamRepository.getOrganizationTeamsPage(
+                    organizationId = organizationId,
+                    limit = ORGANIZATION_CATALOG_PAGE_SIZE,
+                    offset = 0,
+                ).getOrThrow()
+            }.onSuccess { page ->
+                if (generation == teamsCatalogGeneration) {
+                    _teams.value = mergeOrganizationCatalogItems(
+                        existing = emptyList(),
+                        incoming = page.teams,
+                        id = { team -> team.team.id },
+                    )
+                    nextTeamsOffset = page.nextOffset.coerceAtLeast(0)
+                    _canLoadMoreTeams.value = page.hasMore
+                    teamsLoaded = true
                 }
-                .onFailure { error ->
+            }.onFailure { error ->
+                if (generation == teamsCatalogGeneration) {
                     _errorState.value = ErrorMessage("Failed to load organization teams: ${error.userMessage()}")
-                    _teams.value = emptyList()
+                    teamsLoaded = true
                 }
-            _isLoadingTeams.value = false
-            teamsLoaded = true
-            updateVisibleTabs()
+            }
+            if (generation == teamsCatalogGeneration) {
+                _isLoadingTeams.value = false
+                updateVisibleTabs()
+            }
+        }
+    }
+
+    override fun loadMoreTeams() {
+        if (!_canLoadMoreTeams.value || _isLoadingMoreTeams.value || _isLoadingTeams.value) return
+
+        val generation = teamsCatalogGeneration
+        val offset = nextTeamsOffset
+        _isLoadingMoreTeams.value = true
+        scope.launch {
+            runCatching {
+                teamRepository.getOrganizationTeamsPage(
+                    organizationId = organizationId,
+                    limit = ORGANIZATION_CATALOG_PAGE_SIZE,
+                    offset = offset,
+                ).getOrThrow()
+            }.onSuccess { page ->
+                if (generation == teamsCatalogGeneration) {
+                    _teams.value = mergeOrganizationCatalogItems(
+                        existing = _teams.value,
+                        incoming = page.teams,
+                        id = { team -> team.team.id },
+                    )
+                    nextTeamsOffset = page.nextOffset.coerceAtLeast(offset)
+                    _canLoadMoreTeams.value = page.hasMore
+                    teamsLoaded = true
+                    updateVisibleTabs()
+                }
+            }.onFailure {
+                if (generation == teamsCatalogGeneration) {
+                    _errorState.value = ErrorMessage("Failed to load more teams. Try again.")
+                }
+            }
+            if (generation == teamsCatalogGeneration) {
+                _isLoadingMoreTeams.value = false
+            }
         }
     }
 

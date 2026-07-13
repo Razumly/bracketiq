@@ -456,6 +456,15 @@ data class EventApiDto(
 @Serializable
 data class EventsResponseDto(
     val events: List<EventApiDto> = emptyList(),
+    val pagination: EventsPaginationDto? = null,
+)
+
+@Serializable
+data class EventsPaginationDto(
+    val limit: Int? = null,
+    val offset: Int? = null,
+    val nextOffset: Int? = null,
+    val hasMore: Boolean? = null,
 )
 
 @Serializable

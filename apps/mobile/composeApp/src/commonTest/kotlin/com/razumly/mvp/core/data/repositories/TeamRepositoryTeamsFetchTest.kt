@@ -48,6 +48,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 private class InMemoryAuthTokenStore(
@@ -63,7 +64,9 @@ private fun outgoingBodyText(content: OutgoingContent): String = when (content) 
     else -> error("Unsupported outgoing content ${content::class.simpleName}")
 }
 
-private class FakeTeamDao : TeamDao {
+private class FakeTeamDao(
+    private val relationsOrder: (List<String>) -> List<String> = { ids -> ids },
+) : TeamDao {
     private val teams = MutableStateFlow<Map<String, Team>>(emptyMap())
 
     override suspend fun upsertTeam(team: Team) {
@@ -131,7 +134,7 @@ private class FakeTeamDao : TeamDao {
 
     override fun getTeamsWithPlayersFlowByIds(ids: List<String>): Flow<List<com.razumly.mvp.core.data.dataTypes.TeamWithPlayers>> =
         teams.map { cached ->
-            ids.mapNotNull(cached::get).map { team ->
+            relationsOrder(ids).mapNotNull(cached::get).map { team ->
                 com.razumly.mvp.core.data.dataTypes.TeamWithPlayers(
                     team = team,
                     captain = null,
@@ -1109,6 +1112,113 @@ class TeamRepositoryTeamsFetchTest {
         assertEquals(1, teams.size)
         assertEquals("org_team_1", teams.first().team.id)
         assertEquals("org_1", teams.first().team.organizationId)
+    }
+
+    @Test
+    fun getOrganizationTeamsPage_includes_offset_maps_pagination_and_preserves_remote_order() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao(relationsOrder = List<String>::reversed)
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+        val engine = MockEngine { request ->
+            assertEquals("/api/teams", request.url.encodedPath)
+            assertEquals("org_1", request.url.parameters["organizationId"])
+            assertEquals("50", request.url.parameters["limit"])
+            assertEquals("20", request.url.parameters["offset"])
+            respond(
+                content = """
+                    {
+                      "teams": [
+                        {
+                          "id": "team_a",
+                          "name": "First Remote Team",
+                          "division": "Open",
+                          "playerIds": ["u1"],
+                          "captainId": "u1",
+                          "pending": [],
+                          "teamSize": 6,
+                          "organizationId": "org_1"
+                        },
+                        {
+                          "id": "team_b",
+                          "name": "Second Remote Team",
+                          "division": "Open",
+                          "playerIds": ["u2"],
+                          "captainId": "u2",
+                          "pending": [],
+                          "teamSize": 6,
+                          "organizationId": "org_1"
+                        }
+                      ],
+                      "pagination": {
+                        "limit": 50,
+                        "offset": 20,
+                        "nextOffset": 22,
+                        "hasMore": true
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            tokenStore,
+        )
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        val page = repo.getOrganizationTeamsPage("org_1", limit = 50, offset = 20).getOrThrow()
+
+        assertEquals(listOf("team_a", "team_b"), page.teams.map { team -> team.team.id })
+        assertEquals(22, page.nextOffset)
+        assertTrue(page.hasMore)
+    }
+
+    @Test
+    fun getOrganizationTeamsPage_sanitizes_values_and_treats_missing_pagination_as_terminal() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+        val engine = MockEngine { request ->
+            assertEquals("organization one", request.url.parameters["organizationId"])
+            assertEquals("1", request.url.parameters["limit"])
+            assertEquals("0", request.url.parameters["offset"])
+            respond(
+                content = """
+                    {
+                      "teams": [
+                        {
+                          "id": "team_1",
+                          "name": "Legacy Team",
+                          "division": "Open",
+                          "playerIds": ["u1"],
+                          "captainId": "u1",
+                          "pending": [],
+                          "teamSize": 6,
+                          "organizationId": "organization one"
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            tokenStore,
+        )
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        val page = repo.getOrganizationTeamsPage(" organization one ", limit = -3, offset = -8).getOrThrow()
+
+        assertEquals(listOf("team_1"), page.teams.map { team -> team.team.id })
+        assertEquals(1, page.nextOffset)
+        assertFalse(page.hasMore)
     }
 
     @Test

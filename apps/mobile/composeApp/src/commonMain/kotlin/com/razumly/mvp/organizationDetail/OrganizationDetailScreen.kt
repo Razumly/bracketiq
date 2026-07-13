@@ -30,6 +30,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -120,6 +121,10 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val isLoadingOrganization by component.isLoadingOrganization.collectAsState()
     val isLoadingEvents by component.isLoadingEvents.collectAsState()
     val isLoadingTeams by component.isLoadingTeams.collectAsState()
+    val canLoadMoreEvents by component.canLoadMoreEvents.collectAsState()
+    val canLoadMoreTeams by component.canLoadMoreTeams.collectAsState()
+    val isLoadingMoreEvents by component.isLoadingMoreEvents.collectAsState()
+    val isLoadingMoreTeams by component.isLoadingMoreTeams.collectAsState()
     val isLoadingProducts by component.isLoadingProducts.collectAsState()
     val isLoadingReviews by component.isLoadingReviews.collectAsState()
     val isMutatingReview by component.isMutatingReview.collectAsState()
@@ -454,9 +459,12 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                     EventsTabContent(
                         events = events,
                         isLoading = isLoadingEvents,
+                        canLoadMore = canLoadMoreEvents,
+                        isLoadingMore = isLoadingMoreEvents,
                         bottomPadding = bottomPadding,
                         organizationLogoId = organization?.logoId,
                         onEventClick = component::viewEvent,
+                        onLoadMore = component::loadMoreEvents,
                     )
                 }
 
@@ -464,8 +472,11 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                     TeamsTabContent(
                         teams = teams,
                         isLoading = isLoadingTeams,
+                        canLoadMore = canLoadMoreTeams,
+                        isLoadingMore = isLoadingMoreTeams,
                         bottomPadding = bottomPadding,
                         onTeamClick = { team -> selectedTeam = team },
+                        onLoadMore = component::loadMoreTeams,
                     )
                 }
 
@@ -1157,11 +1168,14 @@ private fun ProductPreviewCard(
 private fun EventsTabContent(
     events: List<Event>,
     isLoading: Boolean,
+    canLoadMore: Boolean,
+    isLoadingMore: Boolean,
     bottomPadding: androidx.compose.ui.unit.Dp,
     organizationLogoId: String?,
     onEventClick: (Event) -> Unit,
+    onLoadMore: () -> Unit,
 ) {
-    if (isLoading) {
+    if (isLoading && events.isEmpty()) {
         EmptyState(message = "Loading events...")
         return
     }
@@ -1191,6 +1205,17 @@ private fun EventsTabContent(
                     )
                 }
             }
+            if (canLoadMore) {
+                item(key = "load-more-events") {
+                    OutlinedButton(
+                        onClick = onLoadMore,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isLoadingMore && !isLoading,
+                    ) {
+                        Text(if (isLoadingMore) "Loading more…" else "Load more events")
+                    }
+                }
+            }
         }
     }
 }
@@ -1199,10 +1224,13 @@ private fun EventsTabContent(
 private fun TeamsTabContent(
     teams: List<TeamWithPlayers>,
     isLoading: Boolean,
+    canLoadMore: Boolean,
+    isLoadingMore: Boolean,
     bottomPadding: androidx.compose.ui.unit.Dp,
     onTeamClick: (TeamWithPlayers) -> Unit,
+    onLoadMore: () -> Unit,
 ) {
-    if (isLoading) {
+    if (isLoading && teams.isEmpty()) {
         EmptyState(message = "Loading teams...")
         return
     }
@@ -1222,6 +1250,17 @@ private fun TeamsTabContent(
                     team = team,
                     modifier = Modifier.clickable { onTeamClick(team) },
                 )
+            }
+            if (canLoadMore) {
+                item(key = "load-more-teams") {
+                    OutlinedButton(
+                        onClick = onLoadMore,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isLoadingMore && !isLoading,
+                    ) {
+                        Text(if (isLoadingMore) "Loading more…" else "Load more teams")
+                    }
+                }
             }
         }
     }

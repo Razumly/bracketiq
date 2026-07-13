@@ -107,6 +107,12 @@ import kotlinx.serialization.Serializable
 import kotlin.time.Clock
 import kotlin.time.Instant
 
+data class OrganizationEventPage(
+    val events: List<Event>,
+    val nextOffset: Int,
+    val hasMore: Boolean,
+)
+
 interface IEventRepository : IMVPRepository {
     fun getCachedEventsFlow(): Flow<Result<List<Event>>>
     fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>>
@@ -118,6 +124,19 @@ interface IEventRepository : IMVPRepository {
     suspend fun getEventStaffInvites(eventId: String): Result<List<Invite>>
     suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>>
     suspend fun getEventsByOrganization(organizationId: String, limit: Int = 200): Result<List<Event>>
+    suspend fun getOrganizationEventsPage(
+        organizationId: String,
+        limit: Int = 50,
+        offset: Int = 0,
+    ): Result<OrganizationEventPage> {
+        return getEventsByOrganization(organizationId, limit).map { events ->
+            OrganizationEventPage(
+                events = events,
+                nextOffset = events.size,
+                hasMore = false,
+            )
+        }
+    }
     suspend fun getRegistrationQuestions(scopeType: String, scopeId: String): Result<List<TeamJoinQuestion>> =
         Result.success(emptyList())
     suspend fun createEvent(
@@ -1246,6 +1265,28 @@ class EventRepository(
         return res.events.mapNotNull { it.toEventOrNull() }
     }
 
+    private suspend fun fetchRemoteEventsPageByOrganization(
+        organizationId: String,
+        limit: Int,
+        offset: Int,
+    ): OrganizationEventPage {
+        val encodedOrganizationId = organizationId.encodeURLQueryComponent()
+        val safeLimit = limit.coerceIn(1, 500)
+        val safeOffset = offset.coerceAtLeast(0)
+        val response = api.get<EventsResponseDto>(
+            "api/events?organizationId=$encodedOrganizationId&limit=$safeLimit&offset=$safeOffset",
+        )
+        val events = response.events.mapNotNull { it.toEventOrNull() }
+        val pagination = response.pagination
+        val fallbackNextOffset = events.size
+        val nextOffset = pagination?.nextOffset?.takeIf { candidate -> candidate > safeOffset }
+        return OrganizationEventPage(
+            events = events,
+            nextOffset = nextOffset ?: fallbackNextOffset,
+            hasMore = pagination?.hasMore == true && nextOffset != null,
+        )
+    }
+
     private suspend fun fetchRemoteEventsByIds(eventIds: List<String>): List<Event> {
         val idChunks = collectionIdChunks(eventIds)
         val ids = idChunks.flatten()
@@ -1913,6 +1954,35 @@ class EventRepository(
                 databaseService.getEventDao.upsertEvents(events)
             }
             events
+        }
+    }
+
+    override suspend fun getOrganizationEventsPage(
+        organizationId: String,
+        limit: Int,
+        offset: Int,
+    ): Result<OrganizationEventPage> {
+        val normalizedOrganizationId = organizationId.trim()
+        if (normalizedOrganizationId.isEmpty()) {
+            return Result.success(
+                OrganizationEventPage(
+                    events = emptyList(),
+                    nextOffset = 0,
+                    hasMore = false,
+                ),
+            )
+        }
+
+        return runCatching {
+            val page = fetchRemoteEventsPageByOrganization(
+                organizationId = normalizedOrganizationId,
+                limit = limit,
+                offset = offset,
+            )
+            if (page.events.isNotEmpty()) {
+                databaseService.getEventDao.upsertEvents(page.events)
+            }
+            page
         }
     }
 
