@@ -125,19 +125,22 @@ class DefaultTeamManagementComponent(
     private val _sports = MutableStateFlow<List<Sport>>(emptyList())
     override val sports = _sports.asStateFlow()
 
-    override val currentTeams = currentUserIdFlow
+    private val currentTeamsResult: StateFlow<Result<List<TeamWithPlayers>>> = currentUserIdFlow
         .flatMapLatest { currentUserId ->
             if (currentUserId.isBlank()) {
                 flowOf(Result.success(emptyList()))
             } else {
                 teamRepository.getTeamsWithPlayersFlow(currentUserId)
             }
-        }.map { team ->
+        }
+        .stateIn(scope, SharingStarted.Eagerly, Result.success(emptyList()))
+    override val currentTeams = currentTeamsResult.map { team ->
             team.getOrElse {
                 _errorState.value = it.userMessage()
                 emptyList()
             }
-        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+        }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
     private val _isTeamsRefreshing = MutableStateFlow(false)
     private val repositoryCurrentTeamsLoading = currentUserIdFlow
         .flatMapLatest { currentUserId ->
@@ -157,6 +160,7 @@ class DefaultTeamManagementComponent(
 
     private val _selectedTeam = MutableStateFlow<TeamWithPlayers?>(null)
     override val selectedTeam = _selectedTeam.asStateFlow()
+    private var isSelectedTeamDraft = false
 
     private val _staffUsersById = MutableStateFlow<Map<String, UserData>>(emptyMap())
     override val staffUsersById = _staffUsersById.asStateFlow()
@@ -262,15 +266,20 @@ class DefaultTeamManagementComponent(
                 }
         }
         scope.launch {
-            currentTeams.collect { teams ->
+            currentTeamsResult.collect { result ->
+                val teams = result.getOrNull() ?: return@collect
                 val selectedTeam = _selectedTeam.value
                 if (selectedTeam != null) {
-                    val updatedSelectedTeam = teams.find { team -> team.team.id == selectedTeam.team.id }
+                    val updatedSelectedTeam = resolveSelectedTeamAfterRefresh(
+                        selectedTeam = selectedTeam,
+                        refreshedTeams = teams,
+                        isDraft = isSelectedTeamDraft,
+                    )
                     if (updatedSelectedTeam != null) {
                         _selectedTeam.value = updatedSelectedTeam
                         refreshSelectedTeamStaffUsers(updatedSelectedTeam)
                     } else {
-                        refreshSelectedTeamStaffUsers(selectedTeam)
+                        deselectTeam()
                     }
                 }
             }
@@ -282,6 +291,7 @@ class DefaultTeamManagementComponent(
     }
 
     override fun selectTeam(team: TeamWithPlayers?) {
+        isSelectedTeamDraft = team == null
         val resolvedTeam = team ?: TeamWithPlayers(
             Team(currentUser.id), currentUser, listOf(currentUser), listOf()
         )
@@ -427,6 +437,7 @@ class DefaultTeamManagementComponent(
     }
 
     override fun deselectTeam() {
+        isSelectedTeamDraft = false
         _selectedTeam.value = null
         teamEditorBackCallback.isEnabled = false
         _staffUsersById.value = emptyMap()
@@ -515,4 +526,13 @@ class DefaultTeamManagementComponent(
         team.players.forEach { put(it.id, it) }
         team.pendingPlayers.forEach { put(it.id, it) }
     }
+}
+
+internal fun resolveSelectedTeamAfterRefresh(
+    selectedTeam: TeamWithPlayers,
+    refreshedTeams: List<TeamWithPlayers>,
+    isDraft: Boolean,
+): TeamWithPlayers? {
+    if (isDraft) return selectedTeam
+    return refreshedTeams.firstOrNull { team -> team.team.id == selectedTeam.team.id }
 }
