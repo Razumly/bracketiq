@@ -340,6 +340,24 @@ internal fun canApplyRentalSelectionRange(
     )
 }
 
+internal fun isRentalSelectionValidForAvailabilitySnapshot(
+    fieldId: String,
+    start: Instant,
+    end: Instant,
+    availabilityWindow: RentalAvailabilityWindow?,
+    busyBlocks: List<RentalBusyBlock>,
+): Boolean {
+    if (availabilityWindow == null || end <= start) {
+        return false
+    }
+    if (start < availabilityWindow.start || end > availabilityWindow.end) {
+        return false
+    }
+    return busyBlocks.none { block ->
+        block.fieldId == fieldId && start < block.end && block.start < end
+    }
+}
+
 internal fun rangeOverlapsBusyBlockOnDate(
     block: RentalBusyBlock,
     date: LocalDate,
@@ -387,8 +405,16 @@ internal fun RentalBusyBlock.toBusyRangeOnDate(
         return null
     }
 
-    val startMinutes = (clippedStart - dayStart).inWholeMinutes.toInt()
-    val endMinutes = (clippedEnd - dayStart).inWholeMinutes.toInt()
+    val startMinutes = clippedStart.toWallClockMinutesOnDate(
+        date = date,
+        timeZone = timeZone,
+        roundUp = false,
+    )
+    val endMinutes = clippedEnd.toWallClockMinutesOnDate(
+        date = date,
+        timeZone = timeZone,
+        roundUp = true,
+    )
     val normalizedStart = startMinutes.coerceIn(RENTAL_TIMELINE_START_MINUTES, RENTAL_TIMELINE_END_MINUTES)
     val normalizedEnd = endMinutes.coerceIn(RENTAL_TIMELINE_START_MINUTES, RENTAL_TIMELINE_END_MINUTES)
     if (normalizedEnd <= normalizedStart) {
@@ -407,16 +433,36 @@ internal fun LocalDate.toInstantAtMinutes(
     minutesFromStartOfDay: Int,
     timeZone: TimeZone,
 ): Instant {
-    val startOfDay = LocalDateTime(
-        year = year,
-        monthNumber = monthNumber,
-        dayOfMonth = dayOfMonth,
-        hour = 0,
-        minute = 0,
+    require(minutesFromStartOfDay in 0..(24 * 60)) {
+        "Minutes from start of day must be between 0 and 1440."
+    }
+    val targetDate = if (minutesFromStartOfDay == 24 * 60) {
+        LocalDate.fromEpochDays(toEpochDays() + 1)
+    } else {
+        this
+    }
+    val minuteOfDay = minutesFromStartOfDay % (24 * 60)
+    return LocalDateTime(
+        year = targetDate.year,
+        monthNumber = targetDate.monthNumber,
+        dayOfMonth = targetDate.dayOfMonth,
+        hour = minuteOfDay / 60,
+        minute = minuteOfDay % 60,
         second = 0,
-        nanosecond = 0
+        nanosecond = 0,
     ).toInstant(timeZone)
-    return startOfDay + minutesFromStartOfDay.minutes
+}
+
+private fun Instant.toWallClockMinutesOnDate(
+    date: LocalDate,
+    timeZone: TimeZone,
+    roundUp: Boolean,
+): Int {
+    val local = toLocalDateTime(timeZone)
+    if (local.date < date) return 0
+    if (local.date > date) return 24 * 60
+    val partialMinute = local.second > 0 || local.nanosecond > 0
+    return local.hour * 60 + local.minute + if (roundUp && partialMinute) 1 else 0
 }
 
 internal fun DayOfWeek.toShortLabel(): String {

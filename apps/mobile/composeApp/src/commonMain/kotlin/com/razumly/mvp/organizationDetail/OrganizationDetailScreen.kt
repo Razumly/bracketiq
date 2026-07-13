@@ -88,8 +88,10 @@ import com.razumly.mvp.eventSearch.canApplyRentalSelectionRange
 import com.razumly.mvp.eventSearch.displayLabel
 import com.razumly.mvp.eventSearch.isRentalIntervalInPast
 import com.razumly.mvp.eventSearch.isRangeCoveredByRentalAvailability
+import com.razumly.mvp.eventSearch.isRentalSelectionValidForAvailabilitySnapshot
 import com.razumly.mvp.eventSearch.rangeOverlapsBusyBlockOnDate
 import com.razumly.mvp.eventSearch.rangesOverlap
+import com.razumly.mvp.eventSearch.rentalAvailabilityFetchWindowForDate
 import com.razumly.mvp.eventSearch.resolveRentalSelection
 import com.razumly.mvp.eventSearch.resolvedRentalTimeZone
 import com.razumly.mvp.eventSearch.toRentalDayIndex
@@ -118,6 +120,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val startingProductCheckoutId by component.startingProductCheckoutId.collectAsState()
     val rentalFieldOptions by component.rentalFieldOptions.collectAsState()
     val rentalBusyBlocks by component.rentalBusyBlocks.collectAsState()
+    val loadedRentalAvailabilityWindow by component.loadedRentalAvailabilityWindow.collectAsState()
     val isLoadingOrganization by component.isLoadingOrganization.collectAsState()
     val isLoadingEvents by component.isLoadingEvents.collectAsState()
     val isLoadingTeams by component.isLoadingTeams.collectAsState()
@@ -167,6 +170,10 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     }
     val today = remember(timeZone) { Clock.System.now().toLocalDateTime(timeZone).date }
     var selectedRentalDate by remember { mutableStateOf(today) }
+    val rentalAvailabilityWindow = remember(selectedRentalDate, timeZone) {
+        rentalAvailabilityFetchWindowForDate(selectedRentalDate, timeZone)
+    }
+    val isRentalAvailabilityCurrent = loadedRentalAvailabilityWindow == rentalAvailabilityWindow
     var rentalSelections by remember { mutableStateOf<List<RentalSelectionDraft>>(emptyList()) }
     var nextRentalSelectionId by remember { mutableStateOf(1L) }
     var rentalDetailsStep by remember { mutableStateOf(RentalDetailsStep.BUILDER) }
@@ -180,9 +187,23 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
             )
         }
     }
-    val validResolvedSelections = resolvedSelections
-    val invalidSelectionCount = remember(rentalSelections, resolvedSelections) {
-        rentalSelections.size - resolvedSelections.size
+    val validResolvedSelections = remember(
+        resolvedSelections,
+        loadedRentalAvailabilityWindow,
+        rentalBusyBlocks,
+    ) {
+        resolvedSelections.filter { selection ->
+            isRentalSelectionValidForAvailabilitySnapshot(
+                fieldId = selection.field.id,
+                start = selection.startInstant,
+                end = selection.endInstant,
+                availabilityWindow = loadedRentalAvailabilityWindow,
+                busyBlocks = rentalBusyBlocks,
+            )
+        }
+    }
+    val invalidSelectionCount = remember(rentalSelections, validResolvedSelections) {
+        rentalSelections.size - validResolvedSelections.size
     }
     val totalRentalPriceCents = remember(validResolvedSelections) {
         validResolvedSelections.sumOf { resolved -> resolved.totalPriceCents }
@@ -281,9 +302,13 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val organizationCanReserveRentals = organization?.let { org ->
         !org.publicSlug.isNullOrBlank() && org.publicPageEnabled
     } == true
-    val canGoToConfirmation = validResolvedSelections.isNotEmpty() &&
+    val canGoToConfirmation = isRentalAvailabilityCurrent &&
+        !isLoadingRentals &&
+        validResolvedSelections.isNotEmpty() &&
         invalidSelectionCount == 0
     val canContinueRental = organizationCanReserveRentals &&
+        isRentalAvailabilityCurrent &&
+        !isLoadingRentals &&
         rentalStartInstant != null &&
         rentalEndInstant != null &&
         selectedFieldIdsForCreate.isNotEmpty() &&
@@ -293,10 +318,11 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val rentalValidationMessage = when {
         organization == null -> "Organization is not available."
         !organizationCanReserveRentals -> "This organization needs a public rental checkout before resources can be reserved."
-        isLoadingRentals && rentalFieldOptions.isEmpty() -> "Loading resources and rental slots..."
+        isLoadingRentals -> "Loading resources and rental slots..."
+        !isRentalAvailabilityCurrent -> "Availability could not be loaded for this week. Try again."
         rentalFieldOptions.isEmpty() -> "No resources are configured for this organization."
         rentalSelections.isEmpty() -> "Tap any available 30-minute cell to add a rental selection."
-        invalidSelectionCount > 0 -> "One or more selections are outside available rental slot ranges."
+        invalidSelectionCount > 0 -> "One or more selections are outside loaded availability or overlap an unavailable time."
         else -> null
     }
 
@@ -317,10 +343,25 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
         }
     }
 
-    LaunchedEffect(selectedTab, organization?.id) {
+    LaunchedEffect(
+        selectedTab,
+        organization?.id,
+        rentalAvailabilityWindow.start,
+        rentalAvailabilityWindow.end,
+    ) {
         if (selectedTab == OrganizationDetailTab.RENTALS && organization != null) {
-            component.refreshRentals(force = true)
+            component.refreshRentals(
+                rangeStart = rentalAvailabilityWindow.start,
+                rangeEnd = rentalAvailabilityWindow.end,
+                force = true,
+            )
         }
+    }
+
+    LaunchedEffect(rentalAvailabilityWindow.start, rentalAvailabilityWindow.end) {
+        rentalSelections = emptyList()
+        rentalDetailsStep = RentalDetailsStep.BUILDER
+        nextRentalSelectionId = 1L
     }
 
     LaunchedEffect(selectedTab) {
@@ -510,6 +551,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                             allSelectionCount = rentalSelections.size,
                             totalPriceCents = totalRentalPriceCents,
                             isLoadingFields = isLoadingRentals,
+                            isAvailabilityInteractive = isRentalAvailabilityCurrent && !isLoadingRentals,
                             bottomPadding = bottomPadding,
                             canGoNext = canGoToConfirmation,
                             validationMessage = rentalValidationMessage,
@@ -517,6 +559,9 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                                 selectedRentalDate = selectedDate
                             },
                             onCreateSelection = { fieldId, startMinutes ->
+                                if (!isRentalAvailabilityCurrent || isLoadingRentals) {
+                                    return@RentalDetailsContent
+                                }
                                 val endMinutes = startMinutes + SLOT_INTERVAL_MINUTES
                                 val fieldOption = rentalFieldOptions.firstOrNull { option ->
                                     option.field.id == fieldId
@@ -569,6 +614,9 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                                 }
                             },
                             onCanUpdateSelection = { selectionId, startMinutes, endMinutes ->
+                                if (!isRentalAvailabilityCurrent || isLoadingRentals) {
+                                    return@RentalDetailsContent false
+                                }
                                 val targetSelection = rentalSelections.firstOrNull { selection ->
                                     selection.id == selectionId
                                 } ?: return@RentalDetailsContent false
@@ -586,6 +634,9 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                                 )
                             },
                             onUpdateSelection = { selectionId, startMinutes, endMinutes ->
+                                if (!isRentalAvailabilityCurrent || isLoadingRentals) {
+                                    return@RentalDetailsContent false
+                                }
                                 val targetSelection = rentalSelections.firstOrNull { selection ->
                                     selection.id == selectionId
                                 }

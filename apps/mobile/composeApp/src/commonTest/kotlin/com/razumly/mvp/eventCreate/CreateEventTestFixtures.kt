@@ -25,6 +25,7 @@ import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Product
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
+import com.razumly.mvp.core.data.dataTypes.RentalAvailabilitySnapshot
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.SportDTO
 import com.razumly.mvp.core.data.dataTypes.Subscription
@@ -530,6 +531,18 @@ internal class CreateEvent_FakeFieldRepository : IFieldRepository {
         fieldIds: List<String>,
         rentalOnly: Boolean,
     ): Result<List<TimeSlot>> = Result.success(emptyList())
+    override suspend fun getRentalAvailability(
+        organizationId: String,
+        rangeStart: Instant,
+        rangeEnd: Instant,
+    ): Result<RentalAvailabilitySnapshot> = Result.success(
+        RentalAvailabilitySnapshot(
+            rangeStart = rangeStart,
+            rangeEnd = rangeEnd,
+            fields = emptyList(),
+            busyBlocks = emptyList(),
+        )
+    )
 
     override suspend fun createTimeSlot(slot: TimeSlot): Result<TimeSlot> = runCatching {
         slotCounter += 1

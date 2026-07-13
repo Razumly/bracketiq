@@ -47,6 +47,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
 interface EventSearchComponent {
     val locationTracker: LocationTracker
@@ -108,7 +109,7 @@ interface EventSearchComponent {
     fun selectSearchLocation(label: String, center: LatLng)
     fun useCurrentLocationForSearch()
     fun loadRentalFieldOptions(fieldIds: List<String>)
-    fun loadRentalBusyBlocks(organizationId: String, fieldIds: List<String>)
+    fun loadRentalAvailability(organizationId: String, rangeStart: Instant, rangeEnd: Instant)
     fun clearRentalFieldOptions()
     fun clearRentalBusyBlocks()
 }
@@ -150,11 +151,7 @@ class DefaultEventSearchComponent(
         }
     }
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob() + scopeExceptionHandler)
-    private val rentalAvailabilityLoader = RentalAvailabilityLoader(
-        eventRepository = eventRepository,
-        matchRepository = matchRepository,
-        fieldRepository = fieldRepository,
-    )
+    private val rentalAvailabilityLoader = RentalAvailabilityLoader(fieldRepository)
 
     private val _currentRadius = MutableStateFlow(0.0)
     override val currentRadius: StateFlow<Double> = _currentRadius.asStateFlow()
@@ -690,16 +687,26 @@ class DefaultEventSearchComponent(
         }
     }
 
-    override fun loadRentalBusyBlocks(organizationId: String, fieldIds: List<String>) {
+    override fun loadRentalAvailability(
+        organizationId: String,
+        rangeStart: Instant,
+        rangeEnd: Instant,
+    ) {
         scope.launch {
-            rentalAvailabilityLoader.loadBusyBlocks(organizationId = organizationId, fieldIds = fieldIds)
-                .onSuccess { busyBlocks ->
-                    _rentalBusyBlocks.value = busyBlocks
+            _isLoadingRentalFields.value = true
+            rentalAvailabilityLoader.loadAvailability(
+                organizationId = organizationId,
+                rangeStart = rangeStart,
+                rangeEnd = rangeEnd,
+            )
+                .onSuccess { snapshot ->
+                    _rentalFieldOptions.value = snapshot.fieldOptions
+                    _rentalBusyBlocks.value = snapshot.busyBlocks
                 }
                 .onFailure { error ->
-                    _rentalBusyBlocks.value = emptyList()
-                    _errorState.value = ErrorMessage("Failed to load existing field events: ${error.userMessage()}")
+                    _errorState.value = ErrorMessage("Failed to load rental availability: ${error.userMessage()}")
                 }
+            _isLoadingRentalFields.value = false
         }
     }
 

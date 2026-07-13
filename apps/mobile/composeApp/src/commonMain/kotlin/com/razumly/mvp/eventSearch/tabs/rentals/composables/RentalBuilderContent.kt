@@ -125,6 +125,7 @@ internal fun RentalDetailsContent(
     allSelectionCount: Int,
     totalPriceCents: Int,
     isLoadingFields: Boolean,
+    isAvailabilityInteractive: Boolean,
     bottomPadding: Dp,
     canGoNext: Boolean,
     validationMessage: String?,
@@ -186,6 +187,14 @@ internal fun RentalDetailsContent(
                             text = "Loading resources and rental slots...",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    !isAvailabilityInteractive -> {
+                        Text(
+                            text = "Availability could not be loaded for this week. Try again.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
                         )
                     }
 

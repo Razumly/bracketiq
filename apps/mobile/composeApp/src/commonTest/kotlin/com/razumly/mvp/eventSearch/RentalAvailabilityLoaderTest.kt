@@ -2,14 +2,13 @@
 
 package com.razumly.mvp.eventSearch
 
-import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.RentalAvailabilityBusyBlock
+import com.razumly.mvp.core.data.dataTypes.RentalAvailabilityField
+import com.razumly.mvp.core.data.dataTypes.RentalAvailabilitySnapshot
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
-import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.IFieldRepository
-import com.razumly.mvp.eventCreate.CreateEvent_FakeEventRepository
 import com.razumly.mvp.eventCreate.CreateEvent_FakeFieldRepository
-import com.razumly.mvp.eventCreate.CreateEvent_FakeMatchRepository
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
@@ -23,19 +22,10 @@ class RentalAvailabilityLoaderTest {
     @Test
     fun resolveRentalRange_requires_one_availability_slot_to_cover_entire_paid_range() {
         val date = LocalDate(2026, 6, 22)
-        fun slot(id: String, startMinutes: Int, endMinutes: Int) = TimeSlot(
+        fun slot(id: String, startMinutes: Int, endMinutes: Int) = rentalSlot(
             id = id,
-            dayOfWeek = 0,
-            daysOfWeek = listOf(0),
-            startTimeMinutes = startMinutes,
-            endTimeMinutes = endMinutes,
-            startDate = Instant.parse("2026-06-01T00:00:00Z"),
-            endDate = Instant.parse("2026-07-01T00:00:00Z"),
-            timeZone = "UTC",
-            repeating = true,
-            scheduledFieldId = "field_1",
-            scheduledFieldIds = listOf("field_1"),
-            price = 2000,
+            startMinutes = startMinutes,
+            endMinutes = endMinutes,
         )
         val stitched = RentalFieldOption(
             field = Field(id = "field_1", fieldNumber = 1, name = "Court 1"),
@@ -43,10 +33,7 @@ class RentalAvailabilityLoaderTest {
         )
         val continuous = stitched.copy(rentalSlots = listOf(slot("whole", 10 * 60, 11 * 60)))
 
-        assertEquals(
-            null,
-            resolveRentalRange(stitched, date, 10 * 60, 11 * 60, TimeZone.UTC),
-        )
+        assertEquals(null, resolveRentalRange(stitched, date, 10 * 60, 11 * 60, TimeZone.UTC))
         assertEquals(
             listOf("whole"),
             resolveRentalRange(continuous, date, 10 * 60, 11 * 60, TimeZone.UTC)?.slots?.map(TimeSlot::id),
@@ -84,211 +71,248 @@ class RentalAvailabilityLoaderTest {
     }
 
     @Test
-    fun loadBusyBlocks_convertsLeagueTimeSlotsToRentalBlocks() = runTest {
-        val leagueSlot = TimeSlot(
-            id = "league_slot_1",
-            dayOfWeek = 0,
-            daysOfWeek = listOf(0),
-            startTimeMinutes = 10 * 60,
-            endTimeMinutes = 11 * 60,
-            startDate = Instant.parse("2026-06-01T00:00:00Z"),
-            timeZone = "UTC",
-            repeating = true,
-            endDate = Instant.parse("2026-06-15T00:00:00Z"),
-            scheduledFieldId = "field_1",
-            scheduledFieldIds = listOf("field_1"),
-            price = null,
-        )
-        val rentalSlot = TimeSlot(
-            id = "rental_slot_1",
-            dayOfWeek = 0,
-            daysOfWeek = listOf(0),
-            startTimeMinutes = 6 * 60,
-            endTimeMinutes = 24 * 60,
-            startDate = Instant.parse("2026-06-01T00:00:00Z"),
-            timeZone = "UTC",
-            repeating = true,
-            endDate = Instant.parse("2026-06-15T00:00:00Z"),
-            scheduledFieldId = "field_1",
-            scheduledFieldIds = listOf("field_1"),
-            price = 2500,
-        )
-        val league = Event(
-            id = "league_1",
-            name = "Spring League",
-            hostId = "host_1",
-            organizationId = "org_1",
-            fieldIds = listOf("field_1"),
-            timeSlotIds = listOf("league_slot_1"),
-            start = Instant.parse("2026-06-01T00:00:00Z"),
-            end = Instant.parse("2026-06-15T00:00:00Z"),
-            eventType = EventType.LEAGUE,
-        )
-        val loader = RentalAvailabilityLoader(
-            eventRepository = CreateEvent_FakeEventRepository(listOf(league)),
-            matchRepository = CreateEvent_FakeMatchRepository(),
-            fieldRepository = RentalAvailability_FakeFieldRepository(listOf(leagueSlot)),
+    fun rentalAvailabilityWindow_uses_local_week_boundaries_across_daylightSaving() {
+        val window = rentalAvailabilityWindowForDate(
+            date = LocalDate(2026, 3, 4),
+            timeZone = TimeZone.of("America/Los_Angeles"),
         )
 
-        val blocks = loader.loadBusyBlocks(
-            organizationId = "org_1",
-            fieldIds = listOf("field_1"),
-        ).getOrThrow()
-
-        assertEquals(
-            listOf("2026-06-01T10:00:00Z", "2026-06-08T10:00:00Z"),
-            blocks.map { block -> block.start.toString() },
-        )
-        assertEquals(
-            listOf("2026-06-01T11:00:00Z", "2026-06-08T11:00:00Z"),
-            blocks.map { block -> block.end.toString() },
-        )
-        assertEquals(
-            listOf(RENTAL_UNAVAILABLE_LABEL, RENTAL_UNAVAILABLE_LABEL),
-            blocks.map { block -> block.eventName },
-        )
-
-        val canSelectOverLeagueSlot = canApplyRentalSelectionRange(
-            selectionId = 0L,
-            fieldId = "field_1",
-            date = LocalDate(2026, 6, 1),
-            startMinutes = 10 * 60,
-            endMinutes = 10 * 60 + SLOT_INTERVAL_MINUTES,
-            selections = emptyList(),
-            fieldOptions = listOf(
-                RentalFieldOption(
-                    field = Field(id = "field_1", fieldNumber = 1, name = "Court 1"),
-                    rentalSlots = listOf(rentalSlot),
-                )
-            ),
-            busyBlocks = blocks,
-            timeZone = TimeZone.UTC,
-        )
-
-        assertFalse(canSelectOverLeagueSlot)
+        assertEquals(Instant.parse("2026-03-02T08:00:00Z"), window.start)
+        assertEquals(Instant.parse("2026-03-09T07:00:00Z"), window.end)
     }
 
     @Test
-    fun loadBusyBlocks_expandsWeeklyEventSlotsIntoScheduledOccurrences() = runTest {
-        val weeklySlot = TimeSlot(
-            id = "weekly_slot_1",
-            dayOfWeek = 0,
-            daysOfWeek = listOf(0, 2),
-            startTimeMinutes = 18 * 60,
-            endTimeMinutes = 19 * 60,
-            startDate = Instant.parse("2026-06-01T00:00:00Z"),
-            timeZone = "UTC",
-            repeating = true,
-            endDate = null,
-            scheduledFieldId = "field_1",
-            scheduledFieldIds = listOf("field_1"),
-            price = null,
+    fun rentalAvailabilityFetchWindow_pads_mixed_timezone_week_edges() {
+        val selectedDate = LocalDate(2026, 7, 13)
+        val westAnchoredWindow = rentalAvailabilityFetchWindowForDate(
+            date = selectedDate,
+            timeZone = TimeZone.of("Pacific/Pago_Pago"),
         )
-        val weeklyEvent = Event(
-            id = "weekly_event_1",
-            name = "Weekly Evening Clinic",
-            hostId = "host_1",
-            organizationId = "org_1",
-            fieldIds = listOf("field_1"),
-            timeSlotIds = listOf(weeklySlot.id),
-            start = Instant.parse("2026-06-01T00:00:00Z"),
-            end = Instant.parse("2026-06-12T23:59:00Z"),
-            eventType = EventType.WEEKLY_EVENT,
+        val eastAnchoredWindow = rentalAvailabilityFetchWindowForDate(
+            date = selectedDate,
+            timeZone = TimeZone.of("Pacific/Kiritimati"),
         )
-        val loader = RentalAvailabilityLoader(
-            eventRepository = CreateEvent_FakeEventRepository(listOf(weeklyEvent)),
-            matchRepository = CreateEvent_FakeMatchRepository(),
-            fieldRepository = RentalAvailability_FakeFieldRepository(listOf(weeklySlot)),
+        val eastMondayMorning = selectedDate.toInstantAtMinutes(
+            minutesFromStartOfDay = 6 * 60,
+            timeZone = TimeZone.of("Pacific/Kiritimati"),
+        )
+        val westEndOfSunday = LocalDate(2026, 7, 19).toInstantAtMinutes(
+            minutesFromStartOfDay = 24 * 60,
+            timeZone = TimeZone.of("Pacific/Pago_Pago"),
         )
 
-        val blocks = loader.loadBusyBlocks(
-            organizationId = "org_1",
-            fieldIds = listOf("field_1"),
-        ).getOrThrow()
+        assertEquals(Instant.parse("2026-07-11T11:00:00Z"), westAnchoredWindow.start)
+        assertEquals(Instant.parse("2026-07-22T11:00:00Z"), westAnchoredWindow.end)
+        assertEquals(Instant.parse("2026-07-10T10:00:00Z"), eastAnchoredWindow.start)
+        assertEquals(Instant.parse("2026-07-21T10:00:00Z"), eastAnchoredWindow.end)
+        assertTrue(eastMondayMorning >= westAnchoredWindow.start)
+        assertTrue(westEndOfSunday <= eastAnchoredWindow.end)
+    }
 
+    @Test
+    fun rentalWallClockConversion_preserves_springForward_times_and_busy_ranges() {
+        val date = LocalDate(2026, 3, 8)
+        val timeZone = TimeZone.of("America/Los_Angeles")
+        val start = date.toInstantAtMinutes(9 * 60, timeZone)
+        val end = date.toInstantAtMinutes(10 * 60, timeZone)
+
+        assertEquals(Instant.parse("2026-03-08T16:00:00Z"), start)
+        assertEquals(Instant.parse("2026-03-08T17:00:00Z"), end)
+        assertEquals(Instant.parse("2026-03-09T07:00:00Z"), date.toInstantAtMinutes(24 * 60, timeZone))
         assertEquals(
-            listOf(
-                "2026-06-01T18:00:00Z",
-                "2026-06-03T18:00:00Z",
-                "2026-06-08T18:00:00Z",
-                "2026-06-10T18:00:00Z",
+            RentalBusyRange(
+                eventId = "",
+                eventName = RENTAL_UNAVAILABLE_LABEL,
+                startMinutes = 9 * 60,
+                endMinutes = 10 * 60,
             ),
-            blocks.map { block -> block.start.toString() },
+            RentalBusyBlock(
+                eventId = "",
+                eventName = RENTAL_UNAVAILABLE_LABEL,
+                fieldId = "field_1",
+                start = start,
+                end = end,
+            ).toBusyRangeOnDate(date, timeZone),
         )
+    }
+
+    @Test
+    fun rentalWallClockConversion_preserves_fallBack_times_and_busy_ranges() {
+        val date = LocalDate(2026, 11, 1)
+        val timeZone = TimeZone.of("America/Los_Angeles")
+        val start = date.toInstantAtMinutes(9 * 60, timeZone)
+        val end = date.toInstantAtMinutes(10 * 60, timeZone)
+
+        assertEquals(Instant.parse("2026-11-01T17:00:00Z"), start)
+        assertEquals(Instant.parse("2026-11-01T18:00:00Z"), end)
+        assertEquals(Instant.parse("2026-11-02T08:00:00Z"), date.toInstantAtMinutes(24 * 60, timeZone))
         assertEquals(
-            listOf(
-                "2026-06-01T19:00:00Z",
-                "2026-06-03T19:00:00Z",
-                "2026-06-08T19:00:00Z",
-                "2026-06-10T19:00:00Z",
+            RentalBusyRange(
+                eventId = "",
+                eventName = RENTAL_UNAVAILABLE_LABEL,
+                startMinutes = 9 * 60,
+                endMinutes = 10 * 60,
             ),
-            blocks.map { block -> block.end.toString() },
+            RentalBusyBlock(
+                eventId = "",
+                eventName = RENTAL_UNAVAILABLE_LABEL,
+                fieldId = "field_1",
+                start = start,
+                end = end,
+            ).toBusyRangeOnDate(date, timeZone),
+        )
+    }
+
+    @Test
+    fun rentalSelectionSnapshotValidation_requires_loaded_coverage_and_no_conflict() {
+        val window = RentalAvailabilityWindow(
+            start = Instant.parse("2026-07-13T00:00:00Z"),
+            end = Instant.parse("2026-07-20T00:00:00Z"),
+        )
+        val busyBlocks = listOf(
+            RentalBusyBlock(
+                eventId = "",
+                eventName = RENTAL_UNAVAILABLE_LABEL,
+                fieldId = "field_1",
+                start = Instant.parse("2026-07-14T10:00:00Z"),
+                end = Instant.parse("2026-07-14T11:00:00Z"),
+            )
+        )
+
+        assertTrue(
+            isRentalSelectionValidForAvailabilitySnapshot(
+                fieldId = "field_1",
+                start = Instant.parse("2026-07-14T09:00:00Z"),
+                end = Instant.parse("2026-07-14T10:00:00Z"),
+                availabilityWindow = window,
+                busyBlocks = busyBlocks,
+            )
         )
         assertFalse(
-            blocks.any { block ->
-                block.start < Instant.parse("2026-06-02T19:00:00Z") &&
-                    Instant.parse("2026-06-02T18:00:00Z") < block.end
-            },
+            isRentalSelectionValidForAvailabilitySnapshot(
+                fieldId = "field_1",
+                start = Instant.parse("2026-07-14T10:30:00Z"),
+                end = Instant.parse("2026-07-14T11:30:00Z"),
+                availabilityWindow = window,
+                busyBlocks = busyBlocks,
+            )
+        )
+        assertFalse(
+            isRentalSelectionValidForAvailabilitySnapshot(
+                fieldId = "field_1",
+                start = Instant.parse("2026-07-12T23:30:00Z"),
+                end = Instant.parse("2026-07-13T00:30:00Z"),
+                availabilityWindow = window,
+                busyBlocks = emptyList(),
+            )
+        )
+        assertFalse(
+            isRentalSelectionValidForAvailabilitySnapshot(
+                fieldId = "field_1",
+                start = Instant.parse("2026-07-14T09:00:00Z"),
+                end = Instant.parse("2026-07-14T10:00:00Z"),
+                availabilityWindow = null,
+                busyBlocks = emptyList(),
+            )
         )
     }
 
     @Test
-    fun loadBusyBlocks_hidesEventNamesBehindUnavailableRentalBlocks() = runTest {
-        val directEvent = Event(
-            id = "event_1",
-            name = "Private Birthday Party",
-            hostId = "host_1",
+    fun loadAvailability_maps_authoritative_window_snapshot_to_opaque_view_state() = runTest {
+        val rangeStart = Instant.parse("2026-06-22T07:00:00Z")
+        val rangeEnd = Instant.parse("2026-06-29T07:00:00Z")
+        val slot = rentalSlot(id = "rental_slot_1", startMinutes = 9 * 60, endMinutes = 21 * 60)
+        val field = Field(
+            id = "field_1",
+            fieldNumber = 1,
+            name = "Court 1",
             organizationId = "org_1",
-            fieldIds = listOf("field_1"),
-            start = Instant.parse("2026-06-04T18:00:00Z"),
-            end = Instant.parse("2026-06-04T20:00:00Z"),
-            eventType = EventType.EVENT,
+            rentalSlotIds = listOf(slot.id),
         )
-        val league = Event(
-            id = "league_1",
-            name = "Secret League Play",
-            hostId = "host_1",
-            organizationId = "org_1",
-            fieldIds = listOf("field_1"),
-            start = Instant.parse("2026-06-04T00:00:00Z"),
-            end = Instant.parse("2026-06-05T00:00:00Z"),
-            eventType = EventType.LEAGUE,
-        )
-        val matchRepository = CreateEvent_FakeMatchRepository().apply {
-            tournamentMatches = listOf(
-                com.razumly.mvp.core.data.dataTypes.MatchMVP(
-                    id = "match_1",
-                    matchId = 1,
-                    eventId = "league_1",
-                    fieldId = "field_1",
-                    start = Instant.parse("2026-06-04T21:00:00Z"),
-                    end = Instant.parse("2026-06-04T22:00:00Z"),
+        val repository = RentalAvailability_FakeFieldRepository(
+            result = Result.success(
+                RentalAvailabilitySnapshot(
+                    rangeStart = rangeStart,
+                    rangeEnd = rangeEnd,
+                    fields = listOf(RentalAvailabilityField(field = field, rentalSlots = listOf(slot))),
+                    busyBlocks = listOf(
+                        RentalAvailabilityBusyBlock(
+                            fieldId = field.id,
+                            start = Instant.parse("2026-06-23T17:00:00Z"),
+                            end = Instant.parse("2026-06-23T18:00:00Z"),
+                        )
+                    ),
                 )
-            )
-        }
-        val loader = RentalAvailabilityLoader(
-            eventRepository = CreateEvent_FakeEventRepository(listOf(directEvent, league)),
-            matchRepository = matchRepository,
-            fieldRepository = RentalAvailability_FakeFieldRepository(emptyList()),
+            ),
         )
 
-        val blocks = loader.loadBusyBlocks(
+        val snapshot = RentalAvailabilityLoader(repository).loadAvailability(
             organizationId = "org_1",
-            fieldIds = listOf("field_1"),
+            rangeStart = rangeStart,
+            rangeEnd = rangeEnd,
         ).getOrThrow()
 
-        assertEquals(2, blocks.size)
-        assertTrue(blocks.all { block -> block.eventName == RENTAL_UNAVAILABLE_LABEL })
-        assertTrue(blocks.none { block -> block.eventName.contains("Private") })
-        assertTrue(blocks.none { block -> block.eventName.contains("Secret") })
+        assertEquals(
+            listOf(RentalAvailabilityRequest("org_1", rangeStart, rangeEnd)),
+            repository.requests,
+        )
+        assertEquals(listOf(field), snapshot.fieldOptions.map(RentalFieldOption::field))
+        assertEquals(listOf(slot), snapshot.fieldOptions.single().rentalSlots)
+        assertEquals(listOf(RENTAL_UNAVAILABLE_LABEL), snapshot.busyBlocks.map(RentalBusyBlock::eventName))
+        assertTrue(snapshot.busyBlocks.all { block -> block.eventId.isEmpty() })
+    }
+
+    @Test
+    fun loadAvailability_propagates_snapshot_failure_without_fabricating_empty_state() = runTest {
+        val failure = IllegalStateException("offline")
+        val repository = RentalAvailability_FakeFieldRepository(Result.failure(failure))
+
+        val result = RentalAvailabilityLoader(repository).loadAvailability(
+            organizationId = "org_1",
+            rangeStart = Instant.parse("2026-06-22T00:00:00Z"),
+            rangeEnd = Instant.parse("2026-06-29T00:00:00Z"),
+        )
+
+        assertEquals(failure, result.exceptionOrNull())
     }
 }
 
+private data class RentalAvailabilityRequest(
+    val organizationId: String,
+    val rangeStart: Instant,
+    val rangeEnd: Instant,
+)
+
 private class RentalAvailability_FakeFieldRepository(
-    private val slots: List<TimeSlot>,
+    private val result: Result<RentalAvailabilitySnapshot>,
 ) : IFieldRepository by CreateEvent_FakeFieldRepository() {
-    override suspend fun getTimeSlots(ids: List<String>): Result<List<TimeSlot>> {
-        val requestedIds = ids.map { id -> id.trim() }.toSet()
-        return Result.success(slots.filter { slot -> requestedIds.contains(slot.id) })
+    val requests = mutableListOf<RentalAvailabilityRequest>()
+
+    override suspend fun getRentalAvailability(
+        organizationId: String,
+        rangeStart: Instant,
+        rangeEnd: Instant,
+    ): Result<RentalAvailabilitySnapshot> {
+        requests += RentalAvailabilityRequest(organizationId, rangeStart, rangeEnd)
+        return result
     }
 }
+
+private fun rentalSlot(
+    id: String,
+    startMinutes: Int,
+    endMinutes: Int,
+): TimeSlot = TimeSlot(
+    id = id,
+    dayOfWeek = 0,
+    daysOfWeek = listOf(0),
+    startTimeMinutes = startMinutes,
+    endTimeMinutes = endMinutes,
+    startDate = Instant.parse("2026-06-01T00:00:00Z"),
+    endDate = Instant.parse("2026-07-01T00:00:00Z"),
+    timeZone = "UTC",
+    repeating = true,
+    scheduledFieldId = "field_1",
+    scheduledFieldIds = listOf("field_1"),
+    price = 2000,
+)

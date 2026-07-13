@@ -1,8 +1,14 @@
+@file:OptIn(kotlin.time.ExperimentalTime::class)
+
 package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.dataTypes.Facility
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
+import com.razumly.mvp.core.data.dataTypes.RentalAvailabilityBusyBlock
+import com.razumly.mvp.core.data.dataTypes.RentalAvailabilityField
+import com.razumly.mvp.core.data.dataTypes.RentalAvailabilitySnapshot
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TimeSlotDTO
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
@@ -11,11 +17,16 @@ import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.FieldsResponseDto
+import com.razumly.mvp.core.network.dto.RentalAvailabilityFieldDto
+import com.razumly.mvp.core.network.dto.RentalAvailabilityResponseDto
+import com.razumly.mvp.core.network.dto.RentalAvailabilitySlotDto
 import com.razumly.mvp.core.network.dto.TimeSlotsResponseDto
+import io.ktor.http.encodeURLPathPart
 import io.ktor.http.encodeURLQueryComponent
 import kotlinx.serialization.Serializable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlin.time.Instant
 
 interface IFieldRepository : IMVPRepository {
     suspend fun createFields(count: Int, organizationId: String? = null): Result<List<Field>>
@@ -30,6 +41,13 @@ interface IFieldRepository : IMVPRepository {
         fieldIds: List<String>,
         rentalOnly: Boolean = false,
     ): Result<List<TimeSlot>>
+    suspend fun getRentalAvailability(
+        organizationId: String,
+        rangeStart: Instant,
+        rangeEnd: Instant,
+    ): Result<RentalAvailabilitySnapshot> = Result.failure(
+        UnsupportedOperationException("Rental availability snapshots are not supported by this repository."),
+    )
     suspend fun createTimeSlot(slot: TimeSlot): Result<TimeSlot>
     suspend fun updateTimeSlot(slot: TimeSlot): Result<TimeSlot>
     suspend fun deleteTimeSlot(timeSlotId: String): Result<Unit>
@@ -171,6 +189,35 @@ class FieldRepository(
         slotsById.values.toList()
     }
 
+    override suspend fun getRentalAvailability(
+        organizationId: String,
+        rangeStart: Instant,
+        rangeEnd: Instant,
+    ): Result<RentalAvailabilitySnapshot> = runCatching {
+        val normalizedOrganizationId = organizationId.trim()
+        require(normalizedOrganizationId.isNotEmpty()) { "Organization id is required." }
+        require(rangeEnd > rangeStart) { "Rental availability range end must be after its start." }
+
+        val response = api.get<RentalAvailabilityResponseDto>(
+            path = buildString {
+                append("api/organizations/")
+                append(normalizedOrganizationId.encodeURLPathPart())
+                append("/rental-availability?start=")
+                append(rangeStart.toString().encodeURLQueryComponent())
+                append("&end=")
+                append(rangeEnd.toString().encodeURLQueryComponent())
+            },
+        )
+        val snapshot = response.toRentalAvailabilitySnapshot(
+            organizationId = normalizedOrganizationId,
+            requestedStart = rangeStart,
+            requestedEnd = rangeEnd,
+        )
+        // Availability fields are an intentionally partial projection. Keep
+        // them inside the snapshot instead of overwriting complete Room rows.
+        snapshot
+    }
+
     override suspend fun createTimeSlot(slot: TimeSlot): Result<TimeSlot> = runCatching {
         val normalizedDays = slot.normalizedDaysOfWeek()
         val normalizedFieldIds = slot.normalizedScheduledFieldIds()
@@ -242,6 +289,125 @@ class FieldRepository(
         requiredTemplateIds = requiredTemplateIds,
         hostRequiredTemplateIds = hostRequiredTemplateIds,
     )
+}
+
+private fun RentalAvailabilityResponseDto.toRentalAvailabilitySnapshot(
+    organizationId: String,
+    requestedStart: Instant,
+    requestedEnd: Instant,
+): RentalAvailabilitySnapshot {
+    val responseStart = range.start.toRequiredInstant("Rental availability response range start")
+    val responseEnd = range.end.toRequiredInstant("Rental availability response range end")
+    require(responseStart == requestedStart && responseEnd == requestedEnd) {
+        "Rental availability response range does not match the requested range."
+    }
+
+    val seenFieldIds = mutableSetOf<String>()
+    val mappedFields = fields.map { fieldDto ->
+        val fieldId = fieldDto.id.requiredId("Rental availability field id")
+        require(seenFieldIds.add(fieldId)) { "Rental availability response contains duplicate field $fieldId." }
+        fieldDto.toRentalAvailabilityField(
+            organizationId = organizationId,
+            fieldId = fieldId,
+        )
+    }
+    val knownFieldIds = mappedFields.mapTo(mutableSetOf()) { field -> field.field.id }
+    val mappedBusyBlocks = busyBlocks.map { blockDto ->
+        val fieldId = blockDto.fieldId.requiredId("Rental availability busy block field id")
+        require(fieldId in knownFieldIds) {
+            "Rental availability busy block references unknown field $fieldId."
+        }
+        val start = blockDto.start.toRequiredInstant("Rental availability busy block start")
+        val end = blockDto.end.toRequiredInstant("Rental availability busy block end")
+        require(end > start) { "Rental availability busy block end must be after its start." }
+        require(start >= responseStart && end <= responseEnd) {
+            "Rental availability busy block falls outside the response range."
+        }
+        RentalAvailabilityBusyBlock(
+            fieldId = fieldId,
+            start = start,
+            end = end,
+        )
+    }.distinct()
+
+    return RentalAvailabilitySnapshot(
+        rangeStart = responseStart,
+        rangeEnd = responseEnd,
+        fields = mappedFields,
+        busyBlocks = mappedBusyBlocks,
+    )
+}
+
+private fun RentalAvailabilityFieldDto.toRentalAvailabilityField(
+    organizationId: String,
+    fieldId: String,
+): RentalAvailabilityField {
+    val seenSlotIds = mutableSetOf<String>()
+    val slots = rentalSlots.map { slotDto ->
+        val slotId = slotDto.id.requiredId("Rental availability slot id")
+        require(seenSlotIds.add(slotId)) {
+            "Rental availability field $fieldId contains duplicate slot $slotId."
+        }
+        slotDto.toTimeSlot(fieldId = fieldId, slotId = slotId)
+    }
+    val normalizedFacilityId = facilityId?.trim()?.takeIf(String::isNotBlank)
+    val mappedField = Field(
+        fieldNumber = fieldNumber ?: 0,
+        name = name.trim().takeIf(String::isNotBlank),
+        rentalSlotIds = slots.map(TimeSlot::id),
+        organizationId = organizationId,
+        facilityId = normalizedFacilityId,
+        id = fieldId,
+    )
+    if (normalizedFacilityId != null) {
+        mappedField.facility = Facility(
+            id = normalizedFacilityId,
+            name = facilityName?.trim()?.takeIf(String::isNotBlank),
+        )
+    }
+    return RentalAvailabilityField(
+        field = mappedField,
+        rentalSlots = slots,
+    )
+}
+
+private fun RentalAvailabilitySlotDto.toTimeSlot(
+    fieldId: String,
+    slotId: String,
+): TimeSlot {
+    require(daysOfWeek.all { day -> day in 0..6 }) {
+        "Rental availability slot $slotId contains an invalid weekday."
+    }
+    val normalizedDays = daysOfWeek.distinct().sorted()
+    val normalizedStartDate = startDate
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: error("Rental availability slot $slotId is missing its start date.")
+    val normalizedEndDate = endDate?.trim()?.takeIf(String::isNotBlank)
+    return TimeSlot(
+        id = slotId,
+        dayOfWeek = normalizedDays.firstOrNull(),
+        daysOfWeek = normalizedDays,
+        startTimeMinutes = startTimeMinutes,
+        endTimeMinutes = endTimeMinutes,
+        startDate = normalizedStartDate.toRequiredInstant("Rental availability slot $slotId start date"),
+        timeZone = timeZone?.trim()?.takeIf(String::isNotBlank) ?: "UTC",
+        repeating = repeating,
+        endDate = normalizedEndDate?.toRequiredInstant("Rental availability slot $slotId end date"),
+        scheduledFieldId = fieldId,
+        scheduledFieldIds = listOf(fieldId),
+        price = price,
+    )
+}
+
+private fun String.requiredId(label: String): String = trim().also { normalized ->
+    require(normalized.isNotEmpty()) { "$label is required." }
+}
+
+private fun String.toRequiredInstant(label: String): Instant = runCatching {
+    Instant.parse(trim())
+}.getOrElse { error ->
+    throw IllegalArgumentException("$label must be a valid ISO instant.", error)
 }
 
 @Serializable

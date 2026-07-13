@@ -46,9 +46,13 @@ import com.razumly.mvp.eventDetail.WebSignaturePromptState
 import com.razumly.mvp.eventDetail.DiscountCodePromptState
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import com.razumly.mvp.eventSearch.RentalAvailabilityLoader
+import com.razumly.mvp.eventSearch.RentalAvailabilityWindow
 import com.razumly.mvp.eventSearch.RentalBusyBlock
 import com.razumly.mvp.eventSearch.RentalFieldOption
+import com.razumly.mvp.eventSearch.rentalAvailabilityFetchWindowForDate
 import io.github.aakira.napier.Napier
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
@@ -179,6 +183,7 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     val startingProductCheckoutId: StateFlow<String?>
     val rentalFieldOptions: StateFlow<List<RentalFieldOption>>
     val rentalBusyBlocks: StateFlow<List<RentalBusyBlock>>
+    val loadedRentalAvailabilityWindow: StateFlow<RentalAvailabilityWindow?>
     val isLoadingOrganization: StateFlow<Boolean>
     val isLoadingEvents: StateFlow<Boolean>
     val isLoadingTeams: StateFlow<Boolean>
@@ -216,7 +221,7 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     fun deleteReview(reviewId: String)
     fun reportReview(reviewId: String)
     fun signInToReview()
-    fun refreshRentals(force: Boolean = false)
+    fun refreshRentals(rangeStart: Instant, rangeEnd: Instant, force: Boolean = false)
     fun startProductPurchase(product: Product)
     fun startTeamRegistration(team: TeamWithPlayers)
     fun leaveTeam(team: TeamWithPlayers)
@@ -266,11 +271,7 @@ class DefaultOrganizationDetailComponent(
     override val visibleTabs: StateFlow<List<OrganizationDetailTab>> = _visibleTabs.asStateFlow()
 
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
-    private val rentalAvailabilityLoader = RentalAvailabilityLoader(
-        eventRepository = eventRepository,
-        matchRepository = matchRepository,
-        fieldRepository = fieldRepository,
-    )
+    private val rentalAvailabilityLoader = RentalAvailabilityLoader(fieldRepository)
 
     private val _organization = MutableStateFlow<Organization?>(null)
     override val organization: StateFlow<Organization?> = _organization.asStateFlow()
@@ -295,6 +296,10 @@ class DefaultOrganizationDetailComponent(
 
     private val _rentalBusyBlocks = MutableStateFlow<List<RentalBusyBlock>>(emptyList())
     override val rentalBusyBlocks: StateFlow<List<RentalBusyBlock>> = _rentalBusyBlocks.asStateFlow()
+
+    private val _loadedRentalAvailabilityWindow = MutableStateFlow<RentalAvailabilityWindow?>(null)
+    override val loadedRentalAvailabilityWindow: StateFlow<RentalAvailabilityWindow?> =
+        _loadedRentalAvailabilityWindow.asStateFlow()
 
     private val _isLoadingOrganization = MutableStateFlow(false)
     override val isLoadingOrganization: StateFlow<Boolean> = _isLoadingOrganization.asStateFlow()
@@ -367,6 +372,9 @@ class DefaultOrganizationDetailComponent(
     private var productsLoaded = false
     private var reviewsLoaded = false
     private var rentalsLoaded = false
+    private var rentalAvailabilityGeneration = 0L
+    private var rentalAvailabilityJob: Job? = null
+    private var activeRentalAvailabilityWindow: RentalAvailabilityWindow? = null
     private var pendingProductPurchase: Product? = null
     private var pendingTeamRegistration: TeamWithPlayers? = null
     private var pendingBillingAddressAction: (() -> Unit)? = null
@@ -561,7 +569,7 @@ class DefaultOrganizationDetailComponent(
                 refreshTeams(force = true)
                 refreshProducts(force = true)
                 refreshReviews(force = true)
-                refreshRentals(force = true)
+                refreshCurrentRentalWeek(force = true)
             } else {
                 eventsLoaded = true
                 teamsLoaded = true
@@ -829,38 +837,61 @@ class DefaultOrganizationDetailComponent(
         navigationHandler.navigateToLogin()
     }
 
-    override fun refreshRentals(force: Boolean) {
-        scope.launch {
-            if (_isLoadingRentals.value) return@launch
-            if (rentalsLoaded && !force) return@launch
-
-            val org = _organization.value
-            if (org == null) {
-                _rentalFieldOptions.value = emptyList()
-                _rentalBusyBlocks.value = emptyList()
-                rentalsLoaded = true
-                updateVisibleTabs()
-                return@launch
-            }
-
-            _isLoadingRentals.value = true
-            val fieldIds = resolveOrganizationFieldIds(org)
-            if (fieldIds.isEmpty()) {
-                _rentalFieldOptions.value = emptyList()
-                _rentalBusyBlocks.value = emptyList()
-                _isLoadingRentals.value = false
-                rentalsLoaded = true
-                updateVisibleTabs()
-                return@launch
-            }
-
-            loadRentalFieldOptions(fieldIds)
-            loadRentalBusyBlocks(org.id, fieldIds)
-
-            _isLoadingRentals.value = false
-            rentalsLoaded = true
-            updateVisibleTabs()
+    override fun refreshRentals(
+        rangeStart: Instant,
+        rangeEnd: Instant,
+        force: Boolean,
+    ) {
+        if (rangeEnd <= rangeStart) {
+            _errorState.value = ErrorMessage("Rental availability range end must be after its start.")
+            return
         }
+
+        val organization = _organization.value ?: return
+        val requestedWindow = RentalAvailabilityWindow(start = rangeStart, end = rangeEnd)
+        if (_isLoadingRentals.value && activeRentalAvailabilityWindow == requestedWindow) return
+        if (!force && rentalsLoaded && _loadedRentalAvailabilityWindow.value == requestedWindow) return
+
+        activeRentalAvailabilityWindow = requestedWindow
+        val generation = ++rentalAvailabilityGeneration
+        rentalAvailabilityJob?.cancel()
+        _loadedRentalAvailabilityWindow.value = null
+        _isLoadingRentals.value = true
+        rentalAvailabilityJob = scope.launch {
+            rentalAvailabilityLoader.loadAvailability(
+                organizationId = organization.id,
+                rangeStart = requestedWindow.start,
+                rangeEnd = requestedWindow.end,
+            ).onSuccess { snapshot ->
+                if (generation != rentalAvailabilityGeneration) return@onSuccess
+                _rentalFieldOptions.value = snapshot.fieldOptions
+                _rentalBusyBlocks.value = snapshot.busyBlocks
+                _loadedRentalAvailabilityWindow.value = requestedWindow
+                rentalsLoaded = true
+                updateVisibleTabs()
+            }.onFailure { error ->
+                if (generation != rentalAvailabilityGeneration) return@onFailure
+                _errorState.value = ErrorMessage(
+                    "Failed to load rental availability: ${error.userMessage()}",
+                )
+            }
+
+            if (generation == rentalAvailabilityGeneration) {
+                _isLoadingRentals.value = false
+                updateVisibleTabs()
+            }
+        }
+    }
+
+    private fun refreshCurrentRentalWeek(force: Boolean) {
+        val timeZone = TimeZone.currentSystemDefault()
+        val today = Clock.System.now().toLocalDateTime(timeZone).date
+        val window = rentalAvailabilityFetchWindowForDate(today, timeZone)
+        refreshRentals(
+            rangeStart = window.start,
+            rangeEnd = window.end,
+            force = force,
+        )
     }
 
     private fun updateVisibleTabs() {
@@ -1419,7 +1450,13 @@ class DefaultOrganizationDetailComponent(
                 totalCents = result.totalCents,
             )
             _message.value = "Resources reserved."
-            refreshRentals(force = true)
+            activeRentalAvailabilityWindow?.let { window ->
+                refreshRentals(
+                    rangeStart = window.start,
+                    rangeEnd = window.end,
+                    force = true,
+                )
+            }
         }.onFailure { error ->
             _errorState.value = ErrorMessage(
                 if (error is RentalOrderTerminalFailureException) {
@@ -1706,36 +1743,4 @@ class DefaultOrganizationDetailComponent(
             ?.normalized()
     }
 
-    private suspend fun resolveOrganizationFieldIds(organization: Organization): List<String> {
-        return fieldRepository.listFields()
-            .getOrElse { error ->
-                Napier.w("Failed to load fields for organization rentals: ${error.message}")
-                emptyList()
-            }
-            .filter { field -> field.organizationId == organization.id }
-            .map { field -> field.id }
-            .distinct()
-    }
-
-    private suspend fun loadRentalFieldOptions(fieldIds: List<String>) {
-        _rentalFieldOptions.value = emptyList()
-        rentalAvailabilityLoader.loadFieldOptions(fieldIds)
-            .onSuccess { options ->
-                _rentalFieldOptions.value = options.filter { option -> option.rentalSlots.isNotEmpty() }
-            }
-            .onFailure { error ->
-                _errorState.value = ErrorMessage("Failed to load rental field options: ${error.userMessage()}")
-            }
-    }
-
-    private suspend fun loadRentalBusyBlocks(organizationId: String, fieldIds: List<String>) {
-        rentalAvailabilityLoader.loadBusyBlocks(organizationId = organizationId, fieldIds = fieldIds)
-            .onSuccess { busyBlocks ->
-                _rentalBusyBlocks.value = busyBlocks
-            }
-            .onFailure { error ->
-                _rentalBusyBlocks.value = emptyList()
-                _errorState.value = ErrorMessage("Failed to load existing field events: ${error.userMessage()}")
-            }
-    }
 }

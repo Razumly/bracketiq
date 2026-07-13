@@ -1,3 +1,5 @@
+@file:OptIn(kotlin.time.ExperimentalTime::class)
+
 package com.razumly.mvp.organizationDetail
 
 import com.arkivanov.decompose.DefaultComponentContext
@@ -7,6 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.BillingAddressProfile
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.OrganizationReview
@@ -14,12 +17,17 @@ import com.razumly.mvp.core.data.dataTypes.OrganizationReviewReviewer
 import com.razumly.mvp.core.data.dataTypes.OrganizationReviewSummary
 import com.razumly.mvp.core.data.dataTypes.OrganizationReviewsPayload
 import com.razumly.mvp.core.data.dataTypes.Product
+import com.razumly.mvp.core.data.dataTypes.RentalAvailabilityBusyBlock
+import com.razumly.mvp.core.data.dataTypes.RentalAvailabilityField
+import com.razumly.mvp.core.data.dataTypes.RentalAvailabilitySnapshot
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
+import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IEventRepository
+import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.OrganizationEventPage
 import com.razumly.mvp.core.data.repositories.OrganizationTeamPage
@@ -47,6 +55,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Instant
 
 class OrganizationDetailComponentTest : MainDispatcherTest() {
 
@@ -127,8 +137,13 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
             harness.billingRepository.releasePurchaseCheckout()
             advance()
 
-            // The checkout remains locked until the PaymentSheet reports a result.
-            assertEquals(harness.product.id, harness.component.startingProductCheckoutId.value)
+            // The Android test processor has no Activity/PaymentSheet, so presentation
+            // reports a setup failure and the component releases the checkout lock.
+            assertNull(harness.component.startingProductCheckoutId.value)
+            assertEquals(
+                "Payment setup is unavailable. Please try again.",
+                harness.component.errorState.value?.message,
+            )
         }
 
     @Test
@@ -155,8 +170,13 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
             harness.billingRepository.releaseSubscriptionCheckout()
             advance()
 
-            // The checkout remains locked until the PaymentSheet reports a result.
-            assertEquals(harness.product.id, harness.component.startingProductCheckoutId.value)
+            // The Android test processor has no Activity/PaymentSheet, so presentation
+            // reports a setup failure and the component releases the checkout lock.
+            assertNull(harness.component.startingProductCheckoutId.value)
+            assertEquals(
+                "Payment setup is unavailable. Please try again.",
+                harness.component.errorState.value?.message,
+            )
         }
 
     @Test
@@ -352,6 +372,86 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
         assertEquals(listOf("event-fresh"), harness.component.events.value.map(Event::id))
         assertFalse(harness.component.canLoadMoreEvents.value)
         assertEquals(listOf(0, 1, 0), eventRepository.requests.map(CatalogPageRequest::offset))
+    }
+
+    @Test
+    fun rentalAvailability_refreshes_the_requested_date_window_and_ignores_a_stale_response() =
+        runTest(testDispatcher) {
+            val fieldRepository = QueuedRentalAvailabilityFieldRepository()
+            val harness = OrganizationDetailHarness(
+                product = createProduct(period = "SINGLE"),
+                fieldRepository = fieldRepository,
+            )
+            advance()
+            fieldRepository.requests.clear()
+
+            val firstStart = Instant.parse("2026-07-13T07:00:00Z")
+            val firstEnd = Instant.parse("2026-07-20T07:00:00Z")
+            val secondStart = firstEnd
+            val secondEnd = Instant.parse("2026-07-27T07:00:00Z")
+            val staleResponse = CompletableDeferred<Result<RentalAvailabilitySnapshot>>()
+            val freshResponse = CompletableDeferred<Result<RentalAvailabilitySnapshot>>()
+            fieldRepository.responses += staleResponse
+            fieldRepository.responses += freshResponse
+
+            harness.component.refreshRentals(firstStart, firstEnd, force = true)
+            advance()
+            harness.component.refreshRentals(secondStart, secondEnd, force = true)
+            advance()
+
+            freshResponse.complete(Result.success(rentalSnapshot(secondStart, secondEnd, "fresh")))
+            advance()
+            staleResponse.complete(Result.success(rentalSnapshot(firstStart, firstEnd, "stale")))
+            advance()
+
+            assertEquals(
+                listOf(
+                    RentalAvailabilityRequest("org-1", firstStart, firstEnd),
+                    RentalAvailabilityRequest("org-1", secondStart, secondEnd),
+                ),
+                fieldRepository.requests,
+            )
+            assertEquals(listOf("field-fresh"), harness.component.rentalFieldOptions.value.map { it.field.id })
+            assertEquals("field-fresh", harness.component.rentalBusyBlocks.value.single().fieldId)
+            assertEquals(
+                com.razumly.mvp.eventSearch.RentalAvailabilityWindow(secondStart, secondEnd),
+                harness.component.loadedRentalAvailabilityWindow.value,
+            )
+            assertFalse(harness.component.isLoadingRentals.value)
+        }
+
+    @Test
+    fun rentalAvailability_failure_preserves_the_last_successful_snapshot() = runTest(testDispatcher) {
+        val fieldRepository = QueuedRentalAvailabilityFieldRepository()
+        val harness = OrganizationDetailHarness(
+            product = createProduct(period = "SINGLE"),
+            fieldRepository = fieldRepository,
+        )
+        advance()
+
+        val firstStart = Instant.parse("2026-07-13T07:00:00Z")
+        val firstEnd = Instant.parse("2026-07-20T07:00:00Z")
+        fieldRepository.responses += CompletableDeferred(
+            Result.success(rentalSnapshot(firstStart, firstEnd, "kept")),
+        )
+        harness.component.refreshRentals(firstStart, firstEnd, force = true)
+        advance()
+
+        fieldRepository.responses += CompletableDeferred(
+            Result.failure<RentalAvailabilitySnapshot>(IllegalStateException("offline")),
+        )
+        harness.component.refreshRentals(
+            rangeStart = firstEnd,
+            rangeEnd = Instant.parse("2026-07-27T07:00:00Z"),
+            force = true,
+        )
+        advance()
+
+        assertEquals(listOf("field-kept"), harness.component.rentalFieldOptions.value.map { it.field.id })
+        assertEquals("field-kept", harness.component.rentalBusyBlocks.value.single().fieldId)
+        assertNull(harness.component.loadedRentalAvailabilityWindow.value)
+        assertTrue(harness.component.errorState.value?.message.orEmpty().contains("offline"))
+        assertFalse(harness.component.isLoadingRentals.value)
     }
 
     @Test
@@ -564,6 +664,7 @@ private class OrganizationDetailHarness(
     val product: Product,
     private val eventRepository: IEventRepository = CreateEvent_FakeEventRepository(),
     private val teamRepository: ITeamRepository = NoopTeamRepository,
+    private val fieldRepository: IFieldRepository = CreateEvent_FakeFieldRepository(),
 ) {
     private val organization = Organization(
         id = "org-1",
@@ -592,7 +693,7 @@ private class OrganizationDetailHarness(
         billingRepository = billingRepository,
         eventRepository = eventRepository,
         teamRepository = teamRepository,
-        fieldRepository = CreateEvent_FakeFieldRepository(),
+        fieldRepository = fieldRepository,
         matchRepository = NoopMatchRepository,
         userRepository = CreateEvent_FakeUserRepository(),
         navigationHandler = NoopNavigationHandler,
@@ -739,6 +840,82 @@ private class QueuedOrganizationTeamRepository(
         check(pages.isNotEmpty()) { "Unexpected organization team page request." }
         return pages.removeFirst().await()
     }
+}
+
+private data class RentalAvailabilityRequest(
+    val organizationId: String,
+    val rangeStart: Instant,
+    val rangeEnd: Instant,
+)
+
+private class QueuedRentalAvailabilityFieldRepository :
+    IFieldRepository by CreateEvent_FakeFieldRepository() {
+    val requests = mutableListOf<RentalAvailabilityRequest>()
+    val responses = ArrayDeque<CompletableDeferred<Result<RentalAvailabilitySnapshot>>>()
+
+    override suspend fun getRentalAvailability(
+        organizationId: String,
+        rangeStart: Instant,
+        rangeEnd: Instant,
+    ): Result<RentalAvailabilitySnapshot> {
+        requests += RentalAvailabilityRequest(organizationId, rangeStart, rangeEnd)
+        if (responses.isEmpty()) {
+            return Result.success(
+                RentalAvailabilitySnapshot(
+                    rangeStart = rangeStart,
+                    rangeEnd = rangeEnd,
+                    fields = emptyList(),
+                    busyBlocks = emptyList(),
+                )
+            )
+        }
+        return responses.removeFirst().await()
+    }
+}
+
+private fun rentalSnapshot(
+    rangeStart: Instant,
+    rangeEnd: Instant,
+    suffix: String,
+): RentalAvailabilitySnapshot {
+    val fieldId = "field-$suffix"
+    val slot = TimeSlot(
+        id = "slot-$suffix",
+        dayOfWeek = 0,
+        daysOfWeek = listOf(0),
+        startTimeMinutes = 8 * 60,
+        endTimeMinutes = 22 * 60,
+        startDate = rangeStart,
+        timeZone = "America/Los_Angeles",
+        repeating = true,
+        endDate = null,
+        scheduledFieldId = fieldId,
+        scheduledFieldIds = listOf(fieldId),
+        price = 2500,
+    )
+    return RentalAvailabilitySnapshot(
+        rangeStart = rangeStart,
+        rangeEnd = rangeEnd,
+        fields = listOf(
+            RentalAvailabilityField(
+                field = Field(
+                    id = fieldId,
+                    fieldNumber = 1,
+                    name = "Court $suffix",
+                    organizationId = "org-1",
+                    rentalSlotIds = listOf(slot.id),
+                ),
+                rentalSlots = listOf(slot),
+            )
+        ),
+        busyBlocks = listOf(
+            RentalAvailabilityBusyBlock(
+                fieldId = fieldId,
+                start = rangeStart,
+                end = rangeStart + 1.hours,
+            )
+        ),
+    )
 }
 
 private fun catalogEvent(id: String, name: String = id): Event = Event(
