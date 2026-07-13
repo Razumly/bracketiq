@@ -105,10 +105,7 @@ class WearMatchRepository(
             .plus(cachedMatches.filterKeys { matchId -> matchId !in remoteMatchesById })
             .values
             .toList()
-        val usersById = emptyMap<String, WearUserProfileDto>()
-        val teamsById = schedule.teams
-            .mapNotNull { team -> team.resolvedId()?.let { it to team.toWearTeam(usersById) } }
-            .toMap()
+        val teamsById = hydrateWearTeams(schedule.teams, ::fetchUsers)
         val eventsById = schedule.events.mapNotNull { event -> event.resolvedId()?.let { it to event } }.toMap()
         val fieldsById = schedule.fields.mapNotNull { field -> field.resolvedId()?.let { it to field } }.toMap()
 
@@ -1019,6 +1016,28 @@ fun WearIncidentTypeDefinitionDto.isScoring(): Boolean =
 
 fun WearIncidentTypeDefinitionDto.requiresPlayer(rules: WearResolvedMatchRulesDto): Boolean =
     requiresParticipant == true || (isScoring() && rules.pointIncidentRequiresParticipant)
+
+internal suspend fun hydrateWearTeams(
+    teams: List<WearTeamDto>,
+    fetchUsers: suspend (List<String>) -> Map<String, WearUserProfileDto>,
+): Map<String, WearTeam> {
+    val usersById = fetchUsers(
+        teams
+            .flatMap(WearTeamDto::participantUserIds)
+            .distinct(),
+    )
+    return teams
+        .mapNotNull { team -> team.resolvedId()?.let { it to team.toWearTeam(usersById) } }
+        .toMap()
+}
+
+private fun WearTeamDto.participantUserIds(): List<String> {
+    val registrationUserIds = playerRegistrations.orEmpty()
+        .mapNotNull(WearTeamRegistrationDto::participantUserId)
+    return registrationUserIds.ifEmpty {
+        playerIds.orEmpty().mapNotNull { userId -> userId.normalizedId() }
+    }
+}
 
 private fun WearTeamDto.toWearTeam(usersById: Map<String, WearUserProfileDto>): WearTeam {
     val registrations = playerRegistrations.orEmpty()
