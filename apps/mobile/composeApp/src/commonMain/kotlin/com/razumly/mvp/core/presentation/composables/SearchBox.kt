@@ -56,6 +56,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
@@ -74,6 +75,7 @@ import kotlin.time.ExperimentalTime
 fun SearchBox(
     modifier: Modifier = Modifier,
     placeholder: String,
+    query: String,
     filter: Boolean,
     currentFilter: EventFilter? = null,
     currentRadiusMiles: Double? = null,
@@ -92,7 +94,6 @@ fun SearchBox(
     filterMaxHeight: Dp? = null,
     filterDismissSignal: Int = 0,
 ) {
-    var searchInput by remember { mutableStateOf("") }
     var isSearchFieldFocused by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     var showFilterDropdown by remember { mutableStateOf(false) }
@@ -110,8 +111,8 @@ fun SearchBox(
             showFilterDropdown = false
         }
     }
-    LaunchedEffect(isSearchFieldFocused, searchInput) {
-        onFocusChange(isSearchFieldFocused || searchInput.isNotEmpty())
+    LaunchedEffect(isSearchFieldFocused, query) {
+        onFocusChange(isSearchFieldFocused || query.isNotEmpty())
     }
 
     Column(modifier = modifier.fillMaxWidth().onGloballyPositioned { coordinates ->
@@ -124,11 +125,8 @@ fun SearchBox(
             verticalAlignment = Alignment.CenterVertically
         ) {
             StandardTextField(
-                value = searchInput,
-                onValueChange = { newQuery ->
-                    searchInput = newQuery
-                    onChange(newQuery)
-                },
+                value = query,
+                onValueChange = onChange,
                 placeholder = placeholder,
                 leadingIcon = {
                     Icon(
@@ -138,9 +136,8 @@ fun SearchBox(
                 },
                 trailingIcon = trailingAction ?: {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (searchInput.isNotEmpty()) {
+                        if (query.isNotEmpty()) {
                             IconButton(onClick = {
-                                searchInput = ""
                                 onChange("")
                                 focusManager.clearFocus()
                             }) {
@@ -181,6 +178,8 @@ fun SearchBox(
                     .onFocusChanged { focusState ->
                         isSearchFieldFocused = focusState.isFocused
                     },
+                imeAction = ImeAction.Search,
+                onImeAction = { onSearch(query) },
             )
 
             if (rowAction != null) {

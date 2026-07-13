@@ -1406,6 +1406,7 @@ fun EventSearchScreen(
                 SearchBox(
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = selectedTab.searchPlaceholder,
+                    query = searchQuery,
                     filter = selectedTab == DiscoverTab.EVENTS || selectedTab == DiscoverTab.ORGANIZATIONS,
                     currentFilter = when (selectedTab) {
                         DiscoverTab.EVENTS -> currentFilter

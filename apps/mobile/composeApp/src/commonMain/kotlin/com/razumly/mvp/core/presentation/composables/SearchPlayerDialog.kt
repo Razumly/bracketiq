@@ -92,6 +92,7 @@ fun SearchPlayerDialog(
                         Spacer(modifier = Modifier.height(8.dp))
                         SearchBox(
                             placeholder = if (isEmailMode) "Invite $entryLabel by email" else "Search $entryLabel",
+                            query = searchQuery,
                             filter = false,
                             onChange = { newQuery ->
                                 searchQuery = newQuery
