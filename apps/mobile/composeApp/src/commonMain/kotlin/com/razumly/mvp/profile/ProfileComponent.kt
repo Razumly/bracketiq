@@ -1458,14 +1458,14 @@ class DefaultProfileComponent(
 
         val cachedEvent = _myScheduleState.value.events.firstOrNull { event -> event.id == eventId }
         if (cachedEvent != null) {
-            navigationHandler.navigateToMatchFromSchedule(match, cachedEvent)
+            navigationHandler.navigateToMatchFromSchedule(match.match.id, cachedEvent.id)
             return
         }
 
         scope.launch {
             eventRepository.getEvent(eventId)
                 .onSuccess { event ->
-                    navigationHandler.navigateToMatchFromSchedule(match, event)
+                    navigationHandler.navigateToMatchFromSchedule(match.match.id, event.id)
                 }
                 .onFailure {
                     _errorState.value = ErrorMessage(it.userMessage("Unable to open match."))
@@ -1551,14 +1551,14 @@ class DefaultProfileComponent(
 
         val cached = cachedEvents.firstOrNull { it.id == normalizedId }
         if (cached != null) {
-            navigationHandler.navigateToEvent(cached)
+            navigationHandler.navigateToEvent(cached.id)
             return
         }
 
         scope.launch {
             eventRepository.getEvent(normalizedId)
                 .onSuccess { event ->
-                    navigationHandler.navigateToEvent(event)
+                    navigationHandler.navigateToEvent(event.id)
                 }
                 .onFailure {
                     _errorState.value = ErrorMessage(it.userMessage("Unable to open event."))

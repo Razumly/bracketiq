@@ -110,8 +110,8 @@ private class ChatList_FakeChatGroupRepository : IChatGroupRepository {
     override fun getUnreadMessageCountFlow(userId: String): Flow<Int> = flowOf(0)
 
     override fun getChatGroupFlow(
-        user: UserData?,
-        chatGroup: ChatGroupWithRelations?,
+        messageUserId: String?,
+        chatId: String?,
     ): Flow<Result<ChatGroupWithRelations>> = flowOf(Result.failure(IllegalStateException("unused")))
 
     override suspend fun refreshChatGroupsAndMessages(): Result<Unit> {
@@ -136,17 +136,17 @@ private class ChatList_FakeChatGroupRepository : IChatGroupRepository {
 }
 
 private class ChatList_FakeNavigationHandler : INavigationHandler {
-    override fun navigateToMatch(match: MatchWithRelations, event: Event) = Unit
+    override fun navigateToMatch(matchId: String, eventId: String) = Unit
     override fun navigateToTeams(
         freeAgents: List<String>,
-        event: Event?,
+        eventId: String?,
         selectedFreeAgentId: String?,
     ) = Unit
 
-    override fun navigateToChat(user: UserData?, chat: ChatGroupWithRelations?) = Unit
+    override fun navigateToChat(messageUserId: String?, chatId: String?) = Unit
     override fun navigateToCreate() = Unit
     override fun navigateToSearch() = Unit
-    override fun navigateToEvent(event: Event) = Unit
+    override fun navigateToEvent(eventId: String) = Unit
     override fun navigateToOrganization(organizationId: String, initialTab: OrganizationDetailTab) = Unit
     override fun navigateToEvents() = Unit
     override fun navigateToRefunds() = Unit

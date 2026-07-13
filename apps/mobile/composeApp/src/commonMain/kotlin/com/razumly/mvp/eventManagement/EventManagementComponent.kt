@@ -47,7 +47,9 @@ class DefaultEventManagementComponent(
         .map { result -> result.getOrNull()?.id?.trim().orEmpty() }
         .stateIn(scope, SharingStarted.Eagerly, "")
 
-    override val onEventSelected = navigationHandler::navigateToEvent
+    override val onEventSelected: (Event) -> Unit = { event ->
+        navigationHandler.navigateToEvent(event.id)
+    }
     override val onBack = navigationHandler::navigateBack
 
     override val events: StateFlow<List<Event>> =

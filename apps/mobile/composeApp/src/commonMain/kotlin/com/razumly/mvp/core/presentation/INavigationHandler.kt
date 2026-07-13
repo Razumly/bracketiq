@@ -1,29 +1,25 @@
 package com.razumly.mvp.core.presentation
 
-import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
-import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft
 
 interface INavigationHandler {
-    fun navigateToMatch(match: MatchWithRelations, event: Event)
-    fun navigateToMatchFromSchedule(match: MatchWithRelations, event: Event) {
-        navigateToMatch(match, event)
+    fun navigateToMatch(matchId: String, eventId: String)
+    fun navigateToMatchFromSchedule(matchId: String, eventId: String) {
+        navigateToMatch(matchId, eventId)
     }
 
     fun navigateToTeams(
         freeAgents: List<String> = listOf(),
-        event: Event? = null,
+        eventId: String? = null,
         selectedFreeAgentId: String? = null,
     )
-    fun navigateToChat(user: UserData? = null, chat: ChatGroupWithRelations? = null)
+    fun navigateToChat(messageUserId: String? = null, chatId: String? = null)
     fun navigateToCreate()
     fun navigateToCreate(seed: SeededEventTemplateDraft) {
         navigateToCreate()
     }
     fun navigateToSearch()
-    fun navigateToEvent(event: Event)
+    fun navigateToEvent(eventId: String)
     fun navigateToOrganization(organizationId: String, initialTab: OrganizationDetailTab = OrganizationDetailTab.OVERVIEW)
     fun navigateToEvents()
     fun navigateToRefunds()

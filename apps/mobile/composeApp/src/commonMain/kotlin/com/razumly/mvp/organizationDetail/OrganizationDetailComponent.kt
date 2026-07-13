@@ -1365,7 +1365,7 @@ class DefaultOrganizationDetailComponent(
     }
 
     override fun viewEvent(event: Event) {
-        navigationHandler.navigateToEvent(event)
+        navigationHandler.navigateToEvent(event.id)
     }
 
     override fun selectTab(tab: OrganizationDetailTab) {

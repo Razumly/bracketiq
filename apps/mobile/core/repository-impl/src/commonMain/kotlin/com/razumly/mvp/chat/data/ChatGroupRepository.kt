@@ -36,7 +36,8 @@ interface IChatGroupRepository : IMVPRepository {
     fun getUnreadMessageCountFlow(userId: String): Flow<Int>
 
     fun getChatGroupFlow(
-        user: UserData?, chatGroup: ChatGroupWithRelations?
+        messageUserId: String?,
+        chatId: String?,
     ): Flow<Result<ChatGroupWithRelations>>
 
     suspend fun refreshChatGroupsAndMessages(): Result<Unit>
@@ -74,12 +75,15 @@ class ChatGroupRepository(
         }
 
     override fun getChatGroupFlow(
-        user: UserData?, chatGroup: ChatGroupWithRelations?
+        messageUserId: String?,
+        chatId: String?,
     ): Flow<Result<ChatGroupWithRelations>> {
+        val normalizedMessageUserId = messageUserId?.trim()?.takeIf(String::isNotBlank)
+        val normalizedChatId = chatId?.trim()?.takeIf(String::isNotBlank)
         return chatGroupsFlow.map { result ->
             result.fold(onSuccess = { list ->
-                user?.let { findOrCreateDirectMessage(it.id) }
-                    ?: list.find { it.chatGroup.id == chatGroup?.chatGroup?.id }
+                normalizedMessageUserId?.let { userId -> findOrCreateDirectMessage(userId) }
+                    ?: list.find { it.chatGroup.id == normalizedChatId }
                         ?.let { foundChatGroup ->
                             Result.success(foundChatGroup)
                         } ?: Result.failure(Exception("Chat group not found"))

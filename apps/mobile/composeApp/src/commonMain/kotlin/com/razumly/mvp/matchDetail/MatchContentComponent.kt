@@ -220,13 +220,32 @@ private fun TeamWithRelations.isCurrentUserManagerOrCoach(userId: String): Boole
 @OptIn(ExperimentalCoroutinesApi::class)
 class DefaultMatchContentComponent(
     componentContext: ComponentContext,
-    selectedMatch: MatchWithRelations,
-    selectedEvent: Event?,
+    selectedMatchId: String,
+    selectedEventId: String,
     eventRepository: IEventRepository,
     private val matchRepository: IMatchRepository,
     userRepository: IUserRepository,
     private val teamRepository: ITeamRepository,
 ) : MatchContentComponent, ComponentContext by componentContext {
+
+    private val selectedMatch = MatchWithRelations(
+        match = MatchMVP(
+            matchId = 0,
+            eventId = selectedEventId.trim(),
+            id = selectedMatchId.trim(),
+        ),
+        field = null,
+        team1 = null,
+        team2 = null,
+        teamOfficial = null,
+        winnerNextMatch = null,
+        loserNextMatch = null,
+        previousLeftMatch = null,
+        previousRightMatch = null,
+    )
+    private val selectedEvent = selectedEventId.trim()
+        .takeIf(String::isNotBlank)
+        ?.let { eventId -> Event(id = eventId) }
 
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -238,7 +257,9 @@ class DefaultMatchContentComponent(
             .distinctUntilChanged()
             .map { eventResult ->
                 eventResult.map { it.event }.getOrElse {
-                    _errorState.value = it.userMessage()
+                    if (it !is NoSuchElementException) {
+                        _errorState.value = it.userMessage()
+                    }
                     selectedEvent
                 }
             }.stateIn(scope, SharingStarted.Eagerly, selectedEvent)
@@ -264,7 +285,9 @@ class DefaultMatchContentComponent(
             matchRepository.getMatchFlow(selectedMatch.match.id).distinctUntilChanged()
                 .flatMapLatest { dbResult ->
                     val baseMatch = dbResult.getOrElse {
-                        _errorState.value = it.userMessage()
+                        if (it !is NoSuchElementException) {
+                            _errorState.value = it.userMessage()
+                        }
                         selectedMatch
                     }
 

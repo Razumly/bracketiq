@@ -152,7 +152,7 @@ class DefaultEventDetailComponent(
     componentContext: ComponentContext,
     private val userRepository: IUserRepository,
     fieldRepository: IFieldRepository,
-    event: Event,
+    eventId: String,
     notificationsRepository: IPushNotificationsRepository,
     private val billingRepository: IBillingRepository,
     private val eventRepository: IEventRepository,
@@ -165,6 +165,8 @@ class DefaultEventDetailComponent(
     private val apiClient: MvpApiClient? = null,
 
 ) : EventDetailComponent, PaymentProcessor(), ComponentContext by componentContext {
+    private val event = Event(id = eventId.trim())
+
     private companion object {
         const val MATCH_REALTIME_EDIT_PAUSE_REASON = "event-detail-editing"
     }
@@ -435,9 +437,11 @@ class DefaultEventDetailComponent(
     private val _eventTags = MutableStateFlow<List<EventTag>>(emptyList())
 
     private val eventRelations: StateFlow<EventWithRelations> =
-        eventRepository.getCachedEventWithRelationsFlow(event.id).map { result ->
+        eventRepository.getEventWithRelationsFlow(event.id).map { result ->
             result.getOrElse {
-                _errorState.value = ErrorMessage(it.userMessage())
+                if (it !is NoSuchElementException) {
+                    _errorState.value = ErrorMessage(it.userMessage())
+                }
                 EventWithRelations(event, null)
             }.withInitialEventImageFallback(event)
         }.stateIn(
@@ -1599,13 +1603,13 @@ class DefaultEventDetailComponent(
     }
 
     override fun onNavigateToChat(user: UserData) {
-        navigationHandler.navigateToChat(user = user)
+        navigationHandler.navigateToChat(messageUserId = user.id)
     }
 
     override fun matchSelected(selectedMatch: MatchWithRelations) {
         navigationHandler.navigateToMatch(
-            selectedMatch,
-            selectedEvent.value
+            matchId = selectedMatch.match.id,
+            eventId = selectedEvent.value.id,
         )
     }
 
@@ -2596,8 +2600,8 @@ class DefaultEventDetailComponent(
 
     override fun createNewTeam() {
         navigationHandler.navigateToTeams(
-            selectedEvent.value.freeAgents,
-            selectedEvent.value,
+            freeAgents = selectedEvent.value.freeAgents,
+            eventId = selectedEvent.value.id,
             selectedFreeAgentId = null,
         )
     }
@@ -2605,8 +2609,8 @@ class DefaultEventDetailComponent(
     override fun inviteFreeAgentToTeam(userId: String) {
         val normalizedUserId = userId.trim().takeIf(String::isNotBlank) ?: return
         navigationHandler.navigateToTeams(
-            selectedEvent.value.freeAgents,
-            selectedEvent.value,
+            freeAgents = selectedEvent.value.freeAgents,
+            eventId = selectedEvent.value.id,
             selectedFreeAgentId = normalizedUserId,
         )
     }

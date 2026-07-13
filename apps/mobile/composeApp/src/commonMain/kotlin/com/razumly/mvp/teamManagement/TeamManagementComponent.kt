@@ -40,7 +40,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 interface TeamManagementComponent {
-    val selectedEvent: Event?
+    val selectedEvent: StateFlow<Event?>
     val currentUser: UserData
     val selectedFreeAgentId: String?
     val selectedFreeAgent: StateFlow<UserData?>
@@ -91,7 +91,7 @@ class DefaultTeamManagementComponent(
     private val userRepository: IUserRepository,
     @Suppress("UNUSED_PARAMETER")
     _legacyFreeAgents: List<String>,
-    override val selectedEvent: Event?,
+    eventId: String?,
     override val selectedFreeAgentId: String?,
     private val navigationHandler: INavigationHandler
 ) : ComponentContext by componentContext, TeamManagementComponent {
@@ -109,6 +109,21 @@ class DefaultTeamManagementComponent(
     override val errorState = _errorState.asStateFlow()
     private val _divisionTypeParameters = MutableStateFlow(DivisionTypeParameters())
     override val divisionTypeParameters = _divisionTypeParameters.asStateFlow()
+    private val normalizedEventId = eventId?.trim()?.takeIf(String::isNotBlank)
+    override val selectedEvent: StateFlow<Event?> = normalizedEventId
+        ?.let { selectedEventId ->
+            eventRepository.getEventWithRelationsFlow(selectedEventId)
+                .map { result ->
+                    result.getOrElse { error ->
+                        if (error !is NoSuchElementException) {
+                            _errorState.value = error.userMessage("Failed to load event context")
+                        }
+                        null
+                    }?.event
+                }
+                .stateIn(scope, SharingStarted.Eagerly, null)
+        }
+        ?: MutableStateFlow(null)
 
     private val currentUserState = userRepository.currentUser
         .map { result -> result.getOrNull() ?: UserData() }

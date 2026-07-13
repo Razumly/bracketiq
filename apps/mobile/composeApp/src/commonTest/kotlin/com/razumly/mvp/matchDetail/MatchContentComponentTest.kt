@@ -2509,8 +2509,8 @@ private class MatchDetailHarness(
 
     val component = DefaultMatchContentComponent(
         componentContext = createTestComponentContext(),
-        selectedMatch = initialMatch.toMatchWithRelations(),
-        selectedEvent = event,
+        selectedMatchId = initialMatch.id,
+        selectedEventId = event.id,
         eventRepository = MatchDetailFakeEventRepository(event),
         matchRepository = matchRepository,
         userRepository = MatchDetailFakeUserRepository(currentUser),

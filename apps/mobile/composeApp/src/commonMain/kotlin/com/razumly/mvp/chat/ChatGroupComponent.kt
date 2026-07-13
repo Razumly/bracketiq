@@ -76,12 +76,19 @@ class DefaultChatGroupComponent(
     componentContext: ComponentContext,
     private val userRepository: IUserRepository,
     private val chatGroupRepository: IChatGroupRepository,
-    messageUser: UserData?,
-    initialChatGroup: ChatGroupWithRelations?,
+    messageUserId: String?,
+    initialChatId: String?,
     private val messagesRepository: IMessageRepository,
     private val pushNotificationsRepository: IPushNotificationsRepository,
     private val navigationHandler: INavigationHandler,
 ) : ChatGroupComponent, ComponentContext by componentContext {
+
+    private val normalizedMessageUserId = messageUserId
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+    private val normalizedInitialChatId = initialChatId
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
 
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
     private var ownedActiveChatId: String? = null
@@ -103,7 +110,10 @@ class DefaultChatGroupComponent(
     private val _isChatLoading = MutableStateFlow(true)
     override val isChatLoading = _isChatLoading.asStateFlow()
 
-    override val chatGroup = chatGroupRepository.getChatGroupFlow(messageUser, initialChatGroup)
+    override val chatGroup = chatGroupRepository.getChatGroupFlow(
+        messageUserId = normalizedMessageUserId,
+        chatId = normalizedInitialChatId,
+    )
         .map { result ->
             _isChatLoading.value = false
             val chatGroup = result.getOrElse {

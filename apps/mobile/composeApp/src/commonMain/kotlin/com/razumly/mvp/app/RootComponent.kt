@@ -13,10 +13,8 @@ import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.chat.ChatGroupComponent
 import com.razumly.mvp.chat.ChatListComponent
-import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
-import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.repositories.AppUpdatePrompt
@@ -414,7 +412,7 @@ class RootComponent(
                 .onSuccess { event ->
                     setDefaultNavigationDirection()
                     // Keep Discover in the stack so back returns there from Event Detail.
-                    navigation.replaceAll(AppConfig.Search(), AppConfig.EventDetail(event))
+                    navigation.replaceAll(AppConfig.Search(), AppConfig.EventDetail(event.id))
                     _selectedPage.value = AppConfig.Search()
                 }
                 .onFailure { throwable ->
@@ -456,7 +454,7 @@ class RootComponent(
                         Napier.w("Deep-linked match $matchId was not found for event $eventId")
                         _startupNotice.value = "Couldn't open that match link."
                         setDefaultNavigationDirection()
-                        navigation.replaceAll(AppConfig.Search(), AppConfig.EventDetail(event))
+                        navigation.replaceAll(AppConfig.Search(), AppConfig.EventDetail(event.id))
                         _selectedPage.value = AppConfig.Search()
                         return@onSuccess
                     }
@@ -464,8 +462,8 @@ class RootComponent(
                     setDefaultNavigationDirection()
                     navigation.replaceAll(
                         AppConfig.Search(),
-                        AppConfig.EventDetail(event, initialTab = EventDetailInitialTab.SCHEDULE),
-                        AppConfig.MatchDetail(match.toRootMatchWithRelations(), event),
+                        AppConfig.EventDetail(event.id, initialTab = EventDetailInitialTab.SCHEDULE),
+                        AppConfig.MatchDetail(match.id, event.id),
                     )
                     _selectedPage.value = AppConfig.Search()
                 }
@@ -475,7 +473,7 @@ class RootComponent(
                     setDefaultNavigationDirection()
                     navigation.replaceAll(
                         AppConfig.Search(),
-                        AppConfig.EventDetail(event, initialTab = EventDetailInitialTab.SCHEDULE),
+                        AppConfig.EventDetail(event.id, initialTab = EventDetailInitialTab.SCHEDULE),
                     )
                     _selectedPage.value = AppConfig.Search()
                 }
@@ -533,7 +531,7 @@ class RootComponent(
             eventRepository.getEvent(eventId)
                 .onSuccess { event ->
                     setDefaultNavigationDirection()
-                    navigation.pushNew(AppConfig.EventDetail(event))
+                    navigation.pushNew(AppConfig.EventDetail(event.id))
                 }
                 .onFailure { throwable ->
                     Napier.w("Failed to open center event shortcut $eventId: ${throwable.message}")
@@ -572,8 +570,8 @@ class RootComponent(
                     }
 
                     setDefaultNavigationDirection()
-                    navigation.pushNew(AppConfig.EventDetail(event, initialTab = EventDetailInitialTab.SCHEDULE))
-                    navigation.pushNew(AppConfig.MatchDetail(match.toRootMatchWithRelations(), event))
+                    navigation.pushNew(AppConfig.EventDetail(event.id, initialTab = EventDetailInitialTab.SCHEDULE))
+                    navigation.pushNew(AppConfig.MatchDetail(match.id, event.id))
                 }
                 .onFailure { throwable ->
                     Napier.w("Failed to open center match shortcut $normalizedEventId/$normalizedMatchId: ${throwable.message}")
@@ -780,29 +778,44 @@ class RootComponent(
         }
     }
 
-    override fun navigateToMatch(match: MatchWithRelations, event: Event) {
+    override fun navigateToMatch(matchId: String, eventId: String) {
+        val normalizedMatchId = matchId.trim()
+        val normalizedEventId = eventId.trim()
+        if (normalizedMatchId.isEmpty() || normalizedEventId.isEmpty()) return
         setDefaultNavigationDirection()
-        navigation.pushNew(AppConfig.MatchDetail(match, event))
+        navigation.pushNew(AppConfig.MatchDetail(normalizedMatchId, normalizedEventId))
     }
 
-    override fun navigateToMatchFromSchedule(match: MatchWithRelations, event: Event) {
+    override fun navigateToMatchFromSchedule(matchId: String, eventId: String) {
+        val normalizedMatchId = matchId.trim()
+        val normalizedEventId = eventId.trim()
+        if (normalizedMatchId.isEmpty() || normalizedEventId.isEmpty()) return
         setDefaultNavigationDirection()
-        navigation.pushNew(AppConfig.EventDetail(event, initialTab = EventDetailInitialTab.SCHEDULE))
-        navigation.pushNew(AppConfig.MatchDetail(match, event))
+        navigation.pushNew(AppConfig.EventDetail(normalizedEventId, initialTab = EventDetailInitialTab.SCHEDULE))
+        navigation.pushNew(AppConfig.MatchDetail(normalizedMatchId, normalizedEventId))
     }
 
     override fun navigateToTeams(
         freeAgents: List<String>,
-        event: Event?,
+        eventId: String?,
         selectedFreeAgentId: String?,
     ) {
         setDefaultNavigationDirection()
-        navigation.pushNew(AppConfig.Teams(freeAgents, event, selectedFreeAgentId))
+        navigation.pushNew(
+            AppConfig.Teams(
+                freeAgentIds = freeAgents.map(String::trim).filter(String::isNotBlank),
+                eventId = eventId?.trim()?.takeIf(String::isNotBlank),
+                selectedFreeAgentId = selectedFreeAgentId?.trim()?.takeIf(String::isNotBlank),
+            )
+        )
     }
 
-    override fun navigateToChat(user: UserData?, chat: ChatGroupWithRelations?) {
+    override fun navigateToChat(messageUserId: String?, chatId: String?) {
+        val normalizedMessageUserId = messageUserId?.trim()?.takeIf(String::isNotBlank)
+        val normalizedChatId = chatId?.trim()?.takeIf(String::isNotBlank)
+        if (normalizedMessageUserId == null && normalizedChatId == null) return
         setDefaultNavigationDirection()
-        navigation.pushNew(AppConfig.Chat(user, chat))
+        navigation.pushNew(AppConfig.Chat(normalizedMessageUserId, normalizedChatId))
     }
 
     override fun navigateToCreate() {
@@ -820,9 +833,11 @@ class RootComponent(
         _selectedPage.value = AppConfig.Create()
     }
 
-    override fun navigateToEvent(event: Event) {
+    override fun navigateToEvent(eventId: String) {
+        val normalizedEventId = eventId.trim()
+        if (normalizedEventId.isEmpty()) return
         setDefaultNavigationDirection()
-        navigation.pushNew(AppConfig.EventDetail(event))
+        navigation.pushNew(AppConfig.EventDetail(normalizedEventId))
     }
 
     override fun navigateToOrganization(organizationId: String, initialTab: OrganizationDetailTab) {
@@ -861,10 +876,12 @@ class RootComponent(
     }
 
     private fun onEventCreated(createdEvent: Event) {
+        val eventId = createdEvent.id.trim()
+        if (eventId.isEmpty()) return
         setDefaultNavigationDirection()
         navigation.replaceAll(AppConfig.Search())
         _selectedPage.value = AppConfig.Search()
-        navigation.pushNew(AppConfig.EventDetail(createdEvent))
+        navigation.pushNew(AppConfig.EventDetail(eventId))
     }
 
     private fun setDefaultNavigationDirection() {
@@ -913,7 +930,7 @@ class RootComponent(
         )
 
         is AppConfig.EventDetail -> Child.EventContent(
-            _koin.get { parametersOf(componentContext, config.event, this@RootComponent) },
+            _koin.get { parametersOf(componentContext, config.eventId, this@RootComponent) },
             _koin.get { parametersOf(componentContext) },
             config.initialTab,
         )
@@ -923,7 +940,7 @@ class RootComponent(
         )
 
         is AppConfig.MatchDetail -> Child.MatchContent(
-            component = _koin.get { parametersOf(componentContext, config.match, config.event) },
+            component = _koin.get { parametersOf(componentContext, config.matchId, config.eventId) },
             mapComponent = _koin.get { parametersOf(componentContext) },
         )
 
@@ -932,7 +949,7 @@ class RootComponent(
         )
 
         is AppConfig.Chat -> Child.Chat(
-            _koin.get { parametersOf(componentContext, config.user, config.chat, this@RootComponent) }
+            _koin.get { parametersOf(componentContext, config.messageUserId, config.chatId, this@RootComponent) }
         )
 
         is AppConfig.Create -> {
@@ -978,8 +995,8 @@ class RootComponent(
             _koin.get {
                 parametersOf(
                     componentContext,
-                    config.freeAgents,
-                    config.event,
+                    config.freeAgentIds,
+                    config.eventId,
                     config.selectedFreeAgentId,
                     this@RootComponent,
                 )
@@ -1040,16 +1057,3 @@ private fun MatchMVP.matchesRouteId(routeMatchId: String): Boolean {
         matchId == routeNumber
     } == true
 }
-
-private fun MatchMVP.toRootMatchWithRelations(): MatchWithRelations =
-    MatchWithRelations(
-        match = this,
-        field = null,
-        team1 = null,
-        team2 = null,
-        teamOfficial = null,
-        winnerNextMatch = null,
-        loserNextMatch = null,
-        previousLeftMatch = null,
-        previousRightMatch = null,
-    )

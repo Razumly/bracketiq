@@ -954,12 +954,12 @@ private object NoopMatchRepository : IMatchRepository {
 }
 
 private object NoopNavigationHandler : INavigationHandler {
-    override fun navigateToMatch(match: com.razumly.mvp.core.data.dataTypes.MatchWithRelations, event: Event) = Unit
-    override fun navigateToTeams(freeAgents: List<String>, event: Event?, selectedFreeAgentId: String?) = Unit
-    override fun navigateToChat(user: UserData?, chat: ChatGroupWithRelations?) = Unit
+    override fun navigateToMatch(matchId: String, eventId: String) = Unit
+    override fun navigateToTeams(freeAgents: List<String>, eventId: String?, selectedFreeAgentId: String?) = Unit
+    override fun navigateToChat(messageUserId: String?, chatId: String?) = Unit
     override fun navigateToCreate() = Unit
     override fun navigateToSearch() = Unit
-    override fun navigateToEvent(event: Event) = Unit
+    override fun navigateToEvent(eventId: String) = Unit
     override fun navigateToOrganization(organizationId: String, initialTab: OrganizationDetailTab) = Unit
     override fun navigateToEvents() = Unit
     override fun navigateToRefunds() = Unit

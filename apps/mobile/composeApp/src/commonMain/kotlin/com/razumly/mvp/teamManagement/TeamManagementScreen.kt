@@ -63,7 +63,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val inviteFreeAgentContext by component.inviteFreeAgentContext.collectAsState()
     val freeAgents by component.freeAgentsFiltered.collectAsState()
     val selectedFreeAgent by component.selectedFreeAgent.collectAsState()
-    val selectedEvent = component.selectedEvent
+    val selectedEvent by component.selectedEvent.collectAsState()
     val selectedTeam by component.selectedTeam.collectAsState()
     val componentError by component.errorState.collectAsState()
     val staffUsersById by component.staffUsersById.collectAsState()

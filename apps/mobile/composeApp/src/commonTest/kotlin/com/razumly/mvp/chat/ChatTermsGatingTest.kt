@@ -201,8 +201,8 @@ private class ChatGroupHarness(
         componentContext = createTestComponentContext(lifecycle),
         userRepository = userRepository,
         chatGroupRepository = chatGroupRepository,
-        messageUser = null,
-        initialChatGroup = chat,
+        messageUserId = null,
+        initialChatId = chat.chatGroup.id,
         messagesRepository = messageRepository,
         pushNotificationsRepository = pushNotificationsRepository,
         navigationHandler = ChatTerms_FakeNavigationHandler(),
@@ -229,8 +229,8 @@ private class ChatTerms_FakeChatGroupRepository(
     override fun getUnreadMessageCountFlow(userId: String): Flow<Int> = flowOf(0)
 
     override fun getChatGroupFlow(
-        user: UserData?,
-        chatGroup: ChatGroupWithRelations?,
+        messageUserId: String?,
+        chatId: String?,
     ): Flow<Result<ChatGroupWithRelations>> = if (initiallyLoading) {
         emptyFlow()
     } else {
@@ -333,16 +333,16 @@ private class ChatTerms_FakePushNotificationsRepository : IPushNotificationsRepo
 }
 
 private class ChatTerms_FakeNavigationHandler : INavigationHandler {
-    override fun navigateToMatch(match: MatchWithRelations, event: Event) = Unit
+    override fun navigateToMatch(matchId: String, eventId: String) = Unit
     override fun navigateToTeams(
         freeAgents: List<String>,
-        event: Event?,
+        eventId: String?,
         selectedFreeAgentId: String?,
     ) = Unit
-    override fun navigateToChat(user: UserData?, chat: ChatGroupWithRelations?) = Unit
+    override fun navigateToChat(messageUserId: String?, chatId: String?) = Unit
     override fun navigateToCreate() = Unit
     override fun navigateToSearch() = Unit
-    override fun navigateToEvent(event: Event) = Unit
+    override fun navigateToEvent(eventId: String) = Unit
     override fun navigateToOrganization(organizationId: String, initialTab: OrganizationDetailTab) = Unit
     override fun navigateToEvents() = Unit
     override fun navigateToRefunds() = Unit

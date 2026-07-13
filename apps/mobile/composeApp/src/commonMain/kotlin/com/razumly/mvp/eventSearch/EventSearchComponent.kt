@@ -259,7 +259,7 @@ class DefaultEventSearchComponent(
         if (eventId != null) {
             scope.launch {
                 eventRepository.getEvent(eventId).onSuccess {
-                    navigationHandler.navigateToEvent(it)
+                    navigationHandler.navigateToEvent(it.id)
                 }.onFailure { e ->
                     _errorState.value = ErrorMessage("Failed to fetch event: ${e.userMessage()}")
                 }
@@ -337,7 +337,7 @@ class DefaultEventSearchComponent(
             AnalyticsEvent.EventClicked,
             event.analyticsProperties("discover_events"),
         )
-        navigationHandler.navigateToEvent(event)
+        navigationHandler.navigateToEvent(event.id)
     }
 
     override fun viewOrganization(organization: Organization, initialTab: OrganizationDetailTab) {
