@@ -39,7 +39,7 @@ data class EventFilter(
         }
         if (date.second != null) {
             if (usesWeeklyEndFiltering) {
-                if (effectiveWeeklyEnd > date.second!!) return false
+                if (event.start > date.second!!) return false
             } else if (event.start > date.second!!) {
                 return false
             }
