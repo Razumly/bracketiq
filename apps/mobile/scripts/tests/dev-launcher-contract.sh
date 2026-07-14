@@ -38,4 +38,6 @@ if (( build_assertion_line >= apk_presence_check_line )); then
   exit 1
 fi
 
+"$repo_root/scripts/tests/gradle-daemon-jvm-contract.sh"
+
 echo "dev.ps1 fail-fast launcher contract passed"

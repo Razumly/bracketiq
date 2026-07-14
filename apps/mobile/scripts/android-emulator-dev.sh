@@ -10,6 +10,10 @@ SERIAL="${ANDROID_SERIAL:-emulator-5554}"
 PACKAGE_NAME="${ANDROID_PACKAGE_NAME:-com.razumly.mvp}"
 export PATH="$SDK_DIR/platform-tools:$SDK_DIR/emulator:$PATH"
 
+verify_gradle_daemon_jvm() {
+  "$ROOT_DIR/scripts/tests/gradle-daemon-jvm-contract.sh"
+}
+
 if [[ ! -x "$ADB" ]]; then
   echo "adb not found at $ADB" >&2
   exit 1
@@ -48,6 +52,7 @@ case "$command" in
     ;;
   install)
     start_emulator
+    verify_gradle_daemon_jvm
     (cd "$ROOT_DIR" && ./gradlew :composeApp:installDebug --console=plain)
     ;;
   launch)
@@ -56,6 +61,7 @@ case "$command" in
     ;;
   reinstall)
     start_emulator
+    verify_gradle_daemon_jvm
     (cd "$ROOT_DIR" && ./gradlew :composeApp:installDebug --console=plain)
     launch_app
     ;;
