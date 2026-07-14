@@ -3,8 +3,6 @@ package com.razumly.mvp.core.data.dataTypes
 import androidx.room.Entity
 import androidx.room.Ignore
 import androidx.room.PrimaryKey
-import com.razumly.mvp.core.data.dataTypes.dtos.TeamDTO
-import com.razumly.mvp.core.data.util.normalizeDivisionLabel
 import com.razumly.mvp.core.util.newId
 import kotlinx.serialization.Serializable
 
@@ -89,39 +87,6 @@ data class Team(
                 staffAssignments = emptyList(),
             ).withSynchronizedMembership()
         }
-    }
-
-    fun toTeamDTO(): TeamDTO {
-        val synced = withSynchronizedMembership()
-        return TeamDTO(
-            name = synced.name,
-            division = synced.division.normalizeDivisionLabel(),
-            playerIds = synced.playerIds,
-            captainId = synced.captainId,
-            managerId = synced.managerId,
-            headCoachId = synced.headCoachId,
-            assistantCoachIds = synced.assistantCoachIds,
-            coachIds = synced.coachIds,
-            parentTeamId = synced.parentTeamId,
-            teamSize = synced.teamSize,
-            id = synced.id,
-            pending = synced.pending,
-            profileImageId = synced.profileImageId,
-            sport = synced.sport,
-            divisionTypeId = synced.divisionTypeId,
-            skillDivisionTypeId = synced.skillDivisionTypeId,
-            skillDivisionTypeName = synced.skillDivisionTypeName,
-            ageDivisionTypeId = synced.ageDivisionTypeId,
-            ageDivisionTypeName = synced.ageDivisionTypeName,
-            divisionGender = synced.divisionGender,
-            organizationId = synced.organizationId,
-            createdBy = synced.createdBy,
-            joinPolicy = synced.joinPolicy,
-            openRegistration = synced.openRegistration,
-            registrationPriceCents = synced.registrationPriceCents,
-            affiliateUrl = synced.affiliateUrl,
-            requiredTemplateIds = synced.requiredTemplateIds,
-        )
     }
 }
 

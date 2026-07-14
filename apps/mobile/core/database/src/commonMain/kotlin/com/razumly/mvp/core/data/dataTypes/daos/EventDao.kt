@@ -71,12 +71,6 @@ interface EventDao {
     fun getEventWithRelationsFlow(id: String): Flow<EventWithRelations?>
 
     @Transaction
-    suspend fun upsertEventWithRelations(event: Event) {
-        deleteEventCrossRefs(event.id)
-        upsertEvent(event)
-    }
-
-    @Transaction
     suspend fun deleteEventWithCrossRefs(eventId: String) {
         deleteEventCrossRefs(eventId)
         deleteEventById(eventId)

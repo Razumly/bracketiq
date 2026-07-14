@@ -148,7 +148,6 @@ private class UserRepositoryHttp_UnusedEventDao : EventDao {
     override suspend fun getEventsByIds(ids: List<String>): List<Event> = emptyList()
     override suspend fun getEventWithRelationsById(id: String) = error("unused")
     override fun getEventWithRelationsFlow(id: String) = error("unused")
-    override suspend fun upsertEventWithRelations(event: Event) {}
     override suspend fun deleteEventWithCrossRefs(eventId: String) {}
     override suspend fun deleteEventCrossRefs(eventId: String) {}
     override suspend fun deleteEventUserCrossRefsByEventId(eventId: String) {}

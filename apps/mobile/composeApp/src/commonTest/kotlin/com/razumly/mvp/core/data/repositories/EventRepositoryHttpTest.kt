@@ -127,7 +127,6 @@ private class EventRepositoryHttp_FakeEventDao : EventDao {
     override suspend fun getEventsByIds(ids: List<String>): List<Event> = ids.mapNotNull(events.value::get)
     override suspend fun getEventWithRelationsById(id: String): EventWithRelations = error("unused")
     override fun getEventWithRelationsFlow(id: String): Flow<EventWithRelations> = error("unused")
-    override suspend fun upsertEventWithRelations(event: Event) { upsertEvent(event) }
     override suspend fun deleteEventWithCrossRefs(eventId: String) {
         deleteEventWithCrossRefsCalls += eventId
         deleteEventById(eventId)

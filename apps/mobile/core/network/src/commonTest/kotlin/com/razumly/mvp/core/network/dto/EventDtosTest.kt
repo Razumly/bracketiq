@@ -18,7 +18,6 @@ import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.evergreenDateDisplayLabel
 import com.razumly.mvp.core.data.dataTypes.resolvedDivisionPriceCents
-import com.razumly.mvp.core.data.dataTypes.toEventDTO
 import com.razumly.mvp.core.util.jsonMVP
 import kotlinx.serialization.decodeFromString
 import kotlin.test.Test
@@ -980,7 +979,6 @@ class EventDtosTest {
         val event = dto.toEventOrNull()
 
         assertEquals(true, event?.splitLeaguePlayoffDivisions)
-        assertEquals(true, event?.toEventDTO()?.splitLeaguePlayoffDivisions)
         assertEquals(true, event?.toUpdateDto()?.splitLeaguePlayoffDivisions)
     }
 
@@ -1248,8 +1246,6 @@ class EventDtosTest {
         assertEquals("NO_FIXED_DATE", event.dateDisplayMode)
         assertEquals("Ongoing registration", event.dateDisplayText)
         assertEquals("Ongoing registration", event.evergreenDateDisplayLabel())
-        assertEquals("NO_FIXED_DATE", event.toEventDTO().dateDisplayMode)
-        assertEquals("Ongoing registration", event.toEventDTO().dateDisplayText)
     }
 
     @Test

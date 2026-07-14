@@ -534,18 +534,6 @@ internal class CreateEvent_FakeFieldRepository : IFieldRepository {
     private var fieldCounter = 0
     private var slotCounter = 0
 
-    override suspend fun createFields(count: Int, organizationId: String?): Result<List<Field>> = runCatching {
-        List(count) { index ->
-            createField(
-                Field(
-                    fieldNumber = index + 1,
-                    organizationId = organizationId,
-                    id = "field-draft-${index + 1}",
-                )
-            ).getOrThrow()
-        }
-    }
-
     override suspend fun createField(field: Field): Result<Field> = runCatching {
         fieldCounter += 1
         val created = field.copy(id = "field-created-$fieldCounter")

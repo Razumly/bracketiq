@@ -176,7 +176,6 @@ private fun TimeSlot.withPublicFieldAssociation(fieldId: String): TimeSlot {
 }
 
 interface IFieldRepository : IMVPRepository {
-    suspend fun createFields(count: Int, organizationId: String? = null): Result<List<Field>>
     suspend fun createField(field: Field): Result<Field>
     suspend fun updateField(field: Field): Result<Field>
     fun getFieldsWithMatchesFlow(ids: List<String>): Flow<List<FieldWithMatches>>
@@ -204,16 +203,6 @@ class FieldRepository(
     private val api: MvpApiClient,
     private val databaseService: DatabaseService,
 ) : IFieldRepository {
-    override suspend fun createFields(count: Int, organizationId: String?): Result<List<Field>> =
-        runCatching {
-            val fields = List(count) { Field(fieldNumber = it + 1, organizationId = organizationId) }
-            val created = fields.map { field ->
-                api.post<Field, Field>(path = "api/fields", body = field)
-            }
-            databaseService.getFieldDao.upsertFields(created)
-            created
-        }
-
     override suspend fun createField(field: Field): Result<Field> = runCatching {
         val created = api.post<Field, Field>(path = "api/fields", body = field)
         databaseService.getFieldDao.upsertField(created)

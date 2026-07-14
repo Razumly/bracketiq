@@ -96,6 +96,15 @@ deleted_paths=(
   'composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/composables/CollapsableHeader.kt'
   'composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/composables/SetCountDropdown.kt'
   'composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/composables/MatchEditControls.kt'
+  'composeApp/src/commonMain/kotlin/com/razumly/mvp/core/presentation/Routes.kt'
+  'core/model/src/commonMain/kotlin/com/razumly/mvp/core/data/dataTypes/dtos/BillDTO.kt'
+  'core/model/src/commonMain/kotlin/com/razumly/mvp/core/data/dataTypes/dtos/EventDTO.kt'
+  'core/model/src/commonMain/kotlin/com/razumly/mvp/core/data/dataTypes/dtos/InviteDTO.kt'
+  'core/model/src/commonMain/kotlin/com/razumly/mvp/core/data/dataTypes/dtos/ProductDTO.kt'
+  'core/model/src/commonMain/kotlin/com/razumly/mvp/core/data/dataTypes/dtos/RefundRequestDTO.kt'
+  'core/model/src/commonMain/kotlin/com/razumly/mvp/core/data/dataTypes/dtos/SensitiveUserDataDTO.kt'
+  'core/model/src/commonMain/kotlin/com/razumly/mvp/core/data/dataTypes/dtos/SubscriptionDTO.kt'
+  'core/model/src/commonMain/kotlin/com/razumly/mvp/core/data/dataTypes/dtos/TeamDTO.kt'
   'composeApp/src/commonMain/kotlin/com/razumly/mvp/core/util/DecimalFormat.kt'
   'composeApp/src/androidMain/kotlin/com/razumly/mvp/core/util/DecimalFormat.android.kt'
   'composeApp/src/iosMain/kotlin/com/razumly/mvp/core/util/DecimalFormat.ios.kt'
@@ -124,7 +133,10 @@ for symbol in DbConstants AnimatedMarkerContent MaterialMarker StylizedText Text
   AvatarFallbackColors LightAppExtendedColors DarkAppExtendedColors isLightTheme \
   ScheduleMode ScheduleEntry MonthDatePicker WeekDatePicker DayDatePicker CalendarTitle \
   CalendarNavigationButton CalendarDayCell WeekHeader showSetConfirmDialog dismissSetDialog \
-  requestSetConfirmation confirmSet; do
+  requestSetConfirmation confirmSet EventDTO TeamDTO SubscriptionDTO SensitiveUserDataDTO \
+  RefundRequestDTO ProductDTO InviteDTO BillDTO BillPaymentDTO toEventDTO toTeamDTO \
+  upsertEventWithRelations createFields HomeRoute LoginRoute EventListRoute FollowingRoute \
+  CreateRoute ProfileRoute MatchDetailRoute; do
   if rg --word-regexp --quiet --glob '*.kt' -- "$symbol" "$repo_root/composeApp/src" "$repo_root/core"; then
     echo "Definition-only symbol still exists: $symbol" >&2
     exit 1
