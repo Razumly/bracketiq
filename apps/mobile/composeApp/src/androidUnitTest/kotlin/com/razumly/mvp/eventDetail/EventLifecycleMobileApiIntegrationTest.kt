@@ -281,7 +281,6 @@ class EventLifecycleMobileApiIntegrationTest {
         assertTrue(
             updated.incidents.any { incident ->
                 incident.id == incidentId ||
-                    incident.legacyId == incidentId ||
                     incident.linkedPointDelta == 1 && incident.eventTeamId == teamId
             },
             "Point incident update should persist the scoring incident.",

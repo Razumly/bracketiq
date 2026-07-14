@@ -3,7 +3,6 @@
 package com.razumly.mvp.core.data.dataTypes
 
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Transient
 import kotlin.native.ObjCName
 
@@ -75,14 +74,13 @@ fun Organization.normalizedAffiliateRentalUrl(): String? =
 
 @Serializable
 data class OrganizationStaffMember(
-    val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
+    val id: String,
     val organizationId: String = "",
     val userId: String = "",
     val types: List<String> = emptyList(),
     val roleId: String? = null,
 ) {
-    val resolvedId: String get() = id ?: legacyId ?: ""
+    val resolvedId: String get() = id
 }
 
 private const val ORGANIZATION_EVENTS_MANAGE_PERMISSION = "events.manage"

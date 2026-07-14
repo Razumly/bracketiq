@@ -6,7 +6,6 @@ import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameterOption
 import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.SportOfficialPositionTemplate
 import com.razumly.mvp.core.data.dataTypes.SportSkillDivisionTypes
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -31,7 +30,6 @@ data class DivisionTypeParametersResponseDto(
 @Serializable
 data class SportApiDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val name: String? = null,
     val skillDivisionTypes: List<DivisionTypeParameterOption> = emptyList(),
     val matchRulesTemplate: MatchRulesConfigMVP? = null,
@@ -81,7 +79,7 @@ data class SportApiDto(
     val officialPositionTemplates: List<SportOfficialPositionTemplate>? = null,
 ) {
     fun toSportOrNull(): Sport? {
-        val resolvedId = id ?: legacyId ?: name
+        val resolvedId = id
         val resolvedName = name ?: resolvedId
         if (resolvedId.isNullOrBlank() || resolvedName.isNullOrBlank()) {
             return null

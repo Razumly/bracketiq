@@ -4,13 +4,11 @@ import androidx.room.Entity
 import androidx.room.Ignore
 import androidx.room.PrimaryKey
 import com.razumly.mvp.core.util.newId
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
 data class Facility(
-    val id: String = "",
-    @SerialName("\$id") val legacyId: String? = null,
+    val id: String,
     val name: String? = null,
     val location: String? = null,
     val address: String? = null,
@@ -19,7 +17,7 @@ data class Facility(
     val affiliateUrl: String? = null,
 ) {
     val resolvedId: String
-        get() = id.ifBlank { legacyId.orEmpty() }
+        get() = id
 }
 
 fun Facility.normalizedAffiliateUrl(): String? =
@@ -47,7 +45,7 @@ data class Field(
      * cached field retains its facility grouping after an offline read.
      */
     var facilityId: String? = null,
-    @PrimaryKey override val id: String = "",
+    @PrimaryKey override val id: String,
 ) : MVPDocument {
     @Ignore
     var facility: Facility? = null

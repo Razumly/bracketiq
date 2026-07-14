@@ -9,7 +9,6 @@ import com.razumly.mvp.core.data.util.toNameCase
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlin.time.Clock
 
@@ -142,7 +141,6 @@ data class AuthSessionDto(
 @Serializable
 data class UserProfileDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val firstName: String? = null,
     val lastName: String? = null,
     val teamIds: List<String>? = null,
@@ -166,8 +164,6 @@ data class UserProfileDto(
     val dateOfBirth: String? = null,
     val createdAt: String? = null,
     val updatedAt: String? = null,
-    @SerialName("\$createdAt") val legacyCreatedAt: String? = null,
-    @SerialName("\$updatedAt") val legacyUpdatedAt: String? = null,
 )
 
 @Serializable
@@ -233,7 +229,7 @@ fun AuthUserDto.toAuthAccountOrNull(): AuthAccount? {
 }
 
 fun UserProfileDto.toUserDataOrNull(): UserData? {
-    val resolvedId = (id ?: legacyId)?.takeIf(String::isNotBlank) ?: return null
+    val resolvedId = id?.takeIf(String::isNotBlank) ?: return null
     return UserData(
         firstName = firstName.orEmpty().toNameCase(),
         lastName = lastName.orEmpty().toNameCase(),

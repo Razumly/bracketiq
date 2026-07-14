@@ -6,7 +6,6 @@ import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.OrganizationStaffMember
 import com.razumly.mvp.core.data.dataTypes.resolveOrganizationVerificationReviewStatus
 import com.razumly.mvp.core.data.dataTypes.resolveOrganizationVerificationStatus
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -27,7 +26,6 @@ data class PaginationResponseDto(
 @Serializable
 data class OrganizationApiDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val name: String? = null,
     val location: String? = null,
     val address: String? = null,
@@ -55,7 +53,7 @@ data class OrganizationApiDto(
     val facilities: List<OrganizationFacilityApiDto>? = null,
 ) {
     fun toOrganizationOrNull(): Organization? {
-        val resolvedId = (id ?: legacyId)?.trim()?.takeIf(String::isNotBlank) ?: return null
+        val resolvedId = id?.trim()?.takeIf(String::isNotBlank) ?: return null
         val resolvedName = name?.trim()?.takeIf(String::isNotBlank) ?: return null
         return Organization(
             id = resolvedId,
@@ -99,7 +97,6 @@ data class OrganizationApiDto(
 @Serializable
 data class OrganizationFacilityApiDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val name: String? = null,
     val location: String? = null,
     val address: String? = null,
@@ -108,14 +105,13 @@ data class OrganizationFacilityApiDto(
     val affiliateUrl: String? = null,
 ) {
     fun toFacilityOrNull(): Facility? {
-        val resolvedId = (id ?: legacyId)?.trim().orEmpty()
+        val resolvedId = id?.trim()?.takeIf(String::isNotBlank) ?: return null
         val resolvedName = name?.trim()?.takeIf(String::isNotBlank)
         val resolvedLocation = location?.trim()?.takeIf(String::isNotBlank)
         val resolvedAddress = address?.trim()?.takeIf(String::isNotBlank)
         val resolvedStatus = status?.trim()?.takeIf(String::isNotBlank)
         val resolvedAffiliateUrl = affiliateUrl?.trim()?.takeIf(String::isNotBlank)
         if (
-            resolvedId.isBlank() &&
             resolvedName == null &&
             resolvedLocation == null &&
             resolvedAddress == null &&
@@ -126,7 +122,6 @@ data class OrganizationFacilityApiDto(
         }
         return Facility(
             id = resolvedId,
-            legacyId = legacyId?.trim()?.takeIf(String::isNotBlank),
             name = resolvedName,
             location = resolvedLocation,
             address = resolvedAddress,

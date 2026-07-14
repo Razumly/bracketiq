@@ -260,7 +260,6 @@ class MatchRepository(
 
     private fun MatchIncidentMVP.matchesIncident(other: MatchIncidentMVP): Boolean {
         if (id.isNotBlank() && id == other.id) return true
-        if (!legacyId.isNullOrBlank() && legacyId == other.legacyId) return true
         return segmentId == other.segmentId &&
             eventTeamId == other.eventTeamId &&
             eventRegistrationId == other.eventRegistrationId &&
@@ -861,7 +860,7 @@ class MatchRepository(
 
         val res = api.get<MatchesResponseDto>("api/events/$eventId/matches")
         persistEmbeddedFields(res.matches)
-        return res.matches.firstOrNull { (it.id ?: it.legacyId) == matchId }?.toMatchOrNull()
+        return res.matches.firstOrNull { it.id == matchId }?.toMatchOrNull()
             ?: error("Match $matchId not found")
     }
 

@@ -6,9 +6,29 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class WearDtosTest {
+    @Test
+    fun givenLegacyOnlyScheduleIdentities_whenDecoded_thenDoesNotResolveThem() {
+        val schedule = createWearJson().decodeFromString<WearScheduleResponseDto>(
+            """
+            {
+              "events": [{"${'$'}id": "event_legacy"}],
+              "matches": [{"${'$'}id": "match_legacy"}],
+              "teams": [{"${'$'}id": "team_legacy"}],
+              "fields": [{"${'$'}id": "field_legacy"}]
+            }
+            """.trimIndent(),
+        )
+
+        assertNull(schedule.events.single().resolvedId())
+        assertNull(schedule.matches.single().resolvedId())
+        assertNull(schedule.teams.single().resolvedId())
+        assertNull(schedule.fields.single().resolvedId())
+    }
+
     @Test
     fun givenPaginatedSchedule_whenDecoded_thenRetainsCompletenessMetadata() {
         val schedule = createWearJson().decodeFromString<WearScheduleResponseDto>(

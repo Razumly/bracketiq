@@ -260,7 +260,8 @@ class ChatGroupRepository(
             val response = api.get<ChatGroupApiDto>(
                 "api/chat/groups/${normalizedChatGroupId.encodeURLPathPart()}",
             )
-            val responseId = response.id ?: response.legacyId
+            val responseId = response.id?.trim()?.takeIf(String::isNotBlank)
+                ?: error("Chat summary response for $normalizedChatGroupId is missing canonical id.")
             if (responseId != normalizedChatGroupId) {
                 error("Chat summary response did not match the requested chat group.")
             }
@@ -282,14 +283,13 @@ class ChatGroupRepository(
                 summaryRefreshMutex.withLock {
                     val encoded = userId.encodeURLQueryComponent()
                     val res = api.get<ChatGroupsResponseDto>("api/chat/groups?userId=$encoded")
-                    val summaries = res.groups.mapNotNull { groupDto ->
-                        val groupId = groupDto.id ?: groupDto.legacyId
+                    val summaries = res.groups.mapIndexed { index, groupDto ->
+                        val rowContext = "Chat groups response row ${index + 1}"
+                        val groupId = groupDto.id?.trim()?.takeIf(String::isNotBlank)
+                            ?: error("$rowContext is missing canonical id.")
                         val summary = groupDto.toSummaryOrNull()
-                        if (groupId.isNullOrBlank() || summary == null) {
-                            null
-                        } else {
-                            groupId to summary
-                        }
+                            ?: error("$rowContext is incomplete.")
+                        groupId to summary
                     }.toMap()
                     chatSummarySnapshot.value = replaceChatSummariesIfCurrent(
                         snapshot = chatSummarySnapshot.value,
@@ -297,7 +297,10 @@ class ChatGroupRepository(
                         currentUserId = currentUserIdOrNull(),
                         summaries = summaries,
                     )
-                    res.groups.mapNotNull { it.toChatGroupOrNull() }
+                    res.groups.mapIndexed { index, groupDto ->
+                        groupDto.toChatGroupOrNull()
+                            ?: error("Chat groups response row ${index + 1} is malformed.")
+                    }
                 }
             },
             getLocalData = {

@@ -763,10 +763,15 @@ class BillingRepositoryHttpTest {
                           "requiredSignerType": "participant"
                         },
                         {
-                          "${'$'}id": "tmpl_legacy",
+                          "id": "tmpl_2",
                           "title": "Minor Consent",
                           "type": "TEXT",
                           "requiredSignerType": "parent_guardian_and_child"
+                        },
+                        {
+                          "${'$'}id": "tmpl_legacy_only",
+                          "title": "Obsolete Alias",
+                          "type": "TEXT"
                         }
                       ]
                     }
@@ -787,7 +792,7 @@ class BillingRepositoryHttpTest {
         assertEquals("Waiver", templates[0].title)
         assertEquals("PDF", templates[0].type)
         assertEquals("PARTICIPANT", templates[0].requiredSignerType)
-        assertEquals("tmpl_legacy", templates[1].id)
+        assertEquals("tmpl_2", templates[1].id)
         assertEquals("TEXT", templates[1].type)
         assertEquals("PARENT_GUARDIAN_CHILD", templates[1].requiredSignerType)
     }

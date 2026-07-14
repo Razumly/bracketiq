@@ -684,12 +684,11 @@ final class WatchMatchRepository {
                 ?? operationId.flatMap { id in segments.first { $0.resolvedId == id }?.sequence }
                 ?? ((segments.map(\.sequence).max() ?? 0) + 1)
             let index = segments.firstIndex { segment in
-                (operationId != nil && (segment.id == operationId || segment.legacyId == operationId)) ||
+                (operationId != nil && segment.id == operationId) ||
                     segment.sequence == sequence
             }
             let existing = index.flatMap { segments[$0] } ?? WatchMatchSegmentDTO(
                 id: operationId ?? "\(matchId)_segment_\(sequence)",
-                legacyId: operationId ?? "\(matchId)_segment_\(sequence)",
                 eventId: raw.eventId,
                 matchId: matchId,
                 sequence: sequence,
@@ -703,7 +702,6 @@ final class WatchMatchRepository {
             )
             let updated = existing.copy(
                 id: operationId ?? existing.id,
-                legacyId: operationId ?? existing.legacyId,
                 sequence: sequence,
                 status: stringValue(operation["status"]) ?? existing.status,
                 scores: scoresValue(operation["scores"]) ?? existing.scores,
@@ -774,7 +772,6 @@ final class WatchMatchRepository {
                 }
                 let incident = WatchMatchIncidentDTO(
                     id: operationId ?? "watch_\(UUID().uuidString)",
-                    legacyId: operationId,
                     eventId: raw.eventId,
                     matchId: raw.resolvedId ?? raw.id ?? "",
                     segmentId: stringValue(operation["segmentId"]),
@@ -1229,7 +1226,6 @@ private extension WatchOfficialAssignmentDTO {
 private extension WatchMatchSegmentDTO {
     func copy(
         id: String? = nil,
-        legacyId: String? = nil,
         sequence: Int? = nil,
         status: String? = nil,
         scores: [String: Int]? = nil,
@@ -1241,7 +1237,6 @@ private extension WatchMatchSegmentDTO {
     ) -> WatchMatchSegmentDTO {
         WatchMatchSegmentDTO(
             id: id ?? self.id,
-            legacyId: legacyId ?? self.legacyId,
             eventId: eventId,
             matchId: matchId,
             sequence: sequence ?? self.sequence,
@@ -1273,7 +1268,6 @@ private extension WatchMatchIncidentDTO {
     ) -> WatchMatchIncidentDTO {
         WatchMatchIncidentDTO(
             id: id,
-            legacyId: legacyId,
             eventId: eventId,
             matchId: matchId,
             segmentId: segmentId,
@@ -1307,7 +1301,6 @@ private extension WatchMatchDTO {
     ) -> WatchMatchDTO {
         WatchMatchDTO(
             id: id,
-            legacyId: legacyId,
             matchId: matchId,
             team1Id: team1Id,
             team2Id: team2Id,

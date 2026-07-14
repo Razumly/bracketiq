@@ -5,7 +5,6 @@ import kotlinx.serialization.decodeFromString
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
-import kotlin.test.assertNull
 
 /**
  * Canonical-only payloads in this fixture also pass from the exact v1.6.13 tag.
@@ -29,7 +28,6 @@ class CanonicalOnlyContractFloorTest {
         )
 
         assertEquals("event-canonical", dto.id)
-        assertNull(dto.legacyId)
         val event = assertNotNull(dto.toEventOrNull())
         assertEquals(event.start, event.end)
         assertEquals(true, event.noFixedEndDateTime)

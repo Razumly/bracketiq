@@ -31,14 +31,12 @@ data class InclusivePriceQuoteResponseDto(
 @Serializable
 data class BillingUserRefDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val email: String? = null,
 )
 
 @Serializable
 data class BillingEventRefDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val eventType: String? = null,
     @SerialName("price") val priceCents: Int? = null,
     val hostId: String? = null,
@@ -48,7 +46,6 @@ data class BillingEventRefDto(
 @Serializable
 data class BillingTeamRefDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val teamId: String? = null,
     val name: String? = null,
     val registrantId: String? = null,
@@ -63,7 +60,6 @@ data class BillingTeamRefDto(
 @Serializable
 data class BillingTimeSlotRefDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     @SerialName("price") val priceCents: Int? = null,
     val startDate: String? = null,
     val endDate: String? = null,

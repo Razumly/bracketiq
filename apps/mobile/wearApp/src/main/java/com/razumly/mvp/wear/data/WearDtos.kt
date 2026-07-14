@@ -1,6 +1,5 @@
 package com.razumly.mvp.wear.data
 
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -36,13 +35,12 @@ data class WearAuthSessionDto(
 @Serializable
 data class WearUserProfileDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val firstName: String? = null,
     val lastName: String? = null,
     val userName: String? = null,
     val displayName: String? = null,
 ) {
-    fun resolvedId(): String? = (id ?: legacyId).normalizedId()
+    fun resolvedId(): String? = id.normalizedId()
 
     fun label(): String {
         val explicit = displayName.normalizedText()
@@ -104,7 +102,6 @@ data class WearEventDetailResponseDto(
 @Serializable
 data class WearEventDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val name: String? = null,
     val start: String? = null,
     val end: String? = null,
@@ -117,18 +114,17 @@ data class WearEventDto(
     val autoCreatePointMatchIncidents: Boolean? = null,
     val resolvedMatchRules: WearResolvedMatchRulesDto? = null,
 ) {
-    fun resolvedId(): String? = (id ?: legacyId).normalizedId()
+    fun resolvedId(): String? = id.normalizedId()
 }
 
 @Serializable
 data class WearFieldDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val fieldNumber: Int? = null,
     val name: String? = null,
     val location: String? = null,
 ) {
-    fun resolvedId(): String? = (id ?: legacyId).normalizedId()
+    fun resolvedId(): String? = id.normalizedId()
 
     fun label(): String {
         val explicitName = name.normalizedText()
@@ -155,12 +151,11 @@ data class WearTeamRegistrationDto(
 @Serializable
 data class WearTeamDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val name: String = "",
     val playerIds: List<String>? = null,
     val playerRegistrations: List<WearTeamRegistrationDto>? = null,
 ) {
-    fun resolvedId(): String? = (id ?: legacyId).normalizedId()
+    fun resolvedId(): String? = id.normalizedId()
 
     fun label(): String = name.normalizedText() ?: "Team"
 }
@@ -235,7 +230,6 @@ data class WearResolvedMatchRulesDto(
 @Serializable
 data class WearMatchSegmentDto(
     val id: String,
-    @SerialName("\$id") val legacyId: String? = null,
     val eventId: String? = null,
     val matchId: String,
     val sequence: Int,
@@ -247,13 +241,12 @@ data class WearMatchSegmentDto(
     val resultType: String? = null,
     val statusReason: String? = null,
 ) {
-    fun resolvedId(): String = (id.normalizedId() ?: legacyId.normalizedId()).orEmpty()
+    fun resolvedId(): String = id.normalizedId().orEmpty()
 }
 
 @Serializable
 data class WearMatchIncidentDto(
     val id: String,
-    @SerialName("\$id") val legacyId: String? = null,
     val eventId: String? = null,
     val matchId: String,
     val segmentId: String? = null,
@@ -271,12 +264,11 @@ data class WearMatchIncidentDto(
 )
 
 fun WearMatchIncidentDto.resolvedId(): String =
-    (id.normalizedId() ?: legacyId.normalizedId()).orEmpty()
+    id.normalizedId().orEmpty()
 
 @Serializable
 data class WearMatchDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val matchId: Int? = null,
     val team1Id: String? = null,
     val team2Id: String? = null,
@@ -304,7 +296,7 @@ data class WearMatchDto(
     val teamOfficialId: String? = null,
     val locked: Boolean? = null,
 ) {
-    fun resolvedId(): String? = (id ?: legacyId).normalizedId()
+    fun resolvedId(): String? = id.normalizedId()
 }
 
 @Serializable

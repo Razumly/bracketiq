@@ -22,7 +22,6 @@ struct WatchAuthSessionDTO: Decodable {
 
 struct WatchUserProfileDTO: Decodable {
     let id: String?
-    let legacyId: String?
     let firstName: String?
     let lastName: String?
     let userName: String?
@@ -30,7 +29,6 @@ struct WatchUserProfileDTO: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case id
-        case legacyId = "$id"
         case firstName
         case lastName
         case userName
@@ -38,7 +36,7 @@ struct WatchUserProfileDTO: Decodable {
     }
 
     var resolvedId: String? {
-        id.trimmedOrNil ?? legacyId.trimmedOrNil
+        id.trimmedOrNil
     }
 
     var label: String {
@@ -92,7 +90,6 @@ struct WatchEventDetailResponseDTO: Decodable {
 
 struct WatchEventDTO: Decodable {
     let id: String?
-    let legacyId: String?
     let name: String?
     let start: String?
     let end: String?
@@ -107,7 +104,6 @@ struct WatchEventDTO: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case id
-        case legacyId = "$id"
         case name
         case start
         case end
@@ -122,7 +118,7 @@ struct WatchEventDTO: Decodable {
     }
 
     var resolvedId: String? {
-        id.trimmedOrNil ?? legacyId.trimmedOrNil
+        id.trimmedOrNil
     }
 
     func rules() -> WatchResolvedMatchRulesDTO? {
@@ -138,21 +134,19 @@ struct WatchEventDTO: Decodable {
 
 struct WatchFieldDTO: Decodable {
     let id: String?
-    let legacyId: String?
     let fieldNumber: Int?
     let name: String?
     let location: String?
 
     enum CodingKeys: String, CodingKey {
         case id
-        case legacyId = "$id"
         case fieldNumber
         case name
         case location
     }
 
     var resolvedId: String? {
-        id.trimmedOrNil ?? legacyId.trimmedOrNil
+        id.trimmedOrNil
     }
 
     var label: String {
@@ -176,21 +170,19 @@ struct WatchTeamRegistrationDTO: Decodable {
 
 struct WatchTeamDTO: Decodable {
     let id: String?
-    let legacyId: String?
     let name: String
     let playerIds: [String]?
     let playerRegistrations: [WatchTeamRegistrationDTO]?
 
     enum CodingKeys: String, CodingKey {
         case id
-        case legacyId = "$id"
         case name
         case playerIds
         case playerRegistrations
     }
 
     var resolvedId: String? {
-        id.trimmedOrNil ?? legacyId.trimmedOrNil
+        id.trimmedOrNil
     }
 
     var label: String {
@@ -416,7 +408,6 @@ struct WatchResolvedMatchRulesDTO: Decodable {
 
 struct WatchMatchSegmentDTO: Decodable, Identifiable {
     let id: String
-    let legacyId: String?
     let eventId: String?
     let matchId: String
     let sequence: Int
@@ -430,7 +421,6 @@ struct WatchMatchSegmentDTO: Decodable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id
-        case legacyId = "$id"
         case eventId
         case matchId
         case sequence
@@ -444,13 +434,12 @@ struct WatchMatchSegmentDTO: Decodable, Identifiable {
     }
 
     var resolvedId: String {
-        id.trimmedOrNil ?? legacyId.trimmedOrNil ?? id
+        id.trimmedOrNil ?? id
     }
 }
 
 struct WatchMatchIncidentDTO: Decodable, Identifiable {
     let id: String
-    let legacyId: String?
     let eventId: String?
     let matchId: String
     let segmentId: String?
@@ -468,7 +457,6 @@ struct WatchMatchIncidentDTO: Decodable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id
-        case legacyId = "$id"
         case eventId
         case matchId
         case segmentId
@@ -486,13 +474,12 @@ struct WatchMatchIncidentDTO: Decodable, Identifiable {
     }
 
     var resolvedId: String {
-        id.trimmedOrNil ?? legacyId.trimmedOrNil ?? id
+        id.trimmedOrNil ?? id
     }
 }
 
 struct WatchMatchDTO: Decodable, Identifiable {
     let id: String?
-    let legacyId: String?
     let matchId: Int?
     let team1Id: String?
     let team2Id: String?
@@ -522,7 +509,6 @@ struct WatchMatchDTO: Decodable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id
-        case legacyId = "$id"
         case matchId
         case team1Id
         case team2Id
@@ -552,7 +538,7 @@ struct WatchMatchDTO: Decodable, Identifiable {
     }
 
     var resolvedId: String? {
-        id.trimmedOrNil ?? legacyId.trimmedOrNil
+        id.trimmedOrNil
     }
 }
 

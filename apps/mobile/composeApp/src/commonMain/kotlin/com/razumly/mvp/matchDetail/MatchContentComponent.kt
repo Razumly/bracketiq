@@ -2435,7 +2435,7 @@ class DefaultMatchContentComponent(
         }
         val eventTeamId = incident.eventTeamId?.trim()?.takeIf(String::isNotBlank) ?: return this
         val segmentIndex = segments.indexOfFirst { segment ->
-            segment.id == incident.segmentId || segment.legacyId == incident.segmentId
+            segment.id == incident.segmentId
         }
         if (segmentIndex < 0) {
             return this

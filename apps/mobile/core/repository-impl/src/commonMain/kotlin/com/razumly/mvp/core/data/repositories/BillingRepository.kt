@@ -1883,7 +1883,6 @@ class BillingRepository(
                 event = request.eventId?.trim()?.takeIf(String::isNotBlank)?.let { eventId ->
                     BillingEventRefDto(
                         id = eventId,
-                        legacyId = eventId,
                         priceCents = request.totalAmountCents,
                         organizationId = request.organizationId?.trim()?.takeIf(String::isNotBlank),
                     )
@@ -1891,7 +1890,6 @@ class BillingRepository(
                 user = currentUser?.let { user ->
                     BillingUserRefDto(
                         id = user.id,
-                        legacyId = user.id,
                         email = currentAccount?.email,
                     )
                 },
@@ -3415,7 +3413,6 @@ private data class RentalBookingsResponseDto(
 @Serializable
 private data class RentalBookingDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val organizationId: String? = null,
     val renterOrganizationId: String? = null,
     val eventId: String? = null,
@@ -3428,7 +3425,6 @@ private data class RentalBookingDto(
 @Serializable
 private data class RentalBookingOrganizationDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val name: String? = null,
     val location: String? = null,
     val address: String? = null,
@@ -3438,7 +3434,6 @@ private data class RentalBookingOrganizationDto(
 @Serializable
 private data class RentalBookingItemDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val bookingId: String? = null,
     val organizationId: String? = null,
     val facilityId: String? = null,
@@ -3458,7 +3453,6 @@ private data class RentalBookingItemDto(
 @Serializable
 private data class RentalFieldDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val fieldNumber: Int? = null,
     val divisions: List<String> = emptyList(),
     val lat: Double? = null,
@@ -3476,7 +3470,6 @@ private data class RentalFieldDto(
 @Serializable
 private data class RentalFacilityDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val name: String? = null,
     val location: String? = null,
     val address: String? = null,
@@ -3647,7 +3640,6 @@ private data class EventTeamBillingLineItemDto(
 @Serializable
 private data class ManualPaymentProofApiDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val status: String? = null,
     val fileId: String? = null,
     val fileUrl: String? = null,
@@ -3655,7 +3647,6 @@ private data class ManualPaymentProofApiDto(
 ) {
     fun toManualPaymentProofOrNull(): ManualPaymentProof? {
         val resolvedId = id?.trim()?.takeIf(String::isNotBlank)
-            ?: legacyId?.trim()?.takeIf(String::isNotBlank)
             ?: return null
         val resolvedFileId = fileId?.trim()?.takeIf(String::isNotBlank) ?: return null
         return ManualPaymentProof(
@@ -3671,7 +3662,6 @@ private data class ManualPaymentProofApiDto(
 @Serializable
 private data class EventTeamBillingPaymentDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val billId: String? = null,
     val sequence: Int? = null,
     val status: String? = null,
@@ -3702,7 +3692,6 @@ private data class BillDiscountSummaryDto(
 @Serializable
 private data class EventTeamBillingBillDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val ownerType: String? = null,
     val ownerId: String? = null,
     val ownerName: String? = null,
@@ -3737,7 +3726,6 @@ private data class CreateProductSubscriptionRequestDto(
 @Serializable
 private data class BillApiDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val ownerType: String? = null,
     val ownerId: String? = null,
     val organizationId: String? = null,
@@ -3757,7 +3745,7 @@ private data class BillApiDto(
     val createdBy: String? = null,
 ) {
     fun toBillOrNull(): Bill? {
-        val resolvedId = id ?: legacyId
+        val resolvedId = id
         val resolvedOwnerType = ownerType
         val resolvedOwnerId = ownerId
         val resolvedTotal = totalAmountCents
@@ -3909,7 +3897,7 @@ private fun RentalBookingsResponseDto.toRentalResourceOptions(): List<RentalReso
 }
 
 private fun RentalBookingDto.toRentalResourceOptions(): List<RentalResourceOption> {
-    val resolvedBookingId = (id ?: legacyId)?.trim()?.takeIf(String::isNotBlank) ?: return emptyList()
+    val resolvedBookingId = id?.trim()?.takeIf(String::isNotBlank) ?: return emptyList()
     val resolvedOrganizationId = organizationId?.trim()?.takeIf(String::isNotBlank) ?: return emptyList()
     val organizationName = organization?.name?.trim()?.takeIf(String::isNotBlank)
     return items.mapNotNull { item ->
@@ -3928,7 +3916,7 @@ private fun RentalBookingItemDto.toRentalResourceOptionOrNull(
     organizationName: String?,
     renterOrganizationId: String?,
 ): RentalResourceOption? {
-    val resolvedItemId = (id ?: legacyId)?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedItemId = id?.trim()?.takeIf(String::isNotBlank) ?: return null
     val fallbackFacility = facility?.toFacilityOrNull()
     val resolvedField = field?.toFieldOrNull(
         fallbackFieldId = fieldId,
@@ -3971,7 +3959,7 @@ private fun RentalFieldDto.toFieldOrNull(
     fallbackFacilityId: String? = null,
     fallbackFacility: Facility? = null,
 ): Field? {
-    val resolvedId = (id ?: legacyId ?: fallbackFieldId)?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedId = (id ?: fallbackFieldId)?.trim()?.takeIf(String::isNotBlank) ?: return null
     val resolvedFacility = facility?.toFacilityOrNull() ?: fallbackFacility
     return Field(
         fieldNumber = fieldNumber ?: 0,
@@ -3995,14 +3983,13 @@ private fun RentalFieldDto.toFieldOrNull(
 }
 
 private fun RentalFacilityDto.toFacilityOrNull(): Facility? {
-    val resolvedId = (id ?: legacyId)?.trim().orEmpty()
+    val resolvedId = id?.trim()?.takeIf(String::isNotBlank) ?: return null
     val resolvedName = name?.trim()?.takeIf(String::isNotBlank)
     val resolvedLocation = location?.trim()?.takeIf(String::isNotBlank)
     val resolvedAddress = address?.trim()?.takeIf(String::isNotBlank)
     val resolvedStatus = status?.trim()?.takeIf(String::isNotBlank)
     val resolvedAffiliateUrl = affiliateUrl?.trim()?.takeIf(String::isNotBlank)
     if (
-        resolvedId.isBlank() &&
         resolvedName == null &&
         resolvedLocation == null &&
         resolvedAddress == null &&
@@ -4013,7 +4000,6 @@ private fun RentalFacilityDto.toFacilityOrNull(): Facility? {
     }
     return Facility(
         id = resolvedId,
-        legacyId = legacyId?.trim()?.takeIf(String::isNotBlank),
         name = resolvedName,
         location = resolvedLocation,
         address = resolvedAddress,
@@ -4039,7 +4025,6 @@ private fun EventTeamBillingUserDto.toUserOptionOrNull(): EventTeamBillingUserOp
 
 private fun EventTeamBillingBillDto.toBillOrNull(): EventTeamBillingBillSnapshot? {
     val resolvedId = id?.trim()?.takeIf(String::isNotBlank)
-        ?: legacyId?.trim()?.takeIf(String::isNotBlank)
         ?: return null
     val resolvedOwnerType = ownerType?.trim()?.takeIf(String::isNotBlank) ?: return null
     val resolvedOwnerId = ownerId?.trim()?.takeIf(String::isNotBlank) ?: return null
@@ -4100,7 +4085,6 @@ private fun BillDiscountSummaryDto.toBillDiscountSummaryOrNull(): BillDiscountSu
 
 private fun EventTeamBillingPaymentDto.toPaymentOrNull(): EventTeamBillingPaymentSnapshot? {
     val resolvedId = id?.trim()?.takeIf(String::isNotBlank)
-        ?: legacyId?.trim()?.takeIf(String::isNotBlank)
         ?: return null
     val resolvedBillId = billId?.trim()?.takeIf(String::isNotBlank) ?: return null
     val resolvedSequence = sequence ?: return null
@@ -4126,7 +4110,6 @@ private fun EventTeamBillingPaymentDto.toPaymentOrNull(): EventTeamBillingPaymen
 @Serializable
 private data class BillPaymentApiDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val billId: String? = null,
     val sequence: Int? = null,
     val dueDate: String? = null,
@@ -4139,7 +4122,7 @@ private data class BillPaymentApiDto(
     val manualPaymentProofs: List<ManualPaymentProofApiDto> = emptyList(),
 ) {
     fun toBillPaymentOrNull(): BillPayment? {
-        val resolvedId = id ?: legacyId
+        val resolvedId = id
         val resolvedBillId = billId
         val resolvedSequence = sequence
         val resolvedDueDate = dueDate
@@ -4173,7 +4156,6 @@ private data class BillPaymentApiDto(
 @Serializable
 private data class SubscriptionApiDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val productId: String? = null,
     val userId: String? = null,
     val organizationId: String? = null,
@@ -4184,7 +4166,7 @@ private data class SubscriptionApiDto(
     val stripeSubscriptionId: String? = null,
 ) {
     fun toSubscriptionOrNull(): Subscription? {
-        val resolvedId = id ?: legacyId
+        val resolvedId = id
         val resolvedProductId = productId
         val resolvedUserId = userId
         val resolvedStartDate = startDate
@@ -4218,7 +4200,6 @@ private data class SubscriptionApiDto(
 @Serializable
 private data class ProductApiDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val name: String? = null,
     val description: String? = null,
     val priceCents: Int? = null,
@@ -4232,7 +4213,7 @@ private data class ProductApiDto(
     val taxCategory: ProductTaxCategory = ProductTaxCategory.ONE_TIME_PRODUCT,
 ) {
     fun toProductOrNull(): Product? {
-        val resolvedId = id ?: legacyId
+        val resolvedId = id
         val resolvedName = name
         val resolvedPrice = priceCents
         val resolvedPeriod = period
@@ -4267,13 +4248,12 @@ private data class ProductApiDto(
 @Serializable
 private data class OrganizationTemplateApiDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val title: String? = null,
     val type: String? = null,
     val requiredSignerType: String? = null,
 ) {
     fun toOrganizationTemplateOrNull(): OrganizationTemplateDocument? {
-        val resolvedId = (legacyId ?: id)?.trim()?.takeIf(String::isNotBlank) ?: return null
+        val resolvedId = id?.trim()?.takeIf(String::isNotBlank) ?: return null
         val resolvedTitle = title?.trim()?.takeIf(String::isNotBlank) ?: "Untitled Template"
         val resolvedType = when (type?.trim()?.uppercase()) {
             "TEXT" -> "TEXT"

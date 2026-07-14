@@ -69,7 +69,6 @@ import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlin.time.Clock
 
@@ -1147,7 +1146,10 @@ class UserRepository(
     override suspend fun listChildren(): Result<List<FamilyChild>> = runCatching {
         val response = api.get<FamilyChildrenResponseDto>(path = "api/family/children")
         response.error?.takeIf(String::isNotBlank)?.let { error(it) }
-        response.children.mapNotNull { it.toFamilyChildOrNull() }
+        response.children.mapIndexed { index, child ->
+            child.toFamilyChildOrNull()
+                ?: error("Family children response row ${index + 1} is missing canonical userId.")
+        }
     }
 
     override suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>> = runCatching {
@@ -1804,7 +1806,6 @@ private data class FamilyJoinRequestsResponseDto(
 @Serializable
 private data class FamilyChildDto(
     val userId: String? = null,
-    @SerialName("\$id") val legacyUserId: String? = null,
     val firstName: String? = null,
     val lastName: String? = null,
     val userName: String? = null,
@@ -1816,7 +1817,7 @@ private data class FamilyChildDto(
     val hasEmail: Boolean? = null,
 ) {
     fun toFamilyChildOrNull(): FamilyChild? {
-        val resolvedUserId = userId ?: legacyUserId
+        val resolvedUserId = userId
         if (resolvedUserId.isNullOrBlank()) return null
 
         return FamilyChild(
