@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.RegistrationProgressDraft
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -58,6 +59,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Clock
 
 private class UserRepositoryHttp_InMemoryAuthTokenStore(
     private var token: String = "",
@@ -231,6 +233,17 @@ private val logoutTestChatTermsResponse =
     }
     """.trimIndent()
 
+private const val logoutRegistrationDraftKey = "event:shared:event-1:none:none"
+
+private fun logoutRegistrationDraft(userId: String, answer: String): RegistrationProgressDraft =
+    RegistrationProgressDraft(
+        scope = "event",
+        userId = userId,
+        eventId = "event-1",
+        answers = mapOf("answer" to answer),
+        updatedAt = Clock.System.now().toString(),
+    )
+
 class UserRepositoryHttpTest {
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
@@ -280,6 +293,21 @@ class UserRepositoryHttpTest {
         advanceUntilIdle()
         currentUserDataSource.savePushToken("device-token")
         currentUserDataSource.savePushTarget("user_user_1")
+        currentUserDataSource.saveUserId("user_1")
+        currentUserDataSource.saveRegistrationProgress(
+            key = logoutRegistrationDraftKey,
+            draft = logoutRegistrationDraft("user_1", "current-account-answer"),
+        )
+        assertEquals(
+            "current-account-answer",
+            currentUserDataSource.loadRegistrationProgress(logoutRegistrationDraftKey)?.answers?.get("answer"),
+        )
+        currentUserDataSource.saveUserId("user_2")
+        currentUserDataSource.saveRegistrationProgress(
+            key = logoutRegistrationDraftKey,
+            draft = logoutRegistrationDraft("user_2", "other-account-answer"),
+        )
+        currentUserDataSource.saveUserId("user_1")
         var authStateWhenCurrentUserCleared: StartupAuthState? = null
         val observeCurrentUser = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             repository.currentUser.collect { currentUser ->
@@ -301,6 +329,13 @@ class UserRepositoryHttpTest {
         assertEquals("", tokenStore.get())
         assertEquals("", currentUserDataSource.getPushToken().first())
         assertEquals("", currentUserDataSource.getPushTarget().first())
+        currentUserDataSource.saveUserId("user_1")
+        assertNull(currentUserDataSource.loadRegistrationProgress(logoutRegistrationDraftKey))
+        currentUserDataSource.saveUserId("user_2")
+        assertEquals(
+            "other-account-answer",
+            currentUserDataSource.loadRegistrationProgress(logoutRegistrationDraftKey)?.answers?.get("answer"),
+        )
         assertTrue(repository.currentUser.value.isFailure)
         assertTrue(repository.startupAuthState.value is StartupAuthState.Unauthenticated)
         assertTrue(authStateWhenCurrentUserCleared is StartupAuthState.Unauthenticated)
@@ -352,6 +387,15 @@ class UserRepositoryHttpTest {
         advanceUntilIdle()
         currentUserDataSource.savePushToken("device-token")
         currentUserDataSource.savePushTarget("user_user_1")
+        currentUserDataSource.saveUserId("user_1")
+        currentUserDataSource.saveRegistrationProgress(
+            key = logoutRegistrationDraftKey,
+            draft = logoutRegistrationDraft("user_1", "preserved-answer"),
+        )
+        assertEquals(
+            "preserved-answer",
+            currentUserDataSource.loadRegistrationProgress(logoutRegistrationDraftKey)?.answers?.get("answer"),
+        )
 
         val result = repository.logout()
 
@@ -360,6 +404,10 @@ class UserRepositoryHttpTest {
         assertEquals("session-token", tokenStore.get())
         assertEquals("device-token", currentUserDataSource.getPushToken().first())
         assertEquals("user_user_1", currentUserDataSource.getPushTarget().first())
+        assertEquals(
+            "preserved-answer",
+            currentUserDataSource.loadRegistrationProgress(logoutRegistrationDraftKey)?.answers?.get("answer"),
+        )
         assertEquals("user_1", repository.currentUser.value.getOrNull()?.id)
         assertTrue(repository.startupAuthState.value is StartupAuthState.Authenticated)
     }

@@ -611,6 +611,7 @@ class UserRepository(
     }
 
     override suspend fun logout(): Result<Unit> = runCatching {
+        val registrationDraftAccountId = currentRegistrationDraftAccountId()
         val pushToken = currentUserDataSource.getPushToken().first().trim()
         val pushTarget = currentUserDataSource.getPushTarget().first().trim()
         val request = when {
@@ -635,6 +636,9 @@ class UserRepository(
             check(response.deviceTargetRemoved == true) { "Push notification cleanup was not confirmed." }
         }
 
+        registrationDraftAccountId?.let { accountId ->
+            currentUserDataSource.clearRegistrationProgressForAccount(accountId)
+        }
         currentUserDataSource.clearPushDeviceTarget()
         clearLoginState()
     }
@@ -655,6 +659,7 @@ class UserRepository(
         runCatching {
             databaseService.getUserDataDao.deleteUsersById(listOf(currentUserId))
         }
+        currentUserDataSource.clearRegistrationProgressForAccount(currentUserId)
         clearLoginState()
     }
 
@@ -787,6 +792,13 @@ class UserRepository(
         cacheCurrentUserProfile(profile, prefetchChatTermsConsent = false)
         profile
     }
+
+    private suspend fun currentRegistrationDraftAccountId(): String? =
+        currentUser.value.getOrNull()?.id?.trim()?.takeIf(String::isNotBlank)
+            ?: currentAccount.value.getOrNull()?.id?.trim()?.takeIf(String::isNotBlank)
+            ?: runCatching {
+                currentUserDataSource.getUserIdNow().trim().takeIf(String::isNotBlank)
+            }.getOrNull()
 
     private suspend fun clearLoginState() {
         chatTermsPrefetchJob?.cancelAndJoin()

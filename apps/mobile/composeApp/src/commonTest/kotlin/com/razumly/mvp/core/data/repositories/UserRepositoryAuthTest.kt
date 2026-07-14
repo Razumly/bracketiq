@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.RegistrationProgressDraft
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
@@ -47,7 +48,9 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Clock
 
 private class UserRepositoryAuth_InMemoryAuthTokenStore(
     private var token: String = "",
@@ -132,6 +135,17 @@ private class UserRepositoryAuth_FakeDatabaseService(
     override val getMessageDao: MessageDao get() = error("unused")
     override val getRefundRequestDao: RefundRequestDao get() = error("unused")
 }
+
+private const val accountDeletionRegistrationDraftKey = "event:shared:event-1:none:none"
+
+private fun accountDeletionRegistrationDraft(userId: String, answer: String): RegistrationProgressDraft =
+    RegistrationProgressDraft(
+        scope = "event",
+        userId = userId,
+        eventId = "event-1",
+        answers = mapOf("answer" to answer),
+        updatedAt = Clock.System.now().toString(),
+    )
 
 class UserRepositoryAuthTest {
     @Test
@@ -531,11 +545,33 @@ class UserRepositoryAuthTest {
         val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
 
         repo.getCurrentAccount().getOrThrow()
+        currentUserDataSource.saveUserId("u_delete")
+        currentUserDataSource.saveRegistrationProgress(
+            key = accountDeletionRegistrationDraftKey,
+            draft = accountDeletionRegistrationDraft("u_delete", "deleted-account-answer"),
+        )
+        assertEquals(
+            "deleted-account-answer",
+            currentUserDataSource.loadRegistrationProgress(accountDeletionRegistrationDraftKey)?.answers?.get("answer"),
+        )
+        currentUserDataSource.saveUserId("u_other")
+        currentUserDataSource.saveRegistrationProgress(
+            key = accountDeletionRegistrationDraftKey,
+            draft = accountDeletionRegistrationDraft("u_other", "other-account-answer"),
+        )
+        currentUserDataSource.saveUserId("u_delete")
         repo.deleteAccount("delete my account").getOrThrow()
 
         assertEquals(true, deleteBody.contains("\"confirmationText\":\"delete my account\""))
         assertEquals("", tokenStore.get())
         assertEquals("", currentUserDataSource.getUserId().first())
+        currentUserDataSource.saveUserId("u_delete")
+        assertNull(currentUserDataSource.loadRegistrationProgress(accountDeletionRegistrationDraftKey))
+        currentUserDataSource.saveUserId("u_other")
+        assertEquals(
+            "other-account-answer",
+            currentUserDataSource.loadRegistrationProgress(accountDeletionRegistrationDraftKey)?.answers?.get("answer"),
+        )
         assertTrue(repo.currentAccount.value.isFailure)
         assertTrue(repo.currentUser.value.isFailure)
     }
@@ -1022,8 +1058,27 @@ class UserRepositoryAuthTest {
                 }
 
                 "/api/auth/me" -> respond(
-                    content = """{"error":"unauthorized"}""",
-                    status = HttpStatusCode.Unauthorized,
+                    content = """
+                        {
+                          "user": { "id":"u1", "email":"u1@example.com", "name":"U1" },
+                          "session": { "userId":"u1", "isAdmin":false },
+                          "token":"t123",
+                          "profile": {
+                            "id":"u1",
+                            "firstName":"A",
+                            "lastName":"B",
+                            "userName":"ab",
+                            "teamIds":[],
+                            "friendIds":[],
+                            "friendRequestIds":[],
+                            "friendRequestSentIds":[],
+                            "followingIds":[],
+                            "uploadedImages":[],
+                            "hasStripeAccount":false
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
                     headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
                 )
 

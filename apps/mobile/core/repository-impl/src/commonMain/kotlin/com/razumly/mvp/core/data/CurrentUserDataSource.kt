@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.data
 
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -13,7 +14,13 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlin.time.Clock
+import kotlin.time.Duration.Companion.hours
 import kotlin.time.Instant
+
+private const val REGISTRATION_PROGRESS_VERSION = 1
+private const val REGISTRATION_PROGRESS_LEGACY_PREFIX = "registration_progress_"
+private const val REGISTRATION_PROGRESS_ACCOUNT_PREFIX = "account_registration_progress_"
+private val REGISTRATION_PROGRESS_MAX_AGE = 24.hours
 
 @Serializable
 data class RegistrationProgressDraft(
@@ -31,7 +38,10 @@ data class RegistrationProgressDraft(
     val updatedAt: String,
 )
 
-class CurrentUserDataSource(private val dataStore: DataStore<Preferences>) {
+class CurrentUserDataSource(
+    private val dataStore: DataStore<Preferences>,
+    private val now: () -> Instant = { Clock.System.now() },
+) {
     private val idKey = stringPreferencesKey("id")
     private val pushToken = stringPreferencesKey("token")
     private val pushTarget = stringPreferencesKey("target")
@@ -195,26 +205,109 @@ class CurrentUserDataSource(private val dataStore: DataStore<Preferences>) {
     ) {
         val normalizedKey = key.trim().takeIf(String::isNotBlank) ?: return
         dataStore.edit { preferences ->
-            preferences[registrationProgressKey(normalizedKey)] = jsonMVP.encodeToString(draft)
+            val accountId = preferences[idKey]
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+                ?: return@edit
+            if (draft.userId.trim().isBlank()) return@edit
+
+            val evaluatedAt = now()
+            preferences.purgeInvalidRegistrationProgress(evaluatedAt)
+            val scopedKey = registrationProgressKey(accountId, normalizedKey)
+            if (!draft.isWithinRegistrationProgressLifetime(evaluatedAt)) {
+                preferences.remove(scopedKey)
+                return@edit
+            }
+
+            preferences[scopedKey] = jsonMVP.encodeToString(draft)
+            val legacyKey = legacyRegistrationProgressKey(normalizedKey)
+            preferences[legacyKey]
+                ?.decodeRegistrationProgressDraft()
+                ?.takeIf { legacyDraft -> legacyDraft.userId.trim() == accountId }
+                ?.let { preferences.remove(legacyKey) }
         }
     }
 
     suspend fun loadRegistrationProgress(key: String): RegistrationProgressDraft? {
         val normalizedKey = key.trim().takeIf(String::isNotBlank) ?: return null
-        val preferenceKey = registrationProgressKey(normalizedKey)
-        val raw = dataStore.data.first()[preferenceKey]?.trim()?.takeIf(String::isNotBlank) ?: return null
-        val draft = runCatching { jsonMVP.decodeFromString<RegistrationProgressDraft>(raw) }.getOrNull()
-        if (draft == null || draft.version != 1 || draft.isHoldExpired()) {
-            clearRegistrationProgress(normalizedKey)
-            return null
+        var restoredDraft: RegistrationProgressDraft? = null
+        dataStore.edit { preferences ->
+            val accountId = preferences[idKey]
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+                ?: return@edit
+            val evaluatedAt = now()
+            preferences.purgeInvalidRegistrationProgress(evaluatedAt)
+
+            val scopedKey = registrationProgressKey(accountId, normalizedKey)
+            val legacyKey = legacyRegistrationProgressKey(normalizedKey)
+            val scopedRaw = preferences[scopedKey]
+            val isLegacy = scopedRaw == null
+            val raw = scopedRaw ?: preferences[legacyKey] ?: return@edit
+            val draft = raw.decodeRegistrationProgressDraft()
+            if (
+                draft == null ||
+                (isLegacy && draft.userId.trim() != accountId) ||
+                !draft.isWithinRegistrationProgressLifetime(evaluatedAt)
+            ) {
+                if (isLegacy) {
+                    if (draft == null || draft.userId.trim() == accountId) {
+                        preferences.remove(legacyKey)
+                    }
+                } else {
+                    preferences.remove(scopedKey)
+                }
+                return@edit
+            }
+
+            if (isLegacy) {
+                preferences[scopedKey] = raw
+                preferences.remove(legacyKey)
+            }
+            restoredDraft = draft
         }
-        return draft
+        return restoredDraft
     }
 
     suspend fun clearRegistrationProgress(key: String) {
         val normalizedKey = key.trim().takeIf(String::isNotBlank) ?: return
         dataStore.edit { preferences ->
-            preferences.remove(registrationProgressKey(normalizedKey))
+            val accountId = preferences[idKey]
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+                ?: return@edit
+            preferences.remove(registrationProgressKey(accountId, normalizedKey))
+
+            val legacyKey = legacyRegistrationProgressKey(normalizedKey)
+            val legacyDraft = preferences[legacyKey]?.decodeRegistrationProgressDraft()
+            if (legacyDraft == null || legacyDraft.userId.trim() == accountId) {
+                preferences.remove(legacyKey)
+            }
+        }
+    }
+
+    suspend fun clearRegistrationProgressForAccount(accountId: String) {
+        val normalizedAccountId = accountId.trim().takeIf(String::isNotBlank) ?: return
+        val accountPrefix = registrationProgressAccountPrefix(normalizedAccountId)
+        dataStore.edit { preferences ->
+            val evaluatedAt = now()
+            preferences.asMap().toList().forEach { (key, value) ->
+                val keyName = key.name
+                val draft = (value as? String)?.decodeRegistrationProgressDraft()
+                val shouldRemove = when {
+                    keyName.startsWith(accountPrefix) -> true
+                    keyName.startsWith(REGISTRATION_PROGRESS_LEGACY_PREFIX) ->
+                        draft == null ||
+                            !draft.isWithinRegistrationProgressLifetime(evaluatedAt) ||
+                            draft.userId.trim() == normalizedAccountId
+                    keyName.startsWith(REGISTRATION_PROGRESS_ACCOUNT_PREFIX) ->
+                        draft == null || !draft.isWithinRegistrationProgressLifetime(evaluatedAt)
+                    else -> false
+                }
+                if (shouldRemove) {
+                    preferences.removeUntyped(key)
+                }
+            }
         }
     }
 
@@ -236,12 +329,59 @@ class CurrentUserDataSource(private val dataStore: DataStore<Preferences>) {
             .sorted()
             .joinToString(",")
 
-    private fun registrationProgressKey(key: String) =
-        stringPreferencesKey("registration_progress_$key")
+    private fun registrationProgressAccountPrefix(accountId: String): String =
+        "$REGISTRATION_PROGRESS_ACCOUNT_PREFIX${accountId.length}:$accountId:"
 
-    private fun RegistrationProgressDraft.isHoldExpired(): Boolean {
-        val rawHoldExpiresAt = holdExpiresAt?.trim()?.takeIf(String::isNotBlank) ?: return false
-        val expiresAt = runCatching { Instant.parse(rawHoldExpiresAt) }.getOrNull() ?: return false
-        return expiresAt <= Clock.System.now()
+    private fun registrationProgressKey(accountId: String, key: String) =
+        stringPreferencesKey("${registrationProgressAccountPrefix(accountId)}$key")
+
+    private fun legacyRegistrationProgressKey(key: String) =
+        stringPreferencesKey("$REGISTRATION_PROGRESS_LEGACY_PREFIX$key")
+
+    private fun String.decodeRegistrationProgressDraft(): RegistrationProgressDraft? =
+        trim()
+            .takeIf(String::isNotBlank)
+            ?.let { raw ->
+                runCatching { jsonMVP.decodeFromString<RegistrationProgressDraft>(raw) }.getOrNull()
+            }
+
+    private fun MutablePreferences.purgeInvalidRegistrationProgress(evaluatedAt: Instant) {
+        asMap().toList().forEach { (key, value) ->
+            val keyName = key.name
+            if (
+                !keyName.startsWith(REGISTRATION_PROGRESS_ACCOUNT_PREFIX) &&
+                !keyName.startsWith(REGISTRATION_PROGRESS_LEGACY_PREFIX)
+            ) {
+                return@forEach
+            }
+
+            val draft = (value as? String)?.decodeRegistrationProgressDraft()
+            if (draft == null || !draft.isWithinRegistrationProgressLifetime(evaluatedAt)) {
+                removeUntyped(key)
+            }
+        }
+    }
+
+    private fun RegistrationProgressDraft.isWithinRegistrationProgressLifetime(evaluatedAt: Instant): Boolean {
+        if (version != REGISTRATION_PROGRESS_VERSION) return false
+        val lastUpdatedAt = updatedAt
+            .trim()
+            .takeIf(String::isNotBlank)
+            ?.let { raw -> runCatching { Instant.parse(raw) }.getOrNull() }
+            ?: return false
+        if (lastUpdatedAt > evaluatedAt) return false
+
+        val retentionExpiresAt = lastUpdatedAt.plus(REGISTRATION_PROGRESS_MAX_AGE)
+        val rawHoldExpiresAt = holdExpiresAt?.trim()?.takeIf(String::isNotBlank)
+        val holdExpiry = rawHoldExpiresAt?.let { raw ->
+            runCatching { Instant.parse(raw) }.getOrNull() ?: return false
+        }
+        val expiresAt = holdExpiry?.takeIf { it < retentionExpiresAt } ?: retentionExpiresAt
+        return expiresAt > evaluatedAt
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun MutablePreferences.removeUntyped(key: Preferences.Key<*>) {
+        remove(key as Preferences.Key<Any>)
     }
 }
