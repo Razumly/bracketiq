@@ -2523,7 +2523,13 @@ private class EventDetailFakeTeamRepository(
         teamsById[teamId]?.let { team -> Result.success(team) }
             ?: Result.failure(IllegalStateException("Team $teamId not found"))
     override suspend fun deleteTeam(team: TeamWithPlayers): Result<Unit> = Result.success(Unit)
-    override fun getTeamsWithPlayersFlow(id: String): Flow<Result<List<TeamWithPlayers>>> = flowOf(Result.success(emptyList()))
+    override fun getTeamsWithPlayersFlow(id: String): Flow<Result<List<TeamWithPlayers>>> = flowOf(
+        Result.success(
+            buildTeamRelations().filter { team ->
+                team.team.managerId == id || team.players.any { player -> player.id == id }
+            },
+        ),
+    )
     override fun getTeamsWithPlayersLoadingFlow(id: String): Flow<Boolean> = flowOf(false)
     override fun getTeamWithPlayersFlow(id: String): Flow<Result<TeamWithRelations>> =
         flowOf(Result.failure(IllegalStateException("unused")))

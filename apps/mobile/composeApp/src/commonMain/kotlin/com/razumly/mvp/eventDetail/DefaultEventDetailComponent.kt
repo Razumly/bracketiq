@@ -18,7 +18,6 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
-import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.Invite
@@ -36,9 +35,7 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
-import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
 import com.razumly.mvp.core.data.dataTypes.isPaymentPending
-import com.razumly.mvp.core.data.dataTypes.normalizedRole
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
@@ -73,7 +70,6 @@ import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.EventParticipantsSummary
 import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
-import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.data.repositories.userMessage
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.network.MvpApiClient
@@ -139,14 +135,6 @@ private fun FamilyChild.toJoinChildOption(): JoinChildOption {
         email = normalizedEmail,
         hasEmail = hasEmail ?: (normalizedEmail != null),
     )
-}
-
-private fun EventWithRelations.withInitialEventImageFallback(initialEvent: Event): EventWithRelations {
-    val initialImageId = initialEvent.imageId.trim()
-    if (initialImageId.isBlank() || event.id != initialEvent.id || event.imageId.isNotBlank()) {
-        return this
-    }
-    return copy(event = event.copy(imageId = initialImageId))
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -269,42 +257,13 @@ class DefaultEventDetailComponent(
 
     override fun confirmEventTeamCheckIn() {
         val currentEvent = selectedEvent.value
-        val eventTeamId = _currentUserManagedEventTeamId.value ?: resolveCurrentUserManagedEventTeamId()
         eventTeamCheckInCoordinator.confirm(
             event = currentEvent,
-            eventTeamId = eventTeamId,
+            eventTeamId = currentUserManagedEventTeamId.value,
             onFailure = { error ->
                 _errorState.value = ErrorMessage("Failed to check in team: ${error.userMessage()}")
             },
         )
-    }
-
-    private fun updateCurrentUserManagedEventTeam() {
-        _currentUserManagedEventTeamId.value = resolveCurrentUserManagedEventTeamId()
-    }
-
-    private fun resolveCurrentUserManagedEventTeamId(): String? {
-        val currentUserId = currentUser.value.id.trim()
-        if (currentUserId.isBlank()) return null
-        val eventTeamIds = selectedEvent.value.teamIds
-            .map(String::trim)
-            .filter(String::isNotBlank)
-            .toSet()
-        val relationTeams = eventWithRelations.value.teams
-        val candidateTeams = if (eventTeamIds.isEmpty()) {
-            relationTeams
-        } else {
-            relationTeams.filter { team -> team.team.id in eventTeamIds }
-        }
-        return candidateTeams.firstOrNull { team ->
-            team.team.managerId?.trim() == currentUserId ||
-                team.team.headCoachId?.trim() == currentUserId ||
-                team.team.coachIds.any { coachId -> coachId.trim() == currentUserId } ||
-                team.team.activeStaffAssignments().any { assignment ->
-                    assignment.userId.trim() == currentUserId &&
-                        assignment.normalizedRole() in setOf("MANAGER", "HEAD_COACH", "ASSISTANT_COACH")
-                }
-        }?.team?.id
     }
 
     private fun refreshEventTeamCheckInsIfAllowed() {
@@ -319,10 +278,9 @@ class DefaultEventDetailComponent(
 
     private fun evaluateEventTeamCheckInPrompt() {
         val event = selectedEvent.value
-        val eventTeamId = _currentUserManagedEventTeamId.value ?: resolveCurrentUserManagedEventTeamId()
         eventTeamCheckInCoordinator.evaluatePrompt(
             event = event,
-            eventTeamId = eventTeamId,
+            eventTeamId = currentUserManagedEventTeamId.value,
         )
     }
 
@@ -406,26 +364,33 @@ class DefaultEventDetailComponent(
     private val sportsCatalogCoordinator = EventSportsCatalogCoordinator()
     private val _eventTags = MutableStateFlow<List<EventTag>>(emptyList())
 
-    private val eventRelations: StateFlow<EventWithRelations> =
-        eventRepository.getEventWithRelationsFlow(event.id).map { result ->
-            result.getOrElse {
-                if (it !is NoSuchElementException) {
-                    _errorState.value = ErrorMessage(it.userMessage())
-                }
-                EventWithRelations(event, null)
-            }.withInitialEventImageFallback(event)
-        }.stateIn(
-            scope,
-            SharingStarted.Eagerly,
-            EventWithRelations(event, null)
-        )
+    private val relationStateCoordinator = EventRelationStateCoordinator(
+        initialEvent = event,
+        currentUser = currentUser,
+        observeEventRelations = eventRepository::getEventWithRelationsFlow,
+        observeEventMatches = matchRepository::getCachedMatchesOfTournamentFlow,
+        observeEventTeams = teamRepository::getTeamsFlow,
+        observeUsers = userRepository::getUsersFlow,
+        observeCurrentUserTeams = teamRepository::getTeamsWithPlayersFlow,
+        scope = scope,
+        onEventRelationsError = { error ->
+            _errorState.value = ErrorMessage(error.userMessage())
+        },
+        onEventMatchesError = { error ->
+            _errorState.value = ErrorMessage("Error loading matches: ${error.userMessage()}")
+        },
+        onEventTeamsError = { error ->
+            _errorState.value = ErrorMessage("Failed to load teams: ${error.userMessage()}")
+        },
+    )
+
+    private val eventRelations = relationStateCoordinator.eventRelations
 
     override val sports = sportsCatalogCoordinator.sports
     override val eventTags = _eventTags.asStateFlow()
     override val divisionTypeParameters = sportsCatalogCoordinator.divisionTypeParameters
 
-    override val selectedEvent: StateFlow<Event> =
-        eventRelations.map { it.event }.stateIn(scope, SharingStarted.Eagerly, event)
+    override val selectedEvent = relationStateCoordinator.selectedEvent
 
     private val bootstrapResourcesCoordinator = EventBootstrapResourcesCoordinator(
         selectedEvent = selectedEvent,
@@ -440,84 +405,11 @@ class DefaultEventDetailComponent(
     override val isHost = selectedEvent.map { it.hostId == currentUser.value.id }
         .stateIn(scope, SharingStarted.Eagerly, false)
 
-    private val selectedEventId: StateFlow<String> = selectedEvent
-        .map { selected -> selected.id.trim() }
-        .distinctUntilChanged()
-        .stateIn(scope, SharingStarted.Eagerly, event.id.trim())
-
-    private val eventRelationPlayers: StateFlow<List<UserData>> = eventRelations
-        .map { relations -> relations.players }
-        .distinctUntilChanged()
-        .stateIn(scope, SharingStarted.Eagerly, emptyList())
-
-    private val eventRelationHost: StateFlow<UserData?> = eventRelations
-        .map { relations -> relations.host }
-        .distinctUntilChanged()
-        .stateIn(scope, SharingStarted.Eagerly, eventRelations.value.host)
-
-    private val eventRelationTeamIds: StateFlow<List<String>> = combine(
-        selectedEvent,
-        eventRelations,
-    ) { selected, relations ->
-        val registeredTeamIds = selected.teamIds.normalizedTeamIds()
-        if (selected.teamSignup) {
-            registeredTeamIds
-        } else {
-            (registeredTeamIds + relations.teams.map { team -> team.id }).normalizedTeamIds()
-        }
-    }
-        .distinctUntilChanged()
-        .stateIn(scope, SharingStarted.Eagerly, event.teamIds.normalizedTeamIds())
-
-    private val eventMatches: StateFlow<List<MatchWithRelations>> = selectedEventId
-        .flatMapLatest { eventId ->
-            if (eventId.isBlank()) {
-                flowOf(emptyList())
-            } else {
-                matchRepository.getCachedMatchesOfTournamentFlow(eventId).map { result ->
-                    result.getOrElse {
-                        _errorState.value = ErrorMessage("Error loading matches: ${it.userMessage()}")
-                        emptyList()
-                    }
-                }
-            }
-        }
-        .stateIn(scope, SharingStarted.Eagerly, emptyList())
-
-    private val eventTeams: StateFlow<List<TeamWithPlayers>> = eventRelationTeamIds
-        .flatMapLatest { relationTeamIds ->
-            if (relationTeamIds.isEmpty()) {
-                flowOf(emptyList())
-            } else {
-                teamRepository.getTeamsFlow(relationTeamIds).map { result ->
-                    result.getOrElse {
-                        _errorState.value = ErrorMessage("Failed to load teams: ${it.userMessage()}")
-                        emptyList()
-                    }
-                }
-            }
-        }
-        .stateIn(scope, SharingStarted.Eagerly, emptyList())
-
-    private val eventHost: StateFlow<UserData?> = combine(
-        selectedEvent
-            .map { selected -> selected.id to selected.hostId.trim() }
-            .distinctUntilChanged(),
-        eventRelationHost,
-    ) { (eventId, hostId), host ->
-        Triple(eventId, hostId, host)
-    }.flatMapLatest { (eventId, hostId, host) ->
-        if (host != null || hostId.isBlank()) {
-            flowOf(host)
-        } else {
-            userRepository.getUsersFlow(
-                userIds = listOf(hostId),
-                visibilityContext = UserVisibilityContext(eventId = eventId),
-            ).map { result ->
-                result.getOrElse { emptyList() }.firstOrNull()
-            }
-        }
-    }.stateIn(scope, SharingStarted.Eagerly, eventRelations.value.host)
+    private val selectedEventId = relationStateCoordinator.selectedEventId
+    private val eventRelationPlayers = relationStateCoordinator.eventPlayers
+    private val eventMatches = relationStateCoordinator.eventMatches
+    private val eventTeams = relationStateCoordinator.eventTeams
+    private val eventHost = relationStateCoordinator.eventHost
 
     private val eventOrganization: StateFlow<Organization?> = selectedEvent
         .map { selected -> selected.organizationId?.trim().orEmpty() }
@@ -673,13 +565,7 @@ class DefaultEventDetailComponent(
     private var eventDetailHydrationJob: Job? = null
     private var weeklyOccurrenceSummaryPrefetchJob: Job? = null
 
-    private val _userTeams = currentUser.flatMapLatest {
-        teamRepository.getTeamsWithPlayersFlow(it.id).map { result ->
-            result.getOrElse {
-                emptyList()
-            }
-        }
-    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    private val userTeams = relationStateCoordinator.currentUserTeams
 
     override val eventTeamCheckIns = eventTeamCheckInCoordinator.eventTeamCheckIns
 
@@ -687,8 +573,7 @@ class DefaultEventDetailComponent(
 
     override val eventTeamCheckInSaving = eventTeamCheckInCoordinator.eventTeamCheckInSaving
 
-    private val _currentUserManagedEventTeamId = MutableStateFlow<String?>(null)
-    override val currentUserManagedEventTeamId = _currentUserManagedEventTeamId.asStateFlow()
+    override val currentUserManagedEventTeamId = relationStateCoordinator.currentUserManagedEventTeamId
 
     private val cachedCurrentUserRegistrations = selectedEvent
         .map { selected -> selected.id.trim() }
@@ -708,15 +593,12 @@ class DefaultEventDetailComponent(
     private val membershipCoordinator = EventMembershipCoordinator(
         initialEvent = event,
         initialCurrentUserId = currentUser.value.id,
-        initialCurrentUserTeamIds = currentUser.value.teamIds
-            .map(String::trim)
-            .filter(String::isNotBlank)
-            .toSet(),
+        initialCurrentUserTeamIds = relationStateCoordinator.currentUserTeamIds.value,
         initialWeeklyParentWithoutSelection = isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() == null,
     )
 
     override val validTeams = combine(
-        _userTeams,
+        userTeams,
         eventWithRelations,
         currentUser,
     ) { teams, relations, user ->
@@ -1048,12 +930,21 @@ class DefaultEventDetailComponent(
                 }
         }
         scope.launch {
-            combine(selectedEvent, eventWithRelations, currentUser) { eventValue, relations, user ->
-                Triple(eventValue.id, relations.teams.map { team -> team.team.id }, user.id)
+            combine(
+                selectedEvent,
+                eventWithRelations,
+                currentUser,
+                currentUserManagedEventTeamId,
+            ) { eventValue, relations, user, managedTeamId ->
+                listOf(
+                    eventValue.id,
+                    relations.organization?.id.orEmpty(),
+                    user.id,
+                    managedTeamId.orEmpty(),
+                )
             }
                 .distinctUntilChanged()
                 .collect {
-                    updateCurrentUserManagedEventTeam()
                     refreshEventTeamCheckInsIfAllowed()
                     evaluateEventTeamCheckInPrompt()
                 }
@@ -1169,7 +1060,12 @@ class DefaultEventDetailComponent(
                 }
         }
         scope.launch {
-            cachedCurrentUserRegistrations.collect {
+            combine(
+                cachedCurrentUserRegistrations,
+                relationStateCoordinator.currentUserTeamIds,
+            ) { registrations, currentUserTeamIds ->
+                registrations to currentUserTeamIds
+            }.collect {
                 refreshCurrentUserMembershipState(selectedEvent.value)
             }
         }
@@ -3083,7 +2979,7 @@ class DefaultEventDetailComponent(
         val missingWeeklySelection = membershipCoordinator.refreshCurrentUserMembershipState(
             event = event,
             currentUserId = current.id,
-            profileTeamIds = current.teamIds,
+            profileTeamIds = canonicalCurrentUserTeamIds(),
             registrations = cachedCurrentUserRegistrations.value,
             selectedOccurrence = selectedOccurrence,
             isWeeklyParentEvent = eventIsWeeklyParent,
@@ -3104,7 +3000,7 @@ class DefaultEventDetailComponent(
             registrations = cachedCurrentUserRegistrations.value,
             selectedOccurrence = currentWeeklyOccurrenceSelection(),
             currentUserId = currentUser.value.id,
-            profileTeamIds = currentUser.value.teamIds,
+            profileTeamIds = canonicalCurrentUserTeamIds(),
             isWeeklyParentEvent = isWeeklyParentEvent(event),
         )
     }
@@ -3132,7 +3028,7 @@ class DefaultEventDetailComponent(
             event = event,
             userId = userId,
             currentUserId = currentUser.value.id,
-            profileTeamIds = currentUser.value.teamIds,
+            profileTeamIds = canonicalCurrentUserTeamIds(),
             cachedCurrentUserMembership = if (userId == currentUser.value.id) {
                 resolveCachedCurrentUserRegistrationMembership(event)
             } else {
@@ -3143,8 +3039,11 @@ class DefaultEventDetailComponent(
     }
 
     private fun currentUserTeamIds(): Set<String> {
-        return membershipCoordinator.currentUserTeamIds(currentUser.value.teamIds)
+        return membershipCoordinator.currentUserTeamIds(canonicalCurrentUserTeamIds())
     }
+
+    private fun canonicalCurrentUserTeamIds(): List<String> =
+        relationStateCoordinator.currentUserTeamIds.value.toList()
 
     override fun dismissPaymentPlanPreviewDialog() {
         registrationActionHandler.dismissPaymentPlanPreviewDialog()
