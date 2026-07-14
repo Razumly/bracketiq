@@ -559,6 +559,18 @@ class WearMatchRepository(
         )
     }
 
+    suspend fun deleteIncident(
+        match: WearMatch,
+        incident: WearMatchIncidentDto,
+    ): WearMatchDto {
+        val incidentId = incident.resolvedId().normalizedId()
+            ?: throw WearApiException("Incident is no longer available.")
+        if (match.raw.incidents.none { it.resolvedId() == incidentId }) {
+            throw WearApiException("Incident is no longer available.")
+        }
+        return patchMatch(match, incidentDeletePatch(incidentId))
+    }
+
     fun defaultIncidentClockSeconds(match: WearMatch): Int {
         val segment = match.raw.activeSegment() ?: return 0
         val startedAt = runCatching { Instant.parse(segment.startedAt) }.getOrNull() ?: return 0
@@ -1081,6 +1093,24 @@ data class WearSession(
     val userId: String,
     val label: String,
 )
+
+internal fun incidentDeletePatch(incidentId: String): JsonObject {
+    val normalizedIncidentId = incidentId.normalizedId()
+        ?: throw WearApiException("Incident is no longer available.")
+    return buildJsonObject {
+        put(
+            "incidentOperations",
+            JsonArray(
+                listOf(
+                    buildJsonObject {
+                        put("action", JsonPrimitive("DELETE"))
+                        put("id", JsonPrimitive(normalizedIncidentId))
+                    },
+                ),
+            ),
+        )
+    }
+}
 
 internal fun reconcileAuthoritativeWearSchedule(
     remoteSchedule: WearScheduleResponseDto,

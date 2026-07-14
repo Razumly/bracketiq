@@ -50,6 +50,8 @@ class MainActivity : ComponentActivity() {
                     onMinuteAdjusted = viewModel::adjustMinute,
                     onTimeDone = viewModel::returnToIncidentEditor,
                     onFinishIncident = viewModel::finishIncident,
+                    onRequestDeleteIncident = viewModel::requestDeleteIncident,
+                    onDeleteIncident = viewModel::deleteIncident,
                     onCancelIncident = viewModel::cancelIncident,
                 ),
             )
@@ -103,5 +105,7 @@ data class MvpWearActions(
     val onMinuteAdjusted: (Int) -> Unit,
     val onTimeDone: () -> Unit,
     val onFinishIncident: () -> Unit,
+    val onRequestDeleteIncident: () -> Unit,
+    val onDeleteIncident: () -> Unit,
     val onCancelIncident: () -> Unit,
 )

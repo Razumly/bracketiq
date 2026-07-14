@@ -169,6 +169,11 @@ class MvpWearViewModel(application: Application) : AndroidViewModel(application)
                         },
                     )
                 }
+                WearRoute.INCIDENT_DELETE_CONFIRM -> current.copy(
+                    route = WearRoute.INCIDENT_EDITOR,
+                    error = null,
+                    message = null,
+                )
                 WearRoute.INCIDENT_TYPES -> current.copy(
                     route = if (current.incidentMode == WearIncidentMode.CREATE) {
                         WearRoute.TEAM_PICK
@@ -437,6 +442,42 @@ class MvpWearViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun requestDeleteIncident() {
+        val current = state.value
+        if (current.incidentMode != WearIncidentMode.EDIT || current.selectedIncident == null) return
+        _state.update {
+            it.copy(
+                route = WearRoute.INCIDENT_DELETE_CONFIRM,
+                error = null,
+                message = null,
+            )
+        }
+    }
+
+    fun deleteIncident() {
+        val current = state.value
+        if (current.route != WearRoute.INCIDENT_DELETE_CONFIRM) return
+        val match = current.selectedMatch ?: return
+        val incident = current.selectedIncident ?: run {
+            _state.update { it.copy(error = "Incident is no longer available.") }
+            return
+        }
+        launchBusy {
+            val updatedRaw = withContext(Dispatchers.IO) {
+                repository.deleteIncident(match = match, incident = incident)
+            }
+            val updatedMatch = match.withUpdatedRaw(updatedRaw, current.currentUserId)
+            _state.update {
+                it.withUpdatedMatch(updatedMatch).clearIncidentDraft().copy(
+                    route = WearRoute.INCIDENT_LIST,
+                    message = "Incident deleted.",
+                    error = null,
+                )
+            }
+            runCatching { reloadMatches(preserveSelection = true) }
+        }
+    }
+
     fun cancelIncident() {
         _state.update { current ->
             current.clearIncidentDraft().copy(
@@ -635,6 +676,7 @@ enum class WearRoute {
     ACTION_MENU,
     INCIDENT_LIST,
     INCIDENT_EDITOR,
+    INCIDENT_DELETE_CONFIRM,
     INCIDENT_TYPES,
     INCIDENT_TEAMS,
     PLAYERS,

@@ -114,6 +114,7 @@ fun MvpWearApp(
                 WearRoute.ACTION_MENU -> ActionMenuScreen(state, actions)
                 WearRoute.INCIDENT_LIST -> IncidentListScreen(state, actions)
                 WearRoute.INCIDENT_EDITOR -> IncidentEditorScreen(state, actions)
+                WearRoute.INCIDENT_DELETE_CONFIRM -> IncidentDeleteConfirmationScreen(state, actions)
                 WearRoute.INCIDENT_TYPES -> IncidentTypeScreen(state, actions)
                 WearRoute.INCIDENT_TEAMS -> IncidentTeamScreen(state, actions)
                 WearRoute.PLAYERS -> PlayerScreen(state, actions)
@@ -179,7 +180,6 @@ private fun MatchListScreen(
         MiniHeader(title = "Upcoming", subtitle = state.currentUserLabel ?: "Officials")
         if (state.matches.isEmpty()) {
             EmptyText("No matches")
-            SecondaryChip(label = "Refresh", onClick = actions.onRefresh)
         } else {
             state.matches.forEach { match ->
                 MatchRow(match = match, onClick = { actions.onMatchSelected(match.id) })
@@ -569,6 +569,14 @@ private fun IncidentEditorScreen(
                 value = state.incidentClockDisplay().plainLabel,
                 onClick = { actions.onEditIncidentField(WearIncidentField.TIME) },
             )
+            if (state.incidentMode == WearIncidentMode.EDIT) {
+                PrimaryChip(
+                    label = "Delete incident",
+                    color = Danger,
+                    enabled = !state.isLoading,
+                    onClick = actions.onRequestDeleteIncident,
+                )
+            }
             StatusText(message = state.error, danger = true)
             StatusText(message = state.message, danger = false)
         }
@@ -593,6 +601,60 @@ private fun IncidentEditorScreen(
                 onClick = actions.onFinishIncident,
             )
         }
+    }
+}
+
+@Composable
+private fun IncidentDeleteConfirmationScreen(
+    state: MvpWearUiState,
+    actions: MvpWearActions,
+) {
+    val match = state.selectedMatch
+    val incident = state.selectedIncident
+    if (match == null || incident == null) {
+        EmptySelection(actions.onBack)
+        return
+    }
+    FixedFooterScreen(
+        title = "Delete incident",
+        onBack = actions.onBack,
+        footer = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(0.dp),
+            ) {
+                BottomActionButton(
+                    label = "Keep",
+                    modifier = Modifier.weight(1f),
+                    enabled = !state.isLoading,
+                    contentAlignment = Alignment.CenterEnd,
+                    onClick = actions.onBack,
+                )
+                BottomActionButton(
+                    label = "Delete",
+                    modifier = Modifier.weight(1f),
+                    color = Danger,
+                    enabled = !state.isLoading,
+                    contentAlignment = Alignment.CenterStart,
+                    onClick = actions.onDeleteIncident,
+                )
+            }
+        },
+    ) {
+        BasicText(
+            text = "Remove this ${incident.typeLabel(match)}?",
+            style = TextStyle(
+                color = OnSurface,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            ),
+        )
+        BasicText(
+            text = "This cannot be undone after it syncs.",
+            style = TextStyle(color = Muted, fontSize = 10.sp, textAlign = TextAlign.Center),
+        )
+        StatusText(message = state.error, danger = true)
     }
 }
 
@@ -1521,11 +1583,11 @@ private fun formatStartTime(raw: String): String? =
             .format(Instant.parse(raw))
     }.getOrNull()
 
-private fun formatDuration(seconds: Long): String {
+internal fun formatMatchClockDuration(seconds: Long): String {
     val safeSeconds = seconds.coerceAtLeast(0)
     val minutes = safeSeconds / 60
     val remainder = safeSeconds % 60
-    return "${minutes.toString().padStart(3, '0')}:${remainder.toString().padStart(2, '0')}"
+    return "$minutes:${remainder.toString().padStart(2, '0')}"
 }
 
 private data class MatchClockDisplay(
@@ -1554,15 +1616,15 @@ private fun WearMatch.clockDisplay(elapsedSeconds: Long): MatchClockDisplay {
     val activeSegment = raw.activeSegment()
     val safeSeconds = elapsedSeconds.coerceAtLeast(0).toInt()
     if (!rules.timekeeping.addedTimeEnabled || activeSegment == null) {
-        return MatchClockDisplay(formatDuration(safeSeconds.toLong()), isAddedTime = false)
+        return MatchClockDisplay(formatMatchClockDuration(safeSeconds.toLong()), isAddedTime = false)
     }
     val durationSeconds = durationSecondsForSequence(activeSegment.sequence)
-        ?: return MatchClockDisplay(formatDuration(safeSeconds.toLong()), isAddedTime = false)
+        ?: return MatchClockDisplay(formatMatchClockDuration(safeSeconds.toLong()), isAddedTime = false)
     val offsetSeconds = regulationOffsetSeconds(activeSegment)
     return if (safeSeconds >= durationSeconds) {
-        MatchClockDisplay("+${formatDuration((safeSeconds - durationSeconds).toLong())}", isAddedTime = true)
+        MatchClockDisplay("+${formatMatchClockDuration((safeSeconds - durationSeconds).toLong())}", isAddedTime = true)
     } else {
-        MatchClockDisplay(formatDuration((offsetSeconds + safeSeconds).toLong()), isAddedTime = false)
+        MatchClockDisplay(formatMatchClockDuration((offsetSeconds + safeSeconds).toLong()), isAddedTime = false)
     }
 }
 
