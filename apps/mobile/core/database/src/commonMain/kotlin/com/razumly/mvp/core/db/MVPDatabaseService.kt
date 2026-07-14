@@ -6,6 +6,12 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
+import com.razumly.mvp.core.data.dataTypes.CatalogCacheViewerEntry
+import com.razumly.mvp.core.data.dataTypes.CatalogQueryCacheEntry
+import com.razumly.mvp.core.data.dataTypes.OrganizationCacheEntry
+import com.razumly.mvp.core.data.dataTypes.OrganizationReviewsCacheEntry
+import com.razumly.mvp.core.data.dataTypes.ProductCacheEntry
+import com.razumly.mvp.core.data.dataTypes.TimeSlotCacheEntry
 import com.razumly.mvp.core.data.dataTypes.DiscountCodeCacheEntry
 import com.razumly.mvp.core.data.dataTypes.DiscountOfferCacheEntry
 import com.razumly.mvp.core.data.dataTypes.DiscountTargetCacheEntry
@@ -29,6 +35,7 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPendingPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
+import com.razumly.mvp.core.data.dataTypes.daos.CatalogCacheDao
 import com.razumly.mvp.core.data.dataTypes.daos.DiscountDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventComplianceDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
@@ -46,7 +53,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.data.util.Converters
 
-const val MVP_DATABASE_VERSION = 91
+const val MVP_DATABASE_VERSION = 92
 
 @Database(
     entities = [
@@ -73,6 +80,12 @@ const val MVP_DATABASE_VERSION = 91
         DiscountCodeCacheEntry::class,
         DiscountTargetCacheEntry::class,
         Invite::class,
+        OrganizationCacheEntry::class,
+        ProductCacheEntry::class,
+        OrganizationReviewsCacheEntry::class,
+        TimeSlotCacheEntry::class,
+        CatalogCacheViewerEntry::class,
+        CatalogQueryCacheEntry::class,
     ],
     version = MVP_DATABASE_VERSION,
 )
@@ -90,6 +103,7 @@ abstract class MVPDatabaseService : RoomDatabase(), DatabaseService {
     abstract override val getEventParticipantManagementDao: EventParticipantManagementDao
     abstract override val getEventComplianceDao: EventComplianceDao
     abstract override val getChatGroupDao: ChatGroupDao
+    abstract override val getCatalogCacheDao: CatalogCacheDao
     abstract override val getMessageDao: MessageDao
     abstract override val getRefundRequestDao: RefundRequestDao
     abstract override val getPendingRentalOrderDao: PendingRentalOrderDao

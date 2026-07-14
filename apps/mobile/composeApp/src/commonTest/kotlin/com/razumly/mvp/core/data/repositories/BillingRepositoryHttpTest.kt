@@ -18,6 +18,7 @@ import com.razumly.mvp.core.data.dataTypes.activeHostIds
 import com.razumly.mvp.core.data.dataTypes.activeOfficialIds
 import com.razumly.mvp.core.data.dataTypes.canManageEventsForViewer
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
+import com.razumly.mvp.core.data.dataTypes.daos.CatalogCacheDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
@@ -180,6 +181,7 @@ private class BillingRepositoryHttp_FakePendingRentalOrderDao : PendingRentalOrd
 private class BillingRepositoryHttp_FakeDatabaseService(
     private val refundRequestDao: RefundRequestDao = BillingRepositoryHttp_FakeRefundRequestDao(),
     private val pendingRentalOrderDao: PendingRentalOrderDao = BillingRepositoryHttp_FakePendingRentalOrderDao(),
+    override val getCatalogCacheDao: CatalogCacheDao = InMemoryCatalogCacheDao(),
 ) : DatabaseService {
     override val getMatchDao: MatchDao get() = error("unused")
     override val getTeamDao: TeamDao get() = error("unused")
@@ -1045,6 +1047,432 @@ class BillingRepositoryHttpTest {
         assertEquals(OrganizationVerificationReviewStatus.OPEN, organizations[1].verificationReviewStatus)
         assertEquals("Waiting on payout details", organizations[1].verificationReviewNotes)
         assertEquals("2026-04-13T21:00:00.000Z", organizations[1].verificationReviewUpdatedAt)
+    }
+
+    @Test
+    fun organization_product_and_review_reads_return_room_snapshots_when_refresh_is_offline() = runTest {
+        val callsByPath = mutableMapOf<String, Int>()
+        val engine = MockEngine { request ->
+            val path = request.url.encodedPath
+            val call = callsByPath.getOrDefault(path, 0) + 1
+            callsByPath[path] = call
+            if (call == 2) {
+                return@MockEngine respond(
+                    content = "{}",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+            if (call > 2) {
+                return@MockEngine respond(
+                    content = """{"error":"offline"}""",
+                    status = HttpStatusCode.ServiceUnavailable,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+            val content = when (path) {
+                "/api/organizations/org_1" ->
+                    """{"id":"org_1","name":"Cached Organization","ownerId":"owner_1"}"""
+                "/api/products" ->
+                    """{"products":[{"id":"product_1","name":"Season Pass","priceCents":2500,"period":"ONCE","organizationId":"org_1"}]}"""
+                "/api/organizations/org_1/reviews" ->
+                    """{"summary":{"averageRating":5.0,"reviewCount":1,"ratingCounts":[0,0,0,0,1]},"reviews":[],"nextCursor":null}"""
+                else -> error("Unexpected request: ${request.url}")
+            }
+            respond(
+                content = content,
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("token")
+        val repo = BillingRepository(
+            MvpApiClient(
+                billingRepositoryHttpProductionClient(engine),
+                "http://example.test",
+                tokenStore,
+            ),
+            BillingRepositoryHttp_FakeUserRepository(
+                currentUser = billingMakeUser("u1"),
+                currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+            ),
+            BillingRepositoryHttp_UnusedEventRepository,
+            BillingRepositoryHttp_FakeDatabaseService(),
+        )
+
+        assertEquals(
+            "Cached Organization",
+            repo.getOrganizationsByIds(listOf("org_1")).getOrThrow().single().name,
+        )
+        assertEquals(
+            "Season Pass",
+            repo.listProductsByOrganization("org_1").getOrThrow().single().name,
+        )
+        assertEquals(1, repo.getOrganizationReviews("org_1").getOrThrow().summary.reviewCount)
+
+        assertTrue(repo.getOrganizationsByIds(listOf("org_1")).isFailure)
+        assertTrue(repo.listProductsByOrganization("org_1").isFailure)
+        assertTrue(repo.getOrganizationReviews("org_1").isFailure)
+
+        assertEquals(
+            "Cached Organization",
+            repo.getOrganizationsByIds(listOf("org_1")).getOrThrow().single().name,
+        )
+        assertEquals(
+            "Season Pass",
+            repo.listProductsByOrganization("org_1").getOrThrow().single().name,
+        )
+        assertEquals(1, repo.getOrganizationReviews("org_1").getOrThrow().summary.reviewCount)
+
+        tokenStore.clear()
+        assertTrue(repo.getOrganizationsByIds(listOf("org_1")).isFailure)
+        assertTrue(repo.listProductsByOrganization("org_1").isFailure)
+        assertTrue(repo.getOrganizationReviews("org_1").isFailure)
+    }
+
+    @Test
+    fun catalog_fallback_rejects_permission_not_found_decode_cancellation_and_dao_failures() = runTest {
+        var mode = "ok"
+        val engine = MockEngine {
+            when (mode) {
+                "ok" -> respond(
+                    content = """{"id":"org_1","name":"Cached Organization","ownerId":"owner_1"}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+                "forbidden" -> respond(
+                    content = """{"error":"forbidden"}""",
+                    status = HttpStatusCode.Forbidden,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+                "missing" -> respond(
+                    content = """{"error":"missing"}""",
+                    status = HttpStatusCode.NotFound,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+                "bad-request" -> respond(
+                    content = """{"error":"bad request"}""",
+                    status = HttpStatusCode.BadRequest,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+                "timeout" -> respond(
+                    content = """{"error":"timeout"}""",
+                    status = HttpStatusCode.RequestTimeout,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+                "rate-limited" -> respond(
+                    content = """{"error":"rate limited"}""",
+                    status = HttpStatusCode.TooManyRequests,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+                "malformed" -> respond(
+                    content = """{"id":"org_1"}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+                "cancelled" -> throw kotlinx.coroutines.CancellationException("cancelled")
+                "wrapped-cancelled" -> throw io.ktor.utils.io.errors.IOException(
+                    "transport wrapper",
+                    kotlinx.coroutines.CancellationException("cancelled"),
+                )
+                "transport" -> throw io.ktor.utils.io.errors.IOException("offline")
+                else -> respond(
+                    content = """{"error":"retry"}""",
+                    status = HttpStatusCode.ServiceUnavailable,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+        }
+        val repo = BillingRepository(
+            MvpApiClient(
+                billingRepositoryHttpProductionClient(engine),
+                "http://example.test",
+                BillingRepositoryHttp_InMemoryAuthTokenStore("token"),
+            ),
+            BillingRepositoryHttp_FakeUserRepository(
+                currentUser = billingMakeUser("u1"),
+                currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+            ),
+            BillingRepositoryHttp_UnusedEventRepository,
+            BillingRepositoryHttp_FakeDatabaseService(),
+        )
+
+        assertEquals("Cached Organization", repo.getOrganizationsByIds(listOf("org_1")).getOrThrow().single().name)
+        mode = "forbidden"
+        assertTrue(repo.getOrganizationsByIds(listOf("org_1")).isFailure)
+        mode = "missing"
+        assertTrue(repo.getOrganizationsByIds(listOf("org_1")).isFailure)
+        mode = "bad-request"
+        assertTrue(repo.getOrganizationsByIds(listOf("org_1")).isFailure)
+        mode = "malformed"
+        assertTrue(repo.getOrganizationsByIds(listOf("org_1")).isFailure)
+        mode = "cancelled"
+        assertTrue(repo.getOrganizationsByIds(listOf("org_1")).isFailure)
+        mode = "wrapped-cancelled"
+        assertTrue(repo.getOrganizationsByIds(listOf("org_1")).isFailure)
+        mode = "timeout"
+        assertEquals("Cached Organization", repo.getOrganizationsByIds(listOf("org_1")).getOrThrow().single().name)
+        mode = "rate-limited"
+        assertEquals("Cached Organization", repo.getOrganizationsByIds(listOf("org_1")).getOrThrow().single().name)
+        mode = "transport"
+        assertEquals("Cached Organization", repo.getOrganizationsByIds(listOf("org_1")).getOrThrow().single().name)
+        mode = "transient"
+        assertEquals("Cached Organization", repo.getOrganizationsByIds(listOf("org_1")).getOrThrow().single().name)
+
+        val delegate = InMemoryCatalogCacheDao()
+        val failingDao = object : CatalogCacheDao by delegate {
+            override suspend fun replaceOrganizationQuery(
+                snapshot: com.razumly.mvp.core.data.dataTypes.CatalogQueryCacheEntry,
+                entries: List<com.razumly.mvp.core.data.dataTypes.OrganizationCacheEntry>,
+                staleOrganizationIds: List<String>,
+            ) {
+                error("simulated Room write failure")
+            }
+        }
+        mode = "ok"
+        val daoFailureRepo = BillingRepository(
+            MvpApiClient(
+                billingRepositoryHttpProductionClient(engine),
+                "http://example.test",
+                BillingRepositoryHttp_InMemoryAuthTokenStore("another-token"),
+            ),
+            BillingRepositoryHttp_FakeUserRepository(
+                currentUser = billingMakeUser("u1"),
+                currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+            ),
+            BillingRepositoryHttp_UnusedEventRepository,
+            BillingRepositoryHttp_FakeDatabaseService(getCatalogCacheDao = failingDao),
+        )
+        assertTrue(daoFailureRepo.getOrganizationsByIds(listOf("org_1")).isFailure)
+    }
+
+    @Test
+    fun catalog_request_usesTheSameTokenSnapshotForViewerScopeAndAuthorization() = runTest {
+        var tokenReadCount = 0
+        val tokenStore = object : AuthTokenStore {
+            override suspend fun get(): String {
+                tokenReadCount += 1
+                return if (tokenReadCount == 1) "token-a" else ""
+            }
+
+            override suspend fun set(token: String) = Unit
+            override suspend fun clear() = Unit
+        }
+        val engine = MockEngine { request ->
+            assertEquals("Bearer token-a", request.headers[HttpHeaders.Authorization])
+            respond(
+                content = """{"id":"org_1","name":"Scoped Organization","ownerId":"owner_1"}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repository = BillingRepository(
+            MvpApiClient(billingRepositoryHttpProductionClient(engine), "http://example.test", tokenStore),
+            BillingRepositoryHttp_FakeUserRepository(
+                currentUser = billingMakeUser("u1"),
+                currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+            ),
+            BillingRepositoryHttp_UnusedEventRepository,
+            BillingRepositoryHttp_FakeDatabaseService(),
+        )
+
+        assertEquals("Scoped Organization", repository.getOrganizationsByIds(listOf("org_1")).getOrThrow().single().name)
+        assertEquals(1, tokenReadCount)
+    }
+
+    @Test
+    fun catalog_response_cannotRepopulateCacheAfterViewerChanges() = runTest {
+        val cacheDao = InMemoryCatalogCacheDao()
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("token-a")
+        val engine = MockEngine { request ->
+            assertEquals("Bearer token-a", request.headers[HttpHeaders.Authorization])
+            cacheDao.activateViewer("anonymous")
+            respond(
+                content = """{"id":"org_1","name":"Stale Organization","ownerId":"owner_1"}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repository = BillingRepository(
+            MvpApiClient(billingRepositoryHttpProductionClient(engine), "http://example.test", tokenStore),
+            BillingRepositoryHttp_FakeUserRepository(
+                currentUser = billingMakeUser("u1"),
+                currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+            ),
+            BillingRepositoryHttp_UnusedEventRepository,
+            BillingRepositoryHttp_FakeDatabaseService(getCatalogCacheDao = cacheDao),
+        )
+
+        assertTrue(repository.getOrganizationsByIds(listOf("org_1")).isFailure)
+        assertEquals("anonymous", cacheDao.getActiveViewer()?.viewerKey)
+        assertEquals(0, cacheDao.queryCount)
+    }
+
+    @Test
+    fun product_collection_snapshot_preserves_backend_order_and_authoritative_empty_refresh() = runTest {
+        var requestCount = 0
+        val engine = MockEngine {
+            requestCount += 1
+            when (requestCount) {
+                1 -> respond(
+                    content = """{"products":[{"id":"product_b","name":"B","priceCents":200,"period":"ONCE","organizationId":"org_1"},{"id":"product_a","name":"A","priceCents":100,"period":"ONCE","organizationId":"org_1"}]}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+                2 -> respond(
+                    content = "{}",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+                3 -> respond(
+                    content = """{"error":"offline"}""",
+                    status = HttpStatusCode.ServiceUnavailable,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+                4 -> respond(
+                    content = """{"products":[]}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+                else -> respond(
+                    content = """{"error":"offline"}""",
+                    status = HttpStatusCode.ServiceUnavailable,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+        }
+        val repo = BillingRepository(
+            MvpApiClient(
+                billingRepositoryHttpProductionClient(engine),
+                "http://example.test",
+                BillingRepositoryHttp_InMemoryAuthTokenStore("token"),
+            ),
+            BillingRepositoryHttp_FakeUserRepository(
+                currentUser = billingMakeUser("u1"),
+                currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+            ),
+            BillingRepositoryHttp_UnusedEventRepository,
+            BillingRepositoryHttp_FakeDatabaseService(),
+        )
+
+        assertEquals(
+            listOf("product_b", "product_a"),
+            repo.listProductsByOrganization("org_1").getOrThrow().map { product -> product.id },
+        )
+        assertTrue(repo.listProductsByOrganization("org_1").isFailure)
+        assertEquals(
+            listOf("product_b", "product_a"),
+            repo.listProductsByOrganization("org_1").getOrThrow().map { product -> product.id },
+        )
+        assertTrue(repo.listProductsByOrganization("org_1").getOrThrow().isEmpty())
+        assertTrue(repo.listProductsByOrganization("org_1").getOrThrow().isEmpty())
+    }
+
+    @Test
+    fun organization_page_snapshot_preserves_order_and_continuation_metadata_offline() = runTest {
+        var requestCount = 0
+        val engine = MockEngine {
+            requestCount += 1
+            if (requestCount == 2) {
+                return@MockEngine respond(
+                    content = "{}",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+            if (requestCount > 2) {
+                return@MockEngine respond(
+                    content = """{"error":"offline"}""",
+                    status = HttpStatusCode.ServiceUnavailable,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+            respond(
+                content = """{"organizations":[{"id":"org_b","name":"B"},{"id":"org_a","name":"A"}],"pagination":{"limit":2,"offset":4,"nextOffset":6,"hasMore":true}}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repo = BillingRepository(
+            MvpApiClient(
+                billingRepositoryHttpProductionClient(engine),
+                "http://example.test",
+                BillingRepositoryHttp_InMemoryAuthTokenStore("token"),
+            ),
+            BillingRepositoryHttp_FakeUserRepository(
+                currentUser = billingMakeUser("u1"),
+                currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+            ),
+            BillingRepositoryHttp_UnusedEventRepository,
+            BillingRepositoryHttp_FakeDatabaseService(),
+        )
+
+        val onlinePage = repo.listOrganizationsPage(limit = 2, offset = 4).getOrThrow()
+        assertEquals(listOf("org_b", "org_a"), onlinePage.items.map { organization -> organization.id })
+        assertEquals(2, onlinePage.pagination.limit)
+        assertEquals(4, onlinePage.pagination.offset)
+        assertEquals(6, onlinePage.pagination.nextOffset)
+        assertTrue(onlinePage.pagination.hasMore)
+
+        assertTrue(repo.listOrganizationsPage(limit = 2, offset = 4).isFailure)
+
+        val offlinePage = repo.listOrganizationsPage(limit = 2, offset = 4).getOrThrow()
+        assertEquals(listOf("org_b", "org_a"), offlinePage.items.map { organization -> organization.id })
+        assertEquals(onlinePage.pagination, offlinePage.pagination)
+    }
+
+    @Test
+    fun review_cache_keys_include_viewer_cursor_and_limit_and_mutation_invalidates_other_pages() = runTest {
+        var offline = false
+        val engine = MockEngine { request ->
+            if (offline) {
+                return@MockEngine respond(
+                    content = """{"error":"offline"}""",
+                    status = HttpStatusCode.ServiceUnavailable,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+            val reviewCount = when {
+                request.method == HttpMethod.Post -> 99
+                request.url.parameters["cursor"] == "cursor_2" -> 2
+                request.url.parameters["limit"] == "10" -> 10
+                request.url.parameters["limit"] == "20" -> 20
+                else -> 50
+            }
+            respond(
+                content = """{"summary":{"averageRating":5.0,"reviewCount":$reviewCount,"ratingCounts":[0,0,0,0,$reviewCount]},"reviews":[],"nextCursor":null}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repo = BillingRepository(
+            MvpApiClient(
+                billingRepositoryHttpProductionClient(engine),
+                "http://example.test",
+                BillingRepositoryHttp_InMemoryAuthTokenStore("token"),
+            ),
+            BillingRepositoryHttp_FakeUserRepository(
+                currentUser = billingMakeUser("u1"),
+                currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+            ),
+            BillingRepositoryHttp_UnusedEventRepository,
+            BillingRepositoryHttp_FakeDatabaseService(),
+        )
+
+        assertEquals(10, repo.getOrganizationReviews("org_1", limit = 10).getOrThrow().summary.reviewCount)
+        assertEquals(
+            2,
+            repo.getOrganizationReviews("org_1", cursor = "cursor_2", limit = 10)
+                .getOrThrow().summary.reviewCount,
+        )
+        assertEquals(20, repo.getOrganizationReviews("org_1", limit = 20).getOrThrow().summary.reviewCount)
+        assertEquals(99, repo.saveOrganizationReview("org_1", rating = 5, body = "Great").getOrThrow().summary.reviewCount)
+
+        offline = true
+        assertEquals(99, repo.getOrganizationReviews("org_1", limit = 50).getOrThrow().summary.reviewCount)
+        assertTrue(repo.getOrganizationReviews("org_1", limit = 20).isFailure)
+        assertTrue(repo.getOrganizationReviews("org_1", limit = 10).isFailure)
+        assertTrue(repo.getOrganizationReviews("org_1", cursor = "cursor_2", limit = 10).isFailure)
     }
 
     @Test

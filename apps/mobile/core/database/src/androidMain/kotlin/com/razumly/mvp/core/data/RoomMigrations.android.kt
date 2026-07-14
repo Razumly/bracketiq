@@ -1145,6 +1145,32 @@ val MIGRATION_90_91_FIELD_FACILITY_ID = migration(
     listOf("ALTER TABLE `Field` ADD COLUMN `facilityId` TEXT"),
 )
 
+/**
+ * Catalog responses that previously lived only in memory now have a durable local source of
+ * truth. Payloads stay serialized so API/domain evolution does not duplicate those contracts in
+ * Room columns. Exact request snapshots preserve ordering and projections without inferred joins.
+ */
+val MIGRATION_91_92_ROOM_FIRST_CATALOG_CACHE = migration(
+    91,
+    92,
+    listOf(
+        "CREATE TABLE IF NOT EXISTS `catalog_cache_viewer` (`id` TEXT NOT NULL, `viewerKey` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "CREATE TABLE IF NOT EXISTS `catalog_query_cache` (`cacheKey` TEXT NOT NULL, `viewerKey` TEXT NOT NULL, `resourceType` TEXT NOT NULL, `projectionKey` TEXT NOT NULL, `orderedIdsJson` TEXT NOT NULL, `payloadJson` TEXT NOT NULL, `paginationJson` TEXT, `isComplete` INTEGER NOT NULL, PRIMARY KEY(`cacheKey`))",
+        "CREATE INDEX IF NOT EXISTS `index_catalog_query_cache_viewerKey` ON `catalog_query_cache` (`viewerKey`)",
+        "CREATE INDEX IF NOT EXISTS `index_catalog_query_cache_viewerKey_resourceType_projectionKey` ON `catalog_query_cache` (`viewerKey`, `resourceType`, `projectionKey`)",
+        "CREATE TABLE IF NOT EXISTS `organization_cache` (`viewerKey` TEXT NOT NULL, `projectionKey` TEXT NOT NULL, `organizationId` TEXT NOT NULL, `payloadJson` TEXT NOT NULL, PRIMARY KEY(`viewerKey`, `projectionKey`, `organizationId`))",
+        "CREATE INDEX IF NOT EXISTS `index_organization_cache_viewerKey` ON `organization_cache` (`viewerKey`)",
+        "CREATE TABLE IF NOT EXISTS `product_cache` (`viewerKey` TEXT NOT NULL, `projectionKey` TEXT NOT NULL, `id` TEXT NOT NULL, `organizationId` TEXT NOT NULL, `payloadJson` TEXT NOT NULL, PRIMARY KEY(`viewerKey`, `projectionKey`, `id`))",
+        "CREATE INDEX IF NOT EXISTS `index_product_cache_viewerKey` ON `product_cache` (`viewerKey`)",
+        "CREATE INDEX IF NOT EXISTS `index_product_cache_viewerKey_projectionKey_organizationId` ON `product_cache` (`viewerKey`, `projectionKey`, `organizationId`)",
+        "CREATE TABLE IF NOT EXISTS `organization_reviews_cache` (`cacheKey` TEXT NOT NULL, `viewerKey` TEXT NOT NULL, `organizationId` TEXT NOT NULL, `cursorKey` TEXT NOT NULL, `pageLimit` INTEGER NOT NULL, `payloadJson` TEXT NOT NULL, PRIMARY KEY(`cacheKey`))",
+        "CREATE INDEX IF NOT EXISTS `index_organization_reviews_cache_viewerKey` ON `organization_reviews_cache` (`viewerKey`)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS `index_organization_reviews_cache_viewerKey_organizationId_cursorKey_pageLimit` ON `organization_reviews_cache` (`viewerKey`, `organizationId`, `cursorKey`, `pageLimit`)",
+        "CREATE TABLE IF NOT EXISTS `time_slot_cache` (`viewerKey` TEXT NOT NULL, `projectionKey` TEXT NOT NULL, `id` TEXT NOT NULL, `payloadJson` TEXT NOT NULL, PRIMARY KEY(`viewerKey`, `projectionKey`, `id`))",
+        "CREATE INDEX IF NOT EXISTS `index_time_slot_cache_viewerKey` ON `time_slot_cache` (`viewerKey`)",
+    ),
+)
+
 val MVP_DATABASE_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_3_4_OFFICIAL_TERMINOLOGY_AND_PRIVACY,
     MIGRATION_4_5_NO_SCHEMA_CHANGE,
@@ -1154,4 +1180,5 @@ val MVP_DATABASE_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_35_90_LEGACY_VERSION_CONTINUITY,
     *LEGACY_DATABASE_MIGRATIONS,
     MIGRATION_90_91_FIELD_FACILITY_ID,
+    MIGRATION_91_92_ROOM_FIRST_CATALOG_CACHE,
 )

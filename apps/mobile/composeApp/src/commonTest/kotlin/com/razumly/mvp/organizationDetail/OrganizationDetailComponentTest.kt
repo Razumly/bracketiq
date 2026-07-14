@@ -751,7 +751,6 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
                 coordinates = null,
                 fieldIds = emptyList(),
                 productIds = emptyList(),
-                teamIds = listOf("team-org-signing"),
             )
             val team = Team(
                 id = "team-org-signing",
@@ -935,7 +934,6 @@ private class OrganizationDetailHarness(
         coordinates = null,
         fieldIds = emptyList(),
         productIds = listOf(product.id),
-        teamIds = emptyList(),
         publicSlug = if (rentalCheckoutEnabled) "summit-sports" else null,
         publicPageEnabled = rentalCheckoutEnabled,
     )

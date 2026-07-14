@@ -807,6 +807,16 @@ class UserRepository(
         _chatTermsConsentState.value = ChatTermsConsentState()
         _chatTermsConsentLoading.value = false
         runCatching { tokenStore.clear() }
+        runCatching {
+            databaseService.getCatalogCacheDao.activateViewer(CATALOG_ANONYMOUS_VIEWER_KEY)
+        }.onFailure { throwable ->
+            // Cache rows are independently viewer-scoped, so a purge failure cannot cross an
+            // account boundary. Surface it in diagnostics and retry transactionally on the next
+            // catalog read instead of retaining an unscoped logout cache.
+            Napier.e(tag = USER_REPOSITORY_LOG_TAG, throwable = throwable) {
+                "Failed to purge viewer-scoped catalog cache during logout."
+            }
+        }
         runCatching { currentUserDataSource.saveUserId("") }
         // Root's cleanup collector keys off this state when the empty-user emission arrives.
         // Publish the authorization state first so push, chat, registration, and shortcut cleanup

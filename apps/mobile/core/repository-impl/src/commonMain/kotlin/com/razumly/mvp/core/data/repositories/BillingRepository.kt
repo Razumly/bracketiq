@@ -19,16 +19,19 @@ import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentProof
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.OrganizationReview
+import com.razumly.mvp.core.data.dataTypes.OrganizationReviewSummary
+import com.razumly.mvp.core.data.dataTypes.OrganizationCacheEntry
 import com.razumly.mvp.core.data.dataTypes.OrganizationReviewsPayload
-import com.razumly.mvp.core.data.dataTypes.OrganizationStaffMember
+import com.razumly.mvp.core.data.dataTypes.OrganizationReviewsCacheEntry
+import com.razumly.mvp.core.data.dataTypes.CatalogQueryCacheEntry
 import com.razumly.mvp.core.data.dataTypes.PENDING_RENTAL_ORDER_STATUS_AWAITING_PAYMENT
 import com.razumly.mvp.core.data.dataTypes.PENDING_RENTAL_ORDER_STATUS_PENDING
 import com.razumly.mvp.core.data.dataTypes.PENDING_RENTAL_ORDER_STATUS_REJECTED
 import com.razumly.mvp.core.data.dataTypes.PendingRentalOrder
 import com.razumly.mvp.core.data.dataTypes.normalizedEventTags
-import com.razumly.mvp.core.data.dataTypes.resolveOrganizationVerificationReviewStatus
-import com.razumly.mvp.core.data.dataTypes.resolveOrganizationVerificationStatus
 import com.razumly.mvp.core.data.dataTypes.Product
+import com.razumly.mvp.core.data.dataTypes.ProductCacheEntry
 import com.razumly.mvp.core.data.dataTypes.ProductTaxCategory
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
@@ -47,6 +50,9 @@ import com.razumly.mvp.core.network.dto.BillingTimeSlotRefDto
 import com.razumly.mvp.core.network.dto.BillingUserRefDto
 import com.razumly.mvp.core.network.dto.InclusivePriceQuoteRequestDto
 import com.razumly.mvp.core.network.dto.InclusivePriceQuoteResponseDto
+import com.razumly.mvp.core.network.dto.OrganizationApiDto
+import com.razumly.mvp.core.network.dto.OrganizationsResponseDto
+import com.razumly.mvp.core.network.dto.PaginationResponseDto
 import com.razumly.mvp.core.network.dto.PurchaseIntentRequestDto
 import com.razumly.mvp.core.network.dto.RefundAllRequestDto
 import com.razumly.mvp.core.network.dto.RefundRequestsResponseDto
@@ -72,6 +78,13 @@ import kotlin.time.Instant
 private const val BOLD_SIGN_RATE_LIMIT_FRIENDLY_MESSAGE =
     "You opened the BoldSign document too many times. Please wait a minute before trying again."
 private const val MAX_INCLUSIVE_PRICE_CENTS = 100_000_000
+private const val CATALOG_RESOURCE_ORGANIZATIONS = "organizations"
+private const val CATALOG_RESOURCE_PRODUCTS = "products"
+private const val ORGANIZATION_PROJECTION_DETAIL = "detail"
+private const val ORGANIZATION_PROJECTION_PUBLIC = "public"
+private const val PRODUCT_PROJECTION_FULL = "full"
+// The review mutation routes return getOrganizationReviewsPayload() with the backend's default 50.
+private const val MUTATED_REVIEW_FIRST_PAGE_LIMIT = 50
 
 /** The payment succeeded, but the server has rejected its idempotent rental booking mutation. */
 class RentalOrderTerminalFailureException(message: String, cause: Throwable) : IllegalStateException(message, cause)
@@ -79,6 +92,7 @@ class RentalOrderTerminalFailureException(message: String, cause: Throwable) : I
 /** The original payer must sign back in before their prepared rental can be submitted. */
 class RentalOrderPayerMismatchException(message: String) : IllegalStateException(message)
 
+@Serializable
 data class RepositoryPagination(
     val limit: Int,
     val offset: Int,
@@ -117,6 +131,184 @@ private fun Set<String>.toOrganizationTagsQueryParam(): String {
         "&tags=${tag.encodeURLQueryComponent()}"
     }
 }
+
+@Serializable
+private data class CachedProductPayload(
+    val id: String,
+    val name: String,
+    val description: String? = null,
+    val priceCents: Int,
+    val period: String,
+    val organizationId: String,
+    val createdBy: String? = null,
+    val isActive: Boolean? = null,
+    val createdAt: String? = null,
+    val stripeProductId: String? = null,
+    val stripePriceId: String? = null,
+    val taxCategory: ProductTaxCategory = ProductTaxCategory.ONE_TIME_PRODUCT,
+)
+
+private fun Product.toCachedPayload(): CachedProductPayload = CachedProductPayload(
+    id = id,
+    name = name,
+    description = description,
+    priceCents = priceCents,
+    period = period,
+    organizationId = organizationId,
+    createdBy = createdBy,
+    isActive = isActive,
+    createdAt = createdAt,
+    stripeProductId = stripeProductId,
+    stripePriceId = stripePriceId,
+    taxCategory = taxCategory,
+)
+
+private fun CachedProductPayload.toProduct(): Product = Product(
+    id = id,
+    name = name,
+    description = description,
+    priceCents = priceCents,
+    period = period,
+    organizationId = organizationId,
+    createdBy = createdBy,
+    isActive = isActive,
+    createdAt = createdAt,
+    stripeProductId = stripeProductId,
+    stripePriceId = stripePriceId,
+    taxCategory = taxCategory,
+)
+
+private fun Organization.toCacheEntry(
+    scope: CatalogCacheScope,
+    projectionKey: String,
+): OrganizationCacheEntry = OrganizationCacheEntry(
+    viewerKey = scope.viewerKey,
+    projectionKey = projectionKey,
+    organizationId = id,
+    payloadJson = jsonMVP.encodeToString(this),
+)
+
+private fun Product.toCacheEntry(
+    scope: CatalogCacheScope,
+    projectionKey: String,
+): ProductCacheEntry = ProductCacheEntry(
+    viewerKey = scope.viewerKey,
+    projectionKey = projectionKey,
+    id = id,
+    organizationId = organizationId,
+    payloadJson = jsonMVP.encodeToString(toCachedPayload()),
+)
+
+private fun organizationReviewsCacheKey(
+    scope: CatalogCacheScope,
+    organizationId: String,
+    cursorKey: String,
+    pageLimit: Int,
+): String = catalogCacheKey(
+    scope,
+    "organization-reviews",
+    "full",
+    organizationId,
+    cursorKey,
+    pageLimit.toString(),
+)
+
+private fun OrganizationReviewsPayload.toCacheEntry(
+    scope: CatalogCacheScope,
+    organizationId: String,
+    cursorKey: String,
+    pageLimit: Int,
+): OrganizationReviewsCacheEntry = OrganizationReviewsCacheEntry(
+    cacheKey = organizationReviewsCacheKey(scope, organizationId, cursorKey, pageLimit),
+    viewerKey = scope.viewerKey,
+    organizationId = organizationId,
+    cursorKey = cursorKey,
+    pageLimit = pageLimit,
+    payloadJson = jsonMVP.encodeToString(this),
+)
+
+private fun OrganizationReviewsCacheEntry.toPayload(): OrganizationReviewsPayload =
+    jsonMVP.decodeFromString(payloadJson)
+
+private fun List<Organization>.toOrganizationQueryEntry(
+    cacheKey: String,
+    scope: CatalogCacheScope,
+    projectionKey: String,
+    pagination: RepositoryPagination? = null,
+): CatalogQueryCacheEntry = CatalogQueryCacheEntry(
+    cacheKey = cacheKey,
+    viewerKey = scope.viewerKey,
+    resourceType = CATALOG_RESOURCE_ORGANIZATIONS,
+    projectionKey = projectionKey,
+    orderedIdsJson = jsonMVP.encodeToString(map(Organization::id)),
+    payloadJson = jsonMVP.encodeToString(this),
+    paginationJson = pagination?.let { value -> jsonMVP.encodeToString(value) },
+    isComplete = pagination?.hasMore != true,
+)
+
+private fun CatalogQueryCacheEntry.toOrganizations(): List<Organization> {
+    require(resourceType == CATALOG_RESOURCE_ORGANIZATIONS) {
+        "Cached organization query has the wrong resource type."
+    }
+    val organizations = jsonMVP.decodeFromString<List<Organization>>(payloadJson)
+    val orderedIds = jsonMVP.decodeFromString<List<String>>(orderedIdsJson)
+    require(orderedIds == organizations.map(Organization::id)) {
+        "Cached organization ordering metadata does not match its payload."
+    }
+    return organizations
+}
+
+private fun CatalogQueryCacheEntry.toOrganizationPage(): RepositoryPage<Organization> {
+    val pagination = paginationJson?.let { jsonMVP.decodeFromString<RepositoryPagination>(it) }
+        ?: error("Cached organization page is missing pagination metadata.")
+    require(isComplete == !pagination.hasMore) {
+        "Cached organization pagination completeness is inconsistent."
+    }
+    return RepositoryPage(items = toOrganizations(), pagination = pagination)
+}
+
+private fun List<Product>.toProductQueryEntry(
+    cacheKey: String,
+    scope: CatalogCacheScope,
+): CatalogQueryCacheEntry = CatalogQueryCacheEntry(
+    cacheKey = cacheKey,
+    viewerKey = scope.viewerKey,
+    resourceType = CATALOG_RESOURCE_PRODUCTS,
+    projectionKey = PRODUCT_PROJECTION_FULL,
+    orderedIdsJson = jsonMVP.encodeToString(map(Product::id)),
+    payloadJson = jsonMVP.encodeToString(map(Product::toCachedPayload)),
+    paginationJson = null,
+    isComplete = true,
+)
+
+private fun CatalogQueryCacheEntry.toProducts(): List<Product> {
+    require(resourceType == CATALOG_RESOURCE_PRODUCTS && isComplete) {
+        "Cached product query is not an exact complete snapshot."
+    }
+    val products = jsonMVP.decodeFromString<List<CachedProductPayload>>(payloadJson)
+        .map(CachedProductPayload::toProduct)
+    val orderedIds = jsonMVP.decodeFromString<List<String>>(orderedIdsJson)
+    require(orderedIds == products.map(Product::id)) {
+        "Cached product ordering metadata does not match its payload."
+    }
+    return products
+}
+
+private fun CatalogQueryCacheEntry?.orderedCatalogIdsOrEmpty(): List<String> = this?.let { snapshot ->
+    jsonMVP.decodeFromString<List<String>>(snapshot.orderedIdsJson)
+}.orEmpty()
+
+private fun List<OrganizationApiDto>.toOrganizationsStrict(context: String): List<Organization> =
+    mapIndexed { index, dto ->
+        dto.toOrganizationOrNull()
+            ?: error("$context returned an invalid organization at row $index.")
+    }
+
+private fun List<ProductApiDto>.toProductsStrict(context: String): List<Product> =
+    mapIndexed { index, dto ->
+        dto.toProductOrNull()
+            ?: error("$context returned an invalid product at row $index.")
+    }
 
 private fun Throwable.withFriendlyBoldSignMessage(): Throwable {
     val friendlyMessage = toFriendlyBoldSignMessage(message) ?: return this
@@ -2017,24 +2209,73 @@ class BillingRepository(
         val ids = idChunks.flatten()
         if (ids.isEmpty()) return@runCatching emptyList()
 
-        val productsById = LinkedHashMap<String, Product>()
-        for (idChunk in idChunks) {
-            val encodedIds = idChunk.joinToString(",") { it.encodeURLQueryComponent() }
-            val response = api.get<ProductsResponseDto>(path = "api/products?ids=$encodedIds")
-            response.products.mapNotNull { it.toProductOrNull() }.forEach { product ->
-                productsById[product.id] = product
+        val dao = databaseService.getCatalogCacheDao
+        val scope = api.activateCatalogCache(dao)
+        val cacheKey = catalogCacheKey(
+            scope,
+            CATALOG_RESOURCE_PRODUCTS,
+            PRODUCT_PROJECTION_FULL,
+            "ids",
+            *ids.toTypedArray(),
+        )
+        val previousIds = dao.getCatalogQuery(cacheKey, scope.viewerKey).orderedCatalogIdsOrEmpty()
+        val products = try {
+            val productsById = LinkedHashMap<String, Product>()
+            for (idChunk in idChunks) {
+                val encodedIds = idChunk.joinToString(",") { it.encodeURLQueryComponent() }
+                val response = scope.api.get<ProductsResponseDto>(path = "api/products?ids=$encodedIds")
+                response.products.toProductsStrict("Product id query").forEach { product ->
+                    productsById[product.id] = product
+                }
             }
+            ids.mapNotNull(productsById::get)
+        } catch (error: Throwable) {
+            if (!error.isCatalogFallbackEligible()) throw error
+            return@runCatching dao.getCatalogQuery(cacheKey, scope.viewerKey)?.toProducts()
+                ?: throw error
         }
-        ids.mapNotNull(productsById::get)
+        val snapshot = products.toProductQueryEntry(cacheKey, scope)
+        val productIds = products.map(Product::id).toSet()
+        dao.replaceProductQuery(
+            snapshot = snapshot,
+            entries = products.map { product -> product.toCacheEntry(scope, PRODUCT_PROJECTION_FULL) },
+            staleProductIds = previousIds.filterNot(productIds::contains),
+        )
+        dao.getCatalogQuery(cacheKey, scope.viewerKey)?.toProducts()
+            ?: error("Product id query cache was not written.")
     }
 
     override suspend fun listProductsByOrganization(organizationId: String): Result<List<Product>> = runCatching {
         val normalizedId = organizationId.trim()
         if (normalizedId.isEmpty()) return@runCatching emptyList()
 
-        val encodedId = normalizedId.encodeURLQueryComponent()
-        val response = api.get<ProductsResponseDto>(path = "api/products?organizationId=$encodedId")
-        response.products.mapNotNull { it.toProductOrNull() }
+        val dao = databaseService.getCatalogCacheDao
+        val scope = api.activateCatalogCache(dao)
+        val cacheKey = catalogCacheKey(
+            scope,
+            CATALOG_RESOURCE_PRODUCTS,
+            PRODUCT_PROJECTION_FULL,
+            "organization",
+            normalizedId,
+        )
+        val products = try {
+            val encodedId = normalizedId.encodeURLQueryComponent()
+            scope.api.get<ProductsResponseDto>(path = "api/products?organizationId=$encodedId")
+                .products
+                .toProductsStrict("Organization product query")
+        } catch (error: Throwable) {
+            if (!error.isCatalogFallbackEligible()) throw error
+            return@runCatching dao.getCatalogQuery(cacheKey, scope.viewerKey)?.toProducts()
+                ?: throw error
+        }
+        val snapshot = products.toProductQueryEntry(cacheKey, scope)
+        dao.replaceProductsForOrganization(
+            organizationId = normalizedId,
+            snapshot = snapshot,
+            entries = products.map { product -> product.toCacheEntry(scope, PRODUCT_PROJECTION_FULL) },
+        )
+        dao.getCatalogQuery(cacheKey, scope.viewerKey)?.toProducts()
+            ?: error("Organization product query cache was not written.")
     }
 
     override suspend fun createProductPurchaseIntent(productId: String): Result<PurchaseIntent> =
@@ -2338,18 +2579,53 @@ class BillingRepository(
         val normalizedOffset = offset.coerceAtLeast(0)
         val affiliateParam = if (includeAffiliateRentals) "&includeAffiliateRentals=true" else ""
         val tagsParam = tagSlugs.toOrganizationTagsQueryParam()
-        val response = api.get<OrganizationsResponseDto>(
-            path = "api/organizations?limit=$normalizedLimit&offset=$normalizedOffset$affiliateParam$tagsParam",
+        val dao = databaseService.getCatalogCacheDao
+        val scope = api.activateCatalogCache(dao)
+        val cacheKey = catalogCacheKey(
+            scope,
+            CATALOG_RESOURCE_ORGANIZATIONS,
+            ORGANIZATION_PROJECTION_PUBLIC,
+            "list",
+            normalizedLimit.toString(),
+            normalizedOffset.toString(),
+            includeAffiliateRentals.toString(),
+            *tagSlugs.map(String::trim).filter(String::isNotBlank).sorted().toTypedArray(),
         )
-        val organizations = response.organizations.mapNotNull { it.toOrganizationOrNull() }
-        RepositoryPage(
-            items = organizations,
-            pagination = response.pagination.toRepositoryPagination(
-                fallbackLimit = normalizedLimit,
-                fallbackOffset = normalizedOffset,
-                fallbackItemCount = organizations.size,
-            ),
+        val previousIds = dao.getCatalogQuery(cacheKey, scope.viewerKey).orderedCatalogIdsOrEmpty()
+        val refreshedPage = try {
+            val response = scope.api.get<OrganizationsResponseDto>(
+                path = "api/organizations?limit=$normalizedLimit&offset=$normalizedOffset$affiliateParam$tagsParam",
+            )
+            val organizations = response.organizations.toOrganizationsStrict("Organization list")
+            RepositoryPage(
+                items = organizations,
+                pagination = response.pagination.toRepositoryPagination(
+                    fallbackLimit = normalizedLimit,
+                    fallbackOffset = normalizedOffset,
+                    fallbackItemCount = organizations.size,
+                ),
+            )
+        } catch (error: Throwable) {
+            if (!error.isCatalogFallbackEligible()) throw error
+            return@runCatching dao.getCatalogQuery(cacheKey, scope.viewerKey)?.toOrganizationPage()
+                ?: throw error
+        }
+        val snapshot = refreshedPage.items.toOrganizationQueryEntry(
+            cacheKey = cacheKey,
+            scope = scope,
+            projectionKey = ORGANIZATION_PROJECTION_PUBLIC,
+            pagination = refreshedPage.pagination,
         )
+        val refreshedIds = refreshedPage.items.map(Organization::id).toSet()
+        dao.replaceOrganizationQuery(
+            snapshot = snapshot,
+            entries = refreshedPage.items.map { organization ->
+                organization.toCacheEntry(scope, ORGANIZATION_PROJECTION_PUBLIC)
+            },
+            staleOrganizationIds = previousIds.filterNot(refreshedIds::contains),
+        )
+        dao.getCatalogQuery(cacheKey, scope.viewerKey)?.toOrganizationPage()
+            ?: error("Organization page cache was not written.")
     }
 
     override suspend fun searchOrganizations(
@@ -2365,10 +2641,51 @@ class BillingRepository(
         val encodedQuery = normalizedQuery.encodeURLQueryComponent()
         val affiliateParam = if (includeAffiliateRentals) "&includeAffiliateRentals=true" else ""
         val tagsParam = tagSlugs.toOrganizationTagsQueryParam()
-        val response = api.get<OrganizationsResponseDto>(
-            path = "api/organizations?query=$encodedQuery&limit=$normalizedLimit$affiliateParam$tagsParam",
+        val dao = databaseService.getCatalogCacheDao
+        val scope = api.activateCatalogCache(dao)
+        val cacheKey = catalogCacheKey(
+            scope,
+            CATALOG_RESOURCE_ORGANIZATIONS,
+            ORGANIZATION_PROJECTION_PUBLIC,
+            "search",
+            normalizedQuery,
+            normalizedLimit.toString(),
+            includeAffiliateRentals.toString(),
+            *tagSlugs.map(String::trim).filter(String::isNotBlank).sorted().toTypedArray(),
         )
-        response.organizations.mapNotNull { it.toOrganizationOrNull() }
+        val previousIds = dao.getCatalogQuery(cacheKey, scope.viewerKey).orderedCatalogIdsOrEmpty()
+        val responseAndOrganizations = try {
+            val response = scope.api.get<OrganizationsResponseDto>(
+                path = "api/organizations?query=$encodedQuery&limit=$normalizedLimit$affiliateParam$tagsParam",
+            )
+            response to response.organizations.toOrganizationsStrict("Organization search")
+        } catch (error: Throwable) {
+            if (!error.isCatalogFallbackEligible()) throw error
+            return@runCatching dao.getCatalogQuery(cacheKey, scope.viewerKey)?.toOrganizations()
+                ?: throw error
+        }
+        val (response, organizations) = responseAndOrganizations
+        val pagination = response.pagination.toRepositoryPagination(
+            fallbackLimit = normalizedLimit,
+            fallbackOffset = 0,
+            fallbackItemCount = organizations.size,
+        )
+        val snapshot = organizations.toOrganizationQueryEntry(
+            cacheKey,
+            scope,
+            ORGANIZATION_PROJECTION_PUBLIC,
+            pagination,
+        )
+        val refreshedIds = organizations.map(Organization::id).toSet()
+        dao.replaceOrganizationQuery(
+            snapshot = snapshot,
+            entries = organizations.map { organization ->
+                organization.toCacheEntry(scope, ORGANIZATION_PROJECTION_PUBLIC)
+            },
+            staleOrganizationIds = previousIds.filterNot(refreshedIds::contains),
+        )
+        dao.getCatalogQuery(cacheKey, scope.viewerKey)?.toOrganizations()
+            ?: error("Organization search cache was not written.")
     }
 
     override suspend fun getOrganizationTags(query: String?, filterOnly: Boolean): Result<List<EventTag>> = runCatching {
@@ -2401,23 +2718,56 @@ class BillingRepository(
         val idChunks = collectionIdChunks(organizationIds)
         val ids = idChunks.flatten()
         if (ids.isEmpty()) return@runCatching emptyList()
-        if (ids.size == 1) {
-            val encodedId = ids.first().encodeURLQueryComponent()
-            val response = api.get<OrganizationApiDto>(path = "api/organizations/$encodedId")
-            return@runCatching listOfNotNull(response.toOrganizationOrNull())
-        }
-
-        val organizationsById = LinkedHashMap<String, Organization>()
-        for (idChunk in idChunks) {
-            val encodedIds = idChunk.joinToString(",") { it.encodeURLQueryComponent() }
-            val response = api.get<OrganizationsResponseDto>(
-                path = "api/organizations?ids=$encodedIds&limit=${idChunk.size}",
-            )
-            response.organizations.mapNotNull { it.toOrganizationOrNull() }.forEach { organization ->
+        val dao = databaseService.getCatalogCacheDao
+        val scope = api.activateCatalogCache(dao)
+        val cacheKey = catalogCacheKey(
+            scope,
+            CATALOG_RESOURCE_ORGANIZATIONS,
+            ORGANIZATION_PROJECTION_DETAIL,
+            "ids",
+            *ids.toTypedArray(),
+        )
+        val previousIds = dao.getCatalogQuery(cacheKey, scope.viewerKey).orderedCatalogIdsOrEmpty()
+        val organizations = try {
+            val organizationsById = LinkedHashMap<String, Organization>()
+            if (ids.size == 1) {
+                val encodedId = ids.first().encodeURLQueryComponent()
+                val response = scope.api.get<OrganizationApiDto>(path = "api/organizations/$encodedId")
+                val organization = response.toOrganizationOrNull()
+                    ?: error("Organization detail returned an invalid organization.")
                 organizationsById[organization.id] = organization
+            } else {
+                for (idChunk in idChunks) {
+                    val encodedIds = idChunk.joinToString(",") { it.encodeURLQueryComponent() }
+                    val response = scope.api.get<OrganizationsResponseDto>(
+                        path = "api/organizations?ids=$encodedIds&limit=${idChunk.size}",
+                    )
+                    response.organizations.toOrganizationsStrict("Organization id query").forEach { organization ->
+                        organizationsById[organization.id] = organization
+                    }
+                }
             }
+            ids.mapNotNull(organizationsById::get)
+        } catch (error: Throwable) {
+            if (!error.isCatalogFallbackEligible()) throw error
+            return@runCatching dao.getCatalogQuery(cacheKey, scope.viewerKey)?.toOrganizations()
+                ?: throw error
         }
-        ids.mapNotNull(organizationsById::get)
+        val snapshot = organizations.toOrganizationQueryEntry(
+            cacheKey,
+            scope,
+            ORGANIZATION_PROJECTION_DETAIL,
+        )
+        val refreshedIds = organizations.map(Organization::id).toSet()
+        dao.replaceOrganizationQuery(
+            snapshot = snapshot,
+            entries = organizations.map { organization ->
+                organization.toCacheEntry(scope, ORGANIZATION_PROJECTION_DETAIL)
+            },
+            staleOrganizationIds = previousIds.filterNot(refreshedIds::contains),
+        )
+        dao.getCatalogQuery(cacheKey, scope.viewerKey)?.toOrganizations()
+            ?: error("Organization id query cache was not written.")
     }
 
     override suspend fun getOrganizationReviews(
@@ -2425,17 +2775,32 @@ class BillingRepository(
         cursor: String?,
         limit: Int,
     ): Result<OrganizationReviewsPayload> = runCatching {
-        val encodedId = organizationId.trim().encodeURLQueryComponent()
-        require(encodedId.isNotBlank()) { "Organization id is required." }
+        val normalizedId = organizationId.trim()
+        require(normalizedId.isNotBlank()) { "Organization id is required." }
+        val encodedId = normalizedId.encodeURLQueryComponent()
         val normalizedLimit = limit.coerceIn(1, 100)
-        val normalizedCursor = cursor
-            ?.takeIf(String::isNotBlank)
+        val cursorKey = cursor?.trim()?.takeIf(String::isNotBlank).orEmpty()
+        val normalizedCursor = cursorKey.takeIf(String::isNotEmpty)
             ?.encodeURLQueryComponent(encodeFull = true)
         val path = buildString {
             append("api/organizations/$encodedId/reviews?limit=$normalizedLimit")
             normalizedCursor?.let { encodedCursor -> append("&cursor=$encodedCursor") }
         }
-        api.get<OrganizationReviewsPayload>(path = path)
+        val dao = databaseService.getCatalogCacheDao
+        val scope = api.activateCatalogCache(dao)
+        val cacheKey = organizationReviewsCacheKey(scope, normalizedId, cursorKey, normalizedLimit)
+        val payload = try {
+            scope.api.get<OrganizationReviewsResponseDto>(path = path).toPayload()
+        } catch (error: Throwable) {
+            if (!error.isCatalogFallbackEligible()) throw error
+            return@runCatching dao.getOrganizationReviews(cacheKey, scope.viewerKey)?.toPayload()
+                ?: throw error
+        }
+        dao.replaceOrganizationReviews(
+            payload.toCacheEntry(scope, normalizedId, cursorKey, normalizedLimit),
+        )
+        dao.getOrganizationReviews(cacheKey, scope.viewerKey)?.toPayload()
+            ?: error("Organization reviews cache was not written.")
     }
 
     override suspend fun saveOrganizationReview(
@@ -2443,36 +2808,62 @@ class BillingRepository(
         rating: Int,
         body: String?,
     ): Result<OrganizationReviewsPayload> = runCatching {
-        val encodedId = organizationId.trim().encodeURLQueryComponent()
-        require(encodedId.isNotBlank()) { "Organization id is required." }
-        api.post<OrganizationReviewRequestDto, OrganizationReviewsPayload>(
-            path = "api/organizations/$encodedId/reviews",
+        val normalizedId = organizationId.trim()
+        require(normalizedId.isNotBlank()) { "Organization id is required." }
+        val dao = databaseService.getCatalogCacheDao
+        val scope = api.activateCatalogCache(dao)
+        val payload = scope.api.post<OrganizationReviewRequestDto, OrganizationReviewsResponseDto>(
+            path = "api/organizations/${normalizedId.encodeURLQueryComponent()}/reviews",
             body = OrganizationReviewRequestDto(rating = rating, body = body),
+        ).toPayload()
+        val entry = payload.toCacheEntry(
+            scope,
+            normalizedId,
+            cursorKey = "",
+            pageLimit = MUTATED_REVIEW_FIRST_PAGE_LIMIT,
         )
+        dao.replaceFirstOrganizationReviewPage(entry)
+        dao.getOrganizationReviews(entry.cacheKey, scope.viewerKey)?.toPayload()
+            ?: error("Organization reviews cache was not written.")
     }
 
     override suspend fun deleteOrganizationReview(
         organizationId: String,
         reviewId: String,
     ): Result<OrganizationReviewsPayload> = runCatching {
-        val encodedOrganizationId = organizationId.trim().encodeURLQueryComponent()
+        val normalizedOrganizationId = organizationId.trim()
+        val encodedOrganizationId = normalizedOrganizationId.encodeURLQueryComponent()
         val encodedReviewId = reviewId.trim().encodeURLQueryComponent()
         require(encodedOrganizationId.isNotBlank() && encodedReviewId.isNotBlank()) {
             "Organization id and review id are required."
         }
-        api.delete<EmptyRequestDto, OrganizationReviewsPayload>(
+        val dao = databaseService.getCatalogCacheDao
+        val scope = api.activateCatalogCache(dao)
+        val payload = scope.api.delete<EmptyRequestDto, OrganizationReviewsResponseDto>(
             path = "api/organizations/$encodedOrganizationId/reviews/$encodedReviewId",
             body = EmptyRequestDto(),
+        ).toPayload()
+        val entry = payload.toCacheEntry(
+            scope,
+            normalizedOrganizationId,
+            cursorKey = "",
+            pageLimit = MUTATED_REVIEW_FIRST_PAGE_LIMIT,
         )
+        dao.replaceFirstOrganizationReviewPage(entry)
+        dao.getOrganizationReviews(entry.cacheKey, scope.viewerKey)?.toPayload()
+            ?: error("Organization reviews cache was not written.")
     }
 
     override suspend fun reportOrganizationReview(reviewId: String): Result<Unit> = runCatching {
         val encodedReviewId = reviewId.trim()
         require(encodedReviewId.isNotBlank()) { "Review id is required." }
-        api.postNoResponse(
+        val dao = databaseService.getCatalogCacheDao
+        val scope = api.activateCatalogCache(dao)
+        scope.api.postNoResponse(
             path = "api/moderation/reports",
             body = OrganizationReviewReportRequestDto(targetId = encodedReviewId),
         )
+        dao.deleteOrganizationReviews(scope.viewerKey)
     }
 
     override suspend fun listOrganizationTemplates(
@@ -2927,14 +3318,29 @@ private data class SubscriptionsResponseDto(
 
 @Serializable
 private data class ProductsResponseDto(
-    val products: List<ProductApiDto> = emptyList(),
+    val products: List<ProductApiDto>,
 )
 
 @Serializable
-private data class OrganizationsResponseDto(
-    val organizations: List<OrganizationApiDto> = emptyList(),
-    val pagination: PaginationResponseDto? = null,
-)
+private data class OrganizationReviewsResponseDto(
+    val summary: OrganizationReviewSummary,
+    val reviews: List<OrganizationReview>,
+    val nextCursor: String? = null,
+    val viewerReview: OrganizationReview? = null,
+    val viewerIsAuthenticated: Boolean = false,
+    val canReview: Boolean = false,
+    val cannotReviewReason: String? = null,
+) {
+    fun toPayload(): OrganizationReviewsPayload = OrganizationReviewsPayload(
+        summary = summary,
+        reviews = reviews,
+        nextCursor = nextCursor,
+        viewerReview = viewerReview,
+        viewerIsAuthenticated = viewerIsAuthenticated,
+        canReview = canReview,
+        cannotReviewReason = cannotReviewReason,
+    )
+}
 
 @Serializable
 private data class OrganizationTagsResponseDto(
@@ -2958,14 +3364,6 @@ private data class OrganizationTagApiDto(
             isSystem = isSystem,
         )
 }
-
-@Serializable
-private data class PaginationResponseDto(
-    val limit: Int? = null,
-    val offset: Int? = null,
-    val nextOffset: Int? = null,
-    val hasMore: Boolean? = null,
-)
 
 private fun PaginationResponseDto?.toRepositoryPagination(
     fallbackLimit: Int,
@@ -3862,86 +4260,6 @@ private data class ProductApiDto(
             stripeProductId = stripeProductId,
             stripePriceId = stripePriceId,
             taxCategory = taxCategory,
-        )
-    }
-}
-
-@Serializable
-private data class OrganizationApiDto(
-    val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
-    val name: String? = null,
-    val location: String? = null,
-    val address: String? = null,
-    val description: String? = null,
-    val logoId: String? = null,
-    val ownerId: String? = null,
-    val website: String? = null,
-    val sports: List<String>? = null,
-    val hasStripeAccount: Boolean? = null,
-    val verificationStatus: String? = null,
-    val verifiedAt: String? = null,
-    val verificationReviewStatus: String? = null,
-    val verificationReviewNotes: String? = null,
-    val verificationReviewUpdatedAt: String? = null,
-    val coordinates: List<Double>? = null,
-    val fieldIds: List<String>? = null,
-    val productIds: List<String>? = null,
-    val teamIds: List<String>? = null,
-    val publicSlug: String? = null,
-    val publicPageEnabled: Boolean? = null,
-    val staffMembers: List<OrganizationStaffMember>? = null,
-    val staffInvites: List<Invite>? = null,
-    val staffEmailsByUserId: Map<String, String>? = null,
-    val viewerPermissions: List<String>? = null,
-    val facilities: List<RentalFacilityDto>? = null,
-) {
-    fun toOrganizationOrNull(): Organization? {
-        val resolvedId = id ?: legacyId
-        val resolvedName = name
-        val resolvedOwnerId = ownerId ?: ""
-        if (resolvedId.isNullOrBlank() || resolvedName.isNullOrBlank()) {
-            return null
-        }
-
-        return Organization(
-            id = resolvedId,
-            name = resolvedName,
-            location = location,
-            address = address,
-            description = description,
-            logoId = logoId,
-            ownerId = resolvedOwnerId,
-            website = website,
-            sports = sports
-                ?.map(String::trim)
-                ?.filter(String::isNotBlank)
-                ?: emptyList(),
-            hasStripeAccount = hasStripeAccount ?: false,
-            verificationStatus = resolveOrganizationVerificationStatus(
-                verificationStatus = verificationStatus,
-                hasStripeAccount = hasStripeAccount,
-            ),
-            verifiedAt = verifiedAt?.trim()?.takeIf(String::isNotBlank),
-            verificationReviewStatus = resolveOrganizationVerificationReviewStatus(
-                reviewStatus = verificationReviewStatus,
-            ),
-            verificationReviewNotes = verificationReviewNotes?.trim()?.takeIf(String::isNotBlank),
-            verificationReviewUpdatedAt = verificationReviewUpdatedAt?.trim()?.takeIf(String::isNotBlank),
-            coordinates = coordinates,
-            fieldIds = fieldIds ?: emptyList(),
-            productIds = productIds ?: emptyList(),
-            teamIds = teamIds ?: emptyList(),
-            publicSlug = publicSlug?.trim()?.takeIf(String::isNotBlank),
-            publicPageEnabled = publicPageEnabled ?: false,
-            staffMembers = staffMembers ?: emptyList(),
-            staffInvites = staffInvites ?: emptyList(),
-            staffEmailsByUserId = staffEmailsByUserId ?: emptyMap(),
-            viewerPermissions = viewerPermissions
-                ?.map(String::trim)
-                ?.filter(String::isNotBlank)
-                ?: emptyList(),
-            facilities = facilities?.mapNotNull { facility -> facility.toFacilityOrNull() } ?: emptyList(),
         )
     }
 }

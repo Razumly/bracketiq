@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.data
 
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
+import com.razumly.mvp.core.data.dataTypes.daos.CatalogCacheDao
 import com.razumly.mvp.core.data.dataTypes.daos.DiscountDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventComplianceDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
@@ -35,6 +36,8 @@ interface DatabaseService {
     val getEventComplianceDao: EventComplianceDao
         get() = error("EventComplianceDao is not configured.")
     val getChatGroupDao: ChatGroupDao
+    val getCatalogCacheDao: CatalogCacheDao
+        get() = error("CatalogCacheDao is not configured.")
     val getMessageDao: MessageDao
     val getRefundRequestDao: RefundRequestDao
     val getPendingRentalOrderDao: PendingRentalOrderDao

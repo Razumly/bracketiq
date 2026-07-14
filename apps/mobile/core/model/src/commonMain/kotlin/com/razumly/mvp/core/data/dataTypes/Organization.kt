@@ -4,6 +4,7 @@ package com.razumly.mvp.core.data.dataTypes
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
+import kotlinx.serialization.Transient
 import kotlin.native.ObjCName
 
 @Serializable
@@ -49,9 +50,9 @@ data class Organization(
     val verificationReviewNotes: String? = null,
     val verificationReviewUpdatedAt: String? = null,
     val coordinates: List<Double>?,
-    val fieldIds: List<String>,
+    /** Client-enriched rental field IDs; this is not part of the organization API contract. */
+    @Transient val fieldIds: List<String> = emptyList(),
     val productIds: List<String> = emptyList(),
-    val teamIds: List<String> = emptyList(),
     val publicSlug: String? = null,
     val publicPageEnabled: Boolean = false,
     val staffMembers: List<OrganizationStaffMember> = emptyList(),
@@ -82,71 +83,6 @@ data class OrganizationStaffMember(
     val roleId: String? = null,
 ) {
     val resolvedId: String get() = id ?: legacyId ?: ""
-}
-
-@Serializable
-data class OrganizationDTO(
-    val name: String,
-    val location: String? = null,
-    val address: String? = null,
-    @property:ObjCName(swiftName = "organizationDescription")
-    val description: String? = null,
-    val logoId: String? = null,
-    val ownerId: String,
-    val website: String? = null,
-    val sports: List<String> = emptyList(),
-    val hasStripeAccount: Boolean = false,
-    val verificationStatus: OrganizationVerificationStatus = if (hasStripeAccount) {
-        OrganizationVerificationStatus.LEGACY_CONNECTED
-    } else {
-        OrganizationVerificationStatus.UNVERIFIED
-    },
-    val verifiedAt: String? = null,
-    val verificationReviewStatus: OrganizationVerificationReviewStatus =
-        OrganizationVerificationReviewStatus.NONE,
-    val verificationReviewNotes: String? = null,
-    val verificationReviewUpdatedAt: String? = null,
-    val coordinates: List<Double>? = null,
-    val fieldIds: List<String> = emptyList(),
-    val productIds: List<String> = emptyList(),
-    val teamIds: List<String> = emptyList(),
-    val publicSlug: String? = null,
-    val publicPageEnabled: Boolean = false,
-    val staffMembers: List<OrganizationStaffMember> = emptyList(),
-    val staffInvites: List<Invite> = emptyList(),
-    val staffEmailsByUserId: Map<String, String> = emptyMap(),
-    val viewerPermissions: List<String> = emptyList(),
-    val facilities: List<Facility> = emptyList(),
-) {
-    fun toOrganization(id: String): Organization =
-        Organization(
-            id = id,
-            name = name,
-            location = location,
-            address = address,
-            description = description,
-            logoId = logoId,
-            ownerId = ownerId,
-            website = website,
-            sports = sports,
-            hasStripeAccount = hasStripeAccount,
-            verificationStatus = verificationStatus,
-            verifiedAt = verifiedAt,
-            verificationReviewStatus = verificationReviewStatus,
-            verificationReviewNotes = verificationReviewNotes,
-            verificationReviewUpdatedAt = verificationReviewUpdatedAt,
-            coordinates = coordinates,
-            fieldIds = fieldIds,
-            productIds = productIds,
-            teamIds = teamIds,
-            publicSlug = publicSlug,
-            publicPageEnabled = publicPageEnabled,
-            staffMembers = staffMembers,
-            staffInvites = staffInvites,
-            staffEmailsByUserId = staffEmailsByUserId,
-            viewerPermissions = viewerPermissions,
-            facilities = facilities,
-        )
 }
 
 private const val ORGANIZATION_EVENTS_MANAGE_PERMISSION = "events.manage"

@@ -47,7 +47,7 @@ class RoomMigrationsIosTest {
                 "INSERT INTO `MatchOperationOutboxEntry` (`id`, `payloadJson`) VALUES ('outbox-1', '{\"score\":1}')",
             )
 
-            val migrations = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V91.take(4)
+            val migrations = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V92.take(4)
             assertEquals(listOf(32, 33, 34, 35), migrations.map { it.startVersion })
             assertEquals(listOf(33, 34, 35, 90), migrations.map { it.endVersion })
 
@@ -123,7 +123,7 @@ class RoomMigrationsIosTest {
                 """.trimIndent(),
             )
 
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V91.last()
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V92.first { it.startVersion == 90 }
             assertEquals(90, migration.startVersion)
             assertEquals(91, migration.endVersion)
             migration.migrate(connection)
@@ -133,6 +133,34 @@ class RoomMigrationsIosTest {
                 "SELECT `facilityId` FROM `Field` WHERE `id` = 'field-1'",
             ) { statement ->
                 assertEquals("facility-1", statement.getText(0))
+            }
+        }
+    }
+
+    @Test
+    fun v91CatalogMigration_createsViewerScopedExactQueryCacheTables() {
+        BundledSQLiteDriver().open(":memory:").use { connection ->
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V92.last()
+            assertEquals(91, migration.startVersion)
+            assertEquals(92, migration.endVersion)
+            migration.migrate(connection)
+
+            connection.execute(
+                "INSERT INTO `catalog_cache_viewer` (`id`, `viewerKey`) VALUES ('active', 'viewer-a')",
+            )
+            connection.execute(
+                "INSERT INTO `time_slot_cache` (`viewerKey`, `projectionKey`, `id`, `payloadJson`) VALUES ('viewer-a', 'authenticated', 'slot-1', '{}')",
+            )
+            connection.execute(
+                "INSERT INTO `catalog_query_cache` (`cacheKey`, `viewerKey`, `resourceType`, `projectionKey`, `orderedIdsJson`, `payloadJson`, `paginationJson`, `isComplete`) VALUES ('query-a', 'viewer-a', 'time-slots', 'authenticated', '[\"slot-1\"]', '[]', '{\"hasMore\":false}', 1)",
+            )
+
+            connection.assertSingleRow(
+                "SELECT `viewerKey`, `projectionKey`, `isComplete` FROM `catalog_query_cache` WHERE `cacheKey` = 'query-a'",
+            ) { statement ->
+                assertEquals("viewer-a", statement.getText(0))
+                assertEquals("authenticated", statement.getText(1))
+                assertEquals(1L, statement.getLong(2))
             }
         }
     }

@@ -19,12 +19,14 @@ import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
+import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
+import com.razumly.mvp.core.data.dataTypes.daos.CatalogCacheDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventComplianceDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventParticipantManagementDao
@@ -389,6 +391,7 @@ private class EventRepositoryHttp_FakeDatabaseService(
     override val getEventParticipantManagementDao: EventParticipantManagementDao =
         EventRepositoryHttp_FakeParticipantManagementDao(),
     override val getEventComplianceDao: EventComplianceDao = EventRepositoryHttp_FakeComplianceDao(),
+    override val getCatalogCacheDao: CatalogCacheDao = InMemoryCatalogCacheDao(),
 ) : DatabaseService {
     override val getEventRegistrationDao: EventRegistrationDao get() = error("unused")
     override val getChatGroupDao: ChatGroupDao get() = error("unused")
@@ -743,7 +746,18 @@ class EventRepositoryHttpTest {
                         }
                     """.trimIndent()
                 } else {
-                    """{ "events": [{ "id": "event_2" }] }"""
+                    """
+                        {
+                          "events": [{
+                            "id": "event_2",
+                            "name": "Second Event",
+                            "hostId": "host_1",
+                            "coordinates": [-80.0, 25.0],
+                            "start": "2026-07-14T12:00:00Z",
+                            "end": "2026-07-14T13:00:00Z"
+                          }]
+                        }
+                    """.trimIndent()
                 },
                 status = HttpStatusCode.OK,
                 headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
@@ -1812,6 +1826,274 @@ class EventRepositoryHttpTest {
             assertEquals(listOf(100, 100, 1), chunks.map(List<String>::size))
             assertEquals(requestedIds, chunks.flatten())
         }
+    }
+
+    @Test
+    fun timeSlotRead_returns_room_snapshot_when_refresh_is_offline() = runTest {
+        var requestCount = 0
+        val engine = MockEngine { request ->
+            assertEquals("/api/time-slots", request.url.encodedPath)
+            assertEquals("slot_1", request.url.parameters["ids"])
+            requestCount += 1
+            if (requestCount == 2) {
+                respond(
+                    content = "{}",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            } else if (requestCount > 2) {
+                respond(
+                    content = """{"error":"offline"}""",
+                    status = HttpStatusCode.ServiceUnavailable,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            } else {
+                respond(
+                    content = """
+                        {
+                          "timeSlots": [{
+                            "id": "slot_1",
+                            "dayOfWeek": 2,
+                            "daysOfWeek": [2],
+                            "divisions": ["open"],
+                            "startTimeMinutes": 600,
+                            "endTimeMinutes": 660,
+                            "startDate": "2026-07-14T17:00:00Z",
+                            "timeZone": "UTC",
+                            "repeating": false,
+                            "endDate": null,
+                            "scheduledFieldId": "field_1",
+                            "scheduledFieldIds": ["field_1"],
+                            "price": 2500
+                          }]
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+        }
+        val database = EventRepositoryHttp_FakeDatabaseService(
+            EventRepositoryHttp_FakeEventDao(),
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val repository = FieldRepository(
+            MvpApiClient(
+                HttpClient(engine) { configureMvpHttpClient() },
+                "http://example.test",
+                EventRepositoryHttp_InMemoryAuthTokenStore("token"),
+            ),
+            database,
+        )
+
+        val onlineSlot = repository.getTimeSlots(listOf("slot_1")).getOrThrow().single()
+        assertEquals("slot_1", onlineSlot.id)
+        assertEquals(listOf("field_1"), onlineSlot.scheduledFieldIds)
+        assertEquals(2500, onlineSlot.price)
+
+        assertTrue(repository.getTimeSlots(listOf("slot_1")).isFailure)
+
+        val offlineSlot = repository.getTimeSlots(listOf("slot_1")).getOrThrow().single()
+        assertEquals(onlineSlot, offlineSlot)
+    }
+
+    @Test
+    fun timeSlotFieldRead_fetchesEveryPage_and_preservesAll201RowsInServerOrder() = runTest {
+        val requestedOffsets = mutableListOf<Int>()
+        val engine = MockEngine { request ->
+            val offset = request.url.parameters["offset"]?.toIntOrNull() ?: 0
+            requestedOffsets += offset
+            val range = if (offset == 0) 0 until 200 else 200 until 201
+            val rows = range.joinToString(",") { index ->
+                """{"id":"slot_${index.toString().padStart(3, '0')}","dayOfWeek":2,"daysOfWeek":[2],"startTimeMinutes":600,"endTimeMinutes":660,"startDate":"2026-07-14T17:00:00Z","timeZone":"UTC","repeating":false,"endDate":null,"scheduledFieldId":"field_1","scheduledFieldIds":["field_1"],"price":2500}"""
+            }
+            val hasMore = offset == 0
+            val nextOffset = if (hasMore) 200 else 201
+            respond(
+                content = """{"timeSlots":[$rows],"pagination":{"limit":200,"offset":$offset,"nextOffset":$nextOffset,"hasMore":$hasMore}}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repository = FieldRepository(
+            MvpApiClient(
+                HttpClient(engine) { configureMvpHttpClient() },
+                "http://example.test",
+                EventRepositoryHttp_InMemoryAuthTokenStore("token"),
+            ),
+            EventRepositoryHttp_FakeDatabaseService(
+                EventRepositoryHttp_FakeEventDao(),
+                EventRepositoryHttp_FakeUserDataDao(),
+                EventRepositoryHttp_FakeTeamDao(),
+            ),
+        )
+
+        val slots = repository.getTimeSlotsForField("field_1").getOrThrow()
+
+        assertEquals(listOf(0, 200), requestedOffsets)
+        assertEquals(201, slots.size)
+        assertEquals("slot_000", slots.first().id)
+        assertEquals("slot_200", slots.last().id)
+    }
+
+    @Test
+    fun publicRentalFieldRead_keepsExactRequestAssociation_whenPayloadOmitsFieldIds() = runTest {
+        var offline = false
+        val engine = MockEngine {
+            if (offline) {
+                return@MockEngine respond(
+                    content = """{"error":"offline"}""",
+                    status = HttpStatusCode.ServiceUnavailable,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+            respond(
+                content = """{"timeSlots":[{"id":"public_slot","dayOfWeek":2,"daysOfWeek":[2],"startTimeMinutes":600,"endTimeMinutes":660,"startDate":"2026-07-14T17:00:00Z","timeZone":"UTC","repeating":false,"endDate":null,"price":2500}],"pagination":{"limit":200,"offset":0,"nextOffset":1,"hasMore":false}}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repository = FieldRepository(
+            MvpApiClient(
+                HttpClient(engine) { configureMvpHttpClient() },
+                "http://example.test",
+                EventRepositoryHttp_InMemoryAuthTokenStore(),
+            ),
+            EventRepositoryHttp_FakeDatabaseService(
+                EventRepositoryHttp_FakeEventDao(),
+                EventRepositoryHttp_FakeUserDataDao(),
+                EventRepositoryHttp_FakeTeamDao(),
+            ),
+        )
+
+        val onlineSlots = repository.getTimeSlotsForFields(
+            listOf("field_1", "field_2"),
+            rentalOnly = true,
+        ).getOrThrow()
+        assertEquals(listOf("public_slot"), onlineSlots.map { slot -> slot.id })
+        assertEquals(listOf("field_1", "field_2"), onlineSlots.single().scheduledFieldIds)
+        offline = true
+        val offlineSlots = repository.getTimeSlotsForFields(
+            listOf("field_1", "field_2"),
+            rentalOnly = true,
+        ).getOrThrow()
+        assertEquals(listOf("public_slot"), offlineSlots.map { slot -> slot.id })
+        assertEquals(listOf("field_1", "field_2"), offlineSlots.single().scheduledFieldIds)
+        assertTrue(
+            repository.getTimeSlotsForFields(listOf("field_3"), rentalOnly = true).isFailure,
+        )
+    }
+
+    @Test
+    fun successfulEmptyTimeSlotRefresh_replacesStaleSnapshot_authoritatively() = runTest {
+        var requestCount = 0
+        val engine = MockEngine {
+            requestCount += 1
+            when (requestCount) {
+                1 -> respond(
+                    content = """{"timeSlots":[{"id":"stale_slot","dayOfWeek":2,"daysOfWeek":[2],"startTimeMinutes":600,"endTimeMinutes":660,"startDate":"2026-07-14T17:00:00Z","timeZone":"UTC","repeating":false,"endDate":null,"scheduledFieldId":"field_1","scheduledFieldIds":["field_1"],"price":2500}],"pagination":{"limit":200,"offset":0,"nextOffset":1,"hasMore":false}}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+                2 -> respond(
+                    content = """{"timeSlots":[],"pagination":{"limit":200,"offset":0,"nextOffset":0,"hasMore":false}}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+                else -> respond(
+                    content = """{"error":"offline"}""",
+                    status = HttpStatusCode.ServiceUnavailable,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+        }
+        val repository = FieldRepository(
+            MvpApiClient(
+                HttpClient(engine) { configureMvpHttpClient() },
+                "http://example.test",
+                EventRepositoryHttp_InMemoryAuthTokenStore("token"),
+            ),
+            EventRepositoryHttp_FakeDatabaseService(
+                EventRepositoryHttp_FakeEventDao(),
+                EventRepositoryHttp_FakeUserDataDao(),
+                EventRepositoryHttp_FakeTeamDao(),
+            ),
+        )
+
+        assertEquals(listOf("stale_slot"), repository.getTimeSlotsForField("field_1").getOrThrow().map { it.id })
+        assertTrue(repository.getTimeSlotsForField("field_1").getOrThrow().isEmpty())
+        assertTrue(repository.getTimeSlotsForField("field_1").getOrThrow().isEmpty())
+    }
+
+    @Test
+    fun timeSlotCrud_persistsRoomBeforeReturning_and_deleteRemovesTheScopedRecord() = runTest {
+        val engine = MockEngine { request ->
+            val price = if (request.method == HttpMethod.Patch) 3500 else 2500
+            when (request.method) {
+                HttpMethod.Post, HttpMethod.Patch -> respond(
+                    // Mutation responses are allowed to omit the association; the request owns it.
+                    content = """{"id":"slot_crud","dayOfWeek":2,"daysOfWeek":[2],"startTimeMinutes":600,"endTimeMinutes":660,"startDate":"2026-07-14T17:00:00Z","timeZone":"UTC","repeating":false,"endDate":null,"price":$price}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+                HttpMethod.Delete -> respond(
+                    content = "",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Text.Plain.toString()),
+                )
+                HttpMethod.Get -> respond(
+                    content = """{"error":"offline"}""",
+                    status = HttpStatusCode.ServiceUnavailable,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+                else -> error("Unexpected request: ${request.method} ${request.url}")
+            }
+        }
+        val database = EventRepositoryHttp_FakeDatabaseService(
+            EventRepositoryHttp_FakeEventDao(),
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val repository = FieldRepository(
+            MvpApiClient(
+                HttpClient(engine) { configureMvpHttpClient() },
+                "http://example.test",
+                EventRepositoryHttp_InMemoryAuthTokenStore("token"),
+            ),
+            database,
+        )
+        val request = TimeSlot(
+            id = "slot_crud",
+            dayOfWeek = 2,
+            daysOfWeek = listOf(2),
+            startTimeMinutes = 600,
+            endTimeMinutes = 660,
+            startDate = Instant.parse("2026-07-14T17:00:00Z"),
+            repeating = false,
+            endDate = null,
+            scheduledFieldId = "field_1",
+            scheduledFieldIds = listOf("field_1"),
+            price = 2500,
+        )
+
+        val created = repository.createTimeSlot(request).getOrThrow()
+        assertEquals(listOf("field_1"), created.scheduledFieldIds)
+        val updated = repository.updateTimeSlot(request.copy(price = 3500)).getOrThrow()
+        assertEquals(3500, updated.price)
+        assertEquals(listOf("field_1"), updated.scheduledFieldIds)
+        assertEquals(
+            3500,
+            repository.getTimeSlots(listOf("slot_crud")).getOrThrow().single().price,
+        )
+
+        repository.deleteTimeSlot("slot_crud").getOrThrow()
+        val viewer = database.getCatalogCacheDao.getActiveViewer()?.viewerKey ?: error("Missing cache viewer")
+        assertTrue(
+            database.getCatalogCacheDao
+                .getTimeSlots(listOf("slot_crud"), viewer, "authenticated")
+                .isEmpty(),
+        )
     }
 
     @Test

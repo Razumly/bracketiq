@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.emptyPreferences
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.RegistrationProgressDraft
+import com.razumly.mvp.core.data.dataTypes.CatalogQueryCacheEntry
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -19,6 +20,7 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
+import com.razumly.mvp.core.data.dataTypes.daos.CatalogCacheDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
@@ -183,7 +185,9 @@ private class UserRepositoryHttp_UnusedTeamDao : TeamDao {
     override suspend fun upsertTeamsWithRelations(teams: List<Team>) {}
 }
 
-private class UserRepositoryHttp_FakeDatabaseService : DatabaseService {
+private class UserRepositoryHttp_FakeDatabaseService(
+    override val getCatalogCacheDao: CatalogCacheDao = InMemoryCatalogCacheDao(),
+) : DatabaseService {
     override val getMatchDao: MatchDao get() = error("unused")
     override val getTeamDao: TeamDao = UserRepositoryHttp_UnusedTeamDao()
     override val getFieldDao: FieldDao get() = error("unused")
@@ -290,8 +294,21 @@ class UserRepositoryHttpTest {
             install(ContentNegotiation) { json(jsonMVP) }
         }
         val currentUserDataSource = CurrentUserDataSource(UserRepositoryHttp_InMemoryPreferencesDataStore())
+        val catalogDao = InMemoryCatalogCacheDao()
+        catalogDao.activateViewer("authenticated:old")
+        catalogDao.upsertCatalogQuery(
+            CatalogQueryCacheEntry(
+                cacheKey = "old-query",
+                viewerKey = "authenticated:old",
+                resourceType = "organizations",
+                projectionKey = "detail",
+                orderedIdsJson = "[]",
+                payloadJson = "[]",
+                isComplete = true,
+            ),
+        )
         val repository = UserRepository(
-            databaseService = UserRepositoryHttp_FakeDatabaseService(),
+            databaseService = UserRepositoryHttp_FakeDatabaseService(catalogDao),
             api = MvpApiClient(client, "http://localhost", tokenStore),
             tokenStore = tokenStore,
             currentUserDataSource = currentUserDataSource,
@@ -336,6 +353,8 @@ class UserRepositoryHttpTest {
         assertEquals("", tokenStore.get())
         assertEquals("", currentUserDataSource.getPushToken().first())
         assertEquals("", currentUserDataSource.getPushTarget().first())
+        assertEquals("anonymous", catalogDao.getActiveViewer()?.viewerKey)
+        assertNull(catalogDao.getCatalogQuery("old-query", "authenticated:old"))
         currentUserDataSource.saveUserId("user_1")
         assertNull(currentUserDataSource.loadRegistrationProgress(logoutRegistrationDraftKey))
         currentUserDataSource.saveUserId("user_2")

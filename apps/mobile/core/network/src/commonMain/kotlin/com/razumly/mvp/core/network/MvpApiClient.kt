@@ -24,6 +24,16 @@ class MvpApiClient(
     internal val baseUrl: String,
     val tokenStore: AuthTokenStore,
 ) {
+    /**
+     * Captures the bearer token once for a logical request/cache transaction. Callers that persist
+     * a response can therefore bind the HTTP identity and cache viewer to the same credential.
+     */
+    suspend fun openSession(): MvpApiSession = MvpApiSession(
+        http = http,
+        baseUrl = baseUrl,
+        token = tokenStore.get(),
+    )
+
     fun urlFor(path: String): String {
         val b = baseUrl.trimEnd('/')
         val p = path.trimStart('/')
@@ -130,6 +140,58 @@ class MvpApiClient(
             contentType(ContentType.Application.Json)
             if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
             setBody(body)
+        }.bodyAsText()
+    }
+}
+
+class MvpApiSession @PublishedApi internal constructor(
+    @PublishedApi internal val http: HttpClient,
+    @PublishedApi internal val baseUrl: String,
+    val token: String,
+) {
+    @PublishedApi
+    internal fun urlFor(path: String): String {
+        val base = baseUrl.trimEnd('/')
+        val normalizedPath = path.trimStart('/')
+        return "$base/$normalizedPath"
+    }
+
+    suspend inline fun <reified Res> get(path: String): Res = http.get(urlFor(path)) {
+        if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+    }.body()
+
+    suspend inline fun <reified Req : Any, reified Res> post(path: String, body: Req): Res =
+        http.post(urlFor(path)) {
+            contentType(ContentType.Application.Json)
+            if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+            setBody(body)
+        }.body()
+
+    suspend inline fun <reified Req : Any> postNoResponse(path: String, body: Req) {
+        http.post(urlFor(path)) {
+            contentType(ContentType.Application.Json)
+            if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+            setBody(body)
+        }.bodyAsText()
+    }
+
+    suspend inline fun <reified Req : Any, reified Res> patch(path: String, body: Req): Res =
+        http.patch(urlFor(path)) {
+            contentType(ContentType.Application.Json)
+            if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+            setBody(body)
+        }.body()
+
+    suspend inline fun <reified Req : Any, reified Res> delete(path: String, body: Req): Res =
+        http.delete(urlFor(path)) {
+            contentType(ContentType.Application.Json)
+            if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+            setBody(body)
+        }.body()
+
+    suspend fun deleteNoResponse(path: String) {
+        http.delete(urlFor(path)) {
+            if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
         }.bodyAsText()
     }
 }
