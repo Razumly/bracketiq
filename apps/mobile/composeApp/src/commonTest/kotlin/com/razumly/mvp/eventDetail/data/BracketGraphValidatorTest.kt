@@ -74,4 +74,42 @@ class BracketGraphValidatorTest {
 
         assertTrue(candidates.contains("leaf"))
     }
+
+    @Test
+    fun filterValidNextMatchCandidates_excludes_candidate_that_would_create_cycle() {
+        val nodes = listOf(
+            BracketNode(id = "source"),
+            BracketNode(id = "candidate", winnerNextMatchId = "middle"),
+            BracketNode(id = "middle", winnerNextMatchId = "source"),
+            BracketNode(id = "leaf"),
+        )
+
+        val candidates = filterValidNextMatchCandidates(
+            sourceId = "source",
+            nodes = nodes,
+            lane = BracketLane.WINNER,
+        )
+
+        assertFalse(candidates.contains("candidate"))
+        assertTrue(candidates.contains("leaf"))
+    }
+
+    @Test
+    fun filterValidNextMatchCandidates_ignores_unrelated_existing_errors_when_checking_cycle() {
+        val nodes = listOf(
+            BracketNode(id = "source"),
+            BracketNode(id = "candidate", winnerNextMatchId = "source"),
+            BracketNode(id = "leaf"),
+            BracketNode(id = "other", winnerNextMatchId = "missing"),
+        )
+
+        val candidates = filterValidNextMatchCandidates(
+            sourceId = "source",
+            nodes = nodes,
+            lane = BracketLane.LOSER,
+        )
+
+        assertFalse(candidates.contains("candidate"))
+        assertTrue(candidates.contains("leaf"))
+    }
 }

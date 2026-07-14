@@ -82,6 +82,60 @@ private fun detectCycle(nodeIds: List<String>, edges: Collection<DirectedEdge>):
     return visited != nodeIds.size
 }
 
+private fun knownDirectedEdges(nodes: List<BracketNode>): Set<DirectedEdge> {
+    val nodeIds = nodes.mapTo(mutableSetOf()) { node -> node.id }
+    val edges = linkedSetOf<DirectedEdge>()
+
+    fun addKnownEdge(sourceId: String, targetId: String) {
+        if (sourceId != targetId && sourceId in nodeIds && targetId in nodeIds) {
+            edges += DirectedEdge(sourceId = sourceId, targetId = targetId)
+        }
+    }
+
+    nodes.forEach { node ->
+        normalizeRef(node.winnerNextMatchId)?.let { targetId ->
+            addKnownEdge(node.id, targetId)
+        }
+        normalizeRef(node.loserNextMatchId)?.let { targetId ->
+            addKnownEdge(node.id, targetId)
+        }
+        normalizeRef(node.previousLeftId)?.let { sourceId ->
+            addKnownEdge(sourceId, node.id)
+        }
+        normalizeRef(node.previousRightId)?.let { sourceId ->
+            addKnownEdge(sourceId, node.id)
+        }
+    }
+
+    return edges
+}
+
+private fun hasDirectedPath(
+    edges: Collection<DirectedEdge>,
+    startId: String,
+    targetId: String,
+): Boolean {
+    val outgoing = edges.groupBy(
+        keySelector = DirectedEdge::sourceId,
+        valueTransform = DirectedEdge::targetId,
+    )
+    val pending = ArrayDeque<String>().apply { addLast(startId) }
+    val visited = mutableSetOf<String>()
+
+    while (pending.isNotEmpty()) {
+        val currentId = pending.removeFirst()
+        if (!visited.add(currentId)) {
+            continue
+        }
+        if (currentId == targetId) {
+            return true
+        }
+        outgoing[currentId].orEmpty().forEach(pending::addLast)
+    }
+
+    return false
+}
+
 fun validateAndNormalizeBracketGraph(nodes: List<BracketNode>): BracketValidationResult {
     val nodeById = nodes.associateBy { node -> node.id }
     val errors = mutableListOf<BracketValidationError>()
@@ -202,12 +256,37 @@ fun filterValidNextMatchCandidates(
         BracketLane.WINNER -> normalizeRef(sourceNode.loserNextMatchId)
         BracketLane.LOSER -> normalizeRef(sourceNode.winnerNextMatchId)
     }
+    val graphWithoutEditedLane = nodes.map { node ->
+        if (node.id != normalizedSourceId) {
+            node
+        } else {
+            when (lane) {
+                BracketLane.WINNER -> node.copy(winnerNextMatchId = null)
+                BracketLane.LOSER -> node.copy(loserNextMatchId = null)
+            }
+        }
+    }
+    val edgesWithoutEditedLane = knownDirectedEdges(graphWithoutEditedLane)
 
     return nodes.map { it.id }.filter { candidateId ->
         if (candidateId == normalizedSourceId) {
             return@filter false
         }
         if (otherLaneTarget != null && otherLaneTarget == candidateId) {
+            return@filter false
+        }
+
+        val candidateEdge = DirectedEdge(
+            sourceId = normalizedSourceId,
+            targetId = candidateId,
+        )
+        val introducesCycle = candidateEdge !in edgesWithoutEditedLane &&
+            hasDirectedPath(
+                edges = edgesWithoutEditedLane,
+                startId = candidateId,
+                targetId = normalizedSourceId,
+            )
+        if (introducesCycle) {
             return@filter false
         }
 
