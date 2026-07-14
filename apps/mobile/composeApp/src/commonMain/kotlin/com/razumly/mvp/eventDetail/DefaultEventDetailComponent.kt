@@ -590,6 +590,23 @@ class DefaultEventDetailComponent(
         },
         setMessage = { message -> _errorState.value = ErrorMessage(message) },
     )
+    private val inviteActionHandler = EventInviteActionHandler(
+        scope = scope,
+        inviteCoordinator = eventInviteCoordinator,
+        participantBootstrapCoordinator = participantBootstrapCoordinator,
+        userRepository = userRepository,
+        teamRepository = teamRepository,
+        eventRepository = eventRepository,
+        loadingHandler = { loadingHandler },
+        selectedEvent = { selectedEvent.value },
+        eventWithRelations = { eventWithRelations.value },
+        selectedDivisionId = { selectedDivision.value },
+        currentUserId = { currentUser.value.id },
+        requireSelectedWeeklyOccurrence = { event, errorMessage ->
+            requireSelectedWeeklyOccurrence(event, errorMessage)
+        },
+        setError = { error -> _errorState.value = error },
+    )
 
     private val userTeams = relationStateCoordinator.currentUserTeams
 
@@ -1683,203 +1700,32 @@ class DefaultEventDetailComponent(
         }
     }
 
-    override fun searchUsers(query: String) {
-        if (normalizedInviteSearchQuery(query) == null) {
-            eventInviteCoordinator.clearSuggestedUsers()
-            return
-        }
-        scope.launch {
-            eventInviteCoordinator.searchUsers(
-                query = query,
-                searchPlayers = userRepository::searchPlayers,
-            )?.let { errorMessage -> _errorState.value = errorMessage }
-        }
-    }
+    override fun searchUsers(query: String) = inviteActionHandler.searchUsers(query)
 
-    override fun searchInviteTeams(query: String) {
-        val event = selectedEvent.value
-        if (normalizedInviteSearchQuery(query, minLength = 2) == null || !event.teamSignup) {
-            eventInviteCoordinator.clearInviteTeamSearch()
-            return
-        }
-        scope.launch {
-            eventInviteCoordinator.searchInviteTeams(
-                query = query,
-                event = event,
-                organizationId = currentInviteOrganizationId(event),
-                sportName = currentInviteSportName(event),
-                excludeTeamIds = eventParticipantTeamIdsForInviteSearch(event),
-                searchTeams = { searchQuery, eventId, organizationId, sportName, excludeTeamIds ->
-                    teamRepository.searchTeamsForEventInvite(
-                        query = searchQuery,
-                        eventId = eventId,
-                        organizationId = organizationId,
-                        sportName = sportName,
-                        excludeTeamIds = excludeTeamIds,
-                    )
-                },
-            )?.let { errorMessage -> _errorState.value = errorMessage }
-        }
-    }
+    override fun searchInviteTeams(query: String) = inviteActionHandler.searchInviteTeams(query)
 
-    override fun inviteTeamToEvent(team: Team) {
-        scope.launch {
-            val event = selectedEvent.value
-            val occurrence = if (isWeeklyParentEvent(event)) {
-                requireSelectedWeeklyOccurrence(
-                    event = event,
-                    errorMessage = "Select an occurrence before inviting a team.",
-                ) ?: return@launch
-            } else {
-                null
-            }
+    override fun inviteTeamToEvent(team: Team) = inviteActionHandler.inviteTeamToEvent(team)
 
-            _errorState.value = eventInviteCoordinator.inviteTeamToEvent(
-                team = team,
-                event = event,
-                existingTeamIds = eventParticipantTeamIdsForInviteSearch(event),
-                selectedDivisionId = selectedDivision.value,
-                occurrence = occurrence,
-                loadingHandler = loadingHandler,
-                addTeam = eventRepository::addTeamToEvent,
-                refreshAfterMutation = participantBootstrapCoordinator::refreshEventAfterParticipantMutation,
-            )
-        }
-    }
+    override fun invitePlayerToEvent(user: UserData) = inviteActionHandler.invitePlayerToEvent(user)
 
-    override fun invitePlayerToEvent(user: UserData) {
-        scope.launch {
-            val event = selectedEvent.value
-            val occurrence = if (isWeeklyParentEvent(event)) {
-                requireSelectedWeeklyOccurrence(
-                    event = event,
-                    errorMessage = "Select an occurrence before inviting a player.",
-                ) ?: return@launch
-            } else {
-                null
-            }
-
-            _errorState.value = eventInviteCoordinator.invitePlayerToEvent(
-                user = user,
-                event = event,
-                existingUserIds = eventParticipantUserIdsForInviteSearch(event),
-                selectedDivisionId = selectedDivision.value,
-                occurrence = occurrence,
-                loadingHandler = loadingHandler,
-                addPlayer = eventRepository::addPlayerToEvent,
-                refreshAfterMutation = participantBootstrapCoordinator::refreshEventAfterParticipantMutation,
-            )
-        }
-    }
-
-    override fun invitePlayerToEventByEmail(firstName: String, lastName: String, email: String) {
-        scope.launch {
-            val event = selectedEvent.value
-            _errorState.value = eventInviteCoordinator.invitePlayerToEventByEmail(
-                firstName = firstName,
-                lastName = lastName,
-                email = email,
-                event = event,
-                loadingHandler = loadingHandler,
-                createInvite = { targetEvent, normalizedEmail, normalizedFirstName, normalizedLastName ->
-                    createEventPlayerInvite(
-                        event = targetEvent,
-                        userId = null,
-                        email = normalizedEmail,
-                        firstName = normalizedFirstName,
-                        lastName = normalizedLastName,
-                    )
-                },
-            )
-        }
-    }
-
-    private fun currentInviteOrganizationId(event: Event = selectedEvent.value): String? {
-        return resolveEventInviteOrganizationId(
-            event = event,
-            relationOrganizationId = eventWithRelations.value.organization?.id,
-        )
-    }
-
-    private fun currentInviteSportName(event: Event = selectedEvent.value): String? {
-        return resolveEventInviteSportName(
-            event = event,
-            relationSportName = eventWithRelations.value.sport?.name,
-        )
-    }
-
-    private fun eventParticipantTeamIdsForInviteSearch(event: Event = selectedEvent.value): Set<String> =
-        eventParticipantTeamIdsForInviteSearch(
-            event = event,
-            teams = eventWithRelations.value.teams,
-        )
-
-    private fun eventParticipantUserIdsForInviteSearch(event: Event = selectedEvent.value): Set<String> =
-        eventParticipantUserIdsForInviteSearch(
-            event = event,
-            players = eventWithRelations.value.players,
-        )
-
-    private suspend fun createEventPlayerInvite(
-        event: Event,
-        userId: String?,
-        email: String?,
-        firstName: String?,
-        lastName: String?,
-    ): Result<List<Invite>> {
-        val invite = buildEventPlayerInviteRequest(
-            event = event,
-            organizationId = currentInviteOrganizationId(event),
-            userId = userId,
-            email = email,
-            firstName = firstName,
-            lastName = lastName,
-            createdBy = currentUser.value.id,
-        ).getOrElse { throwable ->
-            return Result.failure(throwable)
-        }
-        return userRepository.createInvites(
-            invites = listOf(invite),
-        )
-    }
+    override fun invitePlayerToEventByEmail(firstName: String, lastName: String, email: String) =
+        inviteActionHandler.invitePlayerToEventByEmail(firstName, lastName, email)
 
     override suspend fun addPendingStaffInvite(
         firstName: String,
         lastName: String,
         email: String,
         roles: Set<EventStaffRole>,
-    ): Result<Unit> = runCatching {
-        val normalizedDraft = eventInviteCoordinator.pendingStaffInviteDraft(
-            firstName = firstName,
-            lastName = lastName,
-            email = email,
-            roles = roles,
-        ).getOrThrow()
-
-        val event = editDraftCoordinator.editedEvent.value
-        val assignedUserIds = normalizedDraft.roles
-            .flatMap { role -> event.assignedUserIdsForRole(role) }
-            .distinct()
-        if (assignedUserIds.isNotEmpty()) {
-            val matches = userRepository.findEmailMembership(
-                emails = listOf(normalizedDraft.email),
-                userIds = assignedUserIds,
-            ).getOrThrow()
-            normalizedDraft.roles.forEach { role ->
-                val roleUserIds = event.assignedUserIdsForRole(role)
-                if (matches.any { match -> roleUserIds.contains(match.userId) }) {
-                    error("${normalizedDraft.email} is already added in the ${role.conflictListLabel()}.")
-                }
-            }
-        }
-
-        eventInviteCoordinator.addPendingStaffInviteDraft(normalizedDraft)
-    }.onFailure { error ->
-        _errorState.value = ErrorMessage(error.userMessage("Unable to add staff invite."))
-    }
+    ): Result<Unit> = inviteActionHandler.addPendingStaffInvite(
+        firstName = firstName,
+        lastName = lastName,
+        email = email,
+        roles = roles,
+        editedEvent = editDraftCoordinator.editedEvent.value,
+    )
 
     override fun removePendingStaffInvite(email: String, role: EventStaffRole?) {
-        eventInviteCoordinator.removePendingStaffInvite(email, role)
+        inviteActionHandler.removePendingStaffInvite(email, role)
     }
 
     override fun updateEvent() {
