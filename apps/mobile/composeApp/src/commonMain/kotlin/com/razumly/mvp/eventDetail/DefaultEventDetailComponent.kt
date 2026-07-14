@@ -77,7 +77,6 @@ import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.data.repositories.userMessage
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.network.MvpApiClient
-import com.razumly.mvp.core.network.dto.TeamCheckInDto
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
@@ -112,7 +111,6 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlin.time.Clock
-import kotlin.time.Duration.Companion.minutes
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
@@ -228,6 +226,11 @@ class DefaultEventDetailComponent(
     private val detailHydrationCoordinator = EventDetailHydrationCoordinator()
     private val joinConfirmationCoordinator = EventJoinConfirmationCoordinator()
     private val eventInviteCoordinator = EventInviteCoordinator()
+    private val eventTeamCheckInCoordinator = EventTeamCheckInCoordinator(
+        getEventTeamCheckInsRequest = matchRepository::getEventTeamCheckIns,
+        checkInEventTeamRequest = matchRepository::checkInEventTeam,
+        scope = scope,
+    )
     override val suggestedUsers = eventInviteCoordinator.suggestedUsers
     override val inviteTeamSuggestions = eventInviteCoordinator.inviteTeamSuggestions
     override val inviteTeamsLoading = eventInviteCoordinator.inviteTeamsLoading
@@ -261,34 +264,19 @@ class DefaultEventDetailComponent(
     }
 
     override fun dismissEventTeamCheckInDialog() {
-        _showEventTeamCheckInDialog.value = false
+        eventTeamCheckInCoordinator.dismissDialog()
     }
 
     override fun confirmEventTeamCheckIn() {
-        if (_eventTeamCheckInSaving.value) return
         val currentEvent = selectedEvent.value
         val eventTeamId = _currentUserManagedEventTeamId.value ?: resolveCurrentUserManagedEventTeamId()
-        if (!eventTeamCheckInEnabled(currentEvent) || eventTeamId.isNullOrBlank()) {
-            _showEventTeamCheckInDialog.value = false
-            return
-        }
-        _eventTeamCheckInSaving.value = true
-        scope.launch {
-            try {
-                matchRepository.checkInEventTeam(
-                    eventId = currentEvent.id,
-                    eventTeamId = eventTeamId,
-                ).onSuccess { checkIn ->
-                    confirmedEventTeamCheckInPromptKeys += eventTeamCheckInPromptKey(currentEvent.id, eventTeamId)
-                    _eventTeamCheckIns.value = _eventTeamCheckIns.value + (eventTeamId to checkIn)
-                    _showEventTeamCheckInDialog.value = false
-                }.onFailure { error ->
-                    _errorState.value = ErrorMessage("Failed to check in team: ${error.userMessage()}")
-                }
-            } finally {
-                _eventTeamCheckInSaving.value = false
-            }
-        }
+        eventTeamCheckInCoordinator.confirm(
+            event = currentEvent,
+            eventTeamId = eventTeamId,
+            onFailure = { error ->
+                _errorState.value = ErrorMessage("Failed to check in team: ${error.userMessage()}")
+            },
+        )
     }
 
     private fun updateCurrentUserManagedEventTeam() {
@@ -319,70 +307,23 @@ class DefaultEventDetailComponent(
         }?.team?.id
     }
 
-    private fun eventTeamCheckInEnabled(event: Event): Boolean =
-        event.teamSignup && event.teamCheckInMode.name == "EVENT"
-
-    private fun eventTeamCheckInPromptKey(eventId: String, eventTeamId: String): String =
-        "${eventId.trim()}:${eventTeamId.trim()}"
-
-    private fun eventTeamHasCheckedIn(eventId: String, eventTeamId: String): Boolean {
-        if (eventTeamCheckInPromptKey(eventId, eventTeamId) in confirmedEventTeamCheckInPromptKeys) return true
-        val checkIn = _eventTeamCheckIns.value[eventTeamId] ?: return false
-        return checkIn.status?.trim()?.uppercase().orEmpty() in setOf("", "CHECKED_IN")
-    }
-
-    private fun isEventTeamCheckInWindowOpen(event: Event): Boolean {
-        val start = event.start
-        val openAt = start - event.teamCheckInOpenMinutesBefore.coerceAtLeast(0).minutes
-        return Clock.System.now() >= openAt
-    }
-
     private fun refreshEventTeamCheckInsIfAllowed() {
         val event = selectedEvent.value
-        if (!eventTeamCheckInEnabled(event)) {
-            lastLoadedEventCheckInKey = null
-            _eventTeamCheckIns.value = emptyMap()
-            return
-        }
         val canViewCheckIns = canManageParticipantData(event = event) ||
             isCurrentUserEventOfficial(currentUser.value.id, event)
-        if (!canViewCheckIns) {
-            return
-        }
-        val loadKey = event.id.trim()
-        if (loadKey.isBlank() || lastLoadedEventCheckInKey == loadKey) {
-            return
-        }
-        lastLoadedEventCheckInKey = loadKey
-        scope.launch {
-            matchRepository.getEventTeamCheckIns(event.id).onSuccess { response ->
-                _eventTeamCheckIns.value = response.checkIns
-                    .mapNotNull { checkIn ->
-                        val eventTeamId = checkIn.eventTeamId?.trim()?.takeIf(String::isNotBlank)
-                        eventTeamId?.let { it to checkIn }
-                    }
-                    .toMap()
-            }.onFailure {
-                // Managers/coaches can submit event check-ins, but read access is host/official scoped.
-            }
-        }
+        eventTeamCheckInCoordinator.refreshIfAllowed(
+            event = event,
+            canViewCheckIns = canViewCheckIns,
+        )
     }
 
     private fun evaluateEventTeamCheckInPrompt() {
         val event = selectedEvent.value
-        if (!eventTeamCheckInEnabled(event) || !isEventTeamCheckInWindowOpen(event)) {
-            _showEventTeamCheckInDialog.value = false
-            return
-        }
         val eventTeamId = _currentUserManagedEventTeamId.value ?: resolveCurrentUserManagedEventTeamId()
-        if (eventTeamId.isNullOrBlank() || eventTeamHasCheckedIn(event.id, eventTeamId)) {
-            _showEventTeamCheckInDialog.value = false
-            return
-        }
-        val promptKey = eventTeamCheckInPromptKey(event.id, eventTeamId)
-        if (shownEventTeamCheckInPromptKeys.add(promptKey)) {
-            _showEventTeamCheckInDialog.value = true
-        }
+        eventTeamCheckInCoordinator.evaluatePrompt(
+            event = event,
+            eventTeamId = eventTeamId,
+        )
     }
 
     override fun updateEventRegistrationQuestionAnswer(questionId: String, answer: String) {
@@ -740,21 +681,14 @@ class DefaultEventDetailComponent(
         }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    private val _eventTeamCheckIns = MutableStateFlow<Map<String, TeamCheckInDto>>(emptyMap())
-    override val eventTeamCheckIns = _eventTeamCheckIns.asStateFlow()
+    override val eventTeamCheckIns = eventTeamCheckInCoordinator.eventTeamCheckIns
 
-    private val _showEventTeamCheckInDialog = MutableStateFlow(false)
-    override val showEventTeamCheckInDialog = _showEventTeamCheckInDialog.asStateFlow()
+    override val showEventTeamCheckInDialog = eventTeamCheckInCoordinator.showEventTeamCheckInDialog
 
-    private val _eventTeamCheckInSaving = MutableStateFlow(false)
-    override val eventTeamCheckInSaving = _eventTeamCheckInSaving.asStateFlow()
+    override val eventTeamCheckInSaving = eventTeamCheckInCoordinator.eventTeamCheckInSaving
 
     private val _currentUserManagedEventTeamId = MutableStateFlow<String?>(null)
     override val currentUserManagedEventTeamId = _currentUserManagedEventTeamId.asStateFlow()
-
-    private val shownEventTeamCheckInPromptKeys = mutableSetOf<String>()
-    private val confirmedEventTeamCheckInPromptKeys = mutableSetOf<String>()
-    private var lastLoadedEventCheckInKey: String? = null
 
     private val cachedCurrentUserRegistrations = selectedEvent
         .map { selected -> selected.id.trim() }

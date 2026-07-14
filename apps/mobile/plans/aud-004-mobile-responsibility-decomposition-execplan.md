@@ -17,7 +17,11 @@ After this plan is complete, users must see the same event overview, registratio
 - [x] (2026-07-14 13:35Z) Milestone 1: extracted the pure stage-selection, weekly-schedule presentation, onboarding/role, primary-action, and match-day rules above `EventDetailScreen()` with direct tests. The route fell from 4,137 to 3,357 lines; all 30 focused tests, iOS simulator compilation, Android debug assembly, and diff checks pass.
 - [x] (2026-07-14 14:00Z) Milestone 2a: extracted the detail-tab renderer into a typed presentation host, kept flow collection and route-local selection in `EventDetailScreen`, and added six direct regressions for tab availability, initial-tab fallback, and schedule-division filtering. The route fell from 3,357 to 2,891 lines; all 36 focused tests, iOS simulator compilation, Android debug assembly, and static/diff checks pass.
 - [x] (2026-07-14 14:30Z) Milestone 2b: extracted overview/edit, sticky-action, and overlay/dialog presentation hosts without moving business state into composables. The route fell from 2,891 to 2,192 lines; all 46 focused tests, iOS simulator compilation, Android debug assembly, and static/diff checks pass.
-- [ ] Milestone 3: after APP-009 is integrated, extract event-team check-in, Room-backed relation state, participant hydration, and lifecycle bindings from `DefaultEventDetailComponent` while preserving its public interface and existing coordinators.
+- [ ] Milestone 3: extract component-owned event-team check-in, Room-backed relation state, participant hydration, and lifecycle bindings from `DefaultEventDetailComponent` while preserving its public interface and existing coordinators.
+  - [x] (2026-07-14 14:40Z) Milestone 3a: integrated APP-009 commit `63451562` as `5b862d6d`, then extracted event-team check-in state, prompt policy, loading, and remote execution into `EventTeamCheckInCoordinator`. The component fell from 3,439 to 3,373 lines; all 28 focused coordinator/membership tests, four iOS migration tests, iOS simulator compilation, Android debug assembly, and diff checks pass.
+  - [ ] Milestone 3b: extract canonical Room-backed event/user/team relation derivation.
+  - [ ] Milestone 3c: move participant/bootstrap orchestration behind the existing hydration and participant coordinators.
+  - [ ] Milestone 3d: replace the large component `init` collector block with narrow lifecycle bindings.
 - [ ] Milestone 4: mechanically separate repository contracts/public models and private wire DTO mappings from implementation without changing names, serialization, or dependency-injection bindings.
 - [ ] Milestone 5: split `EventRepository` behind its existing facade into Room store, remote gateway, participant synchronization, registration mutation, event catalog, and session-cache collaborators.
 - [ ] Milestone 6: split `BillingRepository` behind `IBillingRepository` into checkout/signing, rental, bill/payment, discount, catalog, organization/review, and refund collaborators.
@@ -58,6 +62,12 @@ After this plan is complete, users must see the same event overview, registratio
 - Observation: the sticky overview action contains presentation policy that benefits from a small pure rule boundary.
   Evidence: `resolveEventDetailStickyPrimaryAction` preserves the original primary-action priority and enablement, while ten new host-rule tests cover edit availability, delete/signature copy, and sticky-action selection.
 
+- Observation: APP-009 applies cleanly to the isolated screen branch and unlocks membership-dependent component work without a conflict merge.
+  Evidence: cherry-picking `63451562` created integrated commit `5b862d6d` with all 28 APP-009 paths unchanged and no conflicts; the integrated schema-93 iOS migration suite passes four of four tests.
+
+- Observation: one paid-team mobile join integration test is already red on the exact integrated baseline and is unrelated to event-team check-in extraction.
+  Evidence: `EventDetailMobileJoinFlowTest.startTeamRegistration_forPaidOpenTeam_createsTeamRegistrationPurchaseIntent` expects a pending team-registration ID, but the Android unit-test payment processor immediately reports missing payment setup and clears it. The test fails identically at untouched commit `5b862d6d` and after this checkpoint; the other 19 tests in that class pass.
+
 ## Decision Log
 
 - Decision: continue the existing coordinator architecture and keep `EventDetailComponent`, `IBillingRepository`, and `IEventRepository` source-compatible.
@@ -96,9 +106,13 @@ After this plan is complete, users must see the same event overview, registratio
   Rationale: animation height and visibility are renderer concerns, but flow collection, dialog flags, selected entities, report drafts, and component actions remain at the route boundary. This keeps both new hosts lifecycle-free and source-compatible with the existing component.
   Date/Author: 2026-07-14 / Codex
 
+- Decision: extract check-in execution and its mutable UI state without moving managed-team relation derivation into the same coordinator.
+  Rationale: prompt history, check-in snapshots, save state, and the two check-in HTTP calls form one cohesive workflow. Resolving which team the user manages depends on canonical Room relations and belongs to the next state-graph checkpoint rather than a network execution coordinator.
+  Date/Author: 2026-07-14 / Codex
+
 ## Outcomes & Retrospective
 
-Research and sequencing are complete, and Milestones 1, 2a, and 2b are implemented and validated. `EventDetailScreen.kt` now owns 2,192 lines instead of 4,137. Pure rules remain in the three Milestone 1 files; the detail tabs render through `EventDetailTabsHost.kt`; and overview/edit, sticky action, and dialogs render through the two new typed hosts. The latest extraction preserved behavior across 46 focused tests, an iOS simulator compilation, and an Android debug assembly. The APP-009 checkpoint exists on `codex/critical-audit-remediation` at commit `63451562`; this isolated screen branch intentionally remains on pre-APP-009 ancestry, so Milestone 3 must begin from an integrated branch that contains both histories. Milestones 3 through 7 remain.
+Research and sequencing are complete, Milestones 1, 2a, and 2b are validated, and Milestone 3 is underway. `EventDetailScreen.kt` owns 2,192 lines instead of 4,137. APP-009 is now integrated in this branch as `5b862d6d`, and the first component checkpoint moves the complete event-team check-in workflow into a 146-line coordinator with nine direct regressions; `DefaultEventDetailComponent.kt` now owns 3,373 lines instead of 3,439. Canonical relation derivation, participant/bootstrap orchestration, and lifecycle bindings remain in Milestone 3, followed by Milestones 4 through 7. Five top-level milestones remain.
 
 ## Context and Orientation
 
@@ -106,7 +120,7 @@ Work from `/Users/elesesy/StudioProjects/mvp-app-critical-audit` on the current 
 
 `composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt` is the Compose route. It collects component flows, owns transient tab/dialog UI state, derives presentation, and assembles typed state and callback containers for focused sibling render hosts. Pure division/stage/weekly/guide/role rules, detail tabs, overview/edit, sticky action, and overlay/dialog rendering now live in focused sibling files. The route does not fetch data directly.
 
-`composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/DefaultEventDetailComponent.kt` is the concrete Decompose component. A Decompose component is a lifecycle-aware object that exposes observable state and actions to a screen. This component assembles existing coordinators, binds Room observation and lifecycle collectors, refreshes event details and participants, owns realtime subscriptions, and delegates registration, billing, editing, publication, match, and participant actions.
+`composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/DefaultEventDetailComponent.kt` is the concrete Decompose component. A Decompose component is a lifecycle-aware object that exposes observable state and actions to a screen. This component assembles existing coordinators, binds Room observation and lifecycle collectors, refreshes event details and participants, owns realtime subscriptions, and delegates registration, billing, editing, publication, match, participant, and now event-team check-in actions.
 
 `core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/EventRepository.kt` implements event cache observation, remote hydration, event CRUD/search, participants/compliance, registration, standings, schedule, staff, deletion, and session-scoped cache behavior. `getEventWithRelationsFlow()` observes Room. Refresh paths call the server, validate/map the response, persist Room rows and relations, and then expose or re-read Room state.
 
@@ -122,7 +136,7 @@ Milestone 2 is divided into two reviewable checkpoints. Milestone 2a moves the c
 
 Milestone 2b divided the remaining overview/edit and dialog render body into two more owners. `EventDetailOverviewEditHost.kt` receives immutable overview/edit state and callbacks and also owns the presentation-local sticky-action animation. `EventDetailOverlayHost.kt` receives transient dialog state and actions. `EventDetailScreen()` remains the route boundary that collects flows, owns route-local UI selection and dialog state, and invokes component mutations. The extracted composables do not collect repositories or duplicate business state.
 
-Milestone 3 begins only after APP-009 is integrated and its migrations/tests pass. Extract event-team check-in execution into a coordinator, relation derivation into a Room-backed state graph, participant/bootstrap work into a hydration controller, and the large lifecycle collector block into narrow lifecycle bindings. Existing coordinators remain the sole owners of their mutable state. `DefaultEventDetailComponent` retains constructor and interface compatibility and becomes responsible for assembly, public state exposure, and delegation.
+Milestone 3 began by integrating APP-009 and validating schema-93 migration coverage. Checkpoint 3a extracts event-team check-in execution and its check-in/prompt/save state into `EventTeamCheckInCoordinator`; the component still supplies the current event, permission decision, managed-team ID, and error presentation. Checkpoint 3b moves relation derivation into a Room-backed state graph. Checkpoint 3c moves participant/bootstrap work behind the existing hydration and participant coordinators. Checkpoint 3d replaces the large lifecycle collector block with narrow lifecycle bindings. Existing coordinators remain the sole owners of their mutable state. `DefaultEventDetailComponent` retains constructor and interface compatibility and becomes responsible for assembly, public state exposure, and delegation.
 
 Milestone 4 moves types mechanically before implementation splits. Public repository interfaces and public models move to clearly named contract/model files in the same package. Private serializable request/response DTOs and mappers move to wire files grouped by domain. Keep serial names, defaults, nullability, endpoint paths, and mapping behavior byte-for-byte compatible. Run repository tests after each mechanical move before changing ownership.
 
@@ -178,6 +192,21 @@ For the overview/edit and overlay/dialog checkpoint, add `EventDetailPresentatio
 Expect 46 focused tests with zero failures. A static search of `EventDetailOverviewEditHost.kt` and `EventDetailOverlayHost.kt` for `collectAsState`, `StateFlow`, and `EventDetailComponent` must return no matches.
 
 Do not run Gradle tests concurrently with another agent in this checkout. Isolated worktrees may run independently, but each result must identify its exact commit and checkout.
+
+For the event-team check-in component checkpoint, run:
+
+    ./gradlew :composeApp:testDebugUnitTest \
+      --tests 'com.razumly.mvp.eventDetail.EventTeamCheckInCoordinatorTest' \
+      --tests 'com.razumly.mvp.eventDetail.EventMembershipCoordinatorTest' \
+      --tests 'com.razumly.mvp.eventDetail.EventDetailHydrationCoordinatorTest' \
+      --tests 'com.razumly.mvp.eventDetail.EventLifecycleStateTest' \
+      --tests 'com.razumly.mvp.eventDetail.EventBootstrapResourcesCoordinatorTest' \
+      --tests 'com.razumly.mvp.core.data.dataTypes.TeamMembershipTest'
+    ./gradlew :core:database:iosSimulatorArm64Test
+    ./gradlew :composeApp:compileKotlinIosSimulatorArm64
+    ./gradlew :composeApp:assembleDebug
+
+Expect 28 focused unit tests and four iOS migration tests with zero failures. Keep the exact-baseline paid-team payment-sheet fixture failure documented separately until its owning payment-flow work updates the Android unit-test setup.
 
 For the repository milestones, run the two contract suites first:
 
@@ -285,6 +314,30 @@ Milestone 2b evidence on 2026-07-14:
     overview/overlay host state/component static scan: no matches
     git diff --check: passed
 
+Milestone 3a evidence on 2026-07-14:
+
+    APP-009 source commit: 63451562e2eda22b99d5de6f364715e8562285eb
+    APP-009 integrated commit: 5b862d6d
+    3,373  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/DefaultEventDetailComponent.kt
+      146  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventTeamCheckInCoordinator.kt
+      231  composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventTeamCheckInCoordinatorTest.kt
+
+    EventTeamCheckInCoordinatorTest: 9 passed
+    EventMembershipCoordinatorTest: 6 passed
+    EventDetailHydrationCoordinatorTest: 4 passed
+    EventLifecycleStateTest: 2 passed
+    EventBootstrapResourcesCoordinatorTest: 5 passed
+    TeamMembershipTest: 2 passed
+    ./gradlew :core:database:iosSimulatorArm64Test: 4 passed; BUILD SUCCESSFUL (20 actionable tasks: 14 executed, 6 up-to-date)
+    ./gradlew :composeApp:compileKotlinIosSimulatorArm64: BUILD SUCCESSFUL (67 actionable tasks: 18 executed, 49 up-to-date)
+    ./gradlew :composeApp:assembleDebug: BUILD SUCCESSFUL (174 actionable tasks: 17 executed, 157 up-to-date)
+    composeApp-debug.apk SHA-256: 8af0e7ded01ef9a949187e09258d5e59519f6ace5ad0bc81aec009b648014e34
+    git diff --check: passed
+
+    Known baseline: EventDetailMobileJoinFlowTest has 19 passes and one paid-team
+    payment-sheet fixture failure at both 5b862d6d and this checkpoint. The check-in
+    extraction does not touch payment setup or that test.
+
 ## Interfaces and Dependencies
 
 Keep `EventDetailScreen(component: EventDetailComponent, ...)`, the `EventDetailComponent` interface, and `DefaultEventDetailComponent` constructor source-compatible. Pure screen rules stay in package `com.razumly.mvp.eventDetail` with existing function names/signatures and `internal` visibility where tests and route use them. Extracted composables receive immutable state data classes and callback containers; they do not receive repositories.
@@ -300,3 +353,5 @@ Revision note (2026-07-14): Completed Milestone 1 by moving pure stage, weekly s
 Revision note (2026-07-14): Completed Milestone 2a by moving all detail-tab rendering, selector, and dock UI behind typed immutable state/callback containers. Added direct coverage for the pure navigation and schedule-filter rules, kept route-local state and component calls in `EventDetailScreen`, and recorded the exact focused-test, Android, iOS, static-scan, line-count, and APK evidence. Split the remaining screen-host work into Milestone 2b so overview/edit and overlay/dialog extraction stays independently reviewable.
 
 Revision note (2026-07-14): Completed Milestone 2b by moving overview/edit, sticky-action, and overlay/dialog rendering behind typed immutable state/callback containers. Kept all flow collection, route-local selection/dialog state, and component mutations in `EventDetailScreen`, added ten pure presentation-rule regressions, and recorded exact focused-test, Android, iOS, static-scan, line-count, and APK evidence. The APP-009 checkpoint is now available on `codex/critical-audit-remediation` at commit `63451562`, so the next membership-dependent milestone must integrate that commit before continuing.
+
+Revision note (2026-07-14): Started Milestone 3 by integrating APP-009 without conflicts and extracting event-team check-in execution/state into a focused coordinator. Kept managed-team relation resolution in the component for the canonical Room state-graph checkpoint, added nine direct regressions, and recorded the exact unit, migration, Android, iOS, line-count, APK, and baseline-failure evidence.
