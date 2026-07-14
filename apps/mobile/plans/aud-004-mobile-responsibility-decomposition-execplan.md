@@ -35,9 +35,9 @@ After this plan is complete, users must see the same event overview, registratio
     - [x] (2026-07-14 21:02Z) Milestone 5d1: moved self, child, player, team, waitlist, division-move, and withdrawal mutations plus their registration/participant cache convergence into the 473-line `EventRegistrationMutationCoordinator`. `EventRepository.kt` fell from 1,771 to 1,362 lines. At integrated commit `800a7f3f`, all 65 Event repository HTTP cases, iOS simulator compilation, Android debug assembly, and diff checks pass.
     - [x] (2026-07-14 21:17Z) Milestone 5d2: moved registration-question, ID-batch, bounds/search, tag, template, host, and organization reads plus their Room cache behavior into the 400-line `EventCatalogCoordinator`. `EventRepository.kt` is now 1,036 lines. At integrated commit `81ccae0d`, all 65 Event repository HTTP cases, iOS simulator compilation, Android debug assembly, and diff checks pass.
 - [ ] Milestone 6: split `BillingRepository` behind `IBillingRepository` into checkout/signing, rental, bill/payment, discount, catalog, organization/review, and refund collaborators.
-  - [ ] Milestone 6a: extract checkout and document-signing workflows.
+  - [x] (2026-07-14 21:41Z) Milestone 6a: extracted checkout and document-signing workflows.
     - [x] (2026-07-14 21:30Z) Milestone 6a1: moved inclusive-price quotes, event/team purchase intents, rental-intent payload validation, discount preview, and checkout analytics into the 254-line `BillingCheckoutCoordinator`. `BillingRepository.kt` fell from 2,302 to 2,103 lines. At integrated commit `6748e58e`, all 58 Billing repository HTTP cases, iOS simulator compilation, Android debug assembly, canonical identity handling, and diff checks pass.
-    - [ ] Milestone 6a2: extract event/team/rental signing, signature recording/polling, profile documents, and Stripe host onboarding links.
+    - [x] (2026-07-14 21:41Z) Milestone 6a2: moved event/team/rental signing, signature recording and polling, profile documents, and Stripe host onboarding links into the 243-line `BillingSigningCoordinator`. `BillingRepository.kt` fell from 2,103 to 1,891 lines. At integrated commit `dcec13ae`, all 58 Billing repository HTTP cases, iOS simulator compilation, Android debug assembly, canonical identity handling, and diff checks pass.
 - [ ] Milestone 7: run focused and broad Gradle tests, Android assembly/install/cold-launch checks, iOS compilation/tests, and Android/iOS event-detail visual smoke; reconcile AUD-004 only after runtime evidence passes.
 
 ## Surprises & Discoveries
@@ -205,7 +205,7 @@ After this plan is complete, users must see the same event overview, registratio
 
 ## Outcomes & Retrospective
 
-Research and sequencing are complete, Milestones 1 through 5 plus the additional screen-ownership checkpoint are validated, and Milestone 6 is in progress. `EventDetailScreen.kt` owns 1,852 lines instead of 4,137, and its detail-tab presentation lifecycle now lives in a 522-line callback-driven route host. APP-009 is integrated as `5b862d6d`; event-team check-in lives in a 146-line coordinator, canonical Room-backed relation derivation lives in a 222-line coordinator, participant/bootstrap orchestration lives in a 425-line coordinator, and 22 lifecycle collectors now live behind a 327-line binding owner with six direct regressions. `DefaultEventDetailComponent.kt` now owns 2,819 lines instead of 3,439. The repository contracts/models and event plus billing-domain wire mappings now have explicit files; viewer-scoped cache lifecycle lives in a 77-line coordinator, detail HTTP mechanics in a 129-line gateway, canonical detail cache access in a 30-line Room store, viewer registration cache synchronization in a 130-line coordinator with four direct regressions, participant/relation/management/compliance synchronization in a 699-line coordinator, registration mutations plus their Room convergence in a 473-line coordinator, discovery/catalog reads in a 400-line coordinator, and Billing checkout workflows in a 254-line coordinator. `EventRepository.kt` is 1,036 lines instead of 3,398 and `BillingRepository.kt` is 2,103 lines instead of 4,430. The remaining Billing collaborators and Milestone 7 remain, and the screen, component, and Billing repository facades remain above their acceptance targets, so AUD-004 is still open.
+Research and sequencing are complete, Milestones 1 through 5 plus the additional screen-ownership checkpoint are validated, and Milestone 6 is in progress. `EventDetailScreen.kt` owns 1,852 lines instead of 4,137, and its detail-tab presentation lifecycle now lives in a 522-line callback-driven route host. APP-009 is integrated as `5b862d6d`; event-team check-in lives in a 146-line coordinator, canonical Room-backed relation derivation lives in a 222-line coordinator, participant/bootstrap orchestration lives in a 425-line coordinator, and 22 lifecycle collectors now live behind a 327-line binding owner with six direct regressions. `DefaultEventDetailComponent.kt` now owns 2,819 lines instead of 3,439. The repository contracts/models and event plus billing-domain wire mappings now have explicit files; viewer-scoped cache lifecycle lives in a 77-line coordinator, detail HTTP mechanics in a 129-line gateway, canonical detail cache access in a 30-line Room store, viewer registration cache synchronization in a 130-line coordinator with four direct regressions, participant/relation/management/compliance synchronization in a 699-line coordinator, registration mutations plus their Room convergence in a 473-line coordinator, discovery/catalog reads in a 400-line coordinator, Billing checkout workflows in a 254-line coordinator, and Billing signing/onboarding workflows in a 243-line coordinator. `EventRepository.kt` is 1,036 lines instead of 3,398 and `BillingRepository.kt` is 1,891 lines instead of 4,430. The remaining Billing collaborators and Milestone 7 remain, and the screen, component, and Billing repository facades remain above their acceptance targets, so AUD-004 is still open.
 
 ## Context and Orientation
 
@@ -712,6 +712,22 @@ Milestone 6a1 integrated evidence on 2026-07-14:
     normalization order, checkout analytics, error propagation, endpoint paths, and
     canonical-only request/response identity behind the unchanged public facade.
 
+Milestone 6a2 integrated evidence on 2026-07-14:
+
+    isolated checkpoint: 920959d4
+    integrated checkpoint: dcec13ae
+    1,891  core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/BillingRepository.kt
+      243  core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/BillingSigningCoordinator.kt
+    BillingRepositoryHttpTest: 58 passed, 0 skipped, 0 failures, 0 errors
+    ./gradlew :composeApp:compileKotlinIosSimulatorArm64: BUILD SUCCESSFUL (67 actionable tasks: 12 executed, 55 up-to-date)
+    ./gradlew :composeApp:assembleDebug: BUILD SUCCESSFUL (175 actionable tasks: 12 executed, 163 up-to-date)
+    composeApp-debug.apk SHA-256: bb00e170aec574e9aa775449ac547972f9c439fad5007cd08867acf5ac1c62e3
+    git diff --check: passed
+
+    Sign-link normalization and friendly errors, record-signature payloads, polling
+    backoff, profile document mapping, Stripe redirect URLs, host logging, and account
+    refresh ordering remain unchanged behind the public facade.
+
 ## Interfaces and Dependencies
 
 Keep `EventDetailScreen(component: EventDetailComponent, ...)`, the `EventDetailComponent` interface, and `DefaultEventDetailComponent` constructor source-compatible. Pure screen rules stay in package `com.razumly.mvp.eventDetail` with existing function names/signatures and `internal` visibility where tests and route use them. Extracted composables receive immutable state data classes and callback containers; they do not receive repositories.
@@ -752,3 +768,4 @@ Revision note (2026-07-14): Completed Milestone 5c2 and Milestone 5c by moving p
 Revision note (2026-07-14): Completed Milestone 5d1 by moving the complete event-registration mutation family, capacity/division policy, analytics, and post-write registration/participant convergence into `EventRegistrationMutationCoordinator`. Integrated isolated commit `94eaef55` as `800a7f3f`, reduced the Event repository facade to 1,362 lines, and recorded the 65-case repository matrix plus Android/iOS artifact evidence. Milestone 5d2 retains the independent catalog/search/host/organization read boundary.
 Revision note (2026-07-14): Completed Milestone 5d2 and Milestone 5 by moving registration-question, discovery, host, organization, tag, and template reads plus their Room cache policy into `EventCatalogCoordinator`. Integrated isolated commit `166a8a55` as `81ccae0d`, reduced the Event repository facade to 1,036 lines, and recorded the 65-case repository matrix plus Android/iOS artifact evidence.
 Revision note (2026-07-14): Started Milestone 6 with the independent checkout boundary. Moved inclusive-price quoting, event/team/rental purchase-intent construction, discount preview, and checkout analytics into `BillingCheckoutCoordinator`; integrated isolated commit `dc0b407b` as `6748e58e`, reduced the Billing facade to 2,103 lines, and recorded the 58-case Billing matrix plus Android/iOS artifact evidence. Signing remains Milestone 6a2.
+Revision note (2026-07-14): Completed Milestone 6a by moving sign-link creation, signature recording/polling, profile documents, and Stripe host onboarding into `BillingSigningCoordinator`. Integrated isolated commit `920959d4` as `dcec13ae`, reduced the Billing facade to 1,891 lines, and recorded the 58-case Billing matrix plus Android/iOS artifact evidence. Rental-order retry/persistence is the next independent boundary.
