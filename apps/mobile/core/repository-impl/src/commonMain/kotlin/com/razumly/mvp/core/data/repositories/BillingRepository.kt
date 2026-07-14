@@ -34,7 +34,6 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.MvpApiClient
-import com.razumly.mvp.core.network.stripeRedirectBaseUrl
 import com.razumly.mvp.core.network.dto.BillingEventRefDto
 import com.razumly.mvp.core.network.dto.BillingAddressDto
 import com.razumly.mvp.core.network.dto.BillingRefundRequestDto
@@ -44,12 +43,10 @@ import com.razumly.mvp.core.network.dto.OrganizationsResponseDto
 import com.razumly.mvp.core.network.dto.PurchaseIntentRequestDto
 import com.razumly.mvp.core.network.dto.RefundAllRequestDto
 import com.razumly.mvp.core.network.dto.RefundRequestsResponseDto
-import com.razumly.mvp.core.network.dto.StripeHostLinkRequestDto
 import com.razumly.mvp.core.network.dto.UpdateRefundRequestDto
 import com.razumly.mvp.core.util.jsonMVP
 import io.github.aakira.napier.Napier
 import io.ktor.http.encodeURLQueryComponent
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
@@ -57,8 +54,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 
-private const val BOLD_SIGN_RATE_LIMIT_FRIENDLY_MESSAGE =
-    "You opened the BoldSign document too many times. Please wait a minute before trying again."
 private const val CATALOG_RESOURCE_ORGANIZATIONS = "organizations"
 private const val CATALOG_RESOURCE_PRODUCTS = "products"
 private const val ORGANIZATION_PROJECTION_DETAIL = "detail"
@@ -316,6 +311,10 @@ class BillingRepository(
         api = api,
         userRepository = userRepository,
     )
+    private val signingCoordinator = BillingSigningCoordinator(
+        api = api,
+        userRepository = userRepository,
+    )
 
     override suspend fun quoteInclusivePrice(
         direction: InclusivePriceQuoteDirection,
@@ -405,34 +404,12 @@ class BillingRepository(
         signerContext: SignerContext,
         childUserId: String?,
         childUserEmail: String?,
-    ): Result<List<SignStep>> = runCatching {
-        try {
-            val user = userRepository.currentUser.value.getOrThrow()
-            val email = userRepository.currentAccount.value.getOrNull()?.email
-            val response = api.post<EventSignLinksRequestDto, EventSignLinksResponseDto>(
-                path = "api/events/$eventId/sign",
-                body = EventSignLinksRequestDto(
-                    userId = user.id,
-                    userEmail = email,
-                    signerContext = signerContext.apiValue,
-                    childUserId = childUserId?.trim()?.takeIf(String::isNotBlank),
-                    childEmail = childUserEmail?.trim()?.takeIf(String::isNotBlank),
-                    redirectUrl = buildEmbeddedSigningRedirectUrl(eventId),
-                ),
-            )
-
-            response.error
-                ?.let(::toFriendlyBoldSignMessage)
-                ?.takeIf(String::isNotBlank)
-                ?.let { errorMessage ->
-                    throw Exception(errorMessage)
-                }
-
-            response.signLinks.filter { it.templateId.isNotBlank() }
-        } catch (throwable: Throwable) {
-            throw throwable.withFriendlyBoldSignMessage()
-        }
-    }
+    ): Result<List<SignStep>> = signingCoordinator.getRequiredEventSignLinks(
+        eventId = eventId,
+        signerContext = signerContext,
+        childUserId = childUserId,
+        childUserEmail = childUserEmail,
+    )
 
     override suspend fun getRequiredTeamSignLinks(teamId: String): Result<List<SignStep>> {
         return getRequiredTeamSignLinks(
@@ -448,76 +425,22 @@ class BillingRepository(
         signerContext: SignerContext,
         childUserId: String?,
         childUserEmail: String?,
-    ): Result<List<SignStep>> = runCatching {
-        try {
-            val user = userRepository.currentUser.value.getOrThrow()
-            val email = userRepository.currentAccount.value.getOrNull()?.email
-            val response = api.post<EventSignLinksRequestDto, EventSignLinksResponseDto>(
-                path = "api/teams/$teamId/sign",
-                body = EventSignLinksRequestDto(
-                    userId = user.id,
-                    userEmail = email,
-                    signerContext = signerContext.apiValue,
-                    childUserId = childUserId?.trim()?.takeIf(String::isNotBlank),
-                    childEmail = childUserEmail?.trim()?.takeIf(String::isNotBlank),
-                    redirectUrl = null,
-                ),
-            )
-
-            response.error
-                ?.let(::toFriendlyBoldSignMessage)
-                ?.takeIf(String::isNotBlank)
-                ?.let { errorMessage ->
-                    throw Exception(errorMessage)
-                }
-
-            response.signLinks.filter { it.templateId.isNotBlank() }
-        } catch (throwable: Throwable) {
-            throw throwable.withFriendlyBoldSignMessage()
-        }
-    }
+    ): Result<List<SignStep>> = signingCoordinator.getRequiredTeamSignLinks(
+        teamId = teamId,
+        signerContext = signerContext,
+        childUserId = childUserId,
+        childUserEmail = childUserEmail,
+    )
 
     override suspend fun getRequiredRentalSignLinks(
         templateIds: List<String>,
         eventId: String?,
         organizationId: String?,
-    ): Result<List<SignStep>> = runCatching {
-        val normalizedTemplateIds = templateIds
-            .map(String::trim)
-            .filter(String::isNotBlank)
-            .distinct()
-        if (normalizedTemplateIds.isEmpty()) {
-            return@runCatching emptyList()
-        }
-
-        try {
-            val user = userRepository.currentUser.value.getOrThrow()
-            val email = userRepository.currentAccount.value.getOrNull()?.email
-            val normalizedEventId = eventId?.trim()?.takeIf(String::isNotBlank)
-            val response = api.post<RentalSignLinksRequestDto, EventSignLinksResponseDto>(
-                path = "api/rentals/sign",
-                body = RentalSignLinksRequestDto(
-                    userId = user.id,
-                    userEmail = email,
-                    eventId = normalizedEventId,
-                    organizationId = organizationId?.trim()?.takeIf(String::isNotBlank),
-                    templateIds = normalizedTemplateIds,
-                    redirectUrl = normalizedEventId?.let(::buildEmbeddedSigningRedirectUrl),
-                ),
-            )
-
-            response.error
-                ?.let(::toFriendlyBoldSignMessage)
-                ?.takeIf(String::isNotBlank)
-                ?.let { errorMessage ->
-                    throw Exception(errorMessage)
-                }
-
-            response.signLinks.filter { it.templateId.isNotBlank() }
-        } catch (throwable: Throwable) {
-            throw throwable.withFriendlyBoldSignMessage()
-        }
-    }
+    ): Result<List<SignStep>> = signingCoordinator.getRequiredRentalSignLinks(
+        templateIds = templateIds,
+        eventId = eventId,
+        organizationId = organizationId,
+    )
 
     private fun Throwable.isPaymentStillAwaiting(): Boolean =
         this is ApiException && statusCode == 402
@@ -753,34 +676,15 @@ class BillingRepository(
         type: String,
         signerContext: SignerContext,
         childUserId: String?,
-    ): Result<RecordSignatureResult> = runCatching {
-        val userId = userRepository.currentUser.value.getOrThrow().id
-        val response = api.post<RecordSignatureRequestDto, RecordSignatureResponseDto>(
-            path = "api/documents/record-signature",
-            body = RecordSignatureRequestDto(
-                templateId = templateId,
-                documentId = documentId,
-                eventId = eventId,
-                userId = userId,
-                type = type,
-                signerContext = signerContext.apiValue,
-                childUserId = childUserId?.trim()?.takeIf(String::isNotBlank),
-            ),
-        )
-
-        if (!response.error.isNullOrBlank()) {
-            throw Exception(response.error)
-        }
-
-        if (response.ok == false) {
-            throw Exception("Failed to record signature.")
-        }
-
-        RecordSignatureResult(
-            operationId = response.operationId?.trim()?.takeIf(String::isNotBlank),
-            syncStatus = response.syncStatus?.trim()?.takeIf(String::isNotBlank),
-        )
-    }
+    ): Result<RecordSignatureResult> = signingCoordinator.recordSignature(
+        eventId = eventId,
+        teamId = null,
+        templateId = templateId,
+        documentId = documentId,
+        type = type,
+        signerContext = signerContext,
+        childUserId = childUserId,
+    )
 
     override suspend fun recordTeamSignature(
         teamId: String,
@@ -789,145 +693,29 @@ class BillingRepository(
         type: String,
         signerContext: SignerContext,
         childUserId: String?,
-    ): Result<RecordSignatureResult> = runCatching {
-        val userId = userRepository.currentUser.value.getOrThrow().id
-        val response = api.post<RecordSignatureRequestDto, RecordSignatureResponseDto>(
-            path = "api/documents/record-signature",
-            body = RecordSignatureRequestDto(
-                templateId = templateId,
-                documentId = documentId,
-                teamId = teamId,
-                userId = userId,
-                type = type,
-                signerContext = signerContext.apiValue,
-                childUserId = childUserId?.trim()?.takeIf(String::isNotBlank),
-            ),
-        )
-
-        if (!response.error.isNullOrBlank()) {
-            throw Exception(response.error)
-        }
-
-        if (response.ok == false) {
-            throw Exception("Failed to record signature.")
-        }
-
-        RecordSignatureResult(
-            operationId = response.operationId?.trim()?.takeIf(String::isNotBlank),
-            syncStatus = response.syncStatus?.trim()?.takeIf(String::isNotBlank),
-        )
-    }
+    ): Result<RecordSignatureResult> = signingCoordinator.recordSignature(
+        eventId = null,
+        teamId = teamId,
+        templateId = templateId,
+        documentId = documentId,
+        type = type,
+        signerContext = signerContext,
+        childUserId = childUserId,
+    )
 
     override suspend fun pollBoldSignOperation(
         operationId: String,
         timeoutMillis: Long,
         intervalMillis: Long,
-    ): Result<BoldSignOperationStatus> = runCatching {
-        val normalizedOperationId = operationId.trim()
-        require(normalizedOperationId.isNotBlank()) { "Operation id is required." }
+    ): Result<BoldSignOperationStatus> =
+        signingCoordinator.pollBoldSignOperation(operationId, timeoutMillis, intervalMillis)
 
-        val effectiveTimeoutMillis = timeoutMillis.coerceAtLeast(1_000)
-        val baseIntervalMillis = intervalMillis.coerceIn(2_000, 30_000)
-        val startedAt = kotlin.time.Clock.System.now().toEpochMilliseconds()
-        var lastStatus: BoldSignOperationStatus? = null
-        var currentIntervalMillis = baseIntervalMillis
-        var attempt = 0
+    override suspend fun listProfileDocuments(): Result<ProfileDocumentsBundle> =
+        signingCoordinator.listProfileDocuments()
 
-        while (kotlin.time.Clock.System.now().toEpochMilliseconds() - startedAt <= effectiveTimeoutMillis) {
-            if (attempt > 0) {
-                delay(currentIntervalMillis)
-            }
+    override suspend fun createAccount(): Result<String> = signingCoordinator.createAccount()
 
-            val dto = api.get<BoldSignOperationStatusDto>(
-                path = "api/boldsign/operations/${normalizedOperationId.encodeURLQueryComponent()}",
-            )
-            val mapped = dto.toOperationStatus()
-            lastStatus = mapped
-
-            if (mapped.isConfirmed()) {
-                return@runCatching mapped
-            }
-            if (mapped.isFailed()) {
-                val failureMessage = toFriendlyBoldSignMessage(mapped.error)
-                    ?: "Document synchronization failed (${mapped.status})."
-                throw Exception(failureMessage)
-            }
-            attempt += 1
-            currentIntervalMillis = (currentIntervalMillis + baseIntervalMillis).coerceAtMost(30_000)
-        }
-
-        if (lastStatus != null) {
-            val delayedMessage = toFriendlyBoldSignMessage(lastStatus.error)
-                ?: "Document synchronization is delayed. Please try again shortly."
-            throw Exception(delayedMessage)
-        }
-        throw Exception("Document synchronization is delayed. Please try again shortly.")
-    }
-
-    override suspend fun listProfileDocuments(): Result<ProfileDocumentsBundle> = runCatching {
-        val response = api.get<ProfileDocumentsResponseDto>("api/profile/documents")
-        response.error?.takeIf(String::isNotBlank)?.let { errorMessage ->
-            throw Exception(errorMessage)
-        }
-
-        ProfileDocumentsBundle(
-            unsigned = response.unsigned.mapNotNull { document ->
-                document.toProfileDocumentCardOrNull(defaultStatus = ProfileDocumentStatus.UNSIGNED)
-            },
-            signed = response.signed.mapNotNull { document ->
-                document.toProfileDocumentCardOrNull(defaultStatus = ProfileDocumentStatus.SIGNED)
-            },
-        )
-    }
-
-    override suspend fun createAccount(): Result<String> = runCatching {
-        val user = userRepository.currentUser.value.getOrThrow()
-        val email = userRepository.currentAccount.value.getOrNull()?.email
-        val redirectBase = stripeRedirectBaseUrl.trimEnd('/')
-        Napier.i(
-            "Stripe host request: endpoint=/api/billing/host/connect redirectBase=$redirectBase userId=${user.id}",
-            tag = "Stripe",
-        )
-
-        val onboardingUrl = api.post<StripeHostLinkRequestDto, StripeOnboardingLinkResponseDto>(
-            path = "api/billing/host/connect",
-            body = StripeHostLinkRequestDto(
-                refreshUrl = redirectBase,
-                returnUrl = redirectBase,
-                user = BillingUserRefDto(id = user.id, email = email),
-            ),
-        ).onboardingUrl
-        Napier.i("Stripe host response: endpoint=/api/billing/host/connect onboardingUrl=$onboardingUrl", tag = "Stripe")
-
-        // Server may update `hasStripeAccount`; refresh local user/profile cache.
-        runCatching { userRepository.getCurrentAccount().getOrThrow() }
-
-        onboardingUrl
-    }
-
-    override suspend fun getOnboardingLink(): Result<String> = runCatching {
-        val user = userRepository.currentUser.value.getOrThrow()
-        val email = userRepository.currentAccount.value.getOrNull()?.email
-        val redirectBase = stripeRedirectBaseUrl.trimEnd('/')
-        Napier.i(
-            "Stripe host request: endpoint=/api/billing/host/onboarding-link redirectBase=$redirectBase userId=${user.id}",
-            tag = "Stripe",
-        )
-
-        api.post<StripeHostLinkRequestDto, StripeOnboardingLinkResponseDto>(
-            path = "api/billing/host/onboarding-link",
-            body = StripeHostLinkRequestDto(
-                refreshUrl = redirectBase,
-                returnUrl = redirectBase,
-                user = BillingUserRefDto(id = user.id, email = email),
-            ),
-        ).onboardingUrl.also { onboardingUrl ->
-            Napier.i(
-                "Stripe host response: endpoint=/api/billing/host/onboarding-link onboardingUrl=$onboardingUrl",
-                tag = "Stripe",
-            )
-        }
-    }
+    override suspend fun getOnboardingLink(): Result<String> = signingCoordinator.getOnboardingLink()
 
     override suspend fun listBills(ownerType: String, ownerId: String, limit: Int): Result<List<Bill>> =
         runCatching {
