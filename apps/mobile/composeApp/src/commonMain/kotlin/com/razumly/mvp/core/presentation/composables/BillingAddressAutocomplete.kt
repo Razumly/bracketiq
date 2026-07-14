@@ -36,6 +36,9 @@ import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -56,6 +59,54 @@ internal data class BillingAddressSuggestion(
     val primaryText: String,
     val secondaryText: String = "",
 )
+
+internal class BillingAddressResolutionCoordinator(
+    private val scope: CoroutineScope,
+    private val resolveAddress: suspend (String) -> Result<BillingAddressDraft>,
+) {
+    private var generation = 0L
+    private var activeJob: Job? = null
+
+    fun resolve(
+        placeId: String,
+        onResolved: (BillingAddressDraft) -> Unit,
+        onFailure: (Throwable) -> Unit,
+        onFinished: () -> Unit,
+    ) {
+        val requestGeneration = ++generation
+        activeJob?.cancel()
+        activeJob = scope.launch {
+            try {
+                val result = try {
+                    resolveAddress(placeId)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Throwable) {
+                    Result.failure(error)
+                }
+
+                if (requestGeneration != generation) {
+                    return@launch
+                }
+                result.fold(
+                    onSuccess = onResolved,
+                    onFailure = onFailure,
+                )
+            } finally {
+                if (requestGeneration == generation) {
+                    activeJob = null
+                    onFinished()
+                }
+            }
+        }
+    }
+
+    fun invalidate() {
+        generation += 1
+        activeJob?.cancel()
+        activeJob = null
+    }
+}
 
 internal class GooglePlacesBillingAddressProvider(
     private val httpClient: HttpClient = createMvpHttpClient(),
@@ -144,14 +195,23 @@ internal fun BillingAddressAutocompleteField(
 ) {
     val provider = remember { GooglePlacesBillingAddressProvider() }
     val scope = rememberCoroutineScope()
+    val resolutionCoordinator = remember(provider, scope) {
+        BillingAddressResolutionCoordinator(
+            scope = scope,
+            resolveAddress = provider::resolveAddress,
+        )
+    }
     var suggestions by remember { mutableStateOf<List<BillingAddressSuggestion>>(emptyList()) }
     var suggestionError by remember { mutableStateOf<String?>(null) }
     var isLoadingSuggestions by remember { mutableStateOf(false) }
     var isResolvingSuggestion by remember { mutableStateOf(false) }
     var suppressedQuery by remember { mutableStateOf<String?>(null) }
 
-    DisposableEffect(provider) {
-        onDispose { provider.close() }
+    DisposableEffect(provider, resolutionCoordinator) {
+        onDispose {
+            resolutionCoordinator.invalidate()
+            provider.close()
+        }
     }
 
     LaunchedEffect(value) {
@@ -181,6 +241,9 @@ internal fun BillingAddressAutocompleteField(
         StandardTextField(
             value = value,
             onValueChange = { nextValue ->
+                resolutionCoordinator.invalidate()
+                isResolvingSuggestion = false
+                suggestionError = null
                 if (nextValue.trim() != suppressedQuery) {
                     suppressedQuery = null
                 }
@@ -219,18 +282,20 @@ internal fun BillingAddressAutocompleteField(
                         suggestions = emptyList()
                         isResolvingSuggestion = true
                         suggestionError = null
-                        scope.launch {
-                            provider.resolveAddress(suggestion.placeId)
-                                .onSuccess { address ->
-                                    suppressedQuery = address.line1.trim()
-                                    onAddressSelected(address)
-                                }
-                                .onFailure { error ->
-                                    suggestionError = "Unable to fill address from that suggestion."
-                                    Napier.w("Billing address details lookup failed: ${error.message}", error)
-                                }
-                            isResolvingSuggestion = false
-                        }
+                        resolutionCoordinator.resolve(
+                            placeId = suggestion.placeId,
+                            onResolved = { address ->
+                                suppressedQuery = address.line1.trim()
+                                onAddressSelected(address)
+                            },
+                            onFailure = { error ->
+                                suggestionError = "Unable to fill address from that suggestion."
+                                Napier.w("Billing address details lookup failed: ${error.message}", error)
+                            },
+                            onFinished = {
+                                isResolvingSuggestion = false
+                            },
+                        )
                     }
                 )
                 if (index < suggestions.lastIndex) {
