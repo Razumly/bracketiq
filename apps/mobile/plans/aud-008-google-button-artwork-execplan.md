@@ -13,7 +13,7 @@ The shared UI module currently compiles four complete Google sign-in button illu
 - [x] (2026-07-14 15:38Z) Moved the Android and iOS vector sources out of `commonMain` and introduced a narrow expect/actual artwork resolver.
 - [x] (2026-07-14 15:44Z) Added a source-set contract regression and four focused artwork/layout tests.
 - [x] (2026-07-14 15:47Z) Compiled Android and iOS production code, compiled the iOS test source, ran the four focused Android tests, and assembled the complete Android debug app.
-- [ ] Commit the isolated slice and report its canonical integration readiness.
+- [x] (2026-07-14 15:48Z) Committed the isolated implementation and validation slice as `929f5e1f`; it is ready to cherry-pick onto canonical mobile.
 
 ## Surprises & Discoveries
 
@@ -35,7 +35,7 @@ The shared UI module currently compiles four complete Google sign-in button illu
 
 ## Outcomes & Retrospective
 
-The bounded implementation is complete and validated. There is now zero Google button vector payload in `commonMain`, two variants in `androidMain`, and two variants in `iosMain`. The source-set contract passed; all four focused theme, sizing, and fail-closed tests passed; Android and iOS production code compiled; iOS test source compiled; and the complete Android debug app assembled successfully. The exact vector blob hashes are unchanged from the recovery base, so the 189:40 Android and 199:44 iOS artwork is preserved byte for byte. Only the native iOS test executable link/run remains unobserved because it collided with concurrent build-resource pressure after successful compilation; final combined validation can run it once the other mobile Gradle work is idle.
+The bounded implementation is complete, validated, and committed as `929f5e1f`. There is now zero Google button vector payload in `commonMain`, two variants in `androidMain`, and two variants in `iosMain`. The source-set contract passed; all four focused theme, sizing, and fail-closed tests passed; Android and iOS production code compiled; iOS test source compiled; and the complete Android debug app assembled successfully. The exact vector blob hashes are unchanged from the recovery base, so the 189:40 Android and 199:44 iOS artwork is preserved byte for byte. Only the native iOS test executable link/run remains unobserved because it collided with concurrent build-resource pressure after successful compilation; final combined validation can run it once the other mobile Gradle work is idle.
 
 ## Context and Orientation
 
@@ -116,3 +116,5 @@ Each target must provide the actual function in the same package. No new runtime
 Revision note (2026-07-14 15:36Z): Created this recovery plan after proving there was no existing AUD-008 implementation state and choosing an exact-artwork, platform-source-set split.
 
 Revision note (2026-07-14 15:47Z): Recorded the completed source split, regression results, exact vector hash preservation, Android app assembly, and the resource-constrained iOS simulator test-link observation.
+
+Revision note (2026-07-14 15:48Z): Recorded implementation commit `929f5e1f` and canonical cherry-pick readiness.
