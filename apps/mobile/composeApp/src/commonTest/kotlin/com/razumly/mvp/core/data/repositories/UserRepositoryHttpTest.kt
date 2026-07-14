@@ -88,7 +88,7 @@ private class UserRepositoryHttp_InMemoryPreferencesDataStore(
     }
 }
 
-private class UserRepositoryHttp_FakeUserDataDao : UserDataDao {
+private class UserRepositoryHttp_FakeUserDataDao : RoomUserDataDaoTestAdapter() {
     var lastUpsertedUser: UserData? = null
 
     override suspend fun upsertUserData(userData: UserData) {
@@ -111,7 +111,7 @@ private class UserRepositoryHttp_FakeUserDataDao : UserDataDao {
     override suspend fun searchUsers(search: String): List<UserData> = emptyList()
 }
 
-private class UserRepositoryHttp_FakeChatGroupDao : ChatGroupDao {
+private class UserRepositoryHttp_FakeChatGroupDao : RoomChatGroupDaoTestAdapter() {
     val deletedChatIds = mutableListOf<String>()
 
     override suspend fun upsertChatGroup(chatGroup: ChatGroup) {}
@@ -155,7 +155,7 @@ private class UserRepositoryHttp_UnusedEventDao : EventDao {
     override suspend fun clearAllEventsWithCrossRefs() {}
 }
 
-private class UserRepositoryHttp_UnusedTeamDao : TeamDao {
+private class UserRepositoryHttp_UnusedTeamDao : RoomTeamDaoTestAdapter() {
     override suspend fun upsertTeam(team: Team) {}
     override suspend fun upsertTeams(teams: List<Team>) {}
     override suspend fun getTeam(teamId: String): Team = error("unused")

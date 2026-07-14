@@ -80,7 +80,7 @@ private class InMemoryPreferencesDataStore(
     }
 }
 
-private class FakeUserDataDao : UserDataDao {
+private class FakeUserDataDao : RoomUserDataDaoTestAdapter() {
     private val users = MutableStateFlow<Map<String, UserData>>(emptyMap())
 
     override suspend fun upsertUserData(userData: UserData) {

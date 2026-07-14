@@ -66,7 +66,7 @@ private fun outgoingBodyText(content: OutgoingContent): String = when (content) 
 
 private class FakeTeamDao(
     private val relationsOrder: (List<String>) -> List<String> = { ids -> ids },
-) : TeamDao {
+) : RoomTeamDaoTestAdapter() {
     private val teams = MutableStateFlow<Map<String, Team>>(emptyMap())
 
     override suspend fun upsertTeam(team: Team) {

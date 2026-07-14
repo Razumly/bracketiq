@@ -47,7 +47,7 @@ class RoomMigrationsIosTest {
                 "INSERT INTO `MatchOperationOutboxEntry` (`id`, `payloadJson`) VALUES ('outbox-1', '{\"score\":1}')",
             )
 
-            val migrations = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V92.take(4)
+            val migrations = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V93.take(4)
             assertEquals(listOf(32, 33, 34, 35), migrations.map { it.startVersion })
             assertEquals(listOf(33, 34, 35, 90), migrations.map { it.endVersion })
 
@@ -123,7 +123,7 @@ class RoomMigrationsIosTest {
                 """.trimIndent(),
             )
 
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V92.first { it.startVersion == 90 }
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V93.first { it.startVersion == 90 }
             assertEquals(90, migration.startVersion)
             assertEquals(91, migration.endVersion)
             migration.migrate(connection)
@@ -140,7 +140,7 @@ class RoomMigrationsIosTest {
     @Test
     fun v91CatalogMigration_createsViewerScopedExactQueryCacheTables() {
         BundledSQLiteDriver().open(":memory:").use { connection ->
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V92.last()
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V93.first { it.startVersion == 91 }
             assertEquals(91, migration.startVersion)
             assertEquals(92, migration.endVersion)
             migration.migrate(connection)
@@ -164,6 +164,76 @@ class RoomMigrationsIosTest {
             }
         }
     }
+
+    @Test
+    fun v92MembershipMigration_backfillsExactIdsAndAllowsMissingUserProfiles() {
+        BundledSQLiteDriver().open(":memory:").use { connection ->
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute(
+                "CREATE TABLE `Team` (`id` TEXT NOT NULL, `playerIds` TEXT NOT NULL, `pending` TEXT NOT NULL, PRIMARY KEY(`id`))",
+            )
+            connection.execute(
+                "CREATE TABLE `UserData` (`id` TEXT NOT NULL, `teamIds` TEXT NOT NULL, PRIMARY KEY(`id`))",
+            )
+            connection.execute(
+                "CREATE TABLE `ChatGroup` (`id` TEXT NOT NULL, `userIds` TEXT NOT NULL, PRIMARY KEY(`id`))",
+            )
+            connection.execute(
+                "CREATE TABLE `team_user_cross_ref` (`teamId` TEXT NOT NULL, `userId` TEXT NOT NULL, PRIMARY KEY(`teamId`, `userId`), FOREIGN KEY(`teamId`) REFERENCES `Team`(`id`) ON DELETE CASCADE, FOREIGN KEY(`userId`) REFERENCES `UserData`(`id`) ON DELETE CASCADE)",
+            )
+            connection.execute(
+                "CREATE TABLE `team_pending_player_cross_ref` (`teamId` TEXT NOT NULL, `userId` TEXT NOT NULL, PRIMARY KEY(`teamId`, `userId`), FOREIGN KEY(`teamId`) REFERENCES `Team`(`id`) ON DELETE CASCADE, FOREIGN KEY(`userId`) REFERENCES `UserData`(`id`) ON DELETE CASCADE)",
+            )
+            connection.execute(
+                "CREATE TABLE `chat_user_cross_ref` (`chatId` TEXT NOT NULL, `userId` TEXT NOT NULL, PRIMARY KEY(`chatId`, `userId`), FOREIGN KEY(`chatId`) REFERENCES `ChatGroup`(`id`) ON DELETE CASCADE, FOREIGN KEY(`userId`) REFERENCES `UserData`(`id`) ON DELETE CASCADE)",
+            )
+            connection.execute("INSERT INTO `Team` VALUES ('team-array', '[\"user_10\",\"missing_user\"]', '[\"missing_pending\"]')")
+            connection.execute("INSERT INTO `Team` VALUES ('team-from-user', '[]', '[]')")
+            connection.execute("INSERT INTO `UserData` VALUES ('user_10', '[\"team-from-user\"]')")
+            connection.execute("INSERT INTO `UserData` VALUES ('existing_user', '[]')")
+            connection.execute("INSERT INTO `ChatGroup` VALUES ('chat-array', '[\"user_10\",\"missing_chat_user\"]')")
+            connection.execute("INSERT INTO `team_user_cross_ref` VALUES ('team-array', 'existing_user')")
+            connection.execute("INSERT INTO `chat_user_cross_ref` VALUES ('chat-array', 'existing_user')")
+
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V93.last()
+            assertEquals(92, migration.startVersion)
+            assertEquals(93, migration.endVersion)
+            migration.migrate(connection)
+
+            connection.assertSingleRow(
+                "SELECT group_concat(`pair`, ',') FROM (SELECT `teamId` || ':' || `userId` AS `pair` FROM `team_user_cross_ref` ORDER BY `teamId`, `userId`)",
+            ) { statement ->
+                assertEquals(
+                    "team-array:existing_user,team-array:missing_user,team-array:user_10,team-from-user:user_10",
+                    statement.getText(0),
+                )
+            }
+            connection.assertSingleRow(
+                "SELECT `userId` FROM `team_pending_player_cross_ref` WHERE `teamId` = 'team-array'",
+            ) { statement -> assertEquals("missing_pending", statement.getText(0)) }
+            connection.assertSingleRow(
+                "SELECT group_concat(`userId`, ',') FROM (SELECT `userId` FROM `chat_user_cross_ref` WHERE `chatId` = 'chat-array' ORDER BY `userId`)",
+            ) { statement ->
+                assertEquals("existing_user,missing_chat_user,user_10", statement.getText(0))
+            }
+
+            connection.assertColumnAbsent("Team", "playerIds")
+            connection.assertColumnAbsent("Team", "pending")
+            connection.assertColumnAbsent("ChatGroup", "userIds")
+            connection.assertColumnAbsent("UserData", "teamIds")
+            connection.assertForeignKeyParents("team_user_cross_ref", listOf("Team"))
+            connection.assertForeignKeyParents("team_pending_player_cross_ref", listOf("Team"))
+            connection.assertForeignKeyParents("chat_user_cross_ref", listOf("ChatGroup"))
+
+            connection.execute(
+                "INSERT INTO `team_user_cross_ref` (`teamId`, `userId`) VALUES ('team-array', 'arrived-before-profile')",
+            )
+            connection.execute("DELETE FROM `Team` WHERE `id` = 'team-array'")
+            connection.assertSingleRow(
+                "SELECT COUNT(*) FROM `team_user_cross_ref` WHERE `teamId` = 'team-array'",
+            ) { statement -> assertEquals(0L, statement.getLong(0)) }
+        }
+    }
 }
 
 private fun SQLiteConnection.execute(sql: String) {
@@ -181,4 +251,29 @@ private fun SQLiteConnection.assertSingleRow(
         assertion(statement)
         assertTrue(!statement.step(), "Expected exactly one row for query: $sql")
     }
+}
+
+private fun SQLiteConnection.assertColumnAbsent(
+    tableName: String,
+    columnName: String,
+) {
+    prepare("PRAGMA table_info(`$tableName`)").use { statement ->
+        while (statement.step()) {
+            check(statement.getText(1) != columnName) {
+                "Expected $tableName.$columnName to be removed."
+            }
+        }
+    }
+}
+
+private fun SQLiteConnection.assertForeignKeyParents(
+    tableName: String,
+    expectedParents: List<String>,
+) {
+    val parents = buildList {
+        prepare("PRAGMA foreign_key_list(`$tableName`)").use { statement ->
+            while (statement.step()) add(statement.getText(2))
+        }
+    }
+    assertEquals(expectedParents, parents)
 }

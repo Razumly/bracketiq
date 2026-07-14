@@ -146,7 +146,7 @@ private class EventRepositoryHttp_FakeEventDao : EventDao {
     }
 }
 
-private class EventRepositoryHttp_FakeUserDataDao : UserDataDao {
+private class EventRepositoryHttp_FakeUserDataDao : RoomUserDataDaoTestAdapter() {
     override suspend fun upsertUserData(userData: UserData) {}
     override suspend fun upsertUsersData(usersData: List<UserData>) {}
     override suspend fun deleteUsersById(ids: List<String>) {}
@@ -162,7 +162,7 @@ private class EventRepositoryHttp_FakeUserDataDao : UserDataDao {
     override suspend fun searchUsers(search: String): List<UserData> = emptyList()
 }
 
-private class EventRepositoryHttp_FakeTeamDao : TeamDao {
+private class EventRepositoryHttp_FakeTeamDao : RoomTeamDaoTestAdapter() {
     override suspend fun upsertTeam(team: Team) {}
     override suspend fun upsertTeams(teams: List<Team>) {}
     override suspend fun getTeam(teamId: String): Team = error("unused")
