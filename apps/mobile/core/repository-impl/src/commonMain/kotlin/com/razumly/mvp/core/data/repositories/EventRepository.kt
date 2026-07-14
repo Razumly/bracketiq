@@ -38,20 +38,15 @@ import com.razumly.mvp.core.util.jsonMVP
 import dev.icerock.moko.geo.LatLng
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.MvpApiClient
-import com.razumly.mvp.core.network.dto.BillDiscountSummaryDto
 import com.razumly.mvp.core.network.dto.CreateEventRequestDto
 import com.razumly.mvp.core.network.dto.CreateEventTemplateRequestDto
 import com.razumly.mvp.core.network.dto.CurrentUserEventRegistrationsResponseDto
 import com.razumly.mvp.core.network.dto.EventApiDto
 import com.razumly.mvp.core.network.dto.EventChildRegistrationRequestDto
 import com.razumly.mvp.core.network.dto.EventChildRegistrationResponseDto
-import com.razumly.mvp.core.network.dto.EventComplianceDocumentCountsDto
-import com.razumly.mvp.core.network.dto.EventCompliancePaymentSummaryDto
-import com.razumly.mvp.core.network.dto.EventComplianceRequiredDocumentDto
 import com.razumly.mvp.core.network.dto.EventComplianceUserSummaryDto
 import com.razumly.mvp.core.network.dto.EventDetailBootstrapResponseDto
 import com.razumly.mvp.core.network.dto.EventParticipantDivisionWarningDto
-import com.razumly.mvp.core.network.dto.EventParticipantEntryDto
 import com.razumly.mvp.core.network.dto.EventParticipantRegistrationSectionsDto
 import com.razumly.mvp.core.network.dto.EventParticipantsSnapshotResponseDto
 import com.razumly.mvp.core.network.dto.EventParticipantsRequestDto
@@ -66,21 +61,17 @@ import com.razumly.mvp.core.network.dto.EventStaffStateResponseDto
 import com.razumly.mvp.core.network.dto.EventTagsResponseDto
 import com.razumly.mvp.core.network.dto.EventTeamComplianceResponseDto
 import com.razumly.mvp.core.network.dto.EventTeamComplianceSummaryDto
-import com.razumly.mvp.core.network.dto.EventTemplateApiDto
 import com.razumly.mvp.core.network.dto.EventTemplateResponseDto
 import com.razumly.mvp.core.network.dto.EventTemplatesResponseDto
 import com.razumly.mvp.core.network.dto.EventUserComplianceResponseDto
 import com.razumly.mvp.core.network.dto.EventsResponseDto
 import com.razumly.mvp.core.network.dto.ProfileScheduleResponseDto
 import com.razumly.mvp.core.network.dto.ProfileScheduleNextActionResponseDto
-import com.razumly.mvp.core.network.dto.RegistrationQuestionAnswerDto
-import com.razumly.mvp.core.network.dto.RegistrationQuestionAnswerSnapshotDto
 import com.razumly.mvp.core.network.dto.ScheduleEventRequestDto
 import com.razumly.mvp.core.network.dto.ScheduleEventResponseDto
 import com.razumly.mvp.core.network.dto.SeedEventTemplateRequestDto
 import com.razumly.mvp.core.network.dto.StandingsConfirmRequestDto
 import com.razumly.mvp.core.network.dto.StandingsConfirmResponseDto
-import com.razumly.mvp.core.network.dto.StandingsDivisionDto
 import com.razumly.mvp.core.network.dto.StandingsResponseDto
 import com.razumly.mvp.core.network.dto.UpdateEventRequestDto
 import com.razumly.mvp.core.network.dto.toUserDataOrNull
@@ -113,570 +104,11 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.Serializable
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Instant
 
-data class OrganizationEventPage(
-    val events: List<Event>,
-    val nextOffset: Int,
-    val hasMore: Boolean,
-)
 
-data class HostEventPage(
-    val events: List<Event>,
-    val nextOffset: Int,
-    val hasMore: Boolean,
-)
-
-interface IEventRepository : IMVPRepository {
-    fun getCachedEventsFlow(): Flow<Result<List<Event>>>
-    fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>>
-    fun getCachedEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> =
-        getEventWithRelationsFlow(eventId)
-    fun resetCursor()
-    suspend fun getEvent(eventId: String): Result<Event>
-    suspend fun getLeagueScoringConfig(eventId: String): Result<LeagueScoringConfig?> = Result.success(null)
-    suspend fun getEventStaffInvites(eventId: String): Result<List<Invite>>
-    suspend fun getEventStaffState(event: Event): Result<EventStaffState> =
-        Result.failure(UnsupportedOperationException("Atomic event staff loading is not supported."))
-    suspend fun reconcileEventStaff(
-        event: Event,
-        pendingInvites: List<EventStaffInviteInput>,
-        expectedRevision: String,
-    ): Result<EventStaffState> =
-        Result.failure(UnsupportedOperationException("Atomic event staff reconciliation is not supported."))
-    suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>>
-    suspend fun getEventsByOrganization(organizationId: String, limit: Int = 200): Result<List<Event>>
-    suspend fun getOrganizationEventsPage(
-        organizationId: String,
-        limit: Int = 50,
-        offset: Int = 0,
-    ): Result<OrganizationEventPage> {
-        return getEventsByOrganization(organizationId, limit).map { events ->
-            OrganizationEventPage(
-                events = events,
-                nextOffset = offset.coerceAtLeast(0) + events.size,
-                hasMore = false,
-            )
-        }
-    }
-    suspend fun getRegistrationQuestions(scopeType: String, scopeId: String): Result<List<TeamJoinQuestion>> =
-        Result.success(emptyList())
-    suspend fun createEvent(
-        newEvent: Event,
-        requiredTemplateIds: List<String> = emptyList(),
-        leagueScoringConfig: LeagueScoringConfigDTO? = null,
-        fields: List<Field>? = null,
-        timeSlots: List<TimeSlot>? = null,
-    ): Result<Event>
-    suspend fun scheduleEvent(
-        eventId: String,
-        participantCount: Int? = null,
-        includePlaceholderTeams: Boolean? = null,
-    ): Result<Event>
-    suspend fun updateEvent(
-        newEvent: Event,
-        fields: List<Field>? = null,
-        timeSlots: List<TimeSlot>? = null,
-        leagueScoringConfig: LeagueScoringConfigDTO? = null,
-    ): Result<Event>
-    suspend fun updateEventPreservingStaff(
-        newEvent: Event,
-        fields: List<Field>? = null,
-        timeSlots: List<TimeSlot>? = null,
-        leagueScoringConfig: LeagueScoringConfigDTO? = null,
-        expectedStaffRevision: String,
-    ): Result<Event> = updateEvent(
-        newEvent = newEvent,
-        fields = fields,
-        timeSlots = timeSlots,
-        leagueScoringConfig = leagueScoringConfig,
-    )
-    suspend fun updateLocalEvent(newEvent: Event): Result<Event>
-    fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<Event>>>
-    suspend fun getEventsInBounds(bounds: Bounds): Result<Pair<List<Event>, Boolean>>
-    suspend fun getEventsInBounds(
-        bounds: Bounds,
-        dateFrom: Instant? = null,
-        dateTo: Instant? = null,
-        sports: List<String> = emptyList(),
-        tags: List<String> = emptyList(),
-        limit: Int = 50,
-        offset: Int = 0,
-        includeDistanceFilter: Boolean = true,
-    ): Result<Pair<List<Event>, Boolean>>
-    suspend fun searchEvents(
-        searchQuery: String,
-        userLocation: LatLng?,
-        limit: Int = 8,
-        offset: Int = 0,
-    ): Result<Pair<List<Event>, Boolean>>
-    suspend fun getEventTags(
-        query: String? = null,
-        filterOnly: Boolean = false,
-    ): Result<List<EventTag>> = Result.success(emptyList())
-    fun getEventsByHostFlow(hostId: String): Flow<Result<List<Event>>>
-    suspend fun getHostEventsPage(
-        hostId: String,
-        limit: Int = 50,
-        offset: Int = 0,
-    ): Result<HostEventPage> {
-        val safeLimit = limit.coerceAtLeast(1)
-        val safeOffset = offset.coerceAtLeast(0)
-        return getEventsByHostFlow(hostId).first().map { events ->
-            val page = events.drop(safeOffset).take(safeLimit)
-            HostEventPage(
-                events = page,
-                nextOffset = safeOffset + page.size,
-                hasMore = safeOffset + page.size < events.size,
-            )
-        }
-    }
-    fun getEventTemplatesByHostFlow(hostId: String): Flow<Result<List<EventTemplateSummary>>> =
-        flowOf(Result.success(emptyList()))
-    suspend fun createEventTemplateFromEvent(sourceEventId: String): Result<EventTemplateSummary> =
-        Result.failure(UnsupportedOperationException("Event template creation is not supported."))
-    suspend fun seedEventTemplate(
-        templateId: String,
-        newEventId: String,
-        newStartDate: Instant,
-    ): Result<SeededEventTemplateDraft> =
-        Result.failure(UnsupportedOperationException("Event template seeding is not supported."))
-    suspend fun deleteEvent(eventId: String): Result<Unit>
-    suspend fun addCurrentUserToEvent(
-        event: Event,
-        preferredDivisionId: String? = null,
-        occurrence: EventOccurrenceSelection? = null,
-    ): Result<SelfRegistrationResult>
-    suspend fun addCurrentUserToEvent(
-        event: Event,
-        preferredDivisionId: String? = null,
-        occurrence: EventOccurrenceSelection? = null,
-        answers: Map<String, String>,
-    ): Result<SelfRegistrationResult> = addCurrentUserToEvent(
-        event = event,
-        preferredDivisionId = preferredDivisionId,
-        occurrence = occurrence,
-    )
-    suspend fun addPlayerToEvent(
-        event: Event,
-        player: UserData,
-        preferredDivisionId: String? = null,
-        occurrence: EventOccurrenceSelection? = null,
-    ): Result<SelfRegistrationResult>
-    suspend fun requestCurrentUserRegistration(
-        event: Event,
-        preferredDivisionId: String? = null,
-        occurrence: EventOccurrenceSelection? = null,
-    ): Result<SelfRegistrationResult> = addCurrentUserToEvent(
-        event = event,
-        preferredDivisionId = preferredDivisionId,
-        occurrence = occurrence,
-    )
-    suspend fun registerChildForEvent(
-        eventId: String,
-        childUserId: String,
-        joinWaitlist: Boolean = false,
-        occurrence: EventOccurrenceSelection? = null,
-    ): Result<ChildRegistrationResult>
-    suspend fun addTeamToEvent(
-        event: Event,
-        team: Team,
-        preferredDivisionId: String? = null,
-        occurrence: EventOccurrenceSelection? = null,
-    ): Result<Unit>
-    suspend fun addTeamToEvent(
-        event: Event,
-        team: Team,
-        preferredDivisionId: String? = null,
-        occurrence: EventOccurrenceSelection? = null,
-        answers: Map<String, String>,
-    ): Result<Unit> = addTeamToEvent(
-        event = event,
-        team = team,
-        preferredDivisionId = preferredDivisionId,
-        occurrence = occurrence,
-    )
-    suspend fun moveTeamParticipantDivision(
-        event: Event,
-        team: Team,
-        preferredDivisionId: String,
-        occurrence: EventOccurrenceSelection? = null,
-    ): Result<EventParticipantsSyncResult> = Result.failure(NotImplementedError("Team division moves are not implemented."))
-    suspend fun syncEventParticipants(
-        event: Event,
-        occurrence: EventOccurrenceSelection? = null,
-    ): Result<EventParticipantsSyncResult>
-    suspend fun syncEventDetail(
-        event: Event,
-        occurrence: EventOccurrenceSelection? = null,
-        manage: Boolean = false,
-    ): Result<EventDetailSyncResult> = syncEventParticipants(event, occurrence)
-        .map { participantResult -> EventDetailSyncResult(participants = participantResult) }
-    suspend fun getEventParticipantsSummary(
-        eventId: String,
-        occurrence: EventOccurrenceSelection? = null,
-    ): Result<EventParticipantsSummary> = Result.success(EventParticipantsSummary())
-    suspend fun getEventParticipantManagementSnapshot(
-        eventId: String,
-        occurrence: EventOccurrenceSelection? = null,
-    ): Result<EventParticipantManagementSnapshot> = Result.success(EventParticipantManagementSnapshot())
-    fun observeEventParticipantManagementSnapshot(
-        eventId: String,
-        occurrence: EventOccurrenceSelection? = null,
-    ): Flow<EventParticipantManagementSnapshot> = flowOf(EventParticipantManagementSnapshot())
-    suspend fun getEventTeamCompliance(
-        eventId: String,
-        occurrence: EventOccurrenceSelection? = null,
-    ): Result<List<EventTeamComplianceSummary>> =
-        Result.failure(NotImplementedError("Event team compliance is not implemented."))
-    fun observeEventTeamCompliance(
-        eventId: String,
-        occurrence: EventOccurrenceSelection? = null,
-    ): Flow<List<EventTeamComplianceSummary>> = flowOf(emptyList())
-    suspend fun getEventUserCompliance(
-        eventId: String,
-        occurrence: EventOccurrenceSelection? = null,
-    ): Result<List<EventComplianceUserSummary>> =
-        Result.failure(NotImplementedError("Event user compliance is not implemented."))
-    fun observeEventUserCompliance(
-        eventId: String,
-        occurrence: EventOccurrenceSelection? = null,
-    ): Flow<List<EventComplianceUserSummary>> = flowOf(emptyList())
-    suspend fun getLeagueDivisionStandings(eventId: String, divisionId: String): Result<LeagueDivisionStandings>
-    suspend fun confirmLeagueDivisionStandings(
-        eventId: String,
-        divisionId: String,
-        applyReassignment: Boolean = true,
-    ): Result<LeagueStandingsConfirmResult>
-    suspend fun removeTeamFromEvent(
-        event: Event,
-        teamWithPlayers: TeamWithPlayers,
-        refundMode: EventParticipantRefundMode? = null,
-        refundReason: String? = null,
-        occurrence: EventOccurrenceSelection? = null,
-    ): Result<Unit>
-    suspend fun removeCurrentUserFromEvent(
-        event: Event,
-        targetUserId: String? = null,
-        occurrence: EventOccurrenceSelection? = null,
-    ): Result<Unit>
-    suspend fun getMySchedule(): Result<UserScheduleSnapshot> = Result.success(UserScheduleSnapshot())
-    suspend fun getMyScheduleNextAction(): Result<UserScheduleNextAction> =
-        Result.success(UserScheduleNextAction.CreateEvent)
-    suspend fun syncCurrentUserRegistrationCache(): Result<Unit> = Result.success(Unit)
-    suspend fun syncCurrentUserRegistrationCacheForEvent(eventId: String): Result<Unit> = Result.success(Unit)
-    fun observeCurrentUserRegistrationsForEvent(eventId: String): Flow<List<EventRegistrationCacheEntry>> =
-        flowOf(emptyList())
-    suspend fun clearCurrentUserRegistrationCache(): Result<Unit> = Result.success(Unit)
-suspend fun reportEvent(eventId: String, notes: String? = null): Result<Unit> =
-        Result.failure(NotImplementedError("Event reporting is not implemented"))
-}
-
-private fun Event.explicitlyClearedEventPatchFields(previous: Event): Set<String> = buildSet {
-    if (previous.address != null && address == null) add("address")
-    if (previous.rating != null && rating == null) add("rating")
-    if (previous.cancellationRefundHours != null && cancellationRefundHours == null) add("cancellationRefundHours")
-    if (previous.sportId != null && sportId == null) add("sportId")
-    if (previous.leagueScoringConfigId != null && leagueScoringConfigId == null) add("leagueScoringConfigId")
-    if (previous.affiliateUrl != null && affiliateUrl == null) add("affiliateUrl")
-    if (previous.scheduleText != null && scheduleText == null) add("scheduleText")
-    if (previous.dateDisplayMode != null && dateDisplayMode == null) add("dateDisplayMode")
-    if (previous.dateDisplayText != null && dateDisplayText == null) add("dateDisplayText")
-    if (previous.manualPaymentInstructions != null && manualPaymentInstructions == null) add("manualPaymentInstructions")
-    if (previous.minAge != null && minAge == null) add("minAge")
-    if (previous.maxAge != null && maxAge == null) add("maxAge")
-    if (previous.gamesPerOpponent != null && gamesPerOpponent == null) add("gamesPerOpponent")
-    if (previous.playoffTeamCount != null && playoffTeamCount == null) add("playoffTeamCount")
-    if (previous.matchDurationMinutes != null && matchDurationMinutes == null) add("matchDurationMinutes")
-    if (previous.setDurationMinutes != null && setDurationMinutes == null) add("setDurationMinutes")
-    if (previous.setsPerMatch != null && setsPerMatch == null) add("setsPerMatch")
-    if (previous.doTeamsOfficiate != null && doTeamsOfficiate == null) add("doTeamsOfficiate")
-    if (previous.teamOfficialsMaySwap != null && teamOfficialsMaySwap == null) add("teamOfficialsMaySwap")
-    if (previous.matchRulesOverride != null && matchRulesOverride == null) add("matchRulesOverride")
-    if (previous.restTimeMinutes != null && restTimeMinutes == null) add("restTimeMinutes")
-    if (previous.allowPaymentPlans != null && allowPaymentPlans == null) add("allowPaymentPlans")
-    if (previous.installmentCount != null && installmentCount == null) add("installmentCount")
-    if (previous.allowTeamSplitDefault != null && allowTeamSplitDefault == null) add("allowTeamSplitDefault")
-}
-
-@Serializable
-private data class RegistrationQuestionDto(
-    val id: String = "",
-    val prompt: String = "",
-    val answerType: String = "TEXT",
-    val required: Boolean = false,
-    val sortOrder: Int = 0,
-)
-
-@Serializable
-private data class RegistrationQuestionsResponseDto(
-    val questions: List<RegistrationQuestionDto> = emptyList(),
-    val error: String? = null,
-)
-
-private fun RegistrationQuestionDto.toTeamJoinQuestionOrNull(): TeamJoinQuestion? {
-    val normalizedId = id.trim().takeIf(String::isNotBlank) ?: return null
-    val normalizedPrompt = prompt.trim().takeIf(String::isNotBlank) ?: return null
-    return TeamJoinQuestion(
-        id = normalizedId,
-        prompt = normalizedPrompt,
-        answerType = answerType.trim().ifBlank { "TEXT" },
-        required = required,
-        sortOrder = sortOrder,
-    )
-}
-
-private fun Map<String, String>.toRegistrationQuestionAnswerDtos(): List<RegistrationQuestionAnswerDto> =
-    mapNotNull { (questionId, answer) ->
-        val normalizedQuestionId = questionId.trim().takeIf(String::isNotBlank) ?: return@mapNotNull null
-        RegistrationQuestionAnswerDto(
-            questionId = normalizedQuestionId,
-            answer = answer,
-        )
-    }
-
-enum class EventParticipantRefundMode(val wireValue: String) {
-    AUTO("auto"),
-    REQUEST("request"),
-}
-
-data class SelfRegistrationResult(
-    val requiresParentApproval: Boolean = false,
-    val joinedWaitlist: Boolean = false,
-)
-
-data class EventOccurrenceSelection(
-    val slotId: String,
-    val occurrenceDate: String,
-    val label: String? = null,
-)
-
-data class EventParticipantsSyncResult(
-    val event: Event,
-    val participantCount: Int = 0,
-    val participantCapacity: Int? = null,
-    val divisionWarnings: List<EventParticipantDivisionWarning> = emptyList(),
-    val weeklySelectionRequired: Boolean = false,
-)
-
-data class EventDetailSyncResult(
-    val participants: EventParticipantsSyncResult,
-    val matches: List<MatchMVP> = emptyList(),
-    val fields: List<Field> = emptyList(),
-    val timeSlots: List<TimeSlot> = emptyList(),
-    val leagueScoringConfig: LeagueScoringConfig? = null,
-    val staffInvites: List<Invite> = emptyList(),
-    val staffRevision: String? = null,
-) {
-    val event: Event get() = participants.event
-}
-
-data class EventParticipantDivisionWarning(
-    val divisionId: String,
-    val code: String,
-    val message: String,
-    val filledCount: Int = 0,
-    val slotCount: Int = 0,
-    val maxTeams: Int = 0,
-)
-
-data class EventParticipantsSummary(
-    val participantCount: Int = 0,
-    val participantCapacity: Int? = null,
-    val weeklySelectionRequired: Boolean = false,
-)
-
-data class EventParticipantManagementEntry(
-    val registrationId: String,
-    val registrantId: String,
-    val registrantType: String,
-    val rosterRole: String? = null,
-    val status: String? = null,
-    val parentId: String? = null,
-    val divisionId: String? = null,
-    val divisionTypeId: String? = null,
-    val divisionTypeKey: String? = null,
-    val consentDocumentId: String? = null,
-    val consentStatus: String? = null,
-    val slotId: String? = null,
-    val occurrenceDate: String? = null,
-    val createdAt: String? = null,
-    val updatedAt: String? = null,
-)
-
-data class EventParticipantManagementSnapshot(
-    val teamRegistrations: List<EventParticipantManagementEntry> = emptyList(),
-    val userRegistrations: List<EventParticipantManagementEntry> = emptyList(),
-    val childRegistrations: List<EventParticipantManagementEntry> = emptyList(),
-    val waitlistRegistrations: List<EventParticipantManagementEntry> = emptyList(),
-    val freeAgentRegistrations: List<EventParticipantManagementEntry> = emptyList(),
-)
-
-data class EventCompliancePaymentSummary(
-    val hasBill: Boolean = false,
-    val billId: String? = null,
-    val totalAmountCents: Int = 0,
-    val paidAmountCents: Int = 0,
-    val originalAmountCents: Int = totalAmountCents,
-    val discountAmountCents: Int = 0,
-    val discountedAmountCents: Int = totalAmountCents,
-    val discounts: List<BillDiscountSummary> = emptyList(),
-    val status: String? = null,
-    val isPaidInFull: Boolean = false,
-    val paymentPending: Boolean = false,
-    val inheritedFromTeamBill: Boolean = false,
-    val manualPaymentProofStatus: String? = null,
-    val manualPaymentProofCount: Int = 0,
-)
-
-data class EventComplianceDocumentCounts(
-    val signedCount: Int = 0,
-    val requiredCount: Int = 0,
-)
-
-data class EventTemplateSummary(
-    val id: String,
-    val name: String,
-    val description: String? = null,
-    val sourceEventId: String? = null,
-    val ownerUserId: String? = null,
-    val organizationId: String? = null,
-    val sportId: String? = null,
-    val eventType: String? = null,
-    val createdAt: Instant? = null,
-    val updatedAt: Instant? = null,
-)
-
-@Serializable
-data class SeededEventTemplateDraft(
-    val event: Event,
-    val fields: List<Field> = emptyList(),
-    val timeSlots: List<TimeSlot> = emptyList(),
-    val leagueScoringConfig: LeagueScoringConfigDTO? = null,
-)
-
-@Serializable
-data class EventComplianceRequiredDocument(
-    val key: String,
-    val templateId: String,
-    val title: String,
-    val type: String,
-    val signerContext: String,
-    val signerLabel: String,
-    val signOnce: Boolean,
-    val status: String,
-    val signedDocumentRecordId: String? = null,
-    val signedAt: String? = null,
-)
-
-@Serializable
-data class RegistrationQuestionAnswerSummary(
-    val questionId: String,
-    val prompt: String,
-    val answerType: String = "TEXT",
-    val required: Boolean = false,
-    val sortOrder: Int = 0,
-    val answer: String = "",
-)
-
-data class EventComplianceUserSummary(
-    val userId: String,
-    val fullName: String,
-    val userName: String? = null,
-    val isMinorAtEvent: Boolean = false,
-    val registrationType: String = "ADULT",
-    val payment: EventCompliancePaymentSummary = EventCompliancePaymentSummary(),
-    val documents: EventComplianceDocumentCounts = EventComplianceDocumentCounts(),
-    val requiredDocuments: List<EventComplianceRequiredDocument> = emptyList(),
-    val registrationAnswers: List<RegistrationQuestionAnswerSummary> = emptyList(),
-)
-
-data class EventTeamComplianceSummary(
-    val teamId: String,
-    val teamName: String,
-    val payment: EventCompliancePaymentSummary = EventCompliancePaymentSummary(),
-    val documents: EventComplianceDocumentCounts = EventComplianceDocumentCounts(),
-    val users: List<EventComplianceUserSummary> = emptyList(),
-    val registrationAnswers: List<RegistrationQuestionAnswerSummary> = emptyList(),
-)
-
-data class ChildRegistrationResult(
-    val registrationStatus: String? = null,
-    val consentStatus: String? = null,
-    val requiresParentApproval: Boolean = false,
-    val requiresChildEmail: Boolean = false,
-    val joinedWaitlist: Boolean = false,
-    val warnings: List<String> = emptyList(),
-)
-
-data class UserScheduleSnapshot(
-    val events: List<Event> = emptyList(),
-    val matches: List<MatchMVP> = emptyList(),
-    val teams: List<Team> = emptyList(),
-    val fields: List<Field> = emptyList(),
-)
-
-sealed interface UserScheduleNextAction {
-    data object CreateEvent : UserScheduleNextAction
-
-    data class EventShortcut(
-        val eventId: String,
-        val eventName: String,
-        val eventImageId: String,
-    ) : UserScheduleNextAction
-
-    data class MatchShortcut(
-        val eventId: String,
-        val matchId: String,
-        val eventName: String,
-        val eventImageId: String,
-    ) : UserScheduleNextAction
-}
-
-private data class RegistrationDivisionPayload(
-    val divisionId: String? = null,
-    val divisionTypeId: String? = null,
-    val divisionTypeKey: String? = null,
-)
-
-private fun EventParticipantEntryDto.toManagementEntryOrNull(): EventParticipantManagementEntry? {
-    val normalizedRegistrationId = registrationId?.trim()?.takeIf(String::isNotBlank) ?: return null
-    val normalizedRegistrantId = registrantId?.trim()?.takeIf(String::isNotBlank) ?: return null
-    val normalizedRegistrantType = registrantType?.trim()?.takeIf(String::isNotBlank) ?: return null
-    return EventParticipantManagementEntry(
-        registrationId = normalizedRegistrationId,
-        registrantId = normalizedRegistrantId,
-        registrantType = normalizedRegistrantType,
-        rosterRole = rosterRole?.trim()?.takeIf(String::isNotBlank),
-        status = status?.trim()?.takeIf(String::isNotBlank),
-        parentId = parentId?.trim()?.takeIf(String::isNotBlank),
-        divisionId = divisionId?.trim()?.takeIf(String::isNotBlank),
-        divisionTypeId = divisionTypeId?.trim()?.takeIf(String::isNotBlank),
-        divisionTypeKey = divisionTypeKey?.trim()?.takeIf(String::isNotBlank),
-        consentDocumentId = consentDocumentId?.trim()?.takeIf(String::isNotBlank),
-        consentStatus = consentStatus?.trim()?.takeIf(String::isNotBlank),
-        slotId = slotId?.trim()?.takeIf(String::isNotBlank),
-        occurrenceDate = occurrenceDate?.trim()?.takeIf(String::isNotBlank),
-        createdAt = createdAt?.trim()?.takeIf(String::isNotBlank),
-        updatedAt = updatedAt?.trim()?.takeIf(String::isNotBlank),
-    )
-}
-
-private fun EventParticipantRegistrationSectionsDto?.toManagementSnapshot(): EventParticipantManagementSnapshot {
-    if (this == null) {
-        return EventParticipantManagementSnapshot()
-    }
-    return EventParticipantManagementSnapshot(
-        teamRegistrations = teams.mapNotNull(EventParticipantEntryDto::toManagementEntryOrNull),
-        userRegistrations = users.mapNotNull(EventParticipantEntryDto::toManagementEntryOrNull),
-        childRegistrations = children.mapNotNull(EventParticipantEntryDto::toManagementEntryOrNull),
-        waitlistRegistrations = waitlist.mapNotNull(EventParticipantEntryDto::toManagementEntryOrNull),
-        freeAgentRegistrations = freeAgents.mapNotNull(EventParticipantEntryDto::toManagementEntryOrNull),
-    )
-}
 
 private const val MANAGEMENT_SECTION_TEAM = "TEAM"
 private const val MANAGEMENT_SECTION_USER = "USER"
@@ -699,7 +131,6 @@ private fun Event.analyticsProperties(): Map<String, String> = buildMap {
     organizationId?.trim()?.takeIf(String::isNotBlank)?.let { put("organization_id", it) }
     sportId?.trim()?.takeIf(String::isNotBlank)?.let { put("sport_id", it) }
 }
-
 private data class EventParticipantCacheScope(
     val eventId: String,
     val cacheSlotId: String,
@@ -805,153 +236,6 @@ private fun List<EventParticipantManagementCacheEntry>.toManagementSnapshotFromC
     )
 }
 
-private fun EventParticipantDivisionWarningDto.toDomainWarningOrNull(): EventParticipantDivisionWarning? {
-    val normalizedDivisionId = divisionId?.trim()?.takeIf(String::isNotBlank) ?: return null
-    val normalizedCode = code?.trim()?.takeIf(String::isNotBlank) ?: return null
-    val normalizedMessage = message?.trim()?.takeIf(String::isNotBlank) ?: return null
-    return EventParticipantDivisionWarning(
-        divisionId = normalizedDivisionId,
-        code = normalizedCode,
-        message = normalizedMessage,
-        filledCount = filledCount ?: 0,
-        slotCount = slotCount ?: 0,
-        maxTeams = maxTeams ?: 0,
-    )
-}
-
-private fun EventCompliancePaymentSummaryDto?.toCompliancePaymentSummary(): EventCompliancePaymentSummary {
-    if (this == null) {
-        return EventCompliancePaymentSummary()
-    }
-    return EventCompliancePaymentSummary(
-        hasBill = hasBill == true,
-        billId = billId?.trim()?.takeIf(String::isNotBlank),
-        totalAmountCents = totalAmountCents ?: 0,
-        paidAmountCents = paidAmountCents ?: 0,
-        originalAmountCents = originalAmountCents ?: totalAmountCents ?: 0,
-        discountAmountCents = discountAmountCents ?: 0,
-        discountedAmountCents = discountedAmountCents ?: totalAmountCents ?: 0,
-        discounts = discounts.mapNotNull(BillDiscountSummaryDto::toBillDiscountSummaryOrNull),
-        status = status?.trim()?.takeIf(String::isNotBlank),
-        isPaidInFull = isPaidInFull == true,
-        paymentPending = paymentPending == true,
-        inheritedFromTeamBill = inheritedFromTeamBill == true,
-        manualPaymentProofStatus = manualPaymentProofStatus?.trim()?.takeIf(String::isNotBlank),
-        manualPaymentProofCount = manualPaymentProofCount ?: 0,
-    )
-}
-
-private fun BillDiscountSummaryDto.toBillDiscountSummaryOrNull(): BillDiscountSummary? {
-    val resolvedId = id?.trim()?.takeIf(String::isNotBlank) ?: return null
-    val resolvedDiscountId = discountId?.trim()?.takeIf(String::isNotBlank) ?: return null
-    val resolvedDiscountCodeId = discountCodeId?.trim()?.takeIf(String::isNotBlank) ?: return null
-    val resolvedCode = code?.trim()?.takeIf(String::isNotBlank) ?: return null
-    val resolvedOriginal = originalAmountCents ?: return null
-    val resolvedDiscounted = discountedAmountCents ?: return null
-    return BillDiscountSummary(
-        id = resolvedId,
-        discountId = resolvedDiscountId,
-        discountCodeId = resolvedDiscountCodeId,
-        code = resolvedCode,
-        name = name?.trim()?.takeIf(String::isNotBlank),
-        originalAmountCents = resolvedOriginal.coerceAtLeast(0),
-        discountedAmountCents = resolvedDiscounted.coerceAtLeast(0),
-        discountAmountCents = (discountAmountCents ?: (resolvedOriginal - resolvedDiscounted)).coerceAtLeast(0),
-        paymentIntentId = paymentIntentId?.trim()?.takeIf(String::isNotBlank),
-        registrationId = registrationId?.trim()?.takeIf(String::isNotBlank),
-    )
-}
-
-private fun EventComplianceDocumentCountsDto?.toComplianceDocumentCounts(): EventComplianceDocumentCounts {
-    if (this == null) {
-        return EventComplianceDocumentCounts()
-    }
-    return EventComplianceDocumentCounts(
-        signedCount = signedCount ?: 0,
-        requiredCount = requiredCount ?: 0,
-    )
-}
-
-private fun EventComplianceRequiredDocumentDto.toComplianceRequiredDocumentOrNull(): EventComplianceRequiredDocument? {
-    val normalizedKey = key?.trim()?.takeIf(String::isNotBlank)
-    val normalizedTemplateId = templateId?.trim()?.takeIf(String::isNotBlank)
-    if (normalizedKey == null || normalizedTemplateId == null) {
-        return null
-    }
-    return EventComplianceRequiredDocument(
-        key = normalizedKey,
-        templateId = normalizedTemplateId,
-        title = title?.trim()?.takeIf(String::isNotBlank) ?: "Required document",
-        type = type?.trim()?.takeIf(String::isNotBlank) ?: "PDF",
-        signerContext = signerContext?.trim()?.takeIf(String::isNotBlank) ?: "participant",
-        signerLabel = signerLabel?.trim()?.takeIf(String::isNotBlank) ?: "Participant",
-        signOnce = signOnce == true,
-        status = status?.trim()?.takeIf(String::isNotBlank) ?: "UNSIGNED",
-        signedDocumentRecordId = signedDocumentRecordId?.trim()?.takeIf(String::isNotBlank),
-        signedAt = signedAt?.trim()?.takeIf(String::isNotBlank),
-    )
-}
-
-private fun EventTemplateApiDto.toEventTemplateSummaryOrNull(): EventTemplateSummary? {
-    val normalizedId = id?.trim()?.takeIf(String::isNotBlank) ?: return null
-    val normalizedName = name?.trim()?.takeIf(String::isNotBlank) ?: "Untitled Template"
-    return EventTemplateSummary(
-        id = normalizedId,
-        name = normalizedName,
-        description = description?.trim()?.takeIf(String::isNotBlank),
-        sourceEventId = sourceEventId?.trim()?.takeIf(String::isNotBlank),
-        ownerUserId = ownerUserId?.trim()?.takeIf(String::isNotBlank),
-        organizationId = organizationId?.trim()?.takeIf(String::isNotBlank),
-        sportId = sportId?.trim()?.takeIf(String::isNotBlank),
-        eventType = eventType?.trim()?.takeIf(String::isNotBlank),
-        createdAt = createdAt?.trim()?.takeIf(String::isNotBlank)?.let { raw ->
-            runCatching { Instant.parse(raw) }.getOrNull()
-        },
-        updatedAt = updatedAt?.trim()?.takeIf(String::isNotBlank)?.let { raw ->
-            runCatching { Instant.parse(raw) }.getOrNull()
-        },
-    )
-}
-
-private fun RegistrationQuestionAnswerSnapshotDto.toRegistrationQuestionAnswerOrNull(): RegistrationQuestionAnswerSummary? {
-    val normalizedQuestionId = questionId?.trim()?.takeIf(String::isNotBlank) ?: return null
-    val normalizedPrompt = prompt?.trim()?.takeIf(String::isNotBlank) ?: return null
-    return RegistrationQuestionAnswerSummary(
-        questionId = normalizedQuestionId,
-        prompt = normalizedPrompt,
-        answerType = answerType?.trim()?.takeIf(String::isNotBlank) ?: "TEXT",
-        required = required == true,
-        sortOrder = sortOrder ?: 0,
-        answer = answer?.trim().orEmpty(),
-    )
-}
-
-private fun EventComplianceUserSummaryDto.toComplianceUserSummaryOrNull(): EventComplianceUserSummary? {
-    val normalizedUserId = userId?.trim()?.takeIf(String::isNotBlank) ?: return null
-    return EventComplianceUserSummary(
-        userId = normalizedUserId,
-        fullName = fullName?.trim()?.takeIf(String::isNotBlank) ?: normalizedUserId,
-        userName = userName?.trim()?.takeIf(String::isNotBlank),
-        isMinorAtEvent = isMinorAtEvent == true,
-        registrationType = registrationType?.trim()?.takeIf(String::isNotBlank) ?: "ADULT",
-        payment = payment.toCompliancePaymentSummary(),
-        documents = documents.toComplianceDocumentCounts(),
-        requiredDocuments = requiredDocuments.mapNotNull(EventComplianceRequiredDocumentDto::toComplianceRequiredDocumentOrNull),
-        registrationAnswers = registrationAnswers.mapNotNull(RegistrationQuestionAnswerSnapshotDto::toRegistrationQuestionAnswerOrNull),
-    )
-}
-
-private fun EventTeamComplianceSummaryDto.toTeamComplianceSummaryOrNull(): EventTeamComplianceSummary? {
-    val normalizedTeamId = teamId?.trim()?.takeIf(String::isNotBlank) ?: return null
-    return EventTeamComplianceSummary(
-        teamId = normalizedTeamId,
-        teamName = teamName?.trim()?.takeIf(String::isNotBlank) ?: "Team",
-        payment = payment.toCompliancePaymentSummary(),
-        documents = documents.toComplianceDocumentCounts(),
-        users = users.mapNotNull(EventComplianceUserSummaryDto::toComplianceUserSummaryOrNull),
-        registrationAnswers = registrationAnswers.mapNotNull(RegistrationQuestionAnswerSnapshotDto::toRegistrationQuestionAnswerOrNull),
-    )
-}
 
 private fun EventTeamComplianceSummary.toCacheEntry(
     scope: EventParticipantCacheScope,
@@ -1103,38 +387,6 @@ private fun teamComplianceFromCache(
     }
 }
 
-private fun StandingsDivisionDto.toLeagueDivisionStandings(): LeagueDivisionStandings {
-    val confirmedAt = standingsConfirmedAt
-        ?.trim()
-        ?.takeIf(String::isNotBlank)
-        ?.let { value -> runCatching { Instant.parse(value) }.getOrNull() }
-    val validationMessages = validation.mappingErrors + validation.capacityErrors
-
-    return LeagueDivisionStandings(
-        divisionId = divisionId,
-        divisionName = divisionName,
-        standingsConfirmedAt = confirmedAt,
-        standingsConfirmedBy = standingsConfirmedBy?.trim()?.takeIf(String::isNotBlank),
-        rows = standings.map { row ->
-            LeagueStandingsRow(
-                position = row.position,
-                teamId = row.teamId,
-                teamName = row.teamName,
-                wins = row.wins,
-                losses = row.losses,
-                draws = row.draws,
-                goalsFor = row.goalsFor,
-                goalsAgainst = row.goalsAgainst,
-                goalDifference = row.goalDifference,
-                matchesPlayed = row.matchesPlayed,
-                basePoints = row.basePoints,
-                finalPoints = row.finalPoints,
-                pointsDelta = row.pointsDelta,
-            )
-        },
-        validationMessages = validationMessages,
-    )
-}
 
 class EventRepository(
     private val databaseService: DatabaseService,
@@ -1759,10 +1011,10 @@ class EventRepository(
         }
 
         bootstrap.teamCompliance?.teams
-            ?.mapNotNull(EventTeamComplianceSummaryDto::toTeamComplianceSummaryOrNull)
+            ?.mapNotNull(EventTeamComplianceSummaryDto::toEventTeamComplianceSummaryOrNull)
             ?.let { summaries -> replaceTeamComplianceSummaries(cacheScope, summaries) }
         bootstrap.userCompliance?.users
-            ?.mapNotNull(EventComplianceUserSummaryDto::toComplianceUserSummaryOrNull)
+            ?.mapNotNull(EventComplianceUserSummaryDto::toEventComplianceUserSummaryOrNull)
             ?.let { summaries -> replaceStandaloneUserComplianceSummaries(cacheScope, summaries) }
 
         val fields = bootstrap.fields
@@ -1856,7 +1108,7 @@ class EventRepository(
                 basePath = "api/events/$normalizedEventId/teams/compliance",
                 occurrence = occurrence,
             ),
-        ).teams.mapNotNull(EventTeamComplianceSummaryDto::toTeamComplianceSummaryOrNull)
+        ).teams.mapNotNull(EventTeamComplianceSummaryDto::toEventTeamComplianceSummaryOrNull)
         replaceTeamComplianceSummaries(cacheScope, summaries)
     }
 
@@ -1897,7 +1149,7 @@ class EventRepository(
                 basePath = "api/events/$normalizedEventId/users/compliance",
                 occurrence = occurrence,
             ),
-        ).users.mapNotNull(EventComplianceUserSummaryDto::toComplianceUserSummaryOrNull)
+        ).users.mapNotNull(EventComplianceUserSummaryDto::toEventComplianceUserSummaryOrNull)
         replaceStandaloneUserComplianceSummaries(cacheScope, summaries)
     }
 
@@ -2636,7 +1888,7 @@ class EventRepository(
                 divisionTypeKey = divisionPayload.divisionTypeKey,
                 slotId = occurrence?.slotId,
                 occurrenceDate = occurrence?.occurrenceDate,
-                answers = answers.toRegistrationQuestionAnswerDtos(),
+                answers = answers.toEventRegistrationQuestionAnswerDtos(),
             )
             AnalyticsTracker.capture(
                 AnalyticsEvent.EventRegistrationStarted,
@@ -2660,7 +1912,7 @@ class EventRepository(
                             userId = currentUser.id,
                             slotId = occurrence?.slotId,
                             occurrenceDate = occurrence?.occurrenceDate,
-                            answers = answers.toRegistrationQuestionAnswerDtos(),
+                            answers = answers.toEventRegistrationQuestionAnswerDtos(),
                         ),
                     )
                 }
@@ -2899,7 +2151,7 @@ class EventRepository(
                 divisionTypeKey = divisionPayload.divisionTypeKey,
                 slotId = occurrence?.slotId,
                 occurrenceDate = occurrence?.occurrenceDate,
-                answers = answers.toRegistrationQuestionAnswerDtos(),
+                answers = answers.toEventRegistrationQuestionAnswerDtos(),
             )
             AnalyticsTracker.capture(
                 AnalyticsEvent.EventRegistrationStarted,
@@ -3383,16 +2635,3 @@ class EventRepository(
         return participantCount >= maxParticipants
     }
 }
-
-@Serializable
-private data class EventModerationReportRequestDto(
-    val targetType: String,
-    val targetId: String,
-    val category: String,
-    val notes: String? = null,
-)
-
-@Serializable
-private data class EventModerationReportResponseDto(
-    val hiddenEventIds: List<String> = emptyList(),
-)
