@@ -575,6 +575,21 @@ class DefaultEventDetailComponent(
         ),
         scope = scope,
     )
+    private val participantActionHandler = EventParticipantActionHandler(
+        scope = scope,
+        participantManagementCoordinator = participantManagementCoordinator,
+        participantBootstrapCoordinator = participantBootstrapCoordinator,
+        eventRepository = eventRepository,
+        billingRepository = billingRepository,
+        navigationHandler = navigationHandler,
+        loadingHandler = { loadingHandler },
+        selectedEvent = { selectedEvent.value },
+        selectedDivision = ::selectDivision,
+        requireSelectedWeeklyOccurrence = { event, errorMessage ->
+            requireSelectedWeeklyOccurrence(event, errorMessage)
+        },
+        setMessage = { message -> _errorState.value = ErrorMessage(message) },
+    )
 
     private val userTeams = relationStateCoordinator.currentUserTeams
 
@@ -2048,210 +2063,44 @@ class DefaultEventDetailComponent(
         }
     }
 
-    override fun createNewTeam() {
-        navigationHandler.navigateToTeams(
-            freeAgents = selectedEvent.value.freeAgents,
-            eventId = selectedEvent.value.id,
-            selectedFreeAgentId = null,
-        )
-    }
+    override fun createNewTeam() = participantActionHandler.createNewTeam()
 
-    override fun inviteFreeAgentToTeam(userId: String) {
-        val normalizedUserId = userId.trim().takeIf(String::isNotBlank) ?: return
-        navigationHandler.navigateToTeams(
-            freeAgents = selectedEvent.value.freeAgents,
-            eventId = selectedEvent.value.id,
-            selectedFreeAgentId = normalizedUserId,
-        )
-    }
+    override fun inviteFreeAgentToTeam(userId: String) =
+        participantActionHandler.inviteFreeAgentToTeam(userId)
 
-    override fun startManagingParticipants() {
-        val event = selectedEvent.value
-        if (isWeeklyParentEvent(event)) {
-            requireSelectedWeeklyOccurrence(
-                event = event,
-                errorMessage = "Select an occurrence before managing participants.",
-            )
-        }
-    }
+    override fun startManagingParticipants() = participantActionHandler.startManagingParticipants()
 
     override fun stopManagingParticipants() = Unit
 
-    override fun moveTeamParticipantDivision(team: TeamWithPlayers, divisionId: String) {
-        scope.launch {
-            val event = selectedEvent.value
-            val weeklyOccurrence = if (isWeeklyParentEvent(event)) {
-                requireSelectedWeeklyOccurrence(
-                    event = event,
-                    errorMessage = "Select an occurrence before moving teams.",
-                ) ?: return@launch
-            } else {
-                null
-            }
-            val loadingOperation = loadingHandler.newOperation()
-            applyParticipantMutationResult(
-                participantManagementCoordinator.moveTeamParticipantDivision(
-                    event = event,
-                    team = team,
-                    divisionId = divisionId,
-                    occurrence = weeklyOccurrence,
-                    moveTeamDivision = { targetEvent, targetTeam, targetDivisionId, occurrence ->
-                        eventRepository.moveTeamParticipantDivision(
-                            event = targetEvent,
-                            team = targetTeam,
-                            preferredDivisionId = targetDivisionId,
-                            occurrence = occurrence,
-                        )
-                    },
-                    applySuccessfulMove = { result, normalizedDivisionId ->
-                        participantBootstrapCoordinator.applyParticipantSyncResult(result)
-                        selectDivision(normalizedDivisionId)
-                        participantBootstrapCoordinator.refreshSelectedWeeklyOccurrenceSummaryIfNeeded(result.event)
-                        participantBootstrapCoordinator.refreshParticipantManagementSnapshotIfNeeded(result.event)
-                        participantBootstrapCoordinator.refreshParticipantComplianceIfNeeded(result.event)
-                    },
-                    showLoading = loadingOperation::showLoading,
-                    hideLoading = loadingOperation::hideLoading,
-                ),
-            )
-        }
-    }
+    override fun moveTeamParticipantDivision(team: TeamWithPlayers, divisionId: String) =
+        participantActionHandler.moveTeamParticipantDivision(team, divisionId)
 
-    override fun removeTeamParticipant(team: TeamWithPlayers) {
-        scope.launch {
-            val event = selectedEvent.value
-            val weeklyOccurrence = if (isWeeklyParentEvent(event)) {
-                requireSelectedWeeklyOccurrence(
-                    event = event,
-                    errorMessage = "Select an occurrence before removing participants.",
-                ) ?: return@launch
-            } else {
-                null
-            }
-            val loadingOperation = loadingHandler.newOperation()
-            applyParticipantMutationResult(
-                participantManagementCoordinator.removeTeamParticipant(
-                    event = event,
-                    team = team,
-                    occurrence = weeklyOccurrence,
-                    removeTeam = { targetEvent, targetTeam, occurrence ->
-                        eventRepository.removeTeamFromEvent(
-                            targetEvent,
-                            targetTeam,
-                            occurrence = occurrence,
-                        )
-                    },
-                    refreshAfterSuccess = { eventId, warningMessage ->
-                        participantBootstrapCoordinator.refreshEventAfterParticipantMutation(
-                            eventId = eventId,
-                            warningMessage = warningMessage,
-                        )
-                    },
-                    showLoading = loadingOperation::showLoading,
-                    hideLoading = loadingOperation::hideLoading,
-                ),
-            )
-        }
-    }
+    override fun removeTeamParticipant(team: TeamWithPlayers) =
+        participantActionHandler.removeTeamParticipant(team)
 
-    override fun removeUserParticipant(userId: String) {
-        scope.launch {
-            val event = selectedEvent.value
-            val weeklyOccurrence = if (isWeeklyParentEvent(event)) {
-                requireSelectedWeeklyOccurrence(
-                    event = event,
-                    errorMessage = "Select an occurrence before removing participants.",
-                ) ?: return@launch
-            } else {
-                null
-            }
-            val loadingOperation = loadingHandler.newOperation()
-            applyParticipantMutationResult(
-                participantManagementCoordinator.removeUserParticipant(
-                    event = event,
-                    userId = userId,
-                    occurrence = weeklyOccurrence,
-                    removeUser = { targetEvent, targetUserId, occurrence ->
-                        eventRepository.removeCurrentUserFromEvent(
-                            targetEvent,
-                            targetUserId = targetUserId,
-                            occurrence = occurrence,
-                        )
-                    },
-                    refreshAfterSuccess = { eventId, warningMessage ->
-                        participantBootstrapCoordinator.refreshEventAfterParticipantMutation(
-                            eventId = eventId,
-                            warningMessage = warningMessage,
-                        )
-                    },
-                    showLoading = loadingOperation::showLoading,
-                    hideLoading = loadingOperation::hideLoading,
-                ),
-            )
-        }
-    }
+    override fun removeUserParticipant(userId: String) =
+        participantActionHandler.removeUserParticipant(userId)
 
-    private fun applyParticipantMutationResult(result: ParticipantMutationResult) {
-        val message = when (result) {
-            ParticipantMutationResult.NoOp -> null
-            is ParticipantMutationResult.Success -> result.message
-            is ParticipantMutationResult.Rejected -> result.message
-            is ParticipantMutationResult.Failed -> result.message
-        } ?: return
-        _errorState.value = ErrorMessage(message)
-    }
-
-    override suspend fun getParticipantBillingSnapshot(teamId: String): Result<EventTeamBillingSnapshot> {
-        return participantManagementCoordinator.getParticipantBillingSnapshot(
-            eventId = selectedEvent.value.id,
-            teamId = teamId,
-            loadSnapshot = billingRepository::getEventTeamBillingSnapshot,
-        )
-    }
+    override suspend fun getParticipantBillingSnapshot(teamId: String): Result<EventTeamBillingSnapshot> =
+        participantActionHandler.getParticipantBillingSnapshot(teamId)
 
     override suspend fun createParticipantBill(
         teamId: String,
         request: EventTeamBillCreateRequest,
-    ): Result<Unit> {
-        return participantManagementCoordinator.createParticipantBill(
-            eventId = selectedEvent.value.id,
-            teamId = teamId,
-            request = request,
-            createBill = billingRepository::createEventTeamBill,
-            refreshAfterSuccess = {
-                participantBootstrapCoordinator.refreshParticipantComplianceIfNeeded(selectedEvent.value)
-            },
-        )
-    }
+    ): Result<Unit> = participantActionHandler.createParticipantBill(teamId, request)
 
     override suspend fun createParticipantPaymentCheckout(
         teamId: String,
         request: EventTeamPaymentCheckoutRequest,
-    ): Result<EventTeamPaymentCheckout> {
-        return participantManagementCoordinator.createParticipantPaymentCheckout(
-            eventId = selectedEvent.value.id,
-            teamId = teamId,
-            request = request,
-            createCheckout = billingRepository::createEventTeamPaymentCheckout,
-        )
-    }
+    ): Result<EventTeamPaymentCheckout> =
+        participantActionHandler.createParticipantPaymentCheckout(teamId, request)
 
     override suspend fun refundParticipantPayment(
         teamId: String,
         billPaymentId: String,
         amountCents: Int,
-    ): Result<Unit> {
-        return participantManagementCoordinator.refundParticipantPayment(
-            eventId = selectedEvent.value.id,
-            teamId = teamId,
-            billPaymentId = billPaymentId,
-            amountCents = amountCents,
-            refundPayment = billingRepository::refundEventTeamBillPayment,
-            refreshAfterSuccess = {
-                participantBootstrapCoordinator.refreshParticipantComplianceIfNeeded(selectedEvent.value)
-            },
-        )
-    }
+    ): Result<Unit> =
+        participantActionHandler.refundParticipantPayment(teamId, billPaymentId, amountCents)
 
     override suspend fun reviewParticipantManualPaymentProof(
         billId: String,
@@ -2260,18 +2109,14 @@ class DefaultEventDetailComponent(
         decision: String,
         amountAcceptedCents: Int?,
         reviewNote: String?,
-    ): Result<Unit> {
-        return billingRepository.reviewManualPaymentProof(
-            billId = billId,
-            billPaymentId = billPaymentId,
-            proofId = proofId,
-            decision = decision,
-            amountAcceptedCents = amountAcceptedCents,
-            reviewNote = reviewNote,
-        ).mapCatching {
-            participantBootstrapCoordinator.refreshParticipantComplianceIfNeeded(selectedEvent.value)
-        }
-    }
+    ): Result<Unit> = participantActionHandler.reviewParticipantManualPaymentProof(
+        billId = billId,
+        billPaymentId = billPaymentId,
+        proofId = proofId,
+        decision = decision,
+        amountAcceptedCents = amountAcceptedCents,
+        reviewNote = reviewNote,
+    )
 
     override fun selectPlace(place: MVPPlace?) {
         editEventField {
