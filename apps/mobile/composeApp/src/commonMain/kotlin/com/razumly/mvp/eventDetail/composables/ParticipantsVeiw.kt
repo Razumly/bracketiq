@@ -126,6 +126,28 @@ enum class ParticipantsSection(val label: String) {
 internal fun canStartParticipantBillingAction(inFlightActionId: String?): Boolean =
     inFlightActionId == null
 
+internal fun buildConfirmedParticipantBillRequest(
+    isPriceQuoteConfirmed: Boolean,
+    ownerType: String,
+    ownerId: String?,
+    confirmedEventAmountCents: Int,
+    taxAmountCents: Int,
+    allowSplit: Boolean,
+    label: String,
+): EventTeamBillCreateRequest? {
+    if (!isPriceQuoteConfirmed || confirmedEventAmountCents <= 0 || taxAmountCents < 0) {
+        return null
+    }
+    return EventTeamBillCreateRequest(
+        ownerType = ownerType,
+        ownerId = ownerId,
+        eventAmountCents = confirmedEventAmountCents,
+        taxAmountCents = taxAmountCents,
+        allowSplit = ownerType == "TEAM" && allowSplit,
+        label = label.trim(),
+    )
+}
+
 internal fun isCurrentParticipantBillingRequest(
     activeRequestGeneration: Int,
     requestGeneration: Int,
@@ -663,6 +685,7 @@ fun ParticipantsView(
     var createBillOwnerType by remember { mutableStateOf("TEAM") }
     var createBillOwnerId by remember { mutableStateOf<String?>(null) }
     var createBillAmount by remember { mutableStateOf("0") }
+    var createBillQuoteConfirmed by remember { mutableStateOf(false) }
     var createBillTax by remember { mutableStateOf("0") }
     var createBillAllowSplit by remember { mutableStateOf(false) }
     var createBillLabel by remember { mutableStateOf("Event registration") }
@@ -982,6 +1005,7 @@ fun ParticipantsView(
         createBillOwnerType = context.defaultOwnerType
         createBillOwnerId = context.defaultOwnerId ?: context.userOptions.firstOrNull()?.id
         createBillAmount = "0"
+        createBillQuoteConfirmed = false
         createBillTax = "0"
         createBillAllowSplit = false
         createBillLabel = "Event registration"
@@ -1714,11 +1738,15 @@ fun ParticipantsView(
 
                     InclusivePriceInput(
                         totalPriceCents = previewEventAmountCents,
-                        onTotalPriceChange = { nextCents ->
+                        onConfirmedTotalPriceChange = { nextCents ->
                             createBillAmount = nextCents.coerceAtLeast(0).toString()
                         },
+                        quoteInclusivePrice = component::quoteInclusivePrice,
+                        onQuoteConfirmationChange = { createBillQuoteConfirmed = it },
                         modifier = Modifier.fillMaxWidth(),
                         totalLabel = "Bill amount",
+                        editorKey = "participant-bill:${context.billingTeamId}",
+                        eventType = selectedEvent.event.eventType.name,
                     )
                     MoneyInputField(
                         value = createBillTax,
@@ -1779,6 +1807,10 @@ fun ParticipantsView(
             confirmButton = {
                 Button(
                     onClick = {
+                        if (!createBillQuoteConfirmed) {
+                            createBillError = "Wait for the online price quote before creating the bill."
+                            return@Button
+                        }
                         val amountCents = parseCentsInputToCents(createBillAmount)
                         if (amountCents == null || amountCents <= 0) {
                             createBillError = "Enter an amount greater than $0.00"
@@ -1799,20 +1831,25 @@ fun ParticipantsView(
                             createBillError = "Select a user to bill"
                             return@Button
                         }
+                        val request = buildConfirmedParticipantBillRequest(
+                            isPriceQuoteConfirmed = createBillQuoteConfirmed,
+                            ownerType = createBillOwnerType,
+                            ownerId = ownerId,
+                            confirmedEventAmountCents = amountCents,
+                            taxAmountCents = taxCents,
+                            allowSplit = createBillAllowSplit,
+                            label = createBillLabel,
+                        ) ?: run {
+                            createBillError = "Wait for a valid online price quote before creating the bill."
+                            return@Button
+                        }
 
                         creatingBill = true
                         createBillError = null
                         coroutineScope.launch {
                             component.createParticipantBill(
                                 teamId = context.billingTeamId,
-                                request = EventTeamBillCreateRequest(
-                                    ownerType = createBillOwnerType,
-                                    ownerId = ownerId,
-                                    eventAmountCents = amountCents,
-                                    taxAmountCents = taxCents,
-                                    allowSplit = createBillOwnerType == "TEAM" && createBillAllowSplit,
-                                    label = createBillLabel.trim(),
-                                ),
+                                request = request,
                             ).onSuccess {
                                 popUpHandler.showPopup("Bill created successfully.")
                                 billContext = null
@@ -1822,7 +1859,7 @@ fun ParticipantsView(
                             creatingBill = false
                         }
                     },
-                    enabled = !creatingBill,
+                    enabled = !creatingBill && createBillQuoteConfirmed,
                 ) {
                     Text(if (creatingBill) "Creating..." else "Create Bill")
                 }

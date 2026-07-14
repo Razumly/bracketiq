@@ -2142,6 +2142,7 @@ fun EventDetailScreen(
                             onEditEvent = component::editEventField,
                             onEditTournament = component::editTournamentField,
                             onEventTypeSelected = component::onTypeSelected,
+                            quoteInclusivePrice = component::quoteInclusivePrice,
                             onSportSelected = { sportId ->
                                 component.editEventField {
                                     copy(

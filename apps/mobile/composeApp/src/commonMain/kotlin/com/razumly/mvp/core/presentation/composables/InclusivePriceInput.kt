@@ -4,69 +4,25 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
 import com.razumly.mvp.core.presentation.util.MoneyInputUtils
-import kotlin.math.roundToInt
-
-private const val PlatformFeePercentage = 0.01
-private const val StripeProcessingPercentage = 0.029
-private const val StripeFixedFeeCents = 30
-
-data class InclusivePriceBreakdown(
-    val hostReceivesCents: Int,
-    val processingFeeCents: Int,
-    val platformFeeCents: Int,
-    val totalPriceCents: Int,
-)
-
-fun calculateInclusivePriceFromHostAmount(hostAmountCents: Int): InclusivePriceBreakdown {
-    val hostAmount = hostAmountCents.coerceAtLeast(0)
-    if (hostAmount == 0) {
-        return InclusivePriceBreakdown(0, 0, 0, 0)
-    }
-    val platformFee = (hostAmount * PlatformFeePercentage).roundToInt()
-    val total = ((hostAmount + platformFee + StripeFixedFeeCents) / (1 - StripeProcessingPercentage)).roundToInt()
-    return InclusivePriceBreakdown(
-        hostReceivesCents = hostAmount,
-        processingFeeCents = (total - hostAmount - platformFee).coerceAtLeast(0),
-        platformFeeCents = platformFee,
-        totalPriceCents = total,
-    )
-}
-
-fun calculateIncludedFeesFromTotalPrice(totalPriceCents: Int): InclusivePriceBreakdown {
-    val total = totalPriceCents.coerceAtLeast(0)
-    if (total == 0) {
-        return InclusivePriceBreakdown(0, 0, 0, 0)
-    }
-    var low = 0
-    var high = total
-    var best = 0
-    while (low <= high) {
-        val mid = (low + high) / 2
-        val candidateTotal = calculateInclusivePriceFromHostAmount(mid).totalPriceCents
-        if (candidateTotal <= total) {
-            best = mid
-            low = mid + 1
-        } else {
-            high = mid - 1
-        }
-    }
-    val platformFee = (best * PlatformFeePercentage).roundToInt()
-    return InclusivePriceBreakdown(
-        hostReceivesCents = best,
-        processingFeeCents = (total - best - platformFee).coerceAtLeast(0),
-        platformFeeCents = platformFee,
-        totalPriceCents = total,
-    )
-}
-
-private fun centsInputValue(cents: Int): String =
-    cents.coerceAtLeast(0).takeIf { it > 0 }?.toString().orEmpty()
 
 private fun formatCents(cents: Int): String =
     "\$${MoneyInputUtils.centsToDisplayValue(cents)}"
@@ -74,42 +30,138 @@ private fun formatCents(cents: Int): String =
 @Composable
 fun InclusivePriceInput(
     totalPriceCents: Int,
-    onTotalPriceChange: (Int) -> Unit,
+    onConfirmedTotalPriceChange: (Int) -> Unit,
+    quoteInclusivePrice: suspend (
+        InclusivePriceQuoteDirection,
+        Int,
+        String?,
+    ) -> Result<InclusivePriceQuote>,
+    onQuoteConfirmationChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     hostLabel: String = "Host take-home",
     totalLabel: String = "Online price",
     enabled: Boolean = true,
+    editorKey: Any? = Unit,
+    eventType: String? = null,
+    onUserEdit: () -> Unit = {},
 ) {
-    val breakdown = calculateIncludedFeesFromTotalPrice(totalPriceCents)
+    val scope = rememberCoroutineScope()
+    val currentQuoteRequester by rememberUpdatedState(quoteInclusivePrice)
+    val currentConfirmedTotalCallback by rememberUpdatedState(onConfirmedTotalPriceChange)
+    val currentConfirmationCallback by rememberUpdatedState(onQuoteConfirmationChange)
+    val currentUserEditCallback by rememberUpdatedState(onUserEdit)
+    val coordinator = remember(editorKey, eventType) {
+        InclusivePriceQuoteCoordinator(
+            initialTotalPriceCents = totalPriceCents.coerceAtLeast(0),
+            eventType = eventType,
+            scope = scope,
+            requestQuote = { direction, amountCents, quoteEventType ->
+                currentQuoteRequester(direction, amountCents, quoteEventType)
+            },
+        )
+    }
+    val quoteState by coordinator.state.collectAsState()
+
+    DisposableEffect(coordinator) {
+        onDispose(coordinator::close)
+    }
+
+    LaunchedEffect(coordinator, totalPriceCents) {
+        coordinator.syncExternalTotalPrice(totalPriceCents.coerceAtLeast(0))
+    }
+
+    LaunchedEffect(
+        coordinator,
+        quoteState.generation,
+        quoteState.isCurrentInputConfirmed,
+    ) {
+        currentConfirmationCallback(quoteState.isCurrentInputConfirmed)
+    }
+
+    LaunchedEffect(coordinator, quoteState.acceptedGeneration) {
+        if (quoteState.isCurrentInputConfirmed) {
+            quoteState.acceptedQuote?.breakdown?.totalPriceCents?.let(currentConfirmedTotalCallback)
+        }
+    }
+
+    val acceptedBreakdown = quoteState.acceptedQuote?.breakdown
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             MoneyInputField(
-                value = centsInputValue(breakdown.hostReceivesCents),
+                value = quoteState.hostInput,
                 onValueChange = { value ->
-                    val hostAmount = value.filter(Char::isDigit).toIntOrNull()?.coerceAtLeast(0) ?: 0
-                    onTotalPriceChange(calculateInclusivePriceFromHostAmount(hostAmount).totalPriceCents)
+                    currentUserEditCallback()
+                    currentConfirmationCallback(false)
+                    coordinator.updateHostInput(value.filter(Char::isDigit))
                 },
                 modifier = Modifier.weight(1f),
                 label = hostLabel,
                 enabled = enabled,
             )
             MoneyInputField(
-                value = centsInputValue(totalPriceCents),
+                value = quoteState.totalInput,
                 onValueChange = { value ->
-                    onTotalPriceChange(value.filter(Char::isDigit).toIntOrNull()?.coerceAtLeast(0) ?: 0)
+                    currentUserEditCallback()
+                    currentConfirmationCallback(false)
+                    coordinator.updateTotalInput(value.filter(Char::isDigit))
                 },
                 modifier = Modifier.weight(1f),
                 label = totalLabel,
                 enabled = enabled,
             )
         }
-        Text(
-            text = "${formatCents(breakdown.hostReceivesCents)} + ${formatCents(breakdown.processingFeeCents)} processing + ${formatCents(breakdown.platformFeeCents)} platform = ${formatCents(breakdown.totalPriceCents)}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+
+        if (acceptedBreakdown != null) {
+            val prefix = if (quoteState.isCurrentInputConfirmed) "" else "Last confirmed: "
+            Text(
+                text = prefix +
+                    "${formatCents(acceptedBreakdown.hostReceivesCents)} + " +
+                    "${formatCents(acceptedBreakdown.processingFeeCents)} processing + " +
+                    "${formatCents(acceptedBreakdown.platformFeeCents)} platform = " +
+                    formatCents(acceptedBreakdown.totalPriceCents),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        if (quoteState.isPending) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    strokeWidth = 2.dp,
+                )
+                Text(
+                    text = "Refreshing online price…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        quoteState.errorMessage?.let { errorMessage ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = errorMessage,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                TextButton(
+                    onClick = coordinator::retry,
+                ) {
+                    Text("Retry")
+                }
+            }
+        }
     }
 }

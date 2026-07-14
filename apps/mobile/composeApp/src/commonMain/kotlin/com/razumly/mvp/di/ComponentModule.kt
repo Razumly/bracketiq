@@ -207,6 +207,7 @@ val componentModule = module {
     ) ->
         DefaultTeamManagementComponent(
             componentContext = componentContext,
+            billingRepository = get(),
             teamRepository = get(),
             userRepository = get(),
             sportsRepository = get(),

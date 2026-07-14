@@ -76,6 +76,8 @@ import com.razumly.mvp.core.data.repositories.EventCompliancePaymentSummary
 import com.razumly.mvp.core.data.repositories.EventComplianceRequiredDocument
 import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
 import com.razumly.mvp.core.data.repositories.RegistrationQuestionAnswerSummary
 import com.razumly.mvp.core.data.repositories.TeamInviteFreeAgentContext
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
@@ -169,6 +171,12 @@ internal fun shouldRequireTeamDivision(joinPolicy: String): Boolean =
 
 internal fun shouldShowTeamDivisionFields(joinPolicy: String, sportInput: String): Boolean =
     shouldRequireTeamDivision(joinPolicy) && sportInput.trim().isNotBlank()
+
+internal fun isTeamRegistrationPriceReady(
+    joinPolicy: String,
+    isQuoteConfirmed: Boolean,
+): Boolean = !normalizeTeamJoinPolicyInput(joinPolicy, openRegistration = false)
+    .allowsRegistrationCostLabel() || isQuoteConfirmed
 
 internal fun syncedRegistrationInputs(
     registrationSettingsEdited: Boolean,
@@ -315,6 +323,13 @@ fun CreateOrEditTeamScreen(
         inviteType: String,
         email: String?,
     ) -> Unit)? = null,
+    quoteInclusivePrice: suspend (
+        InclusivePriceQuoteDirection,
+        Int,
+        String?,
+    ) -> Result<InclusivePriceQuote> = { _, _, _ ->
+        Result.failure(UnsupportedOperationException("Inclusive price quotes are unavailable."))
+    },
 ) {
     val navBottomPadding = LocalNavBarPadding.current.calculateBottomPadding()
     val syncedTeam = remember(team.team) { team.team.withSynchronizedMembership() }
@@ -327,6 +342,12 @@ fun CreateOrEditTeamScreen(
         mutableStateOf(formatRegistrationCostInput(team.team.registrationPriceCents))
     }
     var registrationSettingsEdited by remember(team.team.id) { mutableStateOf(false) }
+    var registrationPriceQuoteConfirmed by remember(team.team.id) {
+        mutableStateOf(
+            !normalizeTeamJoinPolicyInput(team.team.joinPolicy, team.team.openRegistration)
+                .allowsRegistrationCostLabel(),
+        )
+    }
     var hasAttemptedTeamSubmit by remember(team.team.id, isNewTeam) { mutableStateOf(false) }
     var teamNameTouched by remember(team.team.id) { mutableStateOf(false) }
     var teamNameWasFocused by remember(team.team.id) { mutableStateOf(false) }
@@ -951,8 +972,10 @@ fun CreateOrEditTeamScreen(
                 PlatformDropdown(
                     selectedValue = joinPolicyInput,
                     onSelectionChange = { value ->
+                        val nextJoinPolicy = normalizeTeamJoinPolicyInput(value, openRegistration = false)
                         registrationSettingsEdited = true
-                        joinPolicyInput = normalizeTeamJoinPolicyInput(value, openRegistration = false)
+                        registrationPriceQuoteConfirmed = !nextJoinPolicy.allowsRegistrationCostLabel()
+                        joinPolicyInput = nextJoinPolicy
                     },
                     options = TeamJoinPolicyOptions,
                     modifier = Modifier.fillMaxWidth(),
@@ -975,17 +998,21 @@ fun CreateOrEditTeamScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     InclusivePriceInput(
                         totalPriceCents = registrationPriceCentsInput,
-                        onTotalPriceChange = { nextCents ->
-                            registrationSettingsEdited = true
+                        onConfirmedTotalPriceChange = { nextCents ->
                             registrationCostInput = nextCents
                                 .coerceAtLeast(0)
                                 .takeIf { it > 0 }
                                 ?.toString()
                                 .orEmpty()
                         },
+                        quoteInclusivePrice = quoteInclusivePrice,
+                        onQuoteConfirmationChange = { registrationPriceQuoteConfirmed = it },
+                        onUserEdit = { registrationSettingsEdited = true },
                         modifier = Modifier.fillMaxWidth(),
                         totalLabel = "Registration price",
                         enabled = canEditFields && !(isOpenRegistrationInput && !canChargeRegistration),
+                        editorKey = "team-registration:${team.team.id}:${joinPolicyInput}",
+                        eventType = selectedEvent?.eventType?.name,
                     )
                     Text(
                         text = when {
@@ -1258,7 +1285,15 @@ fun CreateOrEditTeamScreen(
                 ) {
                     if (showEditDetails) {
                         Button(onClick = {
-                            if (!isTeamSizeValid || !isTeamDivisionValid || !isTeamNameValid) {
+                            if (
+                                !isTeamSizeValid ||
+                                !isTeamDivisionValid ||
+                                !isTeamNameValid ||
+                                !isTeamRegistrationPriceReady(
+                                    joinPolicy = joinPolicyInput,
+                                    isQuoteConfirmed = registrationPriceQuoteConfirmed,
+                                )
+                            ) {
                                 hasAttemptedTeamSubmit = true
                                 return@Button
                             }
@@ -1270,7 +1305,10 @@ fun CreateOrEditTeamScreen(
                                     resolvedSize = resolvedTeamSize,
                                 )
                             )
-                        }, enabled = !isBusy) {
+                        }, enabled = !isBusy && isTeamRegistrationPriceReady(
+                            joinPolicy = joinPolicyInput,
+                            isQuoteConfirmed = registrationPriceQuoteConfirmed,
+                        )) {
                             if (isSaving) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(18.dp),

@@ -12,6 +12,42 @@ import kotlin.test.assertTrue
 class EventDetailsValidationTest {
 
     @Test
+    fun online_event_edits_require_a_confirmed_price_quote() {
+        assertFalse(
+            isEventInclusivePriceReady(
+                editView = true,
+                manualPaymentsEnabled = false,
+                isQuoteConfirmed = false,
+            ),
+        )
+        assertTrue(
+            isEventInclusivePriceReady(
+                editView = true,
+                manualPaymentsEnabled = false,
+                isQuoteConfirmed = true,
+            ),
+        )
+    }
+
+    @Test
+    fun manual_payment_and_read_only_event_prices_do_not_require_quotes() {
+        assertTrue(
+            isEventInclusivePriceReady(
+                editView = true,
+                manualPaymentsEnabled = true,
+                isQuoteConfirmed = false,
+            ),
+        )
+        assertTrue(
+            isEventInclusivePriceReady(
+                editView = false,
+                manualPaymentsEnabled = false,
+                isQuoteConfirmed = false,
+            ),
+        )
+    }
+
+    @Test
     fun given_blank_event_name_when_otherwise_valid_then_validation_fails() {
         val result = validateEvent(baseLeagueEvent(maxParticipants = 2).copy(name = "   "))
 

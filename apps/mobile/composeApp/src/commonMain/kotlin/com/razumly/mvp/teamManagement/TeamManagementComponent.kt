@@ -15,8 +15,11 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.isActive
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.repositories.IEventRepository
+import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
 import com.razumly.mvp.core.data.repositories.TeamInviteFreeAgentContext
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.IUserRepository
@@ -83,12 +86,20 @@ interface TeamManagementComponent {
         email: String? = null,
     )
     suspend fun ensureUserByEmail(email: String): Result<UserData>
+    suspend fun quoteInclusivePrice(
+        direction: InclusivePriceQuoteDirection,
+        amountCents: Int,
+        eventType: String? = null,
+    ): Result<InclusivePriceQuote> = Result.failure(
+        UnsupportedOperationException("Inclusive price quotes are unavailable."),
+    )
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DefaultTeamManagementComponent(
     componentContext: ComponentContext,
     private val eventRepository: IEventRepository,
+    private val billingRepository: IBillingRepository,
     private val sportsRepository: ISportsRepository,
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
@@ -102,6 +113,16 @@ class DefaultTeamManagementComponent(
     private var loadingHandler: LoadingHandler? = null
 
     override val onBack = navigationHandler::navigateBack
+
+    override suspend fun quoteInclusivePrice(
+        direction: InclusivePriceQuoteDirection,
+        amountCents: Int,
+        eventType: String?,
+    ): Result<InclusivePriceQuote> = billingRepository.quoteInclusivePrice(
+        direction = direction,
+        amountCents = amountCents,
+        eventType = eventType,
+    )
     private val teamEditorBackCallback = BackCallback(
         isEnabled = false,
         priority = BackCallback.PRIORITY_MAX,

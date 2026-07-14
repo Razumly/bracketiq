@@ -37,6 +37,8 @@ import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.data.repositories.IBillingRepository
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
 import com.razumly.mvp.core.data.repositories.ChatTermsConsentState
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
@@ -162,6 +164,13 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     fun acceptTermsConsent()
     fun onUploadSelected(photo: GalleryPhotoResult, onRetry: () -> Unit = {})
     fun deleteImage(url: String, onDeleted: () -> Unit = {})
+    suspend fun quoteInclusivePrice(
+        direction: InclusivePriceQuoteDirection,
+        amountCents: Int,
+        eventType: String? = null,
+    ): Result<InclusivePriceQuote> = Result.failure(
+        UnsupportedOperationException("Inclusive price quotes are unavailable."),
+    )
 
     sealed class Child {
         data object EventInfo : Child()
@@ -191,6 +200,16 @@ class DefaultCreateEventComponent(
 ) : CreateEventComponent, PaymentProcessor(), ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
+
+    override suspend fun quoteInclusivePrice(
+        direction: InclusivePriceQuoteDirection,
+        amountCents: Int,
+        eventType: String?,
+    ): Result<InclusivePriceQuote> = billingRepository.quoteInclusivePrice(
+        direction = direction,
+        amountCents = amountCents,
+        eventType = eventType,
+    )
     private val initialEventDraft = initialSeed?.event
         ?: createInitialEventDraft(initialHostId = resolveCurrentUserId())
 

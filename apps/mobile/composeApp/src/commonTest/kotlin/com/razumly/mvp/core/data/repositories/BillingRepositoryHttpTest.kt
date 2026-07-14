@@ -2965,4 +2965,212 @@ class BillingRepositoryHttpTest {
         assertTrue(capturedBody.contains("\"rating\":4"))
         assertTrue(capturedBody.contains("\"body\":\"Friendly staff\""))
     }
+
+    @Test
+    fun quoteInclusivePrice_posts_authenticated_host_request_and_returns_server_breakdown() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        var capturedBody = ""
+        val engine = MockEngine { request ->
+            assertEquals("/api/billing/inclusive-price-quote", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+            respond(
+                content = """
+                    {
+                      "version": 1,
+                      "direction": "HOST_AMOUNT",
+                      "breakdown": {
+                        "hostReceivesCents": 1234,
+                        "processingFeeCents": 43,
+                        "platformFeeCents": 17,
+                        "totalPriceCents": 1294,
+                        "platformFeePercentage": 0.017
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repo = BillingRepository(
+            MvpApiClient(HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }, "http://example.test", tokenStore),
+            userRepo,
+            BillingRepositoryHttp_UnusedEventRepository,
+            db,
+        )
+
+        val quote = repo.quoteInclusivePrice(
+            direction = InclusivePriceQuoteDirection.HOST_AMOUNT,
+            amountCents = 1234,
+            eventType = " tournament ",
+        ).getOrThrow()
+
+        assertTrue(capturedBody.contains("\"direction\":\"HOST_AMOUNT\""))
+        assertTrue(capturedBody.contains("\"amountCents\":1234"))
+        assertTrue(capturedBody.contains("\"eventType\":\"tournament\""))
+        assertEquals(1, quote.version)
+        assertEquals(InclusivePriceQuoteDirection.HOST_AMOUNT, quote.direction)
+        assertEquals(1234, quote.requestedAmountCents)
+        assertEquals(1234, quote.breakdown.hostReceivesCents)
+        assertEquals(43, quote.breakdown.processingFeeCents)
+        assertEquals(17, quote.breakdown.platformFeeCents)
+        assertEquals(1294, quote.breakdown.totalPriceCents)
+        assertEquals(0.017, quote.breakdown.platformFeePercentage)
+    }
+
+    @Test
+    fun quoteInclusivePrice_posts_total_request_and_preserves_server_total() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        var capturedBody = ""
+        val engine = MockEngine { request ->
+            assertEquals("/api/billing/inclusive-price-quote", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+            respond(
+                content = """
+                    {
+                      "version": 1,
+                      "direction": "TOTAL_PRICE",
+                      "breakdown": {
+                        "hostReceivesCents": 5001,
+                        "processingFeeCents": 377,
+                        "platformFeeCents": 54,
+                        "totalPriceCents": 5432,
+                        "platformFeePercentage": 0.019
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repo = BillingRepository(
+            MvpApiClient(HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }, "http://example.test", tokenStore),
+            userRepo,
+            BillingRepositoryHttp_UnusedEventRepository,
+            db,
+        )
+
+        val quote = repo.quoteInclusivePrice(
+            direction = InclusivePriceQuoteDirection.TOTAL_PRICE,
+            amountCents = 5432,
+        ).getOrThrow()
+
+        assertTrue(capturedBody.contains("\"direction\":\"TOTAL_PRICE\""))
+        assertTrue(capturedBody.contains("\"amountCents\":5432"))
+        assertEquals(InclusivePriceQuoteDirection.TOTAL_PRICE, quote.direction)
+        assertEquals(5432, quote.requestedAmountCents)
+        assertEquals(5001, quote.breakdown.hostReceivesCents)
+        assertEquals(377, quote.breakdown.processingFeeCents)
+        assertEquals(54, quote.breakdown.platformFeeCents)
+        assertEquals(5432, quote.breakdown.totalPriceCents)
+        assertEquals(0.019, quote.breakdown.platformFeePercentage)
+    }
+
+    @Test
+    fun quoteInclusivePrice_rejects_invalid_server_contracts() = runTest {
+        val validBreakdown = """
+            "hostReceivesCents": 1234,
+            "processingFeeCents": 43,
+            "platformFeeCents": 17,
+            "totalPriceCents": 1294,
+            "platformFeePercentage": 0.017
+        """.trimIndent()
+        val invalidResponses = listOf(
+            "unsupported version" to """
+                {"version":2,"direction":"HOST_AMOUNT","breakdown":{$validBreakdown}}
+            """.trimIndent(),
+            "unsupported direction" to """
+                {"version":1,"direction":"HOST_PRICE","breakdown":{$validBreakdown}}
+            """.trimIndent(),
+            "direction mismatch" to """
+                {"version":1,"direction":"TOTAL_PRICE","breakdown":{$validBreakdown}}
+            """.trimIndent(),
+            "negative amount" to """
+                {"version":1,"direction":"HOST_AMOUNT","breakdown":{
+                  "hostReceivesCents":1234,"processingFeeCents":-1,"platformFeeCents":17,
+                  "totalPriceCents":1250,"platformFeePercentage":0.017
+                }}
+            """.trimIndent(),
+            "fractional amount" to """
+                {"version":1,"direction":"HOST_AMOUNT","breakdown":{
+                  "hostReceivesCents":1234.5,"processingFeeCents":43,"platformFeeCents":17,
+                  "totalPriceCents":1294,"platformFeePercentage":0.017
+                }}
+            """.trimIndent(),
+            "component sum mismatch" to """
+                {"version":1,"direction":"HOST_AMOUNT","breakdown":{
+                  "hostReceivesCents":1234,"processingFeeCents":43,"platformFeeCents":17,
+                  "totalPriceCents":1295,"platformFeePercentage":0.017
+                }}
+            """.trimIndent(),
+            "request anchor mismatch" to """
+                {"version":1,"direction":"HOST_AMOUNT","breakdown":{
+                  "hostReceivesCents":1233,"processingFeeCents":44,"platformFeeCents":17,
+                  "totalPriceCents":1294,"platformFeePercentage":0.017
+                }}
+            """.trimIndent(),
+            "percentage out of range" to """
+                {"version":1,"direction":"HOST_AMOUNT","breakdown":{
+                  "hostReceivesCents":1234,"processingFeeCents":43,"platformFeeCents":17,
+                  "totalPriceCents":1294,"platformFeePercentage":1.01
+                }}
+            """.trimIndent(),
+            "percentage not finite" to """
+                {"version":1,"direction":"HOST_AMOUNT","breakdown":{
+                  "hostReceivesCents":1234,"processingFeeCents":43,"platformFeeCents":17,
+                  "totalPriceCents":1294,"platformFeePercentage":NaN
+                }}
+            """.trimIndent(),
+        )
+
+        invalidResponses.forEach { (label, responseJson) ->
+            val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+            val engine = MockEngine {
+                respond(
+                    content = responseJson,
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+            val repo = BillingRepository(
+                MvpApiClient(
+                    HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+                    "http://example.test",
+                    tokenStore,
+                ),
+                BillingRepositoryHttp_FakeUserRepository(
+                    currentUser = billingMakeUser("u1"),
+                    currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+                ),
+                BillingRepositoryHttp_UnusedEventRepository,
+                BillingRepositoryHttp_FakeDatabaseService(),
+            )
+
+            val result = repo.quoteInclusivePrice(
+                direction = InclusivePriceQuoteDirection.HOST_AMOUNT,
+                amountCents = 1234,
+            )
+
+            assertTrue(result.isFailure, label)
+        }
+    }
 }

@@ -43,6 +43,8 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.FamilyChild
 import com.razumly.mvp.core.data.repositories.IBillingRepository
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
@@ -166,6 +168,16 @@ class DefaultEventDetailComponent(
 
 ) : EventDetailComponent, PaymentProcessor(), ComponentContext by componentContext {
     private val event = Event(id = eventId.trim())
+
+    override suspend fun quoteInclusivePrice(
+        direction: InclusivePriceQuoteDirection,
+        amountCents: Int,
+        eventType: String?,
+    ): Result<InclusivePriceQuote> = billingRepository.quoteInclusivePrice(
+        direction = direction,
+        amountCents = amountCents,
+        eventType = eventType,
+    )
 
     private companion object {
         const val MATCH_REALTIME_EDIT_PAUSE_REASON = "event-detail-editing"

@@ -37,6 +37,8 @@ import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckoutRequest
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
 import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.SignStep
@@ -204,6 +206,13 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
         teamId: String,
         request: EventTeamBillCreateRequest,
     ): Result<Unit>
+    suspend fun quoteInclusivePrice(
+        direction: InclusivePriceQuoteDirection,
+        amountCents: Int,
+        eventType: String? = null,
+    ): Result<InclusivePriceQuote> = Result.failure(
+        UnsupportedOperationException("Inclusive price quotes are unavailable."),
+    )
     suspend fun createParticipantPaymentCheckout(
         teamId: String,
         request: EventTeamPaymentCheckoutRequest,

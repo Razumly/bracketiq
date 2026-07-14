@@ -91,6 +91,7 @@ internal data class EventDetailsDivisionEditorActionsState(
     val isLeaguePlayoffTeamsValid: Boolean,
     val showValidationErrors: Boolean,
     val divisionDetails: List<DivisionDetail>,
+    val isPriceQuoteConfirmed: Boolean = true,
 )
 
 internal data class EventDetailsDivisionEditorActions(
@@ -283,7 +284,7 @@ internal fun EventDetailsDivisionEditorActionsContent(
             ) {
                 Button(
                     onClick = actions.onSaveDivision,
-                    enabled = true,
+                    enabled = state.isPriceQuoteConfirmed,
                 ) {
                     Text("Update Division")
                 }
@@ -300,7 +301,7 @@ internal fun EventDetailsDivisionEditorActionsContent(
                 DivisionActionLeadingField(Modifier.weight(1f))
                 Button(
                     onClick = actions.onSaveDivision,
-                    enabled = true,
+                    enabled = state.isPriceQuoteConfirmed,
                 ) {
                     Text("Add Division")
                 }

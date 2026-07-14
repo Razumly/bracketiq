@@ -80,6 +80,7 @@ import com.razumly.mvp.core.data.dataTypes.officialPositionSummary
 import com.razumly.mvp.core.data.dataTypes.positionSummary
 import com.razumly.mvp.core.data.dataTypes.toLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
+import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.dataTypes.withLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.withTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
@@ -93,6 +94,8 @@ import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
@@ -155,6 +158,12 @@ private val readOnlyNameListItemHeight = 28.dp
 private val readOnlyNameListSpacing = 4.dp
 private val editableOfficialStaffListHeight = 160.dp * STAFF_LAZY_LIST_VISIBLE_COUNT
 private val editableHostStaffListHeight = 130.dp * STAFF_LAZY_LIST_VISIBLE_COUNT
+
+internal fun isEventInclusivePriceReady(
+    editView: Boolean,
+    manualPaymentsEnabled: Boolean,
+    isQuoteConfirmed: Boolean,
+): Boolean = !editView || manualPaymentsEnabled || isQuoteConfirmed
 
 private fun kotlin.time.Instant.reinterpretSystemLocalSelectionIn(timeZone: TimeZone): kotlin.time.Instant {
     val local = toLocalDateTime(TimeZone.currentSystemDefault())
@@ -271,6 +280,13 @@ fun EventDetails(
     onMapRevealCenterChange: (Offset) -> Unit = {},
     onFloatingDockVisibilityChange: (Boolean) -> Unit = {},
     onValidationChange: (Boolean, List<String>) -> Unit = { _, _ -> },
+    quoteInclusivePrice: suspend (
+        InclusivePriceQuoteDirection,
+        Int,
+        String?,
+    ) -> Result<InclusivePriceQuote> = { _, _, _ ->
+        Result.failure(UnsupportedOperationException("Inclusive price quotes are unavailable."))
+    },
     heroTopControls: @Composable BoxScope.() -> Unit = {},
     modifier: Modifier = Modifier,
     joinButton: @Composable (isValid: Boolean) -> Unit
@@ -512,6 +528,26 @@ fun EventDetails(
     var divisionEditorDefaults by remember(editEvent.id) {
         mutableStateOf(divisionEditorBaseState)
     }
+    val inclusivePriceEditorKey = remember(
+        editEvent.id,
+        editEvent.singleDivision,
+        divisionEditor.editingId,
+    ) {
+        if (editEvent.singleDivision) {
+            "event-price:${editEvent.id}:single"
+        } else {
+            "event-price:${editEvent.id}:division:${divisionEditor.editingId.orEmpty().ifBlank { "new" }}"
+        }
+    }
+    var confirmedInclusivePriceEditorKey by remember(editEvent.id) {
+        mutableStateOf<String?>(null)
+    }
+    val isInclusivePriceQuoteConfirmed = isEventInclusivePriceReady(
+        editView = editView,
+        manualPaymentsEnabled = editEvent.usesManualRegistrationPayments(),
+        isQuoteConfirmed = confirmedInclusivePriceEditorKey == inclusivePriceEditorKey,
+    )
+    val effectiveIsValid = isValid && isInclusivePriceQuoteConfirmed
     LaunchedEffect(editEvent.id, divisionEditorBaseState) {
         divisionEditorDefaults = divisionEditorBaseState
         val editorIsIdle = divisionEditor.editingId.isNullOrBlank() &&
@@ -935,6 +971,12 @@ fun EventDetails(
         )
     }
     fun handleSaveDivisionDetail() {
+        if (!isInclusivePriceQuoteConfirmed) {
+            divisionEditor = divisionEditor.copy(
+                error = "Wait for the online price quote before saving this division.",
+            )
+            return
+        }
         val normalizedGender = divisionEditor.gender.uppercase()
         val normalizedSkillDivisionTypeId = divisionEditor.skillDivisionTypeId.normalizeDivisionIdentifier()
         val normalizedAgeDivisionTypeId = divisionEditor.ageDivisionTypeId.normalizeDivisionIdentifier()
@@ -1517,6 +1559,7 @@ fun EventDetails(
         isColorLoaded,
         isNewEvent,
         scheduleTimeLocked,
+        isInclusivePriceQuoteConfirmed,
     ) {
         // Coalesce rapid keystrokes so validation work does not contend with typing.
         delay(80)
@@ -1553,12 +1596,16 @@ fun EventDetails(
         isFixedEndDateRangeValid = result.isFixedEndDateRangeValid
         isPaymentPlansValid = result.isPaymentPlansValid
         paymentPlanValidationErrors = result.paymentPlanValidationErrors
-        validationErrors = result.validationErrors
+        validationErrors = if (isInclusivePriceQuoteConfirmed) {
+            result.validationErrors
+        } else {
+            result.validationErrors + "Wait for the online price quote before continuing."
+        }
         isValid = result.isValid
     }
 
-    LaunchedEffect(isValid, validationErrors) {
-        onValidationChange(isValid, validationErrors)
+    LaunchedEffect(effectiveIsValid, validationErrors) {
+        onValidationChange(effectiveIsValid, validationErrors)
     }
 
     LaunchedEffect(lazyListState) {
@@ -2333,7 +2380,7 @@ fun EventDetails(
                         event = event,
                         editEvent = editEvent,
                         eventNameInput = eventNameInput,
-                        isValid = isValid,
+                        isValid = effectiveIsValid,
                         isLocationValid = isLocationValid,
                         isColorLoaded = isColorLoaded,
                         heroSpacerHeight = heroSpacerHeight,
@@ -2598,6 +2645,7 @@ fun EventDetails(
                                 isNewEvent = isNewEvent,
                                 showValidationErrors = showValidationErrors,
                                 addSelfToEvent = addSelfToEvent,
+                                inclusivePriceEditorKey = inclusivePriceEditorKey,
                             ),
                             actions = EventDetailsDivisionEditorFormActions(
                                 onEditEvent = onEditEvent,
@@ -2618,6 +2666,21 @@ fun EventDetails(
                                 onAddSelfToEventChange = { addSelfToEvent = it },
                                 onAddCurrentUser = onAddCurrentUser,
                                 onDivisionInputsExpandedChange = { divisionInputsExpanded = it },
+                                quoteInclusivePrice = quoteInclusivePrice,
+                                onPriceQuoteConfirmationChange = { isConfirmed ->
+                                    if (isConfirmed) {
+                                        confirmedInclusivePriceEditorKey = inclusivePriceEditorKey
+                                    } else if (confirmedInclusivePriceEditorKey == inclusivePriceEditorKey) {
+                                        confirmedInclusivePriceEditorKey = null
+                                    }
+                                    if (!isConfirmed) {
+                                        onValidationChange(
+                                            false,
+                                            (validationErrors +
+                                                "Wait for the online price quote before continuing.").distinct(),
+                                        )
+                                    }
+                                },
                             ),
                         )
 
@@ -2630,6 +2693,7 @@ fun EventDetails(
                             isLeaguePlayoffTeamsValid = isLeaguePlayoffTeamsValid,
                             showValidationErrors = showValidationErrors,
                             divisionDetails = divisionDetailsForSettings,
+                            isPriceQuoteConfirmed = isInclusivePriceQuoteConfirmed,
                         ),
                         actions = EventDetailsDivisionEditorActions(
                             onDivisionEditorChange = { divisionEditor = it },

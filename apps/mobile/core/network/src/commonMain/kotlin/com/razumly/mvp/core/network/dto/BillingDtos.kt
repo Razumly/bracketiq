@@ -6,6 +6,29 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class InclusivePriceQuoteRequestDto(
+    val direction: String,
+    val amountCents: Int,
+    val eventType: String? = null,
+)
+
+@Serializable
+data class InclusivePriceBreakdownDto(
+    val hostReceivesCents: Int,
+    val processingFeeCents: Int,
+    val platformFeeCents: Int,
+    val totalPriceCents: Int,
+    val platformFeePercentage: Double,
+)
+
+@Serializable
+data class InclusivePriceQuoteResponseDto(
+    val version: Int,
+    val direction: String,
+    val breakdown: InclusivePriceBreakdownDto,
+)
+
+@Serializable
 data class BillingUserRefDto(
     val id: String? = null,
     @SerialName("\$id") val legacyId: String? = null,

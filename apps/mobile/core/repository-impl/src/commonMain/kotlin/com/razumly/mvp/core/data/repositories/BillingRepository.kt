@@ -45,6 +45,8 @@ import com.razumly.mvp.core.network.dto.BillingRentalSelectionDto
 import com.razumly.mvp.core.network.dto.BillingTeamRefDto
 import com.razumly.mvp.core.network.dto.BillingTimeSlotRefDto
 import com.razumly.mvp.core.network.dto.BillingUserRefDto
+import com.razumly.mvp.core.network.dto.InclusivePriceQuoteRequestDto
+import com.razumly.mvp.core.network.dto.InclusivePriceQuoteResponseDto
 import com.razumly.mvp.core.network.dto.PurchaseIntentRequestDto
 import com.razumly.mvp.core.network.dto.RefundAllRequestDto
 import com.razumly.mvp.core.network.dto.RefundRequestsResponseDto
@@ -69,6 +71,7 @@ import kotlin.time.Instant
 
 private const val BOLD_SIGN_RATE_LIMIT_FRIENDLY_MESSAGE =
     "You opened the BoldSign document too many times. Please wait a minute before trying again."
+private const val MAX_INCLUSIVE_PRICE_CENTS = 100_000_000
 
 /** The payment succeeded, but the server has rejected its idempotent rental booking mutation. */
 class RentalOrderTerminalFailureException(message: String, cause: Throwable) : IllegalStateException(message, cause)
@@ -482,6 +485,12 @@ private fun discountTargetCacheKey(ownerType: String, ownerIdKey: String, itemTy
     listOf(ownerType.trim().uppercase(), ownerIdKey, itemType.trim().uppercase(), targetId).joinToString("|")
 
 interface IBillingRepository : IMVPRepository {
+    suspend fun quoteInclusivePrice(
+        direction: InclusivePriceQuoteDirection,
+        amountCents: Int,
+        eventType: String? = null,
+    ): Result<InclusivePriceQuote> =
+        Result.failure(UnsupportedOperationException("Inclusive price quotes are not supported."))
     suspend fun previewEventRegistrationDiscount(
         event: Event,
         teamId: String? = null,
@@ -774,6 +783,32 @@ class BillingRepository(
     private val eventRepository: IEventRepository,
     private val databaseService: DatabaseService,
 ) : IBillingRepository {
+    override suspend fun quoteInclusivePrice(
+        direction: InclusivePriceQuoteDirection,
+        amountCents: Int,
+        eventType: String?,
+    ): Result<InclusivePriceQuote> = runCatching {
+        require(amountCents in 0..MAX_INCLUSIVE_PRICE_CENTS) {
+            "Inclusive price amount must be between 0 and $MAX_INCLUSIVE_PRICE_CENTS cents."
+        }
+        val normalizedEventType = eventType?.trim()?.takeIf(String::isNotBlank)
+        require(normalizedEventType == null || normalizedEventType.length <= 100) {
+            "Inclusive price event type must be at most 100 characters."
+        }
+
+        api.post<InclusivePriceQuoteRequestDto, InclusivePriceQuoteResponseDto>(
+            path = "api/billing/inclusive-price-quote",
+            body = InclusivePriceQuoteRequestDto(
+                direction = direction.name,
+                amountCents = amountCents,
+                eventType = normalizedEventType,
+            ),
+        ).toValidatedQuote(
+            requestedDirection = direction,
+            requestedAmountCents = amountCents,
+        )
+    }
+
     suspend fun createTeamRegistrationPurchaseIntent(team: Team): Result<PurchaseIntent> =
         createTeamRegistrationPurchaseIntent(team, null)
 

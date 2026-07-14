@@ -158,6 +158,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
             onInviteTeamRole = { teamId, userId, inviteType, email ->
                 component.inviteUserToRole(teamId, userId, inviteType, email)
             },
+            quoteInclusivePrice = component::quoteInclusivePrice,
         )
         return
     }

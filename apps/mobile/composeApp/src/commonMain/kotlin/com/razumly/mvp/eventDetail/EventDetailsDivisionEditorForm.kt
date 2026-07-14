@@ -26,6 +26,8 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.InclusivePriceInput
 import com.razumly.mvp.core.presentation.composables.MoneyInputField
@@ -57,6 +59,7 @@ internal data class EventDetailsDivisionEditorFormState(
     val isNewEvent: Boolean,
     val showValidationErrors: Boolean,
     val addSelfToEvent: Boolean,
+    val inclusivePriceEditorKey: String = "event-price",
 )
 
 internal data class EventDetailsDivisionEditorFormActions(
@@ -78,6 +81,14 @@ internal data class EventDetailsDivisionEditorFormActions(
     val onAddSelfToEventChange: (Boolean) -> Unit,
     val onAddCurrentUser: (Boolean) -> Unit,
     val onDivisionInputsExpandedChange: (Boolean) -> Unit,
+    val quoteInclusivePrice: suspend (
+        InclusivePriceQuoteDirection,
+        Int,
+        String?,
+    ) -> Result<InclusivePriceQuote> = { _, _, _ ->
+        Result.failure(UnsupportedOperationException("Inclusive price quotes are unavailable."))
+    },
+    val onPriceQuoteConfirmationChange: (Boolean) -> Unit = {},
 )
 
 @Composable
@@ -411,6 +422,10 @@ private fun DivisionSingleDivisionDefaults(
                 manualPaymentsEnabled = manualPaymentsEnabled,
                 hostHasAccount = state.hostHasAccount,
                 enabled = true,
+                inclusivePriceEditorKey = state.inclusivePriceEditorKey,
+                eventType = editEvent.eventType.name,
+                quoteInclusivePrice = actions.quoteInclusivePrice,
+                onPriceQuoteConfirmationChange = actions.onPriceQuoteConfirmationChange,
                 onPriceChange = { parsedPrice ->
                     actions.onDivisionEditorDefaultsChange(
                         divisionEditorDefaults.copy(priceCents = parsedPrice),
@@ -749,6 +764,10 @@ private fun DivisionInfoFields(
                 manualPaymentsEnabled = manualPaymentsEnabled,
                 hostHasAccount = state.hostHasAccount,
                 enabled = state.divisionEditorReady,
+                inclusivePriceEditorKey = state.inclusivePriceEditorKey,
+                eventType = editEvent.eventType.name,
+                quoteInclusivePrice = actions.quoteInclusivePrice,
+                onPriceQuoteConfirmationChange = actions.onPriceQuoteConfirmationChange,
                 onPriceChange = { priceCents ->
                     actions.onDivisionEditorChange(
                         divisionEditor.copy(
@@ -784,6 +803,14 @@ private fun DivisionPriceAndMaxTeamsFields(
     manualPaymentsEnabled: Boolean,
     hostHasAccount: Boolean,
     enabled: Boolean,
+    inclusivePriceEditorKey: String,
+    eventType: String,
+    quoteInclusivePrice: suspend (
+        InclusivePriceQuoteDirection,
+        Int,
+        String?,
+    ) -> Result<InclusivePriceQuote>,
+    onPriceQuoteConfirmationChange: (Boolean) -> Unit,
     onPriceChange: (Int) -> Unit,
     onMaxParticipantsChange: (String) -> Unit,
     isMaxParticipantsError: Boolean,
@@ -817,10 +844,14 @@ private fun DivisionPriceAndMaxTeamsFields(
         } else {
             InclusivePriceInput(
                 totalPriceCents = priceCents.coerceAtLeast(0),
-                onTotalPriceChange = onPriceChange,
+                onConfirmedTotalPriceChange = onPriceChange,
+                quoteInclusivePrice = quoteInclusivePrice,
+                onQuoteConfirmationChange = onPriceQuoteConfirmationChange,
                 modifier = Modifier.weight(2f),
                 totalLabel = priceLabel,
                 enabled = hostHasAccount && enabled,
+                editorKey = inclusivePriceEditorKey,
+                eventType = eventType,
             )
         }
     }

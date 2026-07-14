@@ -539,6 +539,7 @@ fun CreateEventScreen(
                                 canProceed = isValid
                                 validationErrors = errors
                             },
+                            quoteInclusivePrice = component::quoteInclusivePrice,
                             joinButton = {}
                         )
 
