@@ -18,9 +18,40 @@ plugins {
     alias(libs.plugins.compose.vectorize)
     alias(libs.plugins.secrets)
     id("kotlin-parcelize")
-    id("com.google.gms.google-services") version "4.5.0"
+    id("com.google.gms.google-services") version "4.5.0" apply false
     id("co.touchlab.skie") version "0.10.13"
 }
+
+val googleServicesConfigFile = layout.projectDirectory.file("google-services.json").asFile
+val hasGoogleServicesConfig = googleServicesConfigFile.isFile
+
+if (hasGoogleServicesConfig) {
+    apply(plugin = "com.google.gms.google-services")
+} else {
+    logger.lifecycle(
+        "composeApp/google-services.json is not configured. " +
+            "Firebase, push notifications, analytics, and Android Google sign-in are disabled; " +
+            "debug builds and unit tests remain available.",
+    )
+}
+
+val requireGoogleServicesConfig by tasks.registering {
+    group = "verification"
+    description = "Fails release builds when the untracked Android Google Services config is missing."
+    doLast {
+        if (!googleServicesConfigFile.isFile) {
+            throw GradleException(
+                "Release builds require composeApp/google-services.json. " +
+                    "Run scripts/provision-google-services.sh; see README.md for local and CI setup.",
+            )
+        }
+    }
+}
+
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    dependsOn(requireGoogleServicesConfig)
+}
+
 composeCompiler {
     includeSourceInformation = true
 }
