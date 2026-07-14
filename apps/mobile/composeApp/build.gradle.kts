@@ -246,7 +246,7 @@ kotlin {
             dependencies {
                 implementation(libs.mockk)
                 implementation(libs.robolectric)
-                implementation(libs.androidx.core)
+                implementation(libs.androidx.test.core)
                 implementation(libs.androidx.compose.ui.test.junit4)
             }
         }

@@ -43,7 +43,7 @@ kotlin {
         androidMain {
             dependencies {
                 implementation(libs.androidx.browser)
-                implementation(libs.androidx.core)
+                implementation(libs.androidx.core.ktx)
                 implementation(libs.firebase.messaging)
                 implementation(libs.kotlinx.coroutines.android)
                 implementation(libs.posthog.android)
