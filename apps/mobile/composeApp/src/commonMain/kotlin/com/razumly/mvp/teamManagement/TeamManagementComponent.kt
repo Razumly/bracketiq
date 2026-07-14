@@ -26,6 +26,7 @@ import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.network.userMessage
 import com.razumly.mvp.core.presentation.INavigationHandler
+import com.razumly.mvp.core.presentation.LatestPlayerInviteSearch
 import com.razumly.mvp.core.util.LoadingHandler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -213,8 +214,13 @@ class DefaultTeamManagementComponent(
     private val _loadingTeamMemberComplianceId = MutableStateFlow<String?>(null)
     override val loadingTeamMemberComplianceId = _loadingTeamMemberComplianceId.asStateFlow()
 
-    private val _suggestedPlayers = MutableStateFlow<List<UserData>>(listOf())
-    override val suggestedPlayers = _suggestedPlayers.asStateFlow()
+    private val playerInviteSearch = LatestPlayerInviteSearch(
+        scope = scope,
+        searchPlayers = { query -> userRepository.searchPlayers(search = query) },
+        excludedUserId = { currentUser.id },
+        onFailure = { error -> _errorState.value = error.userMessage() },
+    )
+    override val suggestedPlayers = playerInviteSearch.suggestions
 
     override val inviteFreeAgentContext = selectedTeam
         .flatMapLatest { team ->
@@ -285,6 +291,7 @@ class DefaultTeamManagementComponent(
                 backCallback = teamEditorBackCallback,
             )::onDestroy,
         )
+        lifecycle.doOnDestroy(playerInviteSearch::invalidate)
         scope.launch {
             currentUserState
                 .map { user -> user.friendIds }
@@ -343,6 +350,7 @@ class DefaultTeamManagementComponent(
     }
 
     override fun selectTeam(team: TeamWithPlayers?) {
+        playerInviteSearch.invalidate()
         isSelectedTeamDraft = team == null
         val resolvedTeam = team ?: TeamWithPlayers(
             Team(currentUser.id), currentUser, listOf(currentUser), listOf()
@@ -494,6 +502,7 @@ class DefaultTeamManagementComponent(
     }
 
     override fun deselectTeam() {
+        playerInviteSearch.invalidate()
         isSelectedTeamDraft = false
         _selectedTeam.value = null
         teamEditorBackCallback.isEnabled = false
@@ -509,14 +518,7 @@ class DefaultTeamManagementComponent(
     }
 
     override fun searchPlayers(query: String) {
-        scope.launch {
-            _suggestedPlayers.value = userRepository.searchPlayers(search = query).getOrElse {
-                _errorState.value = it.userMessage()
-                emptyList()
-            }.filterNot { user ->
-                currentUser.id == user.id
-            }
-        }
+        playerInviteSearch.submit(query)
     }
 
     override fun inviteUserToRole(

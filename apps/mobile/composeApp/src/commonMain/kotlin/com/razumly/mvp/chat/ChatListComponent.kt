@@ -2,6 +2,7 @@ package com.razumly.mvp.chat
 
 import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.essenty.lifecycle.doOnDestroy
 import com.razumly.mvp.core.data.dataTypes.ChatGroupSummary
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.chat.data.IChatGroupRepository
@@ -11,6 +12,7 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.ChatTermsConsentState
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.INavigationHandler
+import com.razumly.mvp.core.presentation.LatestPlayerInviteSearch
 import com.razumly.mvp.core.util.newId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -102,8 +104,13 @@ class DefaultChatListComponent(
     private val _chatCreationError = MutableStateFlow<String?>(null)
     override val chatCreationError = _chatCreationError.asStateFlow()
 
-    private val _suggestedPlayers = MutableStateFlow<List<UserData>>(listOf())
-    override val suggestedPlayers = _suggestedPlayers.asStateFlow()
+    private val playerInviteSearch = LatestPlayerInviteSearch(
+        scope = scope,
+        searchPlayers = { query -> userRepository.searchPlayers(search = query) },
+        excludedUserId = { currentUser.id },
+        onFailure = { error -> _errorState.value = error.userMessage() },
+    )
+    override val suggestedPlayers = playerInviteSearch.suggestions
 
     private val _friends = MutableStateFlow<List<UserData>>(listOf())
     override val friends = _friends.asStateFlow()
@@ -122,6 +129,7 @@ class DefaultChatListComponent(
         .stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
     init {
+        lifecycle.doOnDestroy(playerInviteSearch::invalidate)
         scope.launch {
             chatTermsState
                 .map { state -> state.accepted }
@@ -289,14 +297,7 @@ class DefaultChatListComponent(
     }
 
     override fun searchPlayers(query: String) {
-        scope.launch {
-            _suggestedPlayers.value = userRepository.searchPlayers(search = query).getOrElse {
-                _errorState.value = it.userMessage()
-                emptyList()
-            }.filterNot { user ->
-                currentUser.id == user.id
-            }
-        }
+        playerInviteSearch.submit(query)
     }
 
     override fun dismissChatTermsPrompt() {

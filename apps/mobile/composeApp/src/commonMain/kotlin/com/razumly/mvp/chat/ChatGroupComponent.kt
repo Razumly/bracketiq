@@ -15,6 +15,7 @@ import com.razumly.mvp.core.data.repositories.ChatTermsConsentState
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.INavigationHandler
+import com.razumly.mvp.core.presentation.LatestPlayerInviteSearch
 import com.razumly.mvp.core.util.newId
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.Dispatchers
@@ -101,8 +102,13 @@ class DefaultChatGroupComponent(
     override val errorState = _errorState.asStateFlow()
     private val _feedback = MutableStateFlow<ChatFeedback?>(null)
     override val feedback = _feedback.asStateFlow()
-    private val _suggestedPlayers = MutableStateFlow<List<UserData>>(listOf())
-    override val suggestedPlayers = _suggestedPlayers.asStateFlow()
+    private val playerInviteSearch = LatestPlayerInviteSearch(
+        scope = scope,
+        searchPlayers = userRepository::searchPlayers,
+        excludedUserId = { currentUser.id },
+        onFailure = { error -> _errorState.value = error.userMessage() },
+    )
+    override val suggestedPlayers = playerInviteSearch.suggestions
     private val _friends = MutableStateFlow<List<UserData>>(listOf())
     override val friends = _friends.asStateFlow()
     private val _isChatMuted = MutableStateFlow(false)
@@ -149,6 +155,7 @@ class DefaultChatGroupComponent(
         get() = currentUserState.value
     init {
         lifecycle.doOnDestroy(::clearOwnedActiveChat)
+        lifecycle.doOnDestroy(playerInviteSearch::invalidate)
         scope.launch {
             chatTermsState
                 .map { state -> state.accepted }
@@ -245,6 +252,7 @@ class DefaultChatGroupComponent(
     }
 
     override fun onBack() {
+        playerInviteSearch.invalidate()
         clearOwnedActiveChat()
         navigationHandler.navigateBack()
     }
@@ -379,12 +387,7 @@ class DefaultChatGroupComponent(
     }
 
     override fun searchPlayers(query: String) {
-        scope.launch {
-            _suggestedPlayers.value = userRepository.searchPlayers(query).getOrElse {
-                _errorState.value = it.userMessage()
-                emptyList()
-            }.filterNot { user -> user.id == currentUser.id }
-        }
+        playerInviteSearch.submit(query)
     }
 
     override fun addUserToChat(user: UserData) {

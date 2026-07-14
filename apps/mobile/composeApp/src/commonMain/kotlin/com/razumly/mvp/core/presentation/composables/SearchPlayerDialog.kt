@@ -62,9 +62,14 @@ fun SearchPlayerDialog(
     val isEmailMode = mode == InviteEntryMode.InviteByEmail
     val normalizedQuery = searchQuery.trim()
     val showInviteByEmail = onInviteByEmail != null && isEmailMode && normalizedQuery.isProbablyEmail()
+    val dismissSearchDialog = {
+        onSearch("")
+        onDismiss()
+    }
 
     Dialog(
-        onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)
+        onDismissRequest = dismissSearchDialog,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Box(
             modifier = Modifier.fillMaxSize()
@@ -74,7 +79,7 @@ fun SearchPlayerDialog(
                     indication = null,
                     interactionSource = remember { MutableInteractionSource() }
                 ) {
-                    onDismiss()
+                    dismissSearchDialog()
                 }
         ) {
             Column(
@@ -119,7 +124,7 @@ fun SearchPlayerDialog(
                             onFilterChange = { },
                             onToggleFilter = { },
                             trailingAction = {
-                                IconButton(onClick = onDismiss) {
+                                IconButton(onClick = dismissSearchDialog) {
                                     Icon(
                                         imageVector = Icons.Default.Close,
                                         contentDescription = "Close search dialog"
@@ -179,7 +184,7 @@ fun SearchPlayerDialog(
                                 items(freeAgents) { player ->
                                     Row(modifier = Modifier.fillMaxWidth().clickable {
                                         onPlayerSelected(player)
-                                        onDismiss()
+                                        dismissSearchDialog()
                                     }.padding(8.dp)) {
                                         PlayerCard(player)
                                     }
@@ -202,7 +207,7 @@ fun SearchPlayerDialog(
                                     items(friends) { friend ->
                                         Row(modifier = Modifier.fillMaxWidth().clickable {
                                             onPlayerSelected(friend)
-                                            onDismiss()
+                                            dismissSearchDialog()
                                         }.padding(8.dp)) {
                                             PlayerCard(friend)
                                         }
@@ -237,7 +242,7 @@ fun SearchPlayerDialog(
                                                     .fillMaxWidth()
                                                     .clickable {
                                                         onInviteByEmail?.invoke(normalizedQuery)
-                                                        onDismiss()
+                                                        dismissSearchDialog()
                                                     }
                                             ) {
                                                 Text(
@@ -271,7 +276,7 @@ fun SearchPlayerDialog(
                                 items(suggestions) { player ->
                                     Row(modifier = Modifier.fillMaxWidth().clickable {
                                         onPlayerSelected(player)
-                                        onDismiss()
+                                        dismissSearchDialog()
                                     }.padding(8.dp)) {
                                         PlayerCard(player)
                                     }

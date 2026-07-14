@@ -1467,6 +1467,7 @@ fun CreateOrEditTeamScreen(
                         email,
                     )
                 }
+                onSearch("")
                 showSearchDialog = false
             },
         )
@@ -1504,9 +1505,7 @@ internal fun TeamInviteDialog(
     var selectedUser by remember { mutableStateOf<UserData?>(null) }
 
     LaunchedEffect(mode, query) {
-        if (mode == TeamInviteDialogMode.InviteUser && query.trim().length >= 2) {
-            onSearch(query)
-        }
+        onSearch(if (mode == TeamInviteDialogMode.InviteUser) query else "")
     }
 
     val normalizedQuery = query.trim()
@@ -1537,9 +1536,13 @@ internal fun TeamInviteDialog(
         if (playerInviteBlocked) return
         selectedUser = user
     }
+    val dismissInviteDialog = {
+        onSearch("")
+        onDismiss()
+    }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = dismissInviteDialog,
         title = { Text("Invite to $teamName") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1655,7 +1658,7 @@ internal fun TeamInviteDialog(
             }
         },
         dismissButton = {
-            OutlinedButton(onClick = onDismiss) {
+            OutlinedButton(onClick = dismissInviteDialog) {
                 Text("Cancel")
             }
         },
