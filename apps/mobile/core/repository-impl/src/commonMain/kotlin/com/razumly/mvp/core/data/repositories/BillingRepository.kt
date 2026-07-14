@@ -1,7 +1,5 @@
 package com.razumly.mvp.core.data.repositories
 
-import com.razumly.mvp.core.analytics.AnalyticsEvent
-import com.razumly.mvp.core.analytics.AnalyticsTracker
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.Bill
 import com.razumly.mvp.core.data.dataTypes.BillPayment
@@ -21,8 +19,6 @@ import com.razumly.mvp.core.data.dataTypes.OrganizationReviewsCacheEntry
 import com.razumly.mvp.core.data.dataTypes.CatalogQueryCacheEntry
 import com.razumly.mvp.core.data.dataTypes.normalizedEventTags
 import com.razumly.mvp.core.data.dataTypes.Product
-import com.razumly.mvp.core.data.dataTypes.ProductCacheEntry
-import com.razumly.mvp.core.data.dataTypes.ProductTaxCategory
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
 import com.razumly.mvp.core.data.dataTypes.Subscription
@@ -34,7 +30,6 @@ import com.razumly.mvp.core.network.dto.BillingRefundRequestDto
 import com.razumly.mvp.core.network.dto.BillingUserRefDto
 import com.razumly.mvp.core.network.dto.OrganizationApiDto
 import com.razumly.mvp.core.network.dto.OrganizationsResponseDto
-import com.razumly.mvp.core.network.dto.PurchaseIntentRequestDto
 import com.razumly.mvp.core.network.dto.RefundAllRequestDto
 import com.razumly.mvp.core.network.dto.RefundRequestsResponseDto
 import com.razumly.mvp.core.network.dto.UpdateRefundRequestDto
@@ -44,64 +39,14 @@ import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 
 private const val CATALOG_RESOURCE_ORGANIZATIONS = "organizations"
-private const val CATALOG_RESOURCE_PRODUCTS = "products"
 private const val ORGANIZATION_PROJECTION_DETAIL = "detail"
 private const val ORGANIZATION_PROJECTION_PUBLIC = "public"
-private const val PRODUCT_PROJECTION_FULL = "full"
 // The review mutation routes return getOrganizationReviewsPayload() with the backend's default 50.
 private const val MUTATED_REVIEW_FIRST_PAGE_LIMIT = 50
-
-/** The payment succeeded, but the server has rejected its idempotent rental booking mutation. */
-@Serializable
-private data class CachedProductPayload(
-    val id: String,
-    val name: String,
-    val description: String? = null,
-    val priceCents: Int,
-    val period: String,
-    val organizationId: String,
-    val createdBy: String? = null,
-    val isActive: Boolean? = null,
-    val createdAt: String? = null,
-    val stripeProductId: String? = null,
-    val stripePriceId: String? = null,
-    val taxCategory: ProductTaxCategory = ProductTaxCategory.ONE_TIME_PRODUCT,
-)
-
-private fun Product.toCachedPayload(): CachedProductPayload = CachedProductPayload(
-    id = id,
-    name = name,
-    description = description,
-    priceCents = priceCents,
-    period = period,
-    organizationId = organizationId,
-    createdBy = createdBy,
-    isActive = isActive,
-    createdAt = createdAt,
-    stripeProductId = stripeProductId,
-    stripePriceId = stripePriceId,
-    taxCategory = taxCategory,
-)
-
-private fun CachedProductPayload.toProduct(): Product = Product(
-    id = id,
-    name = name,
-    description = description,
-    priceCents = priceCents,
-    period = period,
-    organizationId = organizationId,
-    createdBy = createdBy,
-    isActive = isActive,
-    createdAt = createdAt,
-    stripeProductId = stripeProductId,
-    stripePriceId = stripePriceId,
-    taxCategory = taxCategory,
-)
 
 private fun Organization.toCacheEntry(
     scope: CatalogCacheScope,
@@ -111,17 +56,6 @@ private fun Organization.toCacheEntry(
     projectionKey = projectionKey,
     organizationId = id,
     payloadJson = jsonMVP.encodeToString(this),
-)
-
-private fun Product.toCacheEntry(
-    scope: CatalogCacheScope,
-    projectionKey: String,
-): ProductCacheEntry = ProductCacheEntry(
-    viewerKey = scope.viewerKey,
-    projectionKey = projectionKey,
-    id = id,
-    organizationId = organizationId,
-    payloadJson = jsonMVP.encodeToString(toCachedPayload()),
 )
 
 private fun organizationReviewsCacheKey(
@@ -189,33 +123,6 @@ private fun CatalogQueryCacheEntry.toOrganizationPage(): RepositoryPage<Organiza
         "Cached organization pagination completeness is inconsistent."
     }
     return RepositoryPage(items = toOrganizations(), pagination = pagination)
-}
-
-private fun List<Product>.toProductQueryEntry(
-    cacheKey: String,
-    scope: CatalogCacheScope,
-): CatalogQueryCacheEntry = CatalogQueryCacheEntry(
-    cacheKey = cacheKey,
-    viewerKey = scope.viewerKey,
-    resourceType = CATALOG_RESOURCE_PRODUCTS,
-    projectionKey = PRODUCT_PROJECTION_FULL,
-    orderedIdsJson = jsonMVP.encodeToString(map(Product::id)),
-    payloadJson = jsonMVP.encodeToString(map(Product::toCachedPayload)),
-    paginationJson = null,
-    isComplete = true,
-)
-
-private fun CatalogQueryCacheEntry.toProducts(): List<Product> {
-    require(resourceType == CATALOG_RESOURCE_PRODUCTS && isComplete) {
-        "Cached product query is not an exact complete snapshot."
-    }
-    val products = jsonMVP.decodeFromString<List<CachedProductPayload>>(payloadJson)
-        .map(CachedProductPayload::toProduct)
-    val orderedIds = jsonMVP.decodeFromString<List<String>>(orderedIdsJson)
-    require(orderedIds == products.map(Product::id)) {
-        "Cached product ordering metadata does not match its payload."
-    }
-    return products
 }
 
 private fun CatalogQueryCacheEntry?.orderedCatalogIdsOrEmpty(): List<String> = this?.let { snapshot ->
@@ -317,6 +224,11 @@ class BillingRepository(
     private val paymentCoordinator = BillingPaymentCoordinator(
         api = api,
         userRepository = userRepository,
+    )
+    private val productCoordinator = BillingProductCoordinator(
+        api = api,
+        userRepository = userRepository,
+        databaseService = databaseService,
     )
 
     override suspend fun quoteInclusivePrice(
@@ -670,171 +582,45 @@ class BillingRepository(
     override suspend fun restartSubscription(subscriptionId: String): Result<Boolean> =
         paymentCoordinator.restartSubscription(subscriptionId)
 
-    override suspend fun getProductsByIds(productIds: List<String>): Result<List<Product>> = runCatching {
-        val idChunks = collectionIdChunks(productIds)
-        val ids = idChunks.flatten()
-        if (ids.isEmpty()) return@runCatching emptyList()
+    override suspend fun getProductsByIds(productIds: List<String>): Result<List<Product>> =
+        productCoordinator.getProductsByIds(productIds)
 
-        val dao = databaseService.getCatalogCacheDao
-        val scope = api.activateCatalogCache(dao)
-        val cacheKey = catalogCacheKey(
-            scope,
-            CATALOG_RESOURCE_PRODUCTS,
-            PRODUCT_PROJECTION_FULL,
-            "ids",
-            *ids.toTypedArray(),
-        )
-        val previousIds = dao.getCatalogQuery(cacheKey, scope.viewerKey).orderedCatalogIdsOrEmpty()
-        val products = try {
-            val productsById = LinkedHashMap<String, Product>()
-            for (idChunk in idChunks) {
-                val encodedIds = idChunk.joinToString(",") { it.encodeURLQueryComponent() }
-                val response = scope.api.get<ProductsResponseDto>(path = "api/products?ids=$encodedIds")
-                response.products.toProductsStrict("Product id query").forEach { product ->
-                    productsById[product.id] = product
-                }
-            }
-            ids.mapNotNull(productsById::get)
-        } catch (error: Throwable) {
-            if (!error.isCatalogFallbackEligible()) throw error
-            return@runCatching dao.getCatalogQuery(cacheKey, scope.viewerKey)?.toProducts()
-                ?: throw error
-        }
-        val snapshot = products.toProductQueryEntry(cacheKey, scope)
-        val productIds = products.map(Product::id).toSet()
-        dao.replaceProductQuery(
-            snapshot = snapshot,
-            entries = products.map { product -> product.toCacheEntry(scope, PRODUCT_PROJECTION_FULL) },
-            staleProductIds = previousIds.filterNot(productIds::contains),
-        )
-        dao.getCatalogQuery(cacheKey, scope.viewerKey)?.toProducts()
-            ?: error("Product id query cache was not written.")
-    }
-
-    override suspend fun listProductsByOrganization(organizationId: String): Result<List<Product>> = runCatching {
-        val normalizedId = organizationId.trim()
-        if (normalizedId.isEmpty()) return@runCatching emptyList()
-
-        val dao = databaseService.getCatalogCacheDao
-        val scope = api.activateCatalogCache(dao)
-        val cacheKey = catalogCacheKey(
-            scope,
-            CATALOG_RESOURCE_PRODUCTS,
-            PRODUCT_PROJECTION_FULL,
-            "organization",
-            normalizedId,
-        )
-        val products = try {
-            val encodedId = normalizedId.encodeURLQueryComponent()
-            scope.api.get<ProductsResponseDto>(path = "api/products?organizationId=$encodedId")
-                .products
-                .toProductsStrict("Organization product query")
-        } catch (error: Throwable) {
-            if (!error.isCatalogFallbackEligible()) throw error
-            return@runCatching dao.getCatalogQuery(cacheKey, scope.viewerKey)?.toProducts()
-                ?: throw error
-        }
-        val snapshot = products.toProductQueryEntry(cacheKey, scope)
-        dao.replaceProductsForOrganization(
-            organizationId = normalizedId,
-            snapshot = snapshot,
-            entries = products.map { product -> product.toCacheEntry(scope, PRODUCT_PROJECTION_FULL) },
-        )
-        dao.getCatalogQuery(cacheKey, scope.viewerKey)?.toProducts()
-            ?: error("Organization product query cache was not written.")
-    }
+    override suspend fun listProductsByOrganization(organizationId: String): Result<List<Product>> =
+        productCoordinator.listProductsByOrganization(organizationId)
 
     override suspend fun createProductPurchaseIntent(productId: String): Result<PurchaseIntent> =
-        createProductPurchaseIntent(productId, null)
+        productCoordinator.createProductPurchaseIntent(productId = productId, discountCode = null)
 
     override suspend fun createProductPurchaseIntent(
         productId: String,
         discountCode: String?,
-    ): Result<PurchaseIntent> = runCatching {
-        val normalizedId = productId.trim()
-        if (normalizedId.isEmpty()) {
-            throw Exception("Product id is required.")
-        }
-
-        val user = userRepository.currentUser.value.getOrThrow()
-        val email = userRepository.currentAccount.value.getOrNull()?.email
-
-        val response = api.post<PurchaseIntentRequestDto, PurchaseIntent>(
-            path = "api/billing/purchase-intent",
-            body = PurchaseIntentRequestDto(
-                user = BillingUserRefDto(id = user.id, email = email),
-                productId = normalizedId,
-                discountCode = discountCode?.trim()?.takeIf(String::isNotBlank),
-            ),
-        )
-
-        if (!response.error.isNullOrBlank()) {
-            throw Exception(response.error)
-        }
-        AnalyticsTracker.capture(
-            AnalyticsEvent.CheckoutStarted,
-            mapOf(
-                "checkout_type" to "product_purchase",
-                "product_id" to normalizedId,
-            ),
-        )
-        response
-    }
+    ): Result<PurchaseIntent> = productCoordinator.createProductPurchaseIntent(
+        productId = productId,
+        discountCode = discountCode,
+    )
 
     override suspend fun createProductSubscriptionIntent(productId: String): Result<PurchaseIntent> =
-        createProductSubscriptionIntent(productId, null)
+        productCoordinator.createProductSubscriptionIntent(productId = productId, discountCode = null)
 
     override suspend fun createProductSubscriptionIntent(
         productId: String,
         discountCode: String?,
-    ): Result<PurchaseIntent> = runCatching {
-        val normalizedId = productId.trim()
-        if (normalizedId.isEmpty()) {
-            throw Exception("Product id is required.")
-        }
-
-        val response = api.post<ProductSubscriptionCheckoutRequestDto, PurchaseIntent>(
-            path = "api/products/$normalizedId/subscriptions",
-            body = ProductSubscriptionCheckoutRequestDto(
-                discountCode = discountCode?.trim()?.takeIf(String::isNotBlank),
-            ),
-        )
-
-        if (!response.error.isNullOrBlank()) {
-            throw Exception(response.error)
-        }
-        AnalyticsTracker.capture(
-            AnalyticsEvent.CheckoutStarted,
-            mapOf(
-                "checkout_type" to "product_subscription",
-                "product_id" to normalizedId,
-            ),
-        )
-        response
-    }
+    ): Result<PurchaseIntent> = productCoordinator.createProductSubscriptionIntent(
+        productId = productId,
+        discountCode = discountCode,
+    )
 
     override suspend fun createProductSubscription(
         productId: String,
         organizationId: String?,
         priceCents: Int?,
         startDate: String?,
-    ): Result<Subscription> = runCatching {
-        val normalizedId = productId.trim()
-        if (normalizedId.isEmpty()) {
-            throw Exception("Product id is required.")
-        }
-
-        val response = api.post<CreateProductSubscriptionRequestDto, SubscriptionApiDto>(
-            path = "api/products/$normalizedId/subscriptions",
-            body = CreateProductSubscriptionRequestDto(
-                organizationId = organizationId,
-                priceCents = priceCents,
-                startDate = startDate,
-            ),
-        )
-
-        response.toSubscriptionOrNull() ?: error("Create subscription response missing subscription")
-    }
+    ): Result<Subscription> = productCoordinator.createProductSubscription(
+        productId = productId,
+        organizationId = organizationId,
+        priceCents = priceCents,
+        startDate = startDate,
+    )
 
     override fun observeDiscounts(ownerType: String, ownerId: String?): Flow<List<DiscountOffer>> {
         val normalizedOwnerType = ownerType.trim().uppercase().ifBlank { "USER" }
