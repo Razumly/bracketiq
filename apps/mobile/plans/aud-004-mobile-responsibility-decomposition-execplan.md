@@ -22,7 +22,7 @@ After this plan is complete, users must see the same event overview, registratio
   - [x] (2026-07-14 14:53Z) Milestone 3b: extracted event, player, host, cached-match, event-team, current-user-team, and managed-team derivation into `EventRelationStateCoordinator`. Membership now consumes canonical Room team IDs rather than the ignored `UserData.teamIds` compatibility field. The component fell from 3,373 to 3,272 lines; all 34 focused tests, two affected weekly integration regressions, four iOS migration tests, iOS simulator compilation, Android debug assembly, and diff checks pass.
   - [x] (2026-07-14 15:13Z) Milestone 3c: moved participant/bootstrap orchestration behind `EventParticipantBootstrapCoordinator`, preserving Room-backed participant switching, managed-bootstrap suppression and retry, hydration ordering, and weekly cache/membership/sync ordering. The component fell from 3,272 to 2,919 lines; all 55 focused state/coordinator tests, eight affected integration regressions, four iOS migration tests, iOS simulator compilation, Android debug assembly, and diff checks pass.
   - [x] (2026-07-14 15:29Z) Milestone 3d: replaced 22 inline `init` collectors with named component-scoped lifecycle bindings, preserving launch order, `collectLatest` cancellation, withdrawal-key deduplication, and match-realtime cleanup. The component fell from 2,919 to 2,819 lines; all 61 focused state/coordinator tests, 19 passing mobile join-flow integrations, four iOS migration tests, iOS simulator compilation, Android debug assembly, and diff checks pass.
-- [ ] Milestone 4: mechanically separate repository contracts/public models and private wire DTO mappings from implementation without changing names, serialization, or dependency-injection bindings.
+- [x] (2026-07-14 15:41Z) Milestone 4: mechanically separated `IEventRepository`/`IBillingRepository`, their public models, and the event plus billing-domain wire DTO/mapping families from the two implementation files. Public signatures, serializers, defaults, endpoint paths, constructors, and dependency-injection bindings are unchanged; all 122 repository HTTP cases, iOS simulator compilation, Android debug assembly, and diff checks pass.
 - [ ] Milestone 5: split `EventRepository` behind its existing facade into Room store, remote gateway, participant synchronization, registration mutation, event catalog, and session-cache collaborators.
 - [ ] Milestone 6: split `BillingRepository` behind `IBillingRepository` into checkout/signing, rental, bill/payment, discount, catalog, organization/review, and refund collaborators.
 - [ ] Milestone 7: run focused and broad Gradle tests, Android assembly/install/cold-launch checks, iOS compilation/tests, and Android/iOS event-detail visual smoke; reconcile AUD-004 only after runtime evidence passes.
@@ -80,6 +80,9 @@ After this plan is complete, users must see the same event overview, registratio
 - Observation: the component `init` block contained 22 independently cancellable collectors whose launch order is part of the effective startup behavior.
   Evidence: organization/template loading, event hydration, registration scope, participant bootstrap, membership, payment results, match realtime, edit state, withdrawal targets, standings, and bracket rounds all begin from eager state flows. `EventDetailLifecycleBindings` exposes one named binding per collector and the component invokes them in the original order; six direct tests cover the cancellation, deduplication, projection, and cleanup-sensitive bindings.
 
+- Observation: file-private wire declarations cannot remain `private` after a same-package Kotlin file split, and several Event compliance mapper names intentionally duplicate file-private Team repository mappers.
+  Evidence: moved DTOs and mappers use module-only `internal` visibility. Event and Billing answer/compliance mapper names received repository-specific prefixes so they remain unambiguous without widening any public contract; their bodies, DTO fields, serialization annotations, and call ordering are otherwise unchanged.
+
 ## Decision Log
 
 - Decision: continue the existing coordinator architecture and keep `EventDetailComponent`, `IBillingRepository`, and `IEventRepository` source-compatible.
@@ -134,9 +137,13 @@ After this plan is complete, users must see the same event overview, registratio
   Rationale: the component remains the lifecycle owner and repository/coordinator assembly boundary. Returning each child job makes cancellation directly testable without creating a second component, moving domain mutations into a generic collector, or changing the public interface.
   Date/Author: 2026-07-14 / Codex
 
+- Decision: keep repository contracts and models in the existing implementation module/package for this mechanical checkpoint, while using domain-specific wire files and module-only visibility for declarations the facades still construct directly.
+  Rationale: moving module ownership at the same time would change dependency boundaries rather than only declaration ownership. The stable package keeps every consumer and dependency-injection binding source-compatible; Milestones 5 and 6 can now introduce collaborators against explicit contracts without mixing in DTO movement.
+  Date/Author: 2026-07-14 / Codex
+
 ## Outcomes & Retrospective
 
-Research and sequencing are complete, Milestones 1, 2a, 2b, and 3 are validated. `EventDetailScreen.kt` owns 2,192 lines instead of 4,137. APP-009 is integrated as `5b862d6d`; event-team check-in lives in a 146-line coordinator, canonical Room-backed relation derivation lives in a 222-line coordinator, participant/bootstrap orchestration lives in a 425-line coordinator, and 22 lifecycle collectors now live behind a 327-line binding owner with six direct regressions. `DefaultEventDetailComponent.kt` now owns 2,819 lines instead of 3,439. Milestones 4 through 7 remain, so AUD-004 is still open. Four detailed checkpoints and four top-level milestones remain.
+Research and sequencing are complete, and Milestones 1 through 4 are validated. `EventDetailScreen.kt` owns 2,192 lines instead of 4,137. APP-009 is integrated as `5b862d6d`; event-team check-in lives in a 146-line coordinator, canonical Room-backed relation derivation lives in a 222-line coordinator, participant/bootstrap orchestration lives in a 425-line coordinator, and 22 lifecycle collectors now live behind a 327-line binding owner with six direct regressions. `DefaultEventDetailComponent.kt` now owns 2,819 lines instead of 3,439. The repository contracts/models and event plus billing-domain wire mappings now have explicit files; `EventRepository.kt` is 2,637 lines instead of 3,398 and `BillingRepository.kt` is 2,304 lines instead of 4,430. Milestones 5 through 7 remain, so AUD-004 is still open. Three detailed checkpoints and three top-level milestones remain.
 
 ## Context and Orientation
 
@@ -148,7 +155,7 @@ Work from `/Users/elesesy/StudioProjects/mvp-app-critical-audit` on the current 
 
 `core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/EventRepository.kt` implements event cache observation, remote hydration, event CRUD/search, participants/compliance, registration, standings, schedule, staff, deletion, and session-scoped cache behavior. `getEventWithRelationsFlow()` observes Room. Refresh paths call the server, validate/map the response, persist Room rows and relations, and then expose or re-read Room state.
 
-`core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/BillingRepository.kt` contains `IBillingRepository`, public billing models, the implementation for checkout/rentals/signing/bills/payments/subscriptions/products/discounts/organizations/reviews/refunds, and private wire DTOs/mappers. Catalog refresh paths use viewer-scoped atomic DAO replacement and DAO re-read; this invariant must remain explicit after extraction.
+`core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/BillingRepository.kt` contains the implementation for checkout/rentals/signing/bills/payments/subscriptions/products/discounts/organizations/reviews/refunds. `BillingRepositoryContract.kt` and `BillingRepositoryModels.kt` own its stable public surface. Checkout/signing, catalog/discount, rental, and payment wire declarations live in four domain-specific files. Catalog refresh paths still use viewer-scoped atomic DAO replacement and DAO re-read; this invariant must remain explicit after extraction.
 
 A facade is the existing public class/interface that remains stable while delegating to internal collaborators. A remote gateway owns request/response mechanics but does not decide rendered state. A Room store owns DAO transactions and cached reads/writes. A synchronization collaborator validates remote data and commits all related Room rows before the facade reports success.
 
@@ -162,7 +169,7 @@ Milestone 2b divided the remaining overview/edit and dialog render body into two
 
 Milestone 3 integrated APP-009 and validated schema-93 migration coverage. Checkpoint 3a extracted event-team check-in execution and its check-in/prompt/save state into `EventTeamCheckInCoordinator`; the component still supplies the current event, permission decision, managed-team ID, and error presentation. Checkpoint 3b moved relation derivation into a Room-backed state graph. Checkpoint 3c moved participant/bootstrap flow construction, hydration, managed bootstrap, weekly prefetch/sync, and result fanout into `EventParticipantBootstrapCoordinator`. Checkpoint 3d moved all 22 `init` collectors behind named `EventDetailLifecycleBindings` while retaining the Decompose scope and domain handlers in the component. Existing coordinators remain the sole owners of their mutable state. `DefaultEventDetailComponent` retains constructor and interface compatibility and is responsible for assembly, lifecycle ownership, public state exposure, and delegation.
 
-Milestone 4 moves types mechanically before implementation splits. Public repository interfaces and public models move to clearly named contract/model files in the same package. Private serializable request/response DTOs and mappers move to wire files grouped by domain. Keep serial names, defaults, nullability, endpoint paths, and mapping behavior byte-for-byte compatible. Run repository tests after each mechanical move before changing ownership.
+Milestone 4 moved types mechanically before implementation splits. Public repository interfaces and public models now live in clearly named contract/model files in the same package. Serializable request/response DTOs and mappers now live in module-private wire files grouped by event, checkout/signing, catalog/discount, rental, and bill/payment domains. Serial names, defaults, nullability, endpoint paths, mapping bodies, constructors, and dependency-injection bindings remain compatible. Both repository suites passed independently and together before ownership work begins.
 
 Milestone 5 keeps `EventRepository` as the dependency-injected facade while introducing internal collaborators for the Room event store, remote event gateway, participant/compliance synchronization, registration mutations, event catalog/search, and session cache. A remote detail refresh is successful only after the related event, fields, matches, participants, compliance, and relations commit consistently. UI-facing flows continue to observe Room. Cancellation is rethrown; failed refreshes may expose an existing valid cache but cannot partially overwrite it or render a one-off remote object.
 
@@ -429,6 +436,38 @@ Milestone 3d evidence on 2026-07-14:
     the untouched Milestone 3b parent. The other 19 methods in the class pass,
     including paid-team signature/checkout and registration-detail lifecycle paths.
 
+Milestone 4 evidence on 2026-07-14:
+
+    checkpoint parent: cd3c027d
+    2,637  core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/EventRepository.kt
+      266  core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/EventRepositoryContract.kt
+      223  core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/EventRepositoryModels.kt
+      317  core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/EventRepositoryWire.kt
+    2,304  core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/BillingRepository.kt
+      331  core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/BillingRepositoryContract.kt
+      447  core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/BillingRepositoryModels.kt
+      253  core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/BillingCheckoutSigningWire.kt
+      388  core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/BillingCatalogWire.kt
+      324  core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/BillingRentalWire.kt
+      522  core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/BillingPaymentWire.kt
+
+    BillingRepositoryHttpTest: 58 passed
+    EventRepositoryHttpTest: 64 passed
+    combined repository contract matrix: 122 passed
+    serializable annotation parity: Event 7 -> 7; Billing 78 -> 78
+    endpoint path multiset SHA-256 parity:
+      Event: 05c84a806c1e68a2a45fa3c7f50694e29b96fa1556a03ab1eb092fb261eb55d2
+      Billing: 4862219e0698d60491df617ad8da1d2437d70593172bbe5200cc08f38959d315
+    ./gradlew :composeApp:compileKotlinIosSimulatorArm64: BUILD SUCCESSFUL (67 actionable tasks: 12 executed, 55 up-to-date)
+    ./gradlew :composeApp:assembleDebug: BUILD SUCCESSFUL (174 actionable tasks: 13 executed, 161 up-to-date)
+    composeApp-debug.apk SHA-256: 6c87e783ffdfd51d0eef3b95161a6e2267698dacbf3dc864d76222736b912ae5
+    git diff --check: passed
+
+    No endpoint, request/response field, serializer annotation, default, nullability,
+    repository constructor, or dependency-injection binding changed. The only renamed
+    declarations are module-private helper functions that required repository-specific
+    prefixes to avoid cross-file Kotlin overload collisions.
+
 ## Interfaces and Dependencies
 
 Keep `EventDetailScreen(component: EventDetailComponent, ...)`, the `EventDetailComponent` interface, and `DefaultEventDetailComponent` constructor source-compatible. Pure screen rules stay in package `com.razumly.mvp.eventDetail` with existing function names/signatures and `internal` visibility where tests and route use them. Extracted composables receive immutable state data classes and callback containers; they do not receive repositories.
@@ -452,3 +491,5 @@ Revision note (2026-07-14): Completed Milestone 3b by moving all Room-backed eve
 Revision note (2026-07-14): Completed Milestone 3c by moving participant flow construction, managed bootstrap, hydration, weekly occurrence prefetch/sync, result fanout, and their structured jobs into `EventParticipantBootstrapCoordinator`. Retained lifecycle collector launch in `DefaultEventDetailComponent` for Milestone 3d, added six direct ordering/cancellation regressions, and recorded exact focused, affected-integration, migration, Android, iOS, line-count, and APK evidence.
 
 Revision note (2026-07-14): Completed Milestone 3d and Milestone 3 by replacing 22 inline `init` collectors with named `EventDetailLifecycleBindings` launched from the component-owned Decompose scope in their original order. Kept payment/domain handling in the component, added six direct cancellation/deduplication/realtime-cleanup regressions, and recorded exact focused, 19-path integration, migration, Android, iOS, line-count, APK, and inherited-baseline evidence.
+
+Revision note (2026-07-14): Completed Milestone 4 by moving the Event and Billing public contracts/models plus event, checkout/signing, catalog/discount, rental, and bill/payment wire declarations into focused same-package files. Kept both facades, constructors, endpoints, serializer shapes, and Room-first behavior unchanged; used module-only visibility and repository-specific private-helper prefixes where Kotlin file privacy required it, then recorded the 122-test repository matrix and Android/iOS artifact evidence.
