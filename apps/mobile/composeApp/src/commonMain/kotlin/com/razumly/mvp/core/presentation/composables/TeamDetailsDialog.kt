@@ -272,15 +272,7 @@ fun TeamDetailsDialog(
                                 onBlock = onBlockPlayer,
                                 onUnblock = onUnblockPlayer,
                                 jerseyNumber = playerRegistration?.jerseyNumber,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable(enabled = compliance != null) {
-                                        expandedComplianceUserIds = if (expanded) {
-                                            expandedComplianceUserIds - player.id
-                                        } else {
-                                            expandedComplianceUserIds + player.id
-                                        }
-                                    }
+                                modifier = Modifier.fillMaxWidth(),
                             )
                             if (compliance != null) {
                                 TeamMemberComplianceStrip(

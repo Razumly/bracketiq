@@ -15,6 +15,8 @@ import androidx.compose.ui.test.performScrollToIndex
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
+import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import org.junit.Rule
@@ -99,6 +101,59 @@ class TeamDetailsDialogUiTest {
         assertEquals(1, registerAttempts)
         assertEquals(1, dismissAttempts)
         assertTrue(composeRule.onAllNodesWithText("Close").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun member_row_opens_actions_without_toggling_separate_compliance_strip() {
+        val currentUser = user(id = "viewer", firstName = "Casey", lastName = "Viewer")
+        val member = user(id = "member", firstName = "Jordan", lastName = "Player")
+
+        composeRule.setContent {
+            MaterialTheme {
+                TeamDetailsDialog(
+                    team = TeamWithPlayers(
+                        team = Team(
+                            division = "Open",
+                            name = "River City Blue",
+                            captainId = member.id,
+                            playerIds = listOf(member.id),
+                            teamSize = 6,
+                            sport = "Volleyball",
+                            id = "river-city-blue",
+                        ),
+                        captain = member,
+                        players = listOf(member),
+                        pendingPlayers = emptyList(),
+                    ),
+                    currentUser = currentUser,
+                    memberCompliance = EventTeamComplianceSummary(
+                        teamId = "river-city-blue",
+                        teamName = "River City Blue",
+                        users = listOf(
+                            EventComplianceUserSummary(
+                                userId = member.id,
+                                fullName = member.fullName,
+                            )
+                        ),
+                    ),
+                    onDismiss = {},
+                    onPlayerMessage = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Details").assertIsDisplayed()
+        composeRule.onNodeWithText("Jordan Player").performClick()
+
+        composeRule.onNodeWithText("Message").assertIsDisplayed()
+        composeRule.onNodeWithText("Details").assertIsDisplayed()
+        composeRule.onAllNodesWithText("Hide").assertCountEquals(0)
+
+        composeRule.onNodeWithText("Details").performClick()
+
+        composeRule.onNodeWithText("Hide").assertIsDisplayed()
+        composeRule.onNodeWithText("No required documents for this user.").assertIsDisplayed()
+        composeRule.onNodeWithText("Message").assertIsDisplayed()
     }
 
     private fun user(

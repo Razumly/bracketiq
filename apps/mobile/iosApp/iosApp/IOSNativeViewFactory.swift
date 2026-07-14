@@ -261,6 +261,10 @@ class IOSNativeViewFactory: NativeViewFactory {
 private final class NativeEventCardViewController: UIViewController, UIGestureRecognizerDelegate {
     private static let imageCache = NSCache<NSString, UIImage>()
     private static let ciContext = CIContext(options: nil)
+    // The content stack has nine rows when the Draft/Private badge is present.
+    // Keep enough panel space for every row plus the 42pt top and 20pt bottom
+    // insets so Auto Layout never has to compress a label inside the 430pt host.
+    private static let panelContentHeight: CGFloat = 320
 
     private let imageView = UIImageView()
     private let blurredImageView = UIImageView()
@@ -285,6 +289,7 @@ private final class NativeEventCardViewController: UIViewController, UIGestureRe
     private let bottomRow = UIStackView()
     private let dateLabel = UILabel()
     private let priceLabel = UILabel()
+    private let lifecycleContainer = UIView()
     private let lifecycleLabel = UILabel()
 
     private var imageTask: URLSessionDataTask?
@@ -337,7 +342,6 @@ private final class NativeEventCardViewController: UIViewController, UIGestureRe
 
     private var panelHeightConstraint: NSLayoutConstraint?
     private var stackBottomConstraint: NSLayoutConstraint?
-    private var lifecycleBottomConstraint: NSLayoutConstraint?
 
     private func configureView() {
         view.backgroundColor = .clear
@@ -406,9 +410,10 @@ private final class NativeEventCardViewController: UIViewController, UIGestureRe
         configureRows()
         configureLifecycleLabel()
 
-        panelHeightConstraint = blurView.heightAnchor.constraint(equalToConstant: 288 + bottomPadding)
+        panelHeightConstraint = blurView.heightAnchor.constraint(
+            equalToConstant: Self.panelContentHeight + bottomPadding
+        )
         stackBottomConstraint = stackView.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -(20 + bottomPadding))
-        lifecycleBottomConstraint = lifecycleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -(bottomPadding + 12))
 
         NSLayoutConstraint.activate([
             imageView.topAnchor.constraint(equalTo: view.topAnchor),
@@ -435,9 +440,6 @@ private final class NativeEventCardViewController: UIViewController, UIGestureRe
             stackView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             stackView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             stackBottomConstraint!,
-
-            lifecycleLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            lifecycleBottomConstraint!,
         ])
     }
 
@@ -572,6 +574,20 @@ private final class NativeEventCardViewController: UIViewController, UIGestureRe
         dateLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         priceLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         stackView.addArrangedSubview(bottomRow)
+
+        lifecycleContainer.translatesAutoresizingMaskIntoConstraints = false
+        lifecycleContainer.isHidden = true
+        lifecycleLabel.translatesAutoresizingMaskIntoConstraints = false
+        lifecycleContainer.addSubview(lifecycleLabel)
+        NSLayoutConstraint.activate([
+            lifecycleLabel.topAnchor.constraint(equalTo: lifecycleContainer.topAnchor, constant: 4),
+            lifecycleLabel.bottomAnchor.constraint(equalTo: lifecycleContainer.bottomAnchor),
+            lifecycleLabel.centerXAnchor.constraint(equalTo: lifecycleContainer.centerXAnchor),
+            lifecycleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: lifecycleContainer.leadingAnchor),
+            lifecycleLabel.trailingAnchor.constraint(lessThanOrEqualTo: lifecycleContainer.trailingAnchor),
+            lifecycleLabel.heightAnchor.constraint(greaterThanOrEqualToConstant: 24),
+        ])
+        stackView.addArrangedSubview(lifecycleContainer)
     }
 
     private func configureLifecycleLabel() {
@@ -581,8 +597,6 @@ private final class NativeEventCardViewController: UIViewController, UIGestureRe
         lifecycleLabel.textAlignment = .center
         lifecycleLabel.layer.cornerRadius = 12
         lifecycleLabel.layer.masksToBounds = true
-        lifecycleLabel.isHidden = true
-        view.addSubview(lifecycleLabel)
     }
 
     private func apply(data: NativeEventCardData) {
@@ -605,10 +619,10 @@ private final class NativeEventCardViewController: UIViewController, UIGestureRe
         if let lifecycle = data.lifecycleLabel, !lifecycle.isEmpty {
             lifecycleLabel.text = "  \(lifecycle)  "
             lifecycleLabel.backgroundColor = lifecycleColor(tone: data.lifecycleTone)
-            lifecycleLabel.isHidden = false
+            lifecycleContainer.isHidden = false
         } else {
             lifecycleLabel.text = nil
-            lifecycleLabel.isHidden = true
+            lifecycleContainer.isHidden = true
         }
 
         let shouldUseLogoFallback = data.usesLogoFallback
@@ -666,9 +680,8 @@ private final class NativeEventCardViewController: UIViewController, UIGestureRe
     }
 
     private func updatePanelConstraints() {
-        panelHeightConstraint?.constant = 288 + bottomPadding
+        panelHeightConstraint?.constant = Self.panelContentHeight + bottomPadding
         stackBottomConstraint?.constant = -(20 + bottomPadding)
-        lifecycleBottomConstraint?.constant = -(bottomPadding + 12)
     }
 
     override func viewDidLayoutSubviews() {

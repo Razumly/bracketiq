@@ -41,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -171,14 +172,17 @@ fun ScheduleView(
         ScheduleEventCard(event = event, start = start, end = end, onClick = onClick)
     },
 ) {
+    val currentShowFab by rememberUpdatedState(showFab)
     if (items.isEmpty()) {
+        LaunchedEffect(Unit) {
+            currentShowFab(true)
+        }
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
             Text("No scheduled entries yet.", style = MaterialTheme.typography.bodyMedium)
         }
-        showFab(true)
         return
     }
 
@@ -277,7 +281,9 @@ fun ScheduleView(
     val coroutineScope = rememberCoroutineScope()
     val lazyListState = rememberLazyListState()
     val isScrollingUp by lazyListState.isScrollingUp()
-    showFab(isScrollingUp)
+    LaunchedEffect(isScrollingUp) {
+        currentShowFab(isScrollingUp)
+    }
     val agendaViewportHeight = (
         getScreenHeight() *
             if (isMobileLayout) {

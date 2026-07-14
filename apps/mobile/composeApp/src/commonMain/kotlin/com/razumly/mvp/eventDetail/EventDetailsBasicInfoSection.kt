@@ -129,7 +129,6 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                 onUnfollowUser = actions.readOnlyActions.onUnfollowUser,
                 onBlockUser = actions.readOnlyActions.onBlockUser,
                 onUnblockUser = actions.readOnlyActions.onUnblockUser,
-                onFollowOrganization = actions.readOnlyActions.onFollowOrganization,
             )
             HorizontalDivider(
                 color = MaterialTheme.colorScheme.outlineVariant,

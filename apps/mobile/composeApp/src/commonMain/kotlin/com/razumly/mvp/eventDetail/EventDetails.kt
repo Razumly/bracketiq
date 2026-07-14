@@ -277,7 +277,6 @@ fun EventDetails(
     onHostUnfollowUser: (UserData) -> Unit = {},
     onHostBlockUser: (UserData, Boolean) -> Unit = { _, _ -> },
     onHostUnblockUser: (UserData) -> Unit = {},
-    onHostFollowOrganization: (Organization) -> Unit = {},
     onMapRevealCenterChange: (Offset) -> Unit = {},
     onFloatingDockVisibilityChange: (Boolean) -> Unit = {},
     onValidationChange: (Boolean, List<String>) -> Unit = { _, _ -> },
@@ -2127,7 +2126,6 @@ fun EventDetails(
         onHostUnfollowUser,
         onHostBlockUser,
         onHostUnblockUser,
-        onHostFollowOrganization,
     ) {
         EventDetailsReadOnlyActions(
             onOpenLocationMap = onOpenLocationMap,
@@ -2137,7 +2135,6 @@ fun EventDetails(
             onUnfollowUser = onHostUnfollowUser,
             onBlockUser = onHostBlockUser,
             onUnblockUser = onHostUnblockUser,
-            onFollowOrganization = onHostFollowOrganization,
         )
     }
     val editActions = remember(

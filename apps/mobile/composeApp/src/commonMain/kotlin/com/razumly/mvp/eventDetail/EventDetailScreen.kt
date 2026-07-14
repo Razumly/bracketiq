@@ -2277,13 +2277,6 @@ fun EventDetailScreen(
                             onHostUnblockUser = { user ->
                                 playerInteractionComponent.unblockUser(user)
                             },
-                            onHostFollowOrganization = { _ ->
-                                popupHandler.showPopup(
-                                    com.razumly.mvp.core.util.ErrorMessage(
-                                        "Follow for organizations is not available yet.",
-                                    ),
-                                )
-                            },
                             onMapRevealCenterChange = { center ->
                                 mapRevealCenter = center
                             },
@@ -2982,6 +2975,7 @@ fun EventDetailScreen(
                                             TournamentBracketView(
                                                 showFab = { showFab = it },
                                                 topContentPadding = tabContentTopOffset,
+                                                canManageBracket = canManageMatchEditingFromDock,
                                                 onMatchClick = { match ->
                                                     if (!canEditMatches) {
                                                         component.matchSelected(match)

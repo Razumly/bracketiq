@@ -32,6 +32,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -39,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
@@ -48,6 +50,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
@@ -67,6 +70,7 @@ private const val BRACKET_LAYOUT_ANIMATION_MS = 300
 fun TournamentBracketView(
     showFab: (Boolean) -> Unit,
     topContentPadding: Dp = 0.dp,
+    canManageBracket: Boolean = false,
     onMatchClick: (MatchWithRelations) -> Unit = {},
     isEditingMatches: Boolean = false,
     editableMatches: List<MatchWithRelations> = emptyList(),
@@ -85,6 +89,19 @@ fun TournamentBracketView(
     } else {
         roundsList
     }
+    val currentShowFab by rememberUpdatedState(showFab)
+
+    if (!hasDisplayableBracketRounds(displayRounds)) {
+        LaunchedEffect(Unit) {
+            currentShowFab(true)
+        }
+        BracketEmptyState(
+            canManageBracket = canManageBracket || isEditingMatches,
+            topContentPadding = topContentPadding,
+        )
+        return
+    }
+
     val lazyRowState = rememberLazyListState()
     var maxHeightInRowDp by remember { mutableStateOf(0.dp) }
     val columnHeight by animateDpAsState(
@@ -163,13 +180,13 @@ fun TournamentBracketView(
             !isAutoVerticalScroll &&
             !suppressFabAfterAutoScroll
         ) {
-            showFab(isScrollingUp)
+            currentShowFab(isScrollingUp)
         }
     }
 
     LaunchedEffect(lazyRowState.isScrollInProgress, isScrollingLeft) {
         if (lazyRowState.isScrollInProgress) {
-            showFab(isScrollingLeft)
+            currentShowFab(isScrollingLeft)
         }
     }
 
@@ -535,6 +552,47 @@ fun TournamentBracketView(
         }
     }
 }
+
+@Composable
+internal fun BracketEmptyState(
+    canManageBracket: Boolean,
+    topContentPadding: Dp = 0.dp,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+    ) {
+        if (topContentPadding > 0.dp) {
+            Spacer(modifier = Modifier.height(topContentPadding))
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(horizontal = 24.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = bracketEmptyStateMessage(canManageBracket),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+internal fun bracketEmptyStateMessage(canManageBracket: Boolean): String =
+    if (canManageBracket) {
+        "No bracket rounds yet. Use match management to build and publish the bracket."
+    } else {
+        "The bracket has not been published yet."
+    }
+
+internal fun hasDisplayableBracketRounds(
+    rounds: List<List<MatchWithRelations?>>,
+): Boolean = rounds.any { round -> round.any { match -> match != null } }
 
 @Composable
 private fun PairConnectorCanvas(
