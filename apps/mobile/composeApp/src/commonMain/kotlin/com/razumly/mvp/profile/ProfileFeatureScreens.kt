@@ -1022,11 +1022,7 @@ fun ProfileEventTemplatesScreen(component: ProfileComponent) {
             }
 
             templatesState.templates.isEmpty() -> {
-                Text(
-                    text = "No event templates yet.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                EventTemplatesEmptyState(onCreateEvent = component::createEvent)
             }
 
             else -> {
@@ -1037,6 +1033,27 @@ fun ProfileEventTemplatesScreen(component: ProfileComponent) {
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+internal fun EventTemplatesEmptyState(onCreateEvent: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = "No event templates yet",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            text = "Templates are made from an existing personal event. Create or open an event, then choose Create Template from its actions.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Button(onClick = onCreateEvent) {
+            Text("Create an event")
         }
     }
 }

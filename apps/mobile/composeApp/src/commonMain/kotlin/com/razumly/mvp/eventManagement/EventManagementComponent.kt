@@ -30,11 +30,13 @@ interface EventManagementComponent {
     val isLoadingMore: StateFlow<Boolean>
     val hasMoreEvents: StateFlow<Boolean>
     val onBack: () -> Unit
+    val onCreateEvent: () -> Unit
     val errorState: StateFlow<ErrorMessage?>
     val isLoading: StateFlow<Boolean>
 
     fun setLoadingHandler(handler: LoadingHandler)
     fun loadMoreEvents()
+    fun retryLoadingEvents()
 }
 
 class DefaultEventManagementComponent internal constructor(
@@ -48,6 +50,7 @@ class DefaultEventManagementComponent internal constructor(
     cachedEvents: Flow<Result<List<Event>>>,
     navigateToEvent: (String) -> Unit,
     override val onBack: () -> Unit,
+    override val onCreateEvent: () -> Unit,
 ) : ComponentContext by componentContext, EventManagementComponent {
     constructor(
         componentContext: ComponentContext,
@@ -63,6 +66,7 @@ class DefaultEventManagementComponent internal constructor(
         cachedEvents = eventRepository.getCachedEventsFlow(),
         navigateToEvent = navigationHandler::navigateToEvent,
         onBack = navigationHandler::navigateBack,
+        onCreateEvent = navigationHandler::navigateToCreate,
     )
 
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
@@ -127,24 +131,24 @@ class DefaultEventManagementComponent internal constructor(
                     }
 
                     _isLoading.value = true
-                    loadHostEventsPage(
-                        hostId,
-                        HOST_EVENTS_PAGE_SIZE,
-                        0,
-                    ).onSuccess { page ->
-                        if (isCurrentRequest(generation, hostId)) {
-                            _errorState.value = null
-                            applyPage(page = page, requestedOffset = 0, replace = true)
-                        }
-                    }.onFailure { error ->
-                        if (isCurrentRequest(generation, hostId)) {
-                            _errorState.value = ErrorMessage("Failed to load events: ${error.userMessage()}")
-                        }
-                    }
-                    if (isCurrentRequest(generation, hostId)) {
-                        _isLoading.value = false
-                    }
+                    loadInitialEvents(hostId = hostId, generation = generation)
                 }
+        }
+    }
+
+    override fun retryLoadingEvents() {
+        if (_isLoading.value) return
+
+        val hostId = activeHostId
+        if (hostId.isBlank()) return
+
+        val generation = ++requestGeneration
+        _errorState.value = null
+        _isLoading.value = true
+        _isLoadingMore.value = false
+        _hasMoreEvents.value = false
+        scope.launch {
+            loadInitialEvents(hostId = hostId, generation = generation)
         }
     }
 
@@ -175,6 +179,29 @@ class DefaultEventManagementComponent internal constructor(
             }
             if (isCurrentRequest(generation, hostId)) {
                 _isLoadingMore.value = false
+            }
+        }
+    }
+
+    private suspend fun loadInitialEvents(hostId: String, generation: Long) {
+        try {
+            loadHostEventsPage(
+                hostId,
+                HOST_EVENTS_PAGE_SIZE,
+                0,
+            ).onSuccess { page ->
+                if (isCurrentRequest(generation, hostId)) {
+                    _errorState.value = null
+                    applyPage(page = page, requestedOffset = 0, replace = true)
+                }
+            }.onFailure { error ->
+                if (isCurrentRequest(generation, hostId)) {
+                    _errorState.value = ErrorMessage("Failed to load events: ${error.userMessage()}")
+                }
+            }
+        } finally {
+            if (isCurrentRequest(generation, hostId)) {
+                _isLoading.value = false
             }
         }
     }

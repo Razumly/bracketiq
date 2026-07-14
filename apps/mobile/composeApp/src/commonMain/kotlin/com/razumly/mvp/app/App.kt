@@ -100,9 +100,13 @@ fun App(root: RootComponent) {
     val pendingInviteCount by root.pendingInviteCount.collectAsState()
     val appUpdatePrompt by root.appUpdatePrompt.collectAsState()
     val centerNavAction by root.centerNavAction.collectAsState()
-    val completedGuideIds by root.completedGuideIds.collectAsState()
-    val completedGuideIdsLoaded by root.completedGuideIdsLoaded.collectAsState()
+    val accountGuideCompletionState by root.accountGuideCompletionState.collectAsState()
     val currentUserResult by root.currentUser.collectAsState()
+    val currentGuideAccountId = currentUserResult
+        .getOrNull()
+        ?.id
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
 
     val popupHandler = remember { PopupHandlerImpl() }
     val loadingHandler = remember { LoadingHandlerImpl() }
@@ -169,10 +173,12 @@ fun App(root: RootComponent) {
         }
     }
 
-    LaunchedEffect(completedGuideIds, completedGuideIdsLoaded) {
+    LaunchedEffect(currentGuideAccountId, accountGuideCompletionState) {
+        guideController.updateAccount(currentGuideAccountId)
         guideController.updateCompletedGuideIds(
-            ids = completedGuideIds,
-            loaded = completedGuideIdsLoaded,
+            accountId = accountGuideCompletionState.accountId,
+            ids = accountGuideCompletionState.completedGuideIds,
+            loaded = accountGuideCompletionState.isLoaded,
         )
     }
 

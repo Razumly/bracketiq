@@ -20,6 +20,7 @@ import kotlin.time.Instant
 private const val REGISTRATION_PROGRESS_VERSION = 1
 private const val REGISTRATION_PROGRESS_LEGACY_PREFIX = "registration_progress_"
 private const val REGISTRATION_PROGRESS_ACCOUNT_PREFIX = "account_registration_progress_"
+private const val COMPLETED_GUIDES_ACCOUNT_PREFIX = "account_completed_guide_ids_"
 private val REGISTRATION_PROGRESS_MAX_AGE = 24.hours
 
 @Serializable
@@ -49,7 +50,7 @@ class CurrentUserDataSource(
     private val registrationSyncStartedAt = stringPreferencesKey("registration_sync_started_at")
     private val registrationSyncUserId = stringPreferencesKey("registration_sync_user_id")
     private val dismissedAppReleaseKey = stringPreferencesKey("dismissed_app_release_key")
-    private val completedGuideIds = stringPreferencesKey("completed_guide_ids")
+    private val legacyCompletedGuideIds = stringPreferencesKey("completed_guide_ids")
     private val matchOperationDeviceId = stringPreferencesKey("match_operation_device_id")
 
     suspend fun saveUserId(userId: String) {
@@ -178,24 +179,35 @@ class CurrentUserDataSource(
     suspend fun getDismissedAppReleaseKeyNow(): String =
         dataStore.data.first()[dismissedAppReleaseKey].orEmpty()
 
-    fun getCompletedGuideIds(): Flow<Set<String>> =
-        dataStore.data.map { preferences ->
-            parseIdSet(preferences[completedGuideIds])
-        }
-
-    suspend fun markGuideCompleted(guideId: String) {
-        val normalizedGuideId = guideId.trim()
-        if (normalizedGuideId.isBlank()) return
-        dataStore.edit { preferences ->
-            val existing = parseIdSet(preferences[completedGuideIds])
-            existing += normalizedGuideId
-            preferences[completedGuideIds] = serializeIdSet(existing)
+    fun getCompletedGuideIds(accountId: String): Flow<Set<String>> {
+        val normalizedAccountId = accountId.trim().takeIf(String::isNotBlank)
+            ?: return dataStore.data.map { emptySet() }
+        val accountKey = completedGuideIdsKey(normalizedAccountId)
+        return dataStore.data.map { preferences ->
+            parseIdSet(preferences[accountKey])
         }
     }
 
-    suspend fun clearCompletedGuideIds() {
+    suspend fun markGuideCompleted(accountId: String, guideId: String) {
+        val normalizedAccountId = accountId.trim()
+        val normalizedGuideId = guideId.trim()
+        if (normalizedAccountId.isBlank() || normalizedGuideId.isBlank()) return
         dataStore.edit { preferences ->
-            preferences.remove(completedGuideIds)
+            val accountKey = completedGuideIdsKey(normalizedAccountId)
+            val existing = parseIdSet(preferences[accountKey])
+            existing += normalizedGuideId
+            preferences[accountKey] = serializeIdSet(existing)
+            // Device-global guide history has no trustworthy owner. Discard it instead of
+            // leaking one account's completed guides into the next signed-in account.
+            preferences.remove(legacyCompletedGuideIds)
+        }
+    }
+
+    suspend fun clearCompletedGuideIds(accountId: String) {
+        val normalizedAccountId = accountId.trim().takeIf(String::isNotBlank) ?: return
+        dataStore.edit { preferences ->
+            preferences.remove(completedGuideIdsKey(normalizedAccountId))
+            preferences.remove(legacyCompletedGuideIds)
         }
     }
 
@@ -334,6 +346,9 @@ class CurrentUserDataSource(
 
     private fun registrationProgressKey(accountId: String, key: String) =
         stringPreferencesKey("${registrationProgressAccountPrefix(accountId)}$key")
+
+    private fun completedGuideIdsKey(accountId: String) =
+        stringPreferencesKey("$COMPLETED_GUIDES_ACCOUNT_PREFIX${accountId.length}:$accountId")
 
     private fun legacyRegistrationProgressKey(key: String) =
         stringPreferencesKey("$REGISTRATION_PROGRESS_LEGACY_PREFIX$key")

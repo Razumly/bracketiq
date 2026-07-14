@@ -4,8 +4,10 @@ import android.app.Application
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
@@ -91,6 +93,43 @@ class ChatListErrorUiTest {
         assertEquals(2, component.createChatCalls)
         assertEquals(0, dismissCalls)
     }
+
+    @Test
+    fun empty_chat_list_explains_the_state_and_opens_chat_creation() {
+        val component = ChatListErrorUi_FakeComponent()
+
+        composeRule.setContent {
+            CompositionLocalProvider(LocalNavBarPadding provides PaddingValues()) {
+                MaterialTheme {
+                    ChatListScreen(component)
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("No chats yet").assertIsDisplayed()
+        composeRule.onNodeWithText("Start a conversation with another player or organizer.")
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("Start a chat").performClick()
+
+        composeRule.onNodeWithText("Chat Name (Optional)").assertIsDisplayed()
+    }
+
+    @Test
+    fun loading_chat_list_does_not_claim_the_account_has_no_chats() {
+        val component = ChatListErrorUi_FakeComponent().apply {
+            mutableIsLoadingChats.value = true
+        }
+
+        composeRule.setContent {
+            CompositionLocalProvider(LocalNavBarPadding provides PaddingValues()) {
+                MaterialTheme {
+                    ChatListScreen(component)
+                }
+            }
+        }
+
+        composeRule.onAllNodesWithText("No chats yet").assertCountEquals(0)
+    }
 }
 
 private class ChatListErrorUi_FakeComponent(
@@ -106,6 +145,8 @@ private class ChatListErrorUi_FakeComponent(
     override val chatSummaries: StateFlow<Map<String, ChatGroupSummary>> = MutableStateFlow(emptyMap())
     val mutableErrorState = MutableStateFlow<String?>(null)
     override val errorState: StateFlow<String?> = mutableErrorState
+    val mutableIsLoadingChats = MutableStateFlow(false)
+    override val isLoadingChats: StateFlow<Boolean> = mutableIsLoadingChats
     private val mutableChatCreationStatus = MutableStateFlow(ChatCreationStatus.IDLE)
     override val chatCreationStatus: StateFlow<ChatCreationStatus> = mutableChatCreationStatus
     private val mutableChatCreationError = MutableStateFlow<String?>(null)

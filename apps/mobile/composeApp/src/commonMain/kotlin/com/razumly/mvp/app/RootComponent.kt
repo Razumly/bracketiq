@@ -68,6 +68,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.core.parameter.parametersOf
@@ -88,6 +91,12 @@ internal class CenterActionRefreshRequestTracker {
 
     fun isCurrent(requestId: Long): Boolean = requestId == latestRequestId
 }
+
+internal data class AccountGuideCompletionState(
+    val accountId: String? = null,
+    val completedGuideIds: Set<String> = emptySet(),
+    val isLoaded: Boolean = false,
+)
 
 internal suspend fun LifecycleOwner.repeatCenterActionRefreshWhileStarted(
     isActiveUser: () -> Boolean,
@@ -206,10 +215,9 @@ class RootComponent(
     val appUpdatePrompt: StateFlow<AppUpdatePrompt?> = _appUpdatePrompt.asStateFlow()
     private val _centerNavAction = MutableStateFlow<CenterNavAction>(CenterNavAction.CreateEvent)
     val centerNavAction: StateFlow<CenterNavAction> = _centerNavAction.asStateFlow()
-    private val _completedGuideIds = MutableStateFlow<Set<String>>(emptySet())
-    val completedGuideIds: StateFlow<Set<String>> = _completedGuideIds.asStateFlow()
-    private val _completedGuideIdsLoaded = MutableStateFlow(false)
-    val completedGuideIdsLoaded: StateFlow<Boolean> = _completedGuideIdsLoaded.asStateFlow()
+    private val _accountGuideCompletionState = MutableStateFlow(AccountGuideCompletionState())
+    internal val accountGuideCompletionState: StateFlow<AccountGuideCompletionState> =
+        _accountGuideCompletionState.asStateFlow()
     val currentUser: StateFlow<Result<UserData>> = userRepository.currentUser
 
     val childStack: Value<ChildStack<AppConfig, Child>> = childStack(
@@ -355,10 +363,23 @@ class RootComponent(
         }
 
         scope.launch {
-            currentUserDataSource.getCompletedGuideIds().collect { guideIds ->
-                _completedGuideIds.value = guideIds
-                _completedGuideIdsLoaded.value = true
-            }
+            userRepository.currentUser
+                .map { result -> result.getOrNull()?.id?.trim().orEmpty() }
+                .distinctUntilChanged()
+                .collectLatest { userId ->
+                    _accountGuideCompletionState.value = AccountGuideCompletionState(
+                        accountId = userId.takeIf(String::isNotBlank),
+                    )
+                    if (userId.isBlank()) return@collectLatest
+
+                    currentUserDataSource.getCompletedGuideIds(userId).collect { guideIds ->
+                        _accountGuideCompletionState.value = AccountGuideCompletionState(
+                            accountId = userId,
+                            completedGuideIds = guideIds,
+                            isLoaded = true,
+                        )
+                    }
+                }
         }
     }
 
@@ -388,8 +409,14 @@ class RootComponent(
     }
 
     fun markGuideCompleted(guideId: String) {
+        val userId = userRepository.currentUser.value
+            .getOrNull()
+            ?.id
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: return
         scope.launch(Dispatchers.Default) {
-            currentUserDataSource.markGuideCompleted(guideId)
+            currentUserDataSource.markGuideCompleted(userId, guideId)
         }
     }
 

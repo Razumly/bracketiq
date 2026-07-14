@@ -21,6 +21,43 @@ import kotlin.time.Instant
 @OptIn(ExperimentalTime::class)
 class EventManagementComponentTest : MainDispatcherTest() {
     @Test
+    fun initial_load_failure_remains_actionable_until_retry_succeeds() = runTest(testDispatcher) {
+        val loader = QueuedHostEventPageLoader(
+            pages = ArrayDeque(
+                listOf(
+                    CompletableDeferred<Result<HostEventPage>>(
+                        Result.failure(IllegalStateException("offline")),
+                    ),
+                    CompletableDeferred(
+                        Result.success(
+                            HostEventPage(
+                                events = listOf(hostEvent("event-after-retry")),
+                                nextOffset = 1,
+                                hasMore = false,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val component = eventManagementComponent(loader)
+        advance()
+
+        assertTrue(component.events.value.isEmpty())
+        assertFalse(component.isLoading.value)
+        assertEquals("Failed to load events: offline", component.errorState.value?.message)
+
+        component.retryLoadingEvents()
+        component.retryLoadingEvents()
+        advance()
+
+        assertEquals(listOf(0, 0), loader.requests.map(HostPageRequest::offset))
+        assertEquals(listOf("event-after-retry"), component.events.value.map(Event::id))
+        assertNull(component.errorState.value)
+        assertFalse(component.isLoading.value)
+    }
+
+    @Test
     fun host_events_follow_server_offsets_dedupe_rows_and_expose_load_more_state() =
         runTest(testDispatcher) {
             val firstPage = CompletableDeferred<Result<HostEventPage>>()
@@ -144,6 +181,7 @@ class EventManagementComponentTest : MainDispatcherTest() {
         cachedEvents = loader.cachedEvents,
         navigateToEvent = {},
         onBack = {},
+        onCreateEvent = {},
     )
 }
 

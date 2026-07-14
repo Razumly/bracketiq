@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.FloatingActionButton
@@ -53,12 +54,18 @@ fun ChatListScreen(component: ChatListComponent) {
     val chatList by component.chatGroups.collectAsState()
     val chatSummaries by component.chatSummaries.collectAsState()
     val errorMessage by component.errorState.collectAsState()
+    val isLoadingChats by component.isLoadingChats.collectAsState()
     val chatTermsState by component.chatTermsState.collectAsState()
     val isCheckingChatTerms by component.isCheckingChatTerms.collectAsState()
     val showChatTermsPrompt by component.showChatTermsPrompt.collectAsState()
     var showNewChatDialog by remember { mutableStateOf(false) }
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val navBottomPadding = LocalNavBarPadding.current.calculateBottomPadding()
+
+    fun openNewChatDialog() {
+        component.clearChatCreationFeedback()
+        showNewChatDialog = true
+    }
 
     Scaffold(
         contentWindowInsets = NoScaffoldContentInsets,
@@ -76,10 +83,7 @@ fun ChatListScreen(component: ChatListComponent) {
         floatingActionButton = {
             if (!showNewChatDialog) {
                 FloatingActionButton(
-                    onClick = {
-                        component.clearChatCreationFeedback()
-                        showNewChatDialog = true
-                    },
+                    onClick = ::openNewChatDialog,
                     modifier = Modifier.padding(bottom = navBottomPadding),
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -114,6 +118,15 @@ fun ChatListScreen(component: ChatListComponent) {
                         )
                     }
                 }
+            if (chatList.isEmpty() && isLoadingChats) {
+                item {
+                    CircularProgressIndicator()
+                }
+            } else if (chatList.isEmpty() && errorMessage.isNullOrBlank()) {
+                item {
+                    ChatListEmptyState(onStartChat = ::openNewChatDialog)
+                }
+            }
             items(chatList) {
                 ChatListItem(
                     modifier = Modifier.clickable { component.onChatSelected(it) },
@@ -135,6 +148,32 @@ fun ChatListScreen(component: ChatListComponent) {
                 onDismiss = component::dismissChatTermsPrompt,
                 intro = "Sending chat messages in Bracket IQ requires agreement to the Terms and EULA.",
             )
+        }
+    }
+}
+
+@Composable
+internal fun ChatListEmptyState(onStartChat: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("No chats yet", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = "Start a conversation with another player or organizer.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(onClick = onStartChat) {
+                Text("Start a chat")
+            }
         }
     }
 }

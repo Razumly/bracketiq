@@ -139,6 +139,12 @@ data class RentalReservationComplete(
     val items: List<RentalBookingItemManifest>,
 )
 
+data class TeamSignatureSyncProgress(
+    val currentStep: Int,
+    val totalSteps: Int,
+    val message: String = "Waiting for signature sync...",
+)
+
 enum class OrganizationReviewSaveStatus {
     IDLE,
     SAVING,
@@ -213,6 +219,7 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     val loadingTeamMemberComplianceId: StateFlow<String?>
     val textSignaturePrompt: StateFlow<TextSignaturePromptState?>
     val webSignaturePrompt: StateFlow<WebSignaturePromptState?>
+    val teamSignatureSyncProgress: StateFlow<TeamSignatureSyncProgress?>
     val discountCodePrompt: StateFlow<DiscountCodePromptState?>
     val isReservingRental: StateFlow<Boolean>
     val completedRentalReservation: StateFlow<RentalReservationComplete?>
@@ -360,6 +367,9 @@ class DefaultOrganizationDetailComponent(
     override val textSignaturePrompt: StateFlow<TextSignaturePromptState?> = _textSignaturePrompt.asStateFlow()
     private val _webSignaturePrompt = MutableStateFlow<WebSignaturePromptState?>(null)
     override val webSignaturePrompt: StateFlow<WebSignaturePromptState?> = _webSignaturePrompt.asStateFlow()
+    private val _teamSignatureSyncProgress = MutableStateFlow<TeamSignatureSyncProgress?>(null)
+    override val teamSignatureSyncProgress: StateFlow<TeamSignatureSyncProgress?> =
+        _teamSignatureSyncProgress.asStateFlow()
     private val _discountCodePrompt = MutableStateFlow<DiscountCodePromptState?>(null)
     override val discountCodePrompt: StateFlow<DiscountCodePromptState?> = _discountCodePrompt.asStateFlow()
     private val _isReservingRental = MutableStateFlow(false)
@@ -1435,8 +1445,8 @@ class DefaultOrganizationDetailComponent(
                 ).onFailure { error ->
                     _errorState.value = ErrorMessage(error.userMessage("Failed to record signature."))
                 }.onSuccess {
-                    _textSignaturePrompt.value = null
                     if (awaitTeamSignatureStepClearance(prompt.step)) {
+                        _textSignaturePrompt.value = null
                         processNextTeamSignatureStep()
                     }
                 }
@@ -1695,52 +1705,61 @@ class DefaultOrganizationDetailComponent(
         }
 
         val normalizedOperationId = operationId?.trim()?.takeIf(String::isNotBlank)
-        if (normalizedOperationId != null) {
-            _errorState.value = ErrorMessage("Waiting for signature sync...")
-            billingRepository.pollBoldSignOperation(normalizedOperationId).getOrElse { error ->
-                Napier.e("Failed to poll team BoldSign operation.", error)
-                _errorState.value = ErrorMessage(error.userMessage("Failed to confirm signature status."))
-                clearPendingTeamSignatureFlow()
-                return false
+        _teamSignatureSyncProgress.value = TeamSignatureSyncProgress(
+            currentStep = pendingTeamSignatureStepIndex + 1,
+            totalSteps = pendingTeamSignatureSteps.size.coerceAtLeast(1),
+        )
+        return try {
+            if (normalizedOperationId != null) {
+                billingRepository.pollBoldSignOperation(normalizedOperationId).getOrElse { error ->
+                    Napier.e("Failed to poll team BoldSign operation.", error)
+                    _errorState.value = ErrorMessage(error.userMessage("Failed to confirm signature status."))
+                    clearPendingTeamSignatureFlow()
+                    return false
+                }
             }
+
+            val intervalMillis = 2_000L
+            val timeoutMillis = 60_000L
+            var elapsedMillis = 0L
+
+            while (elapsedMillis <= timeoutMillis) {
+                val refreshedSteps = fetchRequiredTeamSignatureSteps(teamId).getOrElse { error ->
+                    _errorState.value = ErrorMessage(error.userMessage("Failed to confirm signature status."))
+                    clearPendingTeamSignatureFlow()
+                    return false
+                }
+
+                if (refreshedSteps.none { refreshedStep -> refreshedStep.matchesPendingTeamSignatureStep(step) }) {
+                    pendingTeamSignatureSteps = refreshedSteps
+                    pendingTeamSignatureStepIndex = 0
+                    return true
+                }
+
+                if (elapsedMillis >= timeoutMillis) {
+                    break
+                }
+
+                delay(intervalMillis)
+                elapsedMillis += intervalMillis
+            }
+
+            clearPendingTeamSignatureFlow()
+            _errorState.value = ErrorMessage("Document synchronization is delayed. Please try again shortly.")
+            false
+        } finally {
+            _teamSignatureSyncProgress.value = null
         }
-
-        val intervalMillis = 2_000L
-        val timeoutMillis = 60_000L
-        var elapsedMillis = 0L
-
-        while (elapsedMillis <= timeoutMillis) {
-            _errorState.value = ErrorMessage("Waiting for signature sync...")
-            val refreshedSteps = fetchRequiredTeamSignatureSteps(teamId).getOrElse { error ->
-                _errorState.value = ErrorMessage(error.userMessage("Failed to confirm signature status."))
-                clearPendingTeamSignatureFlow()
-                return false
-            }
-
-            if (refreshedSteps.none { refreshedStep -> refreshedStep.matchesPendingTeamSignatureStep(step) }) {
-                pendingTeamSignatureSteps = refreshedSteps
-                pendingTeamSignatureStepIndex = 0
-                return true
-            }
-
-            if (elapsedMillis >= timeoutMillis) {
-                break
-            }
-
-            delay(intervalMillis)
-            elapsedMillis += intervalMillis
-        }
-
-        clearPendingTeamSignatureFlow()
-        _errorState.value = ErrorMessage("Document synchronization is delayed. Please try again shortly.")
-        return false
     }
 
     private suspend fun startTeamSigning(teamId: String, onReady: suspend () -> Unit) {
+        _errorState.value = null
+        _teamSignatureSyncProgress.value = null
         pendingTeamSignatureTeamId = teamId.trim().takeIf(String::isNotBlank)
         pendingPostSignatureAction = onReady
         fetchRequiredTeamSignatureSteps(teamId)
             .onFailure { error ->
+                clearPendingTeamSignatureFlow()
                 _errorState.value = ErrorMessage(
                     "Unable to load required documents: ${error.userMessage("Unknown error")}",
                 )
@@ -1793,7 +1812,6 @@ class DefaultOrganizationDetailComponent(
             totalSteps = pendingTeamSignatureSteps.size,
         )
 
-        _errorState.value = ErrorMessage("Waiting for signature sync...")
         pendingTeamSignaturePollJob = scope.launch {
             if (awaitTeamSignatureStepClearance(currentStep)) {
                 _webSignaturePrompt.value = null
@@ -1811,6 +1829,7 @@ class DefaultOrganizationDetailComponent(
         pendingPostSignatureAction = null
         _textSignaturePrompt.value = null
         _webSignaturePrompt.value = null
+        _teamSignatureSyncProgress.value = null
     }
 
     private suspend fun loadSavedBillingAddress(): BillingAddressDraft? {

@@ -1,4 +1,7 @@
-@file:OptIn(kotlin.time.ExperimentalTime::class)
+@file:OptIn(
+    kotlin.time.ExperimentalTime::class,
+    kotlinx.coroutines.ExperimentalCoroutinesApi::class,
+)
 
 package com.razumly.mvp.organizationDetail
 
@@ -868,13 +871,26 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
 
             assertTrue(component.textSignaturePrompt.value != null)
             assertTrue(component.billingAddressPrompt.value == null)
+            assertNull(component.teamSignatureSyncProgress.value)
             assertTrue(billingRepository.testState.teamRegistrationPurchaseIntentCalls.isEmpty())
 
             component.confirmTextSignature()
-            advance()
+            testDispatcher.scheduler.runCurrent()
+
+            assertEquals(
+                "Waiting for signature sync...",
+                component.teamSignatureSyncProgress.value?.message,
+            )
+            assertNull(component.errorState.value)
+            assertNotNull(component.textSignaturePrompt.value)
+
+            testDispatcher.scheduler.advanceTimeBy(2_000L)
+            testDispatcher.scheduler.runCurrent()
 
             assertTrue(component.textSignaturePrompt.value == null)
             assertTrue(component.billingAddressPrompt.value != null)
+            assertNull(component.teamSignatureSyncProgress.value)
+            assertNull(component.errorState.value)
             assertEquals(1, billingRepository.testState.teamRecordSignatureCalls.size)
             assertTrue(billingRepository.testState.teamRegistrationPurchaseIntentCalls.isEmpty())
 

@@ -40,6 +40,7 @@ interface ChatListComponent {
     val chatGroups: StateFlow<List<ChatGroupWithRelations>>
     val chatSummaries: StateFlow<Map<String, ChatGroupSummary>>
     val errorState: StateFlow<String?>
+    val isLoadingChats: StateFlow<Boolean>
     val chatCreationStatus: StateFlow<ChatCreationStatus>
     val chatCreationError: StateFlow<String?>
     val suggestedPlayers: StateFlow<List<UserData>>
@@ -98,6 +99,9 @@ class DefaultChatListComponent(
 
     private val _errorState = MutableStateFlow<String?>(null)
     override val errorState = _errorState.asStateFlow()
+    private val _isLoadingChats = MutableStateFlow(false)
+    override val isLoadingChats = _isLoadingChats.asStateFlow()
+    private var chatRefreshGeneration = 0L
 
     private val _chatCreationStatus = MutableStateFlow(ChatCreationStatus.IDLE)
     override val chatCreationStatus = _chatCreationStatus.asStateFlow()
@@ -255,9 +259,17 @@ class DefaultChatListComponent(
     }
 
     private fun refreshChatGroups(fallbackMessage: String = "Failed to load chats.") {
+        val generation = ++chatRefreshGeneration
+        _isLoadingChats.value = true
         scope.launch {
-            chatGroupRepository.refreshChatGroupsAndMessages().onFailure {
-                _errorState.value = it.userMessage(fallbackMessage)
+            try {
+                chatGroupRepository.refreshChatGroupsAndMessages().onFailure {
+                    _errorState.value = it.userMessage(fallbackMessage)
+                }
+            } finally {
+                if (generation == chatRefreshGeneration) {
+                    _isLoadingChats.value = false
+                }
             }
         }
     }

@@ -145,6 +145,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val loadingTeamMemberComplianceId by component.loadingTeamMemberComplianceId.collectAsState()
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
     val webSignaturePrompt by component.webSignaturePrompt.collectAsState()
+    val teamSignatureSyncProgress by component.teamSignatureSyncProgress.collectAsState()
     val discountCodePrompt by component.discountCodePrompt.collectAsState()
     val isReservingRental by component.isReservingRental.collectAsState()
     val completedRentalReservation by component.completedRentalReservation.collectAsState()
@@ -788,6 +789,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
             prompt = prompt,
             onConfirm = component::confirmTextSignature,
             onDismiss = component::dismissTextSignature,
+            progressMessage = teamSignatureSyncProgress?.message,
         )
     }
 
@@ -801,7 +803,11 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
         } else {
             null
         }
-        val description = listOfNotNull(progressLabel, signerLabel).joinToString(" - ")
+        val description = listOfNotNull(
+            progressLabel,
+            signerLabel,
+            teamSignatureSyncProgress?.message,
+        ).joinToString(" - ")
 
         EmbeddedWebModal(
             title = prompt.step?.title ?: "Sign required document",

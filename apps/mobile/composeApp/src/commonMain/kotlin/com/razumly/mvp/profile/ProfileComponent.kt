@@ -1208,9 +1208,15 @@ class DefaultProfileComponent(
 
     override fun resetOnboardingForDebug() {
         if (!Platform.isDebugBuild) return
+        val userId = userRepository.currentUser.value
+            .getOrNull()
+            ?.id
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: return
 
         scope.launch {
-            currentUserDataSource.clearCompletedGuideIds()
+            currentUserDataSource.clearCompletedGuideIds(userId)
             navigationHandler.navigateToSearch()
         }
     }
