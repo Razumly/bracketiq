@@ -1059,7 +1059,7 @@ class BillingRepositoryHttpTest {
         val callsByPath = mutableMapOf<String, Int>()
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
-            val call = callsByPath.getOrDefault(path, 0) + 1
+            val call = (callsByPath[path] ?: 0) + 1
             callsByPath[path] = call
             if (call == 2) {
                 return@MockEngine respond(
