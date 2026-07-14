@@ -74,6 +74,12 @@ android {
     packaging {
         resources.pickFirsts.add("META-INF/*")
     }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 dependencies {
@@ -96,6 +102,10 @@ dependencies {
     implementation(libs.play.services.wearable)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 
     testImplementation(libs.kotlin.test)
+    testImplementation(libs.androidx.core)
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.robolectric)
 }
