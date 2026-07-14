@@ -6,6 +6,8 @@ import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.EventApiDto
 import com.razumly.mvp.core.network.dto.EventDetailBootstrapResponseDto
 import com.razumly.mvp.core.network.dto.EventParticipantsSnapshotResponseDto
+import com.razumly.mvp.core.network.dto.EventTeamComplianceResponseDto
+import com.razumly.mvp.core.network.dto.EventUserComplianceResponseDto
 import com.razumly.mvp.core.network.dto.toEventOrThrow
 import io.ktor.http.encodeURLQueryComponent
 
@@ -60,6 +62,34 @@ internal class EventDetailRemoteGateway(
                 } else {
                     emptyMap()
                 },
+            ),
+        )
+    }
+
+    suspend fun fetchTeamCompliance(
+        eventId: String,
+        occurrence: EventOccurrenceSelection?,
+    ): EventTeamComplianceResponseDto {
+        val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
+            ?: error("Event id is required.")
+        return api.get(
+            occurrencePath(
+                basePath = "api/events/$normalizedEventId/teams/compliance",
+                occurrence = occurrence,
+            ),
+        )
+    }
+
+    suspend fun fetchUserCompliance(
+        eventId: String,
+        occurrence: EventOccurrenceSelection?,
+    ): EventUserComplianceResponseDto {
+        val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
+            ?: error("Event id is required.")
+        return api.get(
+            occurrencePath(
+                basePath = "api/events/$normalizedEventId/users/compliance",
+                occurrence = occurrence,
             ),
         )
     }
