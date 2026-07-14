@@ -3,6 +3,7 @@ package com.razumly.mvp.core.data.repositories
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.MvpUploadFile
 import com.razumly.mvp.core.network.dto.FileUploadResponseDto
+import com.razumly.mvp.core.network.dto.ImageUploadPolicyDto
 import io.github.aakira.napier.Napier
 import io.ktor.client.call.body
 import io.ktor.client.request.forms.formData
@@ -64,6 +65,18 @@ class ImagesRepository internal constructor(
     override suspend fun uploadImage(
         inputFile: MvpUploadFile
     ): Result<String> = runCatching {
+        val policy = api.get<ImageUploadPolicyDto>("api/files/upload")
+        require(policy.version > 0) { "Image upload policy has an invalid version" }
+        require(policy.maxBytes > 0) { "Image upload policy has an invalid size limit" }
+        if (inputFile.bytes.size.toLong() > policy.maxBytes) {
+            throw IllegalArgumentException(policy.tooLargeMessage)
+        }
+        val resolvedContentType = resolveImageUploadContentType(
+            policy = policy,
+            fileName = inputFile.filename,
+            contentType = inputFile.mimeType,
+        ) ?: throw IllegalArgumentException(policy.unsupportedTypeMessage)
+
         val token = api.tokenStore.get()
         val response = api.http.submitFormWithBinaryData(
             url = api.urlFor("api/files/upload"),
@@ -73,7 +86,7 @@ class ImagesRepository internal constructor(
                     key = "\"file\"",
                     value = inputFile.bytes,
                     headers = Headers.build {
-                        append(HttpHeaders.ContentType, inputFile.mimeType)
+                        append(HttpHeaders.ContentType, resolvedContentType)
                         append(
                             HttpHeaders.ContentDisposition,
                             "filename=\"${inputFile.filename}\"",
@@ -106,6 +119,33 @@ class ImagesRepository internal constructor(
         // Server will also remove the file id from any `uploadedImages` arrays it is present in.
         runCatching { userImageStore.refreshCurrentAccount().getOrThrow() }
     }
+}
+
+internal fun resolveImageUploadContentType(
+    policy: ImageUploadPolicyDto,
+    fileName: String?,
+    contentType: String?,
+): String? {
+    val normalizedContentType = contentType
+        ?.substringBefore(';')
+        ?.trim()
+        ?.lowercase()
+        ?.takeIf(String::isNotBlank)
+
+    policy.mimeTypes.firstOrNull { supported ->
+        supported.equals(normalizedContentType, ignoreCase = true)
+    }?.let { matched ->
+        return if (matched.equals("image/jpg", ignoreCase = true)) "image/jpeg" else matched.lowercase()
+    }
+
+    val normalizedName = fileName?.trim()?.lowercase().orEmpty()
+    return policy.mimeTypesByExtension.entries
+        .sortedByDescending { it.key.length }
+        .firstOrNull { (extension, _) ->
+            extension.isNotBlank() && normalizedName.endsWith(extension.lowercase())
+        }
+        ?.value
+        ?.lowercase()
 }
 
 internal suspend fun associateUploadedProfileImage(

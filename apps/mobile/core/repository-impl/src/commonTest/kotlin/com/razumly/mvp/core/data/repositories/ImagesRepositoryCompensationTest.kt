@@ -23,6 +23,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -34,6 +35,10 @@ class ImagesRepositoryCompensationTest {
         val engine = MockEngine { request ->
             requests += "${request.method.value} ${request.url.encodedPath}"
             when {
+                request.method == HttpMethod.Get && request.url.encodedPath == "/api/files/upload" -> {
+                    respondJson(DEFAULT_IMAGE_UPLOAD_POLICY_JSON)
+                }
+
                 request.method == HttpMethod.Post && request.url.encodedPath == "/api/files/upload" -> {
                     respondJson("""{"file":{"id":"$FILE_ID"}}""")
                 }
@@ -66,11 +71,92 @@ class ImagesRepositoryCompensationTest {
         assertEquals(1, userImageStore.refreshCurrentAccountCalls)
         assertEquals(
             listOf(
+                "GET /api/files/upload",
                 "POST /api/files/upload",
                 "DELETE /api/files/$FILE_ID",
             ),
             requests,
         )
+    }
+
+    @Test
+    fun uploadValidationUsesTheServerPolicyInsteadOfACodedMobileAllowlist() = runTest {
+        val requests = mutableListOf<String>()
+        val engine = MockEngine { request ->
+            requests += "${request.method.value} ${request.url.encodedPath}"
+            when {
+                request.method == HttpMethod.Get && request.url.encodedPath == "/api/files/upload" -> {
+                    respondJson(
+                        """{
+                            "version":2,
+                            "maxBytes":10485760,
+                            "mimeTypes":["image/gif"],
+                            "mimeTypesByExtension":{".gif":"image/gif"},
+                            "unsupportedTypeMessage":"Choose a supported image.",
+                            "tooLargeMessage":"Choose a smaller image."
+                        }""".trimIndent(),
+                    )
+                }
+
+                request.method == HttpMethod.Post && request.url.encodedPath == "/api/files/upload" -> {
+                    respondJson("""{"file":{"id":"$FILE_ID"}}""")
+                }
+
+                else -> error("Unexpected request: ${request.method.value} ${request.url.encodedPath}")
+            }
+        }
+        val repository = ImagesRepository(
+            api = imagesTestApi(engine),
+            userImageStore = FakeUserImageAssociationStore(),
+        )
+
+        val result = repository.uploadImage(
+            MvpUploadFile(
+                bytes = byteArrayOf(71, 73, 70),
+                filename = "animated.gif",
+                mimeType = "application/octet-stream",
+            ),
+        )
+
+        assertEquals(FILE_ID, result.getOrThrow())
+        assertEquals(
+            listOf("GET /api/files/upload", "POST /api/files/upload"),
+            requests,
+        )
+    }
+
+    @Test
+    fun unsupportedTypeFailsBeforeMultipartUploadWithTheServerMessage() = runTest {
+        val requests = mutableListOf<String>()
+        val engine = MockEngine { request ->
+            requests += "${request.method.value} ${request.url.encodedPath}"
+            when {
+                request.method == HttpMethod.Get && request.url.encodedPath == "/api/files/upload" -> {
+                    respondJson(DEFAULT_IMAGE_UPLOAD_POLICY_JSON)
+                }
+
+                else -> error("Unexpected request: ${request.method.value} ${request.url.encodedPath}")
+            }
+        }
+        val repository = ImagesRepository(
+            api = imagesTestApi(engine),
+            userImageStore = FakeUserImageAssociationStore(),
+        )
+
+        val result = repository.uploadImage(
+            MvpUploadFile(
+                bytes = byteArrayOf(71, 73, 70),
+                filename = "animated.gif",
+                mimeType = "image/gif",
+            ),
+        )
+
+        val failure = assertNotNull(result.exceptionOrNull())
+        assertEquals(
+            "Unsupported image type. Please select a PNG, JPEG, WebP, AVIF, or SVG image.",
+            failure.message,
+        )
+        assertEquals(listOf("GET /api/files/upload"), requests)
     }
 
     @Test
@@ -186,6 +272,21 @@ class ImagesRepositoryCompensationTest {
 
     private companion object {
         const val FILE_ID = "profile-image-123"
+        const val DEFAULT_IMAGE_UPLOAD_POLICY_JSON = """{
+            "version":1,
+            "maxBytes":10485760,
+            "mimeTypes":["image/avif","image/jpeg","image/jpg","image/png","image/svg+xml","image/webp"],
+            "mimeTypesByExtension":{
+                ".avif":"image/avif",
+                ".jpeg":"image/jpeg",
+                ".jpg":"image/jpeg",
+                ".png":"image/png",
+                ".svg":"image/svg+xml",
+                ".webp":"image/webp"
+            },
+            "unsupportedTypeMessage":"Unsupported image type. Please select a PNG, JPEG, WebP, AVIF, or SVG image.",
+            "tooLargeMessage":"Image must be 10MB or less. Choose a smaller image and try again."
+        }"""
     }
 }
 

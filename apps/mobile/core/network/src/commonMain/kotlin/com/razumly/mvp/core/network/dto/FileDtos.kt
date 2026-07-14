@@ -12,3 +12,12 @@ data class FileApiDto(
     val id: String? = null,
 )
 
+@Serializable
+data class ImageUploadPolicyDto(
+    val version: Int,
+    val maxBytes: Long,
+    val mimeTypes: List<String>,
+    val mimeTypesByExtension: Map<String, String>,
+    val unsupportedTypeMessage: String,
+    val tooLargeMessage: String,
+)

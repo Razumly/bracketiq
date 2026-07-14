@@ -36,7 +36,7 @@ actual suspend fun convertPhotoResultToUploadFile(photoResult: GalleryPhotoResul
                 ?: photoResult.fileName
                 ?.trim()
                 ?.takeIf(String::isNotBlank)
-                ?: "image_${System.currentTimeMillis()}.jpg",
+                ?: "image_${System.currentTimeMillis()}",
             mimeType = photoResult.mimeType ?: context.contentResolver.getType(uri),
             declaredSizeBytes = metadata.sizeBytes,
             description = uri.toString(),
@@ -51,7 +51,7 @@ internal suspend fun materializeSelectedImage(
 ): MvpUploadFile = try {
     runInterruptible(ioDispatcher) {
         val source = provideSource()
-        val mimeType = requireSupportedImageUploadMimeType(source.fileName, source.mimeType)
+        val mimeType = normalizeSelectedImageContentType(source.mimeType)
 
         if (source.declaredSizeBytes != null && source.declaredSizeBytes > MAX_IMAGE_UPLOAD_BYTES) {
             throw ImageUploadTooLargeException()
