@@ -47,8 +47,11 @@ After this plan is complete, users must see the same event overview, registratio
 - [ ] Milestone 7: run focused and broad Gradle tests, Android assembly/install/cold-launch checks, iOS compilation/tests, and Android/iOS event-detail visual smoke; reconcile AUD-004 only after runtime evidence passes.
   - [x] (2026-07-14 23:05Z) Milestone 7a: completed the broad shared test gates. Android debug unit tests pass 1,234 of 1,237 with three skipped and zero failures/errors; iOS simulator tests pass 1,151 of 1,151. Corrected two stale test-fixture assumptions without changing production behavior: native checkout unavailability now expects the component's intentional cleared pending state, and the Billing request counter now uses common-Kotlin map access.
   - [x] (2026-07-14 23:12Z) Milestone 7b: installed and cold-launched the exact Android APK and built, installed, and launched the matching iOS simulator app. Both login surfaces render coherently and remain alive without an app crash, ANR, fatal exception, or uncaught termination. The supplied local test account returns `Invalid credentials`, so authenticated event-detail tab, edit, refresh, and offline-cache visual smoke remains blocked without changing credentials or test data.
-- [ ] Milestone 8: finish the screen presentation boundary so `EventDetailScreen.kt` is approximately 1,200 lines or less while preserving the stable typed hosts and all route-visible behavior.
+- [x] (2026-07-14 23:45Z) Milestone 8: finished the screen presentation boundary at 1,197 lines while preserving the stable typed hosts, route-owned transient state, component delegation, and all route-visible behavior.
   - [x] (2026-07-14 23:35Z) Milestone 8a: moved registration, league, playoff, tournament-pool, schedule, standings-selection, computed-standings, and authoritative-remote-standings derivation into the 242-line pure `EventDetailDivisionPresentation` builder. The route fell from 1,852 to 1,585 lines; all 14 focused division/standings tests and both platform build gates pass at commit `841996ab`.
+  - [x] (2026-07-14 23:38Z) Milestone 8b: moved host/assistant/admin access, edit/delete/QR/template permissions, onboarding role, user membership, tracked-user, and participant-summary derivation into the 136-line pure `EventDetailAccessPresentation` builder. The route fell from 1,585 to 1,501 lines; seven focused role regressions plus the division/standings matrix and both platform build gates pass at commit `af9a4cf9`.
+  - [x] (2026-07-14 23:41Z) Milestone 8c: moved weekly parent/occurrence selection, joined/fullness state, editable occurrence routing, schedule items, team-signup projection, and sport-label derivation into the 117-line pure `EventDetailWeeklyRoutePresentation` builder. The route fell from 1,501 to 1,434 lines; all 16 weekly regressions, seven role regressions, and both platform build gates pass at commit `025dbc69`.
+  - [x] (2026-07-14 23:45Z) Milestone 8d: moved join/withdrawal labels and callback descriptors, editable map projection/image scheme state, overview-guide lifecycle, and route error/reset effects into four focused owners. The route fell from 1,434 to 1,197 lines; all 42 focused regressions and both platform build gates pass at commit `9d514abc`.
 - [ ] Milestone 9: finish the component orchestration boundary so `DefaultEventDetailComponent.kt` is approximately 1,500 lines or less and retains only assembly, lifecycle ownership, public state exposure, and delegation.
 - [ ] Milestone 10: rerun broad exact-commit validation and complete authenticated Android/iOS event-detail visual smoke before reconciling AUD-004.
 
@@ -65,6 +68,12 @@ After this plan is complete, users must see the same event overview, registratio
 
 - Observation: the remaining division-selection and standings derivation was one pure presentation family even though its outputs feed multiple existing hosts.
   Evidence: one builder now produces registration, league, playoff, bracket, pool, schedule, and standings selections plus local/remote standings convergence without receiving a component, repository, flow, or mutable UI state. The screen retains both selected-pool values and their reconciliation effects, and focused invalid-pool coverage confirms the unchanged first-pool fallback.
+
+- Observation: event location test fixtures must use the persisted `coordinates` constructor field rather than the compatibility `lat`/`long` properties.
+  Evidence: the first map-presentation test compile rejected `lat` and `long` as constructor parameters; replacing them with longitude/latitude `coordinates` matches the Room/network model and the focused matrix then passed 42 of 42 tests.
+
+- Observation: an explicitly selected paid division resolves through division-level pricing before the event fallback.
+  Evidence: the initial join-presentation fixture selected `open` without a matching `DivisionDetail`, correctly producing zero under the existing resolver. Adding the real division price to the fixture preserved production behavior and verified the paid-team retry label and callback.
 
 - Observation: the event-detail package already has substantial decomposition, so a second component architecture would be counterproductive.
   Evidence: the package contains 74 top-level files, 24 coordinator files, 68 common test files, and roughly 483 event-detail test methods. `DefaultEventDetailComponent` already delegates registration, hydration, membership, participant management, edit drafts, match editing, standings, templates, and billing work to named coordinators.
@@ -229,7 +238,7 @@ After this plan is complete, users must see the same event overview, registratio
 
 ## Outcomes & Retrospective
 
-Research and sequencing are complete, Milestones 1 through 6 plus the additional screen-ownership checkpoints are validated, and Milestone 7's broad tests plus unauthenticated launch checks pass. `EventDetailScreen.kt` owns 1,585 lines instead of 4,137; its detail-tab presentation lifecycle lives in a 522-line callback-driven route host, and division/standings derivation lives in a 242-line pure presentation builder. APP-009 is integrated as `5b862d6d`; event-team check-in lives in a 146-line coordinator, canonical Room-backed relation derivation lives in a 222-line coordinator, participant/bootstrap orchestration lives in a 425-line coordinator, and 22 lifecycle collectors now live behind a 327-line binding owner with six direct regressions. `DefaultEventDetailComponent.kt` now owns 2,819 lines instead of 3,439. The repository contracts/models and event plus billing-domain wire mappings now have explicit files; viewer-scoped cache lifecycle lives in a 77-line coordinator, detail HTTP mechanics in a 129-line gateway, canonical detail cache access in a 30-line Room store, viewer registration cache synchronization in a 130-line coordinator with four direct regressions, participant/relation/management/compliance synchronization in a 699-line coordinator, registration mutations plus their Room convergence in a 473-line coordinator, discovery/catalog reads in a 400-line coordinator, Billing checkout workflows in a 254-line coordinator, Billing signing/onboarding workflows in a 243-line coordinator, rental-order persistence/retry in a 238-line coordinator, bill/payment/subscription workflows in a 439-line coordinator, product catalog/purchase workflows in a 275-line coordinator, discount workflows in a 277-line coordinator, organization/review/template workflows in a 437-line coordinator, and refunds in a 105-line coordinator. `EventRepository.kt` is 1,036 lines instead of 3,398 and `BillingRepository.kt` is 585 lines instead of 4,430; both repository facades now meet their structural targets. Android passes 1,234 tests with three skipped, iOS passes all 1,151 tests, and both exact artifacts launch cleanly to login. Authenticated visual smoke is blocked by invalid supplied credentials, while the screen and component remain above their acceptance targets; Milestones 8 through 10 therefore keep AUD-004 open.
+Research and sequencing are complete, Milestones 1 through 8 are validated, and Milestone 7's broad tests plus unauthenticated launch checks pass. `EventDetailScreen.kt` now owns 1,197 lines instead of 4,137 and meets its structural target. Its detail-tab presentation lifecycle lives in a 522-line callback-driven route host; division/standings derivation lives in a 242-line pure builder; access and weekly-route derivation live in 136-line and 117-line pure builders; and join/withdrawal policy, map state, overview-guide lifecycle, and route effects have focused owners no larger than 193 lines. APP-009 is integrated as `5b862d6d`; event-team check-in lives in a 146-line coordinator, canonical Room-backed relation derivation lives in a 222-line coordinator, participant/bootstrap orchestration lives in a 425-line coordinator, and 22 lifecycle collectors now live behind a 327-line binding owner with six direct regressions. `DefaultEventDetailComponent.kt` now owns 2,819 lines instead of 3,439. The repository contracts/models and event plus billing-domain wire mappings now have explicit files; viewer-scoped cache lifecycle lives in a 77-line coordinator, detail HTTP mechanics in a 129-line gateway, canonical detail cache access in a 30-line Room store, viewer registration cache synchronization in a 130-line coordinator with four direct regressions, participant/relation/management/compliance synchronization in a 699-line coordinator, registration mutations plus their Room convergence in a 473-line coordinator, discovery/catalog reads in a 400-line coordinator, Billing checkout workflows in a 254-line coordinator, Billing signing/onboarding workflows in a 243-line coordinator, rental-order persistence/retry in a 238-line coordinator, bill/payment/subscription workflows in a 439-line coordinator, product catalog/purchase workflows in a 275-line coordinator, discount workflows in a 277-line coordinator, organization/review/template workflows in a 437-line coordinator, and refunds in a 105-line coordinator. `EventRepository.kt` is 1,036 lines instead of 3,398 and `BillingRepository.kt` is 585 lines instead of 4,430; both repository facades meet their structural targets. Android passes 1,234 tests with three skipped, iOS passes all 1,151 tests, and both exact artifacts launch cleanly to login. Authenticated visual smoke is blocked by invalid supplied credentials, while the component remains above its acceptance target; Milestones 9 and 10 therefore keep AUD-004 open.
 
 ## Context and Orientation
 
@@ -895,6 +904,61 @@ Milestone 8a evidence on 2026-07-14:
     The route remains the single owner of selected schedule/standings pool state and
     the effects that reconcile selections when available pool options change.
 
+Milestone 8b evidence on 2026-07-14:
+
+    integrated checkpoint: af9a4cf9
+    1,501  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt
+      136  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailAccessPresentation.kt
+    EventDetailScreenRoleVisibilityTest: 7 passed, 0 skipped, 0 failures, 0 errors
+    EventDetailDivisionOptionsTest: 11 passed, 0 skipped, 0 failures, 0 errors
+    LeagueStandingsPresentationTest: 3 passed, 0 skipped, 0 failures, 0 errors
+    ./gradlew :composeApp:compileKotlinIosSimulatorArm64 :composeApp:assembleDebug: BUILD SUCCESSFUL
+    composeApp-debug.apk SHA-256: 8aeac3996776b5c19cde7427fe4ea82fe18f77b145cd793dcf9d74ec9efb59ce
+    git diff --check and git diff --cached --check: passed
+
+    The pure builder receives only immutable event, user, relation, and feature
+    inputs. It centralizes role-sensitive visibility without receiving a component,
+    repository, flow, HTTP client, mutable Compose state, or mutation callback.
+
+Milestone 8c evidence on 2026-07-14:
+
+    integrated checkpoint: 025dbc69
+    1,434  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt
+      117  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailWeeklyRoutePresentation.kt
+    EventDetailWeeklyBehaviorTest: 16 passed, 0 skipped, 0 failures, 0 errors
+    EventDetailScreenRoleVisibilityTest: 7 passed, 0 skipped, 0 failures, 0 errors
+    ./gradlew :composeApp:compileKotlinIosSimulatorArm64 :composeApp:assembleDebug: BUILD SUCCESSFUL
+    composeApp-debug.apk SHA-256: 7f1672ea8d9e496744f973c6db694e786730685607b8ec652c65502628d259a8
+    git diff --check and git diff --cached --check: passed
+
+    Weekly parent/occurrence projection now has one pure owner while selected
+    occurrence state, navigation, joins, and edits remain route/component-owned.
+
+Milestone 8d and Milestone 8 completion evidence on 2026-07-14:
+
+    integrated checkpoint: 9d514abc
+    1,197  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt
+      193  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailJoinActionPresentation.kt
+       53  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailMapPresentation.kt
+      110  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailOverviewGuideLifecycle.kt
+       57  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailRouteLifecycleEffects.kt
+    EventDetailJoinActionPresentationTest: 3 passed, 0 skipped, 0 failures, 0 errors
+    EventDetailMapPresentationTest: 2 passed, 0 skipped, 0 failures, 0 errors
+    EventDetailWeeklyBehaviorTest: 16 passed, 0 skipped, 0 failures, 0 errors
+    EventDetailScreenRoleVisibilityTest: 7 passed, 0 skipped, 0 failures, 0 errors
+    EventDetailDivisionOptionsTest: 11 passed, 0 skipped, 0 failures, 0 errors
+    LeagueStandingsPresentationTest: 3 passed, 0 skipped, 0 failures, 0 errors
+    focused screen matrix: 42 passed
+    ./gradlew :composeApp:compileKotlinIosSimulatorArm64 :composeApp:assembleDebug: BUILD SUCCESSFUL
+    composeApp-debug.apk SHA-256: 4967a432382d7197572dcc3ffb11fd7b0020d783eba73e91471387a476c2a0d4
+    extracted-owner component/repository/network scan: no matches
+    git diff --check and git diff --cached --check: passed
+
+    Join and withdrawal builders expose typed labels/options while callbacks still
+    delegate to the component. Map state is presentation-only, guide ownership stays
+    in Compose lifecycle, and route effects preserve their original collector/reset
+    keys. The screen is now below the approximately 1,200-line acceptance target.
+
 ## Interfaces and Dependencies
 
 Keep `EventDetailScreen(component: EventDetailComponent, ...)`, the `EventDetailComponent` interface, and `DefaultEventDetailComponent` constructor source-compatible. Pure screen rules stay in package `com.razumly.mvp.eventDetail` with existing function names/signatures and `internal` visibility where tests and route use them. Extracted composables receive immutable state data classes and callback containers; they do not receive repositories.
@@ -944,3 +1008,6 @@ Revision note (2026-07-14): Completed Milestone 6f by moving viewer-scoped organ
 Revision note (2026-07-14): Completed Milestone 6g and Milestone 6 by moving refund request creation, host synchronization/hydration, approval, and rejection into `BillingRefundCoordinator`. Integrated isolated commit `ba3aa77c` as `ffa8504b`, reduced the Billing facade to 585 lines, and recorded the 58-case Billing matrix plus Android/iOS artifact evidence. Both repository facades now meet their structural targets; Milestone 7 broad and runtime validation is next.
 Revision note (2026-07-14): Completed Milestone 7a and 7b with 1,237 green-or-skipped Android tests, 1,151 green iOS simulator tests, and clean exact-artifact launches on both platforms. Corrected two stale cross-platform fixture assumptions in commits `03880122` and `fa9b117d`. Authenticated visual smoke remains blocked by invalid supplied credentials; added Milestones 8 and 9 for the still-open screen/component structural targets and Milestone 10 for final exact-commit validation.
 Revision note (2026-07-14): Completed Milestone 8a by moving the complete division/pool/playoff/registration/standings presentation family into a 242-line pure builder. Commit `841996ab` reduces `EventDetailScreen.kt` from 1,852 to 1,585 lines while keeping pool state and effects in the route; 14 focused tests plus Android and iOS build gates pass.
+Revision note (2026-07-14): Completed Milestone 8b by moving the complete access, permission, role, membership, and participant-summary derivation family into the 136-line pure `EventDetailAccessPresentation` builder. Commit `af9a4cf9` reduces the route from 1,585 to 1,501 lines; the focused role/division/standings matrix and both platform gates pass.
+Revision note (2026-07-14): Completed Milestone 8c by moving weekly parent/occurrence selection, fullness/joined state, editable routing, schedule projection, and sport labels into the 117-line pure `EventDetailWeeklyRoutePresentation` builder. Commit `025dbc69` reduces the route from 1,501 to 1,434 lines; 23 focused weekly/role regressions and both platform gates pass.
+Revision note (2026-07-14): Completed Milestone 8d and Milestone 8 by extracting join/withdrawal policy, editable map/image-scheme state, overview-guide lifecycle, and route error/reset effects into four focused owners. Commit `9d514abc` reduces `EventDetailScreen.kt` to 1,197 lines from its 4,137-line audit baseline; all 42 focused regressions, static boundaries, diff checks, and Android/iOS build gates pass. Milestone 9 now targets the remaining component orchestration boundary.
