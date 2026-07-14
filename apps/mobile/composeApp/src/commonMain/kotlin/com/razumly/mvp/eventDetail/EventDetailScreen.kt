@@ -54,7 +54,6 @@ import com.razumly.mvp.core.data.dataTypes.withOfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
-import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.presentation.EventDetailInitialTab
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
@@ -567,198 +566,37 @@ fun EventDetailScreen(
     val showOverviewOpenDetailsAction = !isAffiliateEvent && (isWeeklyParentEvent || !shouldShowViewSchedulePrimaryAction)
     val showStickyActions = !showDetails && !isEditing && !showMap && showStickyDockByScroll
     val isEventRefreshInProgress = eventTeamsAndParticipantsLoading || eventMatchesLoading
-    val joinDivisionOptions = remember(
+    val divisionPresentation = remember(
+        selectedEvent,
         selectedDivision,
-        selectedEvent.event.divisions,
-        selectedEvent.event.divisionDetails,
-        selectedEvent.matches,
-    ) {
-        val options = mutableListOf<BracketDivisionOption>()
-        val seenIds = mutableSetOf<String>()
-        fun addOption(rawId: String?, explicitLabel: String? = null) {
-            val normalizedId = rawId
-                ?.normalizeDivisionIdentifier()
-                .orEmpty()
-            if (normalizedId.isEmpty() || !seenIds.add(normalizedId)) {
-                return
-            }
-            val label = explicitLabel
-                ?.takeIf { it.isNotBlank() }
-                ?: normalizedId.toDivisionDisplayLabel(selectedEvent.event.divisionDetails)
-            options += BracketDivisionOption(
-                id = normalizedId,
-                label = label.ifBlank { normalizedId }
-            )
-        }
-        selectedEvent.event.divisionDetails.forEach { detail ->
-            addOption(detail.id, detail.name)
-        }
-        selectedEvent.event.divisions.forEach { divisionId ->
-            addOption(divisionId)
-        }
-        selectedEvent.matches.forEach { match ->
-            addOption(match.match.division)
-        }
-        addOption(selectedDivision)
-        options
-    }
-    val leagueDivisionOptions = remember(
-        joinDivisionOptions,
-        selectedEvent.event.divisions,
-        selectedEvent.event.divisionDetails,
-        selectedEvent.matches,
-    ) {
-        selectedEvent.event.leagueDivisionOptionsForStandings(
-            fallbackOptions = joinDivisionOptions,
-            matches = selectedEvent.matches,
-        )
-    }
-    val registrationDivisionOptions = remember(
-        selectedEvent.event.divisions,
-        selectedEvent.event.divisionDetails,
-    ) {
-        buildRegistrationDivisionOptions(selectedEvent.event)
-    }
-    val registrationJoinDivisionOptions = remember(registrationDivisionOptions) {
-        registrationDivisionOptions.toJoinDivisionOptions()
-    }
-    val splitRegistrationDivisionOptions = remember(
-        selectedEvent.event.teamSignup,
-        selectedEvent.event.singleDivision,
-        registrationDivisionOptions,
-    ) {
-        if (selectedEvent.event.teamSignup &&
-            !selectedEvent.event.singleDivision &&
-            registrationDivisionOptions.size > 1
-        ) {
-            registrationDivisionOptions
-        } else {
-            emptyList()
-        }
-    }
-    val playoffDivisionOptions = remember(
-        joinDivisionOptions,
-        selectedEvent.event.divisions,
-        selectedEvent.event.divisionDetails,
-        selectedEvent.matches,
-    ) {
-        selectedEvent.event.playoffDivisionOptionsForBracket(
-            fallbackOptions = joinDivisionOptions,
-            matches = selectedEvent.matches,
-        )
-    }
-    val selectedJoinDivisionId = remember(
-        selectedDivision,
-        joinDivisionOptions,
-    ) {
-        joinDivisionOptions.resolveSelectedDivisionId(selectedDivision)
-    }
-    val tournamentBracketDivisionOptions = remember(
-        tournamentPoolPlayEnabled,
-        selectedEvent.event.divisionDetails,
-        joinDivisionOptions,
-    ) {
-        if (tournamentPoolPlayEnabled) {
-            selectedEvent.event.tournamentBracketDivisionOptions(joinDivisionOptions)
-        } else {
-            emptyList()
-        }
-    }
-    val preferredScheduleBracketDivisionId = remember(
-        tournamentPoolPlayEnabled,
-        selectedEvent.event.divisionDetails,
-        selectedJoinDivisionId,
-    ) {
-        if (!tournamentPoolPlayEnabled) {
-            selectedJoinDivisionId
-        } else {
-            selectedEvent.event.resolveBracketDivisionForPool(selectedJoinDivisionId)
-                ?: selectedJoinDivisionId
-        }
-    }
-    val selectedScheduleDivisionId = remember(
-        tournamentPoolPlayEnabled,
-        preferredScheduleBracketDivisionId,
-        tournamentBracketDivisionOptions,
-        joinDivisionOptions,
-    ) {
-        if (tournamentPoolPlayEnabled && tournamentBracketDivisionOptions.isNotEmpty()) {
-            tournamentBracketDivisionOptions.resolveSelectedDivisionId(preferredScheduleBracketDivisionId)
-        } else {
-            joinDivisionOptions.resolveSelectedDivisionId(preferredScheduleBracketDivisionId)
-        }
-    }
-    val schedulePoolDivisionOptions = remember(
-        tournamentPoolPlayEnabled,
-        selectedEvent.event.divisionDetails,
-        selectedScheduleDivisionId,
-    ) {
-        if (tournamentPoolPlayEnabled) {
-            selectedEvent.event.tournamentPoolDivisionOptions(selectedScheduleDivisionId)
-        } else {
-            emptyList()
-        }
-    }
-    val standingsTabDivisionOptions = remember(
-        joinDivisionOptions,
-        leagueDivisionOptions,
-        selectedEvent.event.eventType,
-        tournamentPoolPlayEnabled,
-        tournamentBracketDivisionOptions,
-    ) {
-        if (tournamentPoolPlayEnabled && tournamentBracketDivisionOptions.isNotEmpty()) {
-            tournamentBracketDivisionOptions
-        } else if (selectedEvent.event.eventType == EventType.LEAGUE) {
-            leagueDivisionOptions
-        } else {
-            joinDivisionOptions
-        }
-    }
-    val preferredStandingsBracketDivisionId = remember(
-        tournamentPoolPlayEnabled,
-        selectedEvent.event.divisionDetails,
-        selectedEvent.event.eventType,
-        selectedEvent.event.splitLeaguePlayoffDivisions,
-        selectedJoinDivisionId,
-    ) {
-        selectedEvent.event.preferredStandingsStageDivisionId(
-            tournamentPoolPlayEnabled = tournamentPoolPlayEnabled,
-            selectedDivisionId = selectedJoinDivisionId,
-        )
-    }
-    val selectedStandingsDivisionId = remember(
-        preferredStandingsBracketDivisionId,
-        standingsTabDivisionOptions,
-    ) {
-        standingsTabDivisionOptions.resolveSelectedDivisionId(preferredStandingsBracketDivisionId)
-    }
-    val standingsPoolDivisionOptions = remember(
-        tournamentPoolPlayEnabled,
-        selectedEvent.event.divisionDetails,
-        selectedStandingsDivisionId,
-    ) {
-        if (tournamentPoolPlayEnabled) {
-            selectedEvent.event.tournamentPoolDivisionOptions(selectedStandingsDivisionId)
-        } else {
-            emptyList()
-        }
-    }
-    val selectedStandingsDataDivisionId = remember(
-        selectedStandingsDivisionId,
         selectedStandingsPoolDivisionId,
-        standingsPoolDivisionOptions,
         tournamentPoolPlayEnabled,
+        showStandingsDrawColumn,
+        leagueDivisionStandings,
     ) {
-        if (!tournamentPoolPlayEnabled) {
-            selectedStandingsDivisionId
-        } else {
-            selectedStandingsPoolDivisionId
-                ?.takeIf { selectedPoolId ->
-                    standingsPoolDivisionOptions.any { option -> option.id == selectedPoolId }
-                }
-                ?: standingsPoolDivisionOptions.firstOrNull()?.id
-        }
+        buildEventDetailDivisionPresentation(
+            selectedEvent = selectedEvent,
+            selectedDivision = selectedDivision,
+            selectedStandingsPoolDivisionId = selectedStandingsPoolDivisionId,
+            tournamentPoolPlayEnabled = tournamentPoolPlayEnabled,
+            showStandingsDrawColumn = showStandingsDrawColumn,
+            leagueDivisionStandings = leagueDivisionStandings,
+        )
     }
+    val joinDivisionOptions = divisionPresentation.joinDivisionOptions
+    val leagueDivisionOptions = divisionPresentation.leagueDivisionOptions
+    val registrationDivisionOptions = divisionPresentation.registrationDivisionOptions
+    val registrationJoinDivisionOptions = divisionPresentation.registrationJoinDivisionOptions
+    val splitRegistrationDivisionOptions = divisionPresentation.splitRegistrationDivisionOptions
+    val playoffDivisionOptions = divisionPresentation.playoffDivisionOptions
+    val selectedJoinDivisionId = divisionPresentation.selectedJoinDivisionId
+    val tournamentBracketDivisionOptions = divisionPresentation.tournamentBracketDivisionOptions
+    val selectedScheduleDivisionId = divisionPresentation.selectedScheduleDivisionId
+    val schedulePoolDivisionOptions = divisionPresentation.schedulePoolDivisionOptions
+    val standingsTabDivisionOptions = divisionPresentation.standingsTabDivisionOptions
+    val selectedStandingsDivisionId = divisionPresentation.selectedStandingsDivisionId
+    val standingsPoolDivisionOptions = divisionPresentation.standingsPoolDivisionOptions
+    val selectedStandingsDataDivisionId = divisionPresentation.selectedStandingsDataDivisionId
     LaunchedEffect(schedulePoolDivisionOptions, selectedSchedulePoolDivisionId) {
         if (
             !selectedSchedulePoolDivisionId.isNullOrBlank() &&
@@ -790,112 +628,7 @@ fun EventDetailScreen(
             selectedStandingsPoolDivisionId = firstPoolId
         }
     }
-    val computedLeagueStandings = remember(
-        selectedEvent.teams,
-        selectedEvent.matches,
-        selectedEvent.event,
-        selectedStandingsDataDivisionId,
-        selectedEvent.leagueScoringConfig,
-        showStandingsDrawColumn,
-        tournamentPoolPlayEnabled,
-    ) {
-        val shouldFilterStandings = tournamentPoolPlayEnabled ||
-            (!selectedEvent.event.singleDivision && !selectedStandingsDataDivisionId.isNullOrBlank())
-        val standingsMatches = if (!shouldFilterStandings || selectedStandingsDataDivisionId.isNullOrBlank()) {
-            selectedEvent.matches
-        } else {
-            val normalizedStandingsDivisionId = selectedStandingsDataDivisionId.normalizeDivisionIdentifier()
-            selectedEvent.matches.filter { match ->
-                match.match.division?.normalizeDivisionIdentifier() == normalizedStandingsDivisionId
-            }
-        }
-        val matchTeamIds = standingsMatches
-            .flatMap { match -> listOfNotNull(match.match.team1Id, match.match.team2Id) }
-            .map { teamId -> teamId.trim() }
-            .filter(String::isNotBlank)
-            .toSet()
-        val divisionTeamIds = if (shouldFilterStandings) {
-            selectedEvent.event.teamIdsForDivision(selectedStandingsDataDivisionId)
-        } else {
-            emptySet()
-        }
-        val standingsTeamIds = divisionTeamIds.ifEmpty { matchTeamIds }
-        val standingsTeams = if (!shouldFilterStandings || selectedStandingsDataDivisionId.isNullOrBlank()) {
-            selectedEvent.teams
-        } else {
-            val normalizedStandingsDivisionId = selectedStandingsDataDivisionId.normalizeDivisionIdentifier()
-            selectedEvent.teams.filter { team ->
-                standingsTeamIds.contains(team.team.id) ||
-                    team.team.division.normalizeDivisionIdentifier() == normalizedStandingsDivisionId
-            }
-        }
-
-        buildLeagueStandings(
-            teams = standingsTeams,
-            matches = standingsMatches,
-            config = selectedEvent.leagueScoringConfig,
-            supportsDraw = showStandingsDrawColumn,
-        )
-    }
-    val leagueStandings = remember(
-        computedLeagueStandings,
-        leagueDivisionStandings,
-        selectedEvent.teams,
-        selectedEvent.event,
-        selectedStandingsDataDivisionId,
-    ) {
-        val remoteRows = if (
-            !selectedStandingsDataDivisionId.isNullOrBlank() &&
-            leagueDivisionStandings?.divisionId?.let { loadedDivisionId ->
-                loadedDivisionId.normalizeDivisionIdentifier() ==
-                    selectedStandingsDataDivisionId.normalizeDivisionIdentifier()
-            } == true
-        ) {
-            leagueDivisionStandings?.rows.orEmpty()
-        } else {
-            emptyList()
-        }
-        val filteredRemoteRows = if (remoteRows.isEmpty() || selectedStandingsDataDivisionId.isNullOrBlank()) {
-            remoteRows
-        } else {
-            val explicitTeamIds = selectedEvent.event.teamIdsForDivision(selectedStandingsDataDivisionId)
-            val normalizedStandingsDivisionId = selectedStandingsDataDivisionId.normalizeDivisionIdentifier()
-            val divisionTeamIds = selectedEvent.teams
-                .filter { team ->
-                    explicitTeamIds.contains(team.team.id) ||
-                        team.team.division.normalizeDivisionIdentifier() == normalizedStandingsDivisionId
-                }
-                .map { team -> team.team.id }
-                .filter(String::isNotBlank)
-                .toSet()
-            if (divisionTeamIds.isEmpty()) {
-                remoteRows
-            } else {
-                remoteRows.filter { row -> row.teamId in divisionTeamIds }
-            }
-        }
-        if (filteredRemoteRows.isEmpty()) {
-            computedLeagueStandings
-        } else {
-            val teamsById = selectedEvent.teams.associateBy { it.team.id }
-            filteredRemoteRows.map { row ->
-                TeamStanding(
-                    team = teamsById[row.teamId],
-                    teamId = row.teamId,
-                    teamName = row.teamName,
-                    wins = row.wins,
-                    losses = row.losses,
-                    draws = row.draws,
-                    goalsFor = row.goalsFor,
-                    goalsAgainst = row.goalsAgainst,
-                    matchesPlayed = row.matchesPlayed,
-                    basePoints = row.basePoints,
-                    finalPoints = row.finalPoints,
-                    pointsDelta = row.pointsDelta,
-                )
-            }
-        }
-    }
+    val leagueStandings = divisionPresentation.leagueStandings
     LaunchedEffect(showInviteTeamDialog, splitRegistrationDivisionOptions, selectedDivision) {
         if (!showInviteTeamDialog || splitRegistrationDivisionOptions.isEmpty()) {
             return@LaunchedEffect
