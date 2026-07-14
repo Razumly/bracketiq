@@ -14,8 +14,8 @@ Android, iOS, Wear OS, and watchOS currently decode canonical `id` fields but st
 - [x] (2026-07-14 15:17Z) Removed dollar-prefixed aliases from current shared DTOs, domain models used for response decoding, and repository-private response models while retaining canonical validation.
 - [x] (2026-07-14 15:17Z) Removed the same aliases from Wear OS DTOs and watchOS Codable models; optimistic segment and incident operations now use canonical `id` only.
 - [x] (2026-07-14 15:17Z) Added canonical-only and legacy-only rejection coverage. Shared DTO tests, targeted Billing/User/Match/Chat tests, all Wear JVM tests, and a 10-source watchOS Swift type-check pass.
-- [ ] Compile iOS, assemble Android debug, run Wear tests and a complete-source watchOS Swift type-check, and record exact evidence.
-- [ ] Commit the bounded mobile slice without pushing or editing the audit ledger.
+- [x] (2026-07-14 15:25Z) Compiled iOS simulator, assembled Android debug, ran 30 Wear JVM tests, and type-checked all 10 watchOS Swift sources successfully.
+- [x] (2026-07-14 15:25Z) Committed the bounded implementation as `8df2db32` without pushing or editing the audit ledger; this closeout records the final validation evidence.
 
 ## Surprises & Discoveries
 
@@ -27,6 +27,9 @@ Android, iOS, Wear OS, and watchOS currently decode canonical `id` fields but st
 
 - Observation: the first targeted billing run correctly exposed one stale compatibility fixture rather than a production regression.
   Evidence: `BillingRepositoryHttpTest.listOrganizationTemplates_gets_and_maps_response` still expected a `$id`-only template to map. The fixture now contains two canonical rows plus one obsolete-alias-only row and verifies that only the canonical rows survive; the targeted rerun passed.
+
+- Observation: the complete Compose JVM suite has one deterministic baseline failure outside LEG-001.
+  Evidence: the branch run completed 1,220 tests with 1,216 passing, 3 skipped, and only `EventDetailMobileJoinFlowTest.startTeamRegistration_forPaidOpenTeam_createsTeamRegistrationPurchaseIntent` failing because `startingTeamRegistrationId` was null. The same single test failed identically after detaching this isolated worktree to exact base `abb2c982`; the worktree was then returned to `codex/leg001-mobile-canonical`. The test and its active EventDetail behavior remain outside this slice.
 
 ## Decision Log
 
@@ -44,7 +47,9 @@ Android, iOS, Wear OS, and watchOS currently decode canonical `id` fields but st
 
 ## Outcomes & Retrospective
 
-Shared, Wear OS, and watchOS implementation is complete and focused validation is green. Full shared tasks, the iOS simulator compile, and the Android debug assembly remain before this mobile slice can close.
+The mobile contract cleanup is complete across the shared phone client, Wear OS, and watchOS. Current clients no longer decode or emit dollar-prefixed identity/timestamp aliases; optimistic score operations retain their behavior using canonical `id` only. Static production searches find no serializer or Codable aliases and no legacy identity fallback; the only matching `legacyUserIds` identifier is unrelated team-membership terminology.
+
+Scoped validation is green: 81 core-network tests, 39 repository-implementation tests, 89 focused Compose Billing/User/Match tests, 30 Wear JVM tests, a 10-source watchOS type-check, the iOS simulator Kotlin compile, and the Android debug assembly. The complete Compose JVM suite remains baseline-red by one proven pre-existing EventDetail assertion (1,216 passed, 3 skipped, 1 failed out of 1,220), so this slice does not claim a newly all-green repository baseline. It is otherwise ready for reconciliation from `8df2db32`; no canonical worktree, remote branch, or audit ledger was changed.
 
 ## Context and Orientation
 
@@ -68,12 +73,13 @@ Run from `/private/tmp/mvp-app-leg001-mobile` with JDK 17:
 
     rg -n -F '@SerialName("\$' core composeApp wearApp --glob '*.kt' --glob '!**/build/**'
     rg -n -F 'case legacyId = "$id"' iosApp/watchApp --glob '*.swift'
-    ./gradlew :core:network:testDebugUnitTest --tests 'com.razumly.mvp.core.network.dto.*'
-    ./gradlew :composeApp:testDebugUnitTest --tests 'com.razumly.mvp.core.data.repositories.BillingRepositoryHttpTest' --tests 'com.razumly.mvp.core.data.repositories.UserRepositoryHttpTest'
-    ./gradlew :core:network:testDebugUnitTest :core:repository-impl:testDebugUnitTest :composeApp:testDebugUnitTest
-    ./gradlew :composeApp:compileKotlinIosSimulatorArm64
-    ./gradlew :wearApp:testDebugUnitTest
-    ./gradlew :composeApp:assembleDebug
+    ANDROID_HOME=/Users/elesesy/Library/Android/sdk ./gradlew :core:network:testDebugUnitTest --tests 'com.razumly.mvp.core.network.dto.*'
+    ANDROID_HOME=/Users/elesesy/Library/Android/sdk ./gradlew :composeApp:testDebugUnitTest --tests 'com.razumly.mvp.core.data.repositories.BillingRepositoryHttpTest' --tests 'com.razumly.mvp.core.data.repositories.UserRepositoryHttpTest' --tests 'com.razumly.mvp.eventDetail.data.MatchRepositoryHttpTest'
+    ANDROID_HOME=/Users/elesesy/Library/Android/sdk ./gradlew :core:network:testDebugUnitTest :core:repository-impl:testDebugUnitTest :composeApp:testDebugUnitTest
+    ANDROID_HOME=/Users/elesesy/Library/Android/sdk ./gradlew :composeApp:compileKotlinIosSimulatorArm64
+    ANDROID_HOME=/Users/elesesy/Library/Android/sdk ./gradlew :wearApp:testDebugUnitTest
+    ANDROID_HOME=/Users/elesesy/Library/Android/sdk ./gradlew :composeApp:assembleDebug
+    xcrun --sdk watchsimulator swiftc -target arm64-apple-watchos10.0-simulator -typecheck iosApp/watchApp/*.swift
     git diff --check
 
 Use the existing watchOS audit command or `xcrun swiftc -typecheck` with every production source required by `WatchOfficialModels.swift`; record its exact source count and result after running it.
@@ -97,3 +103,5 @@ The exact supported-floor evidence is `/private/tmp/mvp-site-leg001/docs/code-au
 Continue using kotlinx.serialization for Kotlin and `Codable` for watchOS. Do not add a compatibility serializer, a second identity property, another JSON library, or a new cache. Preserve public repository and UI interfaces. `resolvedId()` helpers may remain only as canonical normalization helpers; they must not inspect a legacy field. Domain `id` remains the sole identity passed to Room, matching, scoring operations, and UI models.
 
 Revision note (2026-07-14 15:06Z): created this self-contained mobile continuation after verifying the web contract, inventorying current dollar-prefixed aliases, and excluding the exact active AUD-004/AUD-008 ownership paths.
+
+Revision note (2026-07-14 15:25Z): closed the mobile implementation with exact cross-platform validation, static-search evidence, commit `8df2db32`, and the independently reproduced baseline EventDetail test failure.
