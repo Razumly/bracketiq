@@ -3990,9 +3990,13 @@ fun EventDetailScreen(
                     onDivisionSelected = component::selectDivision,
                     onTeamSelected = { team ->
                         component.inviteTeamToEvent(team)
+                        component.searchInviteTeams("")
                         showInviteTeamDialog = false
                     },
-                    onDismiss = { showInviteTeamDialog = false },
+                    onDismiss = {
+                        component.searchInviteTeams("")
+                        showInviteTeamDialog = false
+                    },
                 )
             }
 
@@ -4008,13 +4012,18 @@ fun EventDetailScreen(
                     onSearch = component::searchUsers,
                     onPlayerSelected = { user ->
                         component.invitePlayerToEvent(user)
+                        component.searchUsers("")
                         showInvitePlayerDialog = false
                     },
                     onInviteByEmail = { firstName, lastName, email ->
                         component.invitePlayerToEventByEmail(firstName, lastName, email)
+                        component.searchUsers("")
                         showInvitePlayerDialog = false
                     },
-                    onDismiss = { showInvitePlayerDialog = false },
+                    onDismiss = {
+                        component.searchUsers("")
+                        showInvitePlayerDialog = false
+                    },
                 )
             }
 

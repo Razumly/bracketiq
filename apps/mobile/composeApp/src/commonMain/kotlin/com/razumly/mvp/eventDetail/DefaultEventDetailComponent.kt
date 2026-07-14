@@ -2241,6 +2241,10 @@ class DefaultEventDetailComponent(
     }
 
     override fun searchUsers(query: String) {
+        if (normalizedInviteSearchQuery(query) == null) {
+            eventInviteCoordinator.clearSuggestedUsers()
+            return
+        }
         scope.launch {
             eventInviteCoordinator.searchUsers(
                 query = query,
@@ -2251,6 +2255,10 @@ class DefaultEventDetailComponent(
 
     override fun searchInviteTeams(query: String) {
         val event = selectedEvent.value
+        if (normalizedInviteSearchQuery(query, minLength = 2) == null || !event.teamSignup) {
+            eventInviteCoordinator.clearInviteTeamSearch()
+            return
+        }
         scope.launch {
             eventInviteCoordinator.searchInviteTeams(
                 query = query,

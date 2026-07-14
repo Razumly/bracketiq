@@ -13,6 +13,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 internal class EventInviteCoordinator {
+    private var userSearchGeneration = 0L
+    private var teamSearchGeneration = 0L
+
     private val _suggestedUsers = MutableStateFlow<List<UserData>>(emptyList())
     val suggestedUsers = _suggestedUsers.asStateFlow()
 
@@ -30,6 +33,7 @@ internal class EventInviteCoordinator {
     }
 
     fun clearSuggestedUsers() {
+        userSearchGeneration += 1
         _suggestedUsers.value = emptyList()
     }
 
@@ -37,19 +41,27 @@ internal class EventInviteCoordinator {
         query: String,
         searchPlayers: suspend (String) -> Result<List<UserData>>,
     ): ErrorMessage? {
+        userSearchGeneration += 1
+        val requestGeneration = userSearchGeneration
         val normalizedQuery = normalizedInviteSearchQuery(query)
         if (normalizedQuery == null) {
-            clearSuggestedUsers()
+            _suggestedUsers.value = emptyList()
             return null
         }
 
-        replaceSuggestedUsers(
-            searchPlayers(normalizedQuery)
-                .getOrElse { error ->
-                    return ErrorMessage(error.userMessage("Unable to search users."))
-                },
+        val result = searchPlayers(normalizedQuery)
+        if (requestGeneration != userSearchGeneration) {
+            return null
+        }
+        return result.fold(
+            onSuccess = { users ->
+                replaceSuggestedUsers(users)
+                null
+            },
+            onFailure = { error ->
+                ErrorMessage(error.userMessage("Unable to search users."))
+            },
         )
-        return null
     }
 
     fun removeSuggestedUser(userId: String) {
@@ -74,6 +86,7 @@ internal class EventInviteCoordinator {
     }
 
     fun clearInviteTeamSearch() {
+        teamSearchGeneration += 1
         _inviteTeamSuggestions.value = emptyList()
         _inviteTeamsLoading.value = false
     }
@@ -92,20 +105,27 @@ internal class EventInviteCoordinator {
             excludeTeamIds: Set<String>,
         ) -> Result<List<Team>>,
     ): ErrorMessage? {
+        teamSearchGeneration += 1
+        val requestGeneration = teamSearchGeneration
         val normalizedQuery = normalizedInviteSearchQuery(query, minLength = 2)
         if (normalizedQuery == null || !event.teamSignup) {
-            clearInviteTeamSearch()
+            _inviteTeamSuggestions.value = emptyList()
+            _inviteTeamsLoading.value = false
             return null
         }
 
         startInviteTeamSearch()
-        return searchTeams(
+        val result = searchTeams(
             normalizedQuery,
             event.id,
             organizationId,
             sportName,
             excludeTeamIds,
-        ).fold(
+        )
+        if (requestGeneration != teamSearchGeneration) {
+            return null
+        }
+        return result.fold(
             onSuccess = { teams ->
                 finishInviteTeamSearch(teams)
                 null
