@@ -71,10 +71,6 @@ android {
         jvmToolchain(17)
     }
 
-    packaging {
-        resources.pickFirsts.add("META-INF/*")
-    }
-
     testOptions {
         unitTests {
             isIncludeAndroidResources = true

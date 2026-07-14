@@ -224,10 +224,6 @@ actual class MapComponent(
         return place.toMVPPlace(placesClient)
     }
 
-    fun setRadius(radius: Double) {
-        _currentRadiusMeters.value = radius
-    }
-
     actual fun setEvents(events: List<Event>) {
         _events.value = events
     }

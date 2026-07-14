@@ -53,14 +53,6 @@ fun EmailSignInButton(
         isIOS -> 12.dp
         else -> 10.dp
     }
-    val fontSize = when {
-        isIOS -> {
-            val aspectRatio = 199f / 44f
-
-        }
-        else -> 14.sp
-    }
-
     val (backgroundColor, borderColor, textColor) = when {
         isDarkTheme -> Triple(
             Color(0xFF131314), Color(0xFF8E918F), Color(0xFFE3E3E3)

@@ -1208,8 +1208,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
         advance()
 
         harness.component.updateScore(isTeam1 = true, increment = true)
-        harness.component.requestSetConfirmation()
-        harness.component.confirmSet()
+        harness.component.completeCurrentSet()
         advance()
 
         assertTrue(harness.matchRepository.scoreSetCalls.isEmpty())
@@ -1259,8 +1258,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
         testDispatcher.scheduler.runCurrent()
 
         assertEquals(21, harness.component.matchWithTeams.value.match.team1Points.first())
-        assertFalse(harness.component.showSetConfirmDialog.value)
-
         harness.component.updateScore(isTeam1 = true, increment = true)
         testDispatcher.scheduler.runCurrent()
 
@@ -1415,7 +1412,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
 
         advance()
 
-        harness.component.confirmSet()
+        harness.component.completeCurrentSet()
         advance()
 
         assertTrue(harness.component.matchFinished.value)
@@ -1431,7 +1428,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
         )
         assertEquals(1, harness.matchRepository.operationCalls.size)
 
-        harness.component.confirmSet()
+        harness.component.completeCurrentSet()
         advance()
 
         assertEquals(1, harness.matchRepository.operationCalls.size)
@@ -1475,7 +1472,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
 
         advance()
 
-        harness.component.confirmSet()
+        harness.component.completeCurrentSet()
         advance()
 
         assertFalse(harness.component.matchFinished.value)
@@ -1715,8 +1712,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
         advance()
         harness.matchRepository.updateFailure = null
 
-        harness.component.requestSetConfirmation()
-        harness.component.confirmSet()
+        harness.component.completeCurrentSet()
         advance()
 
         val confirmationSync = harness.matchRepository.operationCalls.single()
@@ -1766,8 +1762,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
 
         advance()
 
-        harness.component.requestSetConfirmation()
-        harness.component.confirmSet()
+        harness.component.completeCurrentSet()
         advance()
 
         assertEquals("COMPLETE", harness.matchRepository.updatedMatches.single().segments.first().status)
@@ -1831,8 +1826,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
 
         advance()
 
-        harness.component.requestSetConfirmation()
-        harness.component.confirmSet()
+        harness.component.completeCurrentSet()
         advance()
 
         val incidentCall = harness.matchRepository.incidentCalls.first()
@@ -2376,8 +2370,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
 
         advance()
 
-        harness.component.requestSetConfirmation()
-        harness.component.confirmSet()
+        harness.component.completeCurrentSet()
         advance()
 
         val incidentCall = harness.matchRepository.incidentCalls.single()

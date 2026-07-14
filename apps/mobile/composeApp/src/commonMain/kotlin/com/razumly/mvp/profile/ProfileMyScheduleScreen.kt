@@ -1,30 +1,19 @@
 package com.razumly.mvp.profile
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -33,25 +22,14 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
-import com.kizitonwose.calendar.compose.HorizontalCalendar
-import com.kizitonwose.calendar.compose.WeekCalendar
-import com.kizitonwose.calendar.compose.rememberCalendarState
-import com.kizitonwose.calendar.compose.weekcalendar.rememberWeekCalendarState
-import com.kizitonwose.calendar.core.CalendarDay
-import com.kizitonwose.calendar.core.DayPosition
-import com.kizitonwose.calendar.core.Week
-import com.kizitonwose.calendar.core.WeekDayPosition
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
@@ -61,49 +39,21 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.officialAssignmentLabels
 import com.razumly.mvp.core.presentation.composables.PlatformLoadingIndicator
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
-import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.timeFormat
 import com.razumly.mvp.eventDetail.composables.ScheduleItem
 import com.razumly.mvp.eventDetail.composables.ScheduleMatchGroupMode
 import com.razumly.mvp.eventDetail.composables.ScheduleView
-import kotlinx.coroutines.launch
-import kotlinx.datetime.DatePeriod
-import kotlinx.datetime.DayOfWeek
-import kotlinx.datetime.LocalDate
-import kotlinx.datetime.Month
 import kotlinx.datetime.TimeZone
-import kotlinx.datetime.YearMonth
 import kotlinx.datetime.format
-import kotlinx.datetime.minus
-import kotlinx.datetime.number
-import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
-import kotlin.time.Clock
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Instant
-
-private enum class ScheduleMode {
-    MONTH,
-    WEEK,
-    DAY,
-    AGENDA,
-}
 
 private enum class ScheduleEntryFilter {
     BOTH,
     MATCHES,
     EVENTS,
 }
-
-private data class ScheduleEntry(
-    val id: String,
-    val eventId: String,
-    val title: String,
-    val subtitle: String?,
-    val start: Instant,
-    val end: Instant,
-    val kind: String,
-)
 
 @Composable
 fun ProfileMyScheduleScreen(component: ProfileComponent) {
@@ -260,185 +210,6 @@ private fun ScheduleEntryFilter.includes(item: ScheduleItem): Boolean =
     }
 
 @Composable
-private fun ScheduleModeSelector(
-    selected: ScheduleMode,
-    onSelected: (ScheduleMode) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        ScheduleMode.entries.forEach { mode ->
-            FilterChip(
-                selected = selected == mode,
-                onClick = { onSelected(mode) },
-                label = {
-                    Text(
-                        when (mode) {
-                            ScheduleMode.MONTH -> "Month"
-                            ScheduleMode.WEEK -> "Week"
-                            ScheduleMode.DAY -> "Day"
-                            ScheduleMode.AGENDA -> "Agenda"
-                        },
-                    )
-                },
-            )
-        }
-    }
-}
-
-@Composable
-private fun MonthDatePicker(
-    selectedDate: LocalDate,
-    highlightedDates: Set<LocalDate>,
-    onSelectedDate: (LocalDate) -> Unit,
-) {
-    val firstDate = highlightedDates.minOrNull() ?: selectedDate
-    val lastDate = highlightedDates.maxOrNull() ?: selectedDate
-    val startMonth = remember(firstDate) { firstDate.toYearMonth().previousMonth() }
-    val endMonth = remember(lastDate) { lastDate.toYearMonth().nextMonth() }
-    val coroutineScope = rememberCoroutineScope()
-    val monthState = rememberCalendarState(
-        startMonth = startMonth,
-        endMonth = endMonth,
-        firstVisibleMonth = selectedDate.toYearMonth(),
-        firstDayOfWeek = DayOfWeek.MONDAY,
-    )
-
-    HorizontalCalendar(
-        state = monthState,
-        modifier = Modifier.fillMaxWidth(),
-        monthHeader = { month ->
-            val currentMonth = month.yearMonth
-            CalendarTitle(
-                currentMonth = currentMonth,
-                onPrevious = {
-                    val previous = currentMonth.previousMonth()
-                    if (previous.toMonthIndex() >= startMonth.toMonthIndex()) {
-                        coroutineScope.launch {
-                            monthState.animateScrollToMonth(previous)
-                        }
-                    }
-                },
-                onNext = {
-                    val next = currentMonth.nextMonth()
-                    if (next.toMonthIndex() <= endMonth.toMonthIndex()) {
-                        coroutineScope.launch {
-                            monthState.animateScrollToMonth(next)
-                        }
-                    }
-                },
-            )
-        },
-        dayContent = { day ->
-            CalendarDayCell(
-                day = day,
-                isSelected = day.date == selectedDate,
-                hasEntries = highlightedDates.contains(day.date),
-                onClick = { onSelectedDate(day.date) },
-            )
-        },
-    )
-}
-
-@Composable
-private fun WeekDatePicker(
-    selectedDate: LocalDate,
-    highlightedDates: Set<LocalDate>,
-    onSelectedDate: (LocalDate) -> Unit,
-) {
-    val selectedEpochDay = remember(selectedDate) { selectedDate.toEpochDays() }
-    val weekState = rememberWeekCalendarState(
-        startDate = LocalDate.fromEpochDays(selectedEpochDay - 180),
-        endDate = LocalDate.fromEpochDays(selectedEpochDay + 180),
-        firstVisibleWeekDate = selectedDate,
-        firstDayOfWeek = DayOfWeek.MONDAY,
-    )
-
-    LaunchedEffect(selectedDate) {
-        weekState.animateScrollToDate(selectedDate)
-    }
-
-    WeekCalendar(
-        state = weekState,
-        modifier = Modifier.fillMaxWidth(),
-        weekHeader = { week ->
-            WeekHeader(week = week)
-        },
-        dayContent = { day ->
-            val isEnabled = day.position == WeekDayPosition.RangeDate
-            val isSelected = day.date == selectedDate
-            Card(
-                modifier = Modifier
-                    .padding(horizontal = 2.dp, vertical = 4.dp)
-                    .clickable(enabled = isEnabled) { onSelectedDate(day.date) },
-                colors = CardDefaults.cardColors(
-                    containerColor = when {
-                        isSelected -> MaterialTheme.colorScheme.primary
-                        highlightedDates.contains(day.date) -> MaterialTheme.colorScheme.primaryContainer
-                        else -> MaterialTheme.colorScheme.surfaceVariant
-                    },
-                    contentColor = when {
-                        isSelected -> MaterialTheme.colorScheme.onPrimary
-                        highlightedDates.contains(day.date) -> MaterialTheme.colorScheme.onPrimaryContainer
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                ),
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Text(
-                        text = day.date.dayOfWeek.shortLabel(),
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                    Text(
-                        text = day.date.dayOfMonth.toString(),
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-            }
-        },
-    )
-}
-
-@Composable
-private fun DayDatePicker(
-    selectedDate: LocalDate,
-    highlightedDates: Set<LocalDate>,
-    onSelectedDate: (LocalDate) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Button(onClick = { onSelectedDate(selectedDate.minus(DatePeriod(days = 1))) }) {
-            Text("Previous")
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = selectedDate.format(dateFormat),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = if (highlightedDates.contains(selectedDate)) "Has schedule entries" else "No entries",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Button(onClick = { onSelectedDate(selectedDate.plus(DatePeriod(days = 1))) }) {
-            Text("Next")
-        }
-    }
-}
-
-@Composable
 private fun ProfileScheduleMatchCard(
     match: MatchWithRelations,
     event: Event?,
@@ -514,127 +285,6 @@ private fun ProfileScheduleMatchCard(
     }
 }
 
-@Composable
-private fun CalendarTitle(
-    currentMonth: YearMonth,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(40.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        CalendarNavigationButton(
-            icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-            contentDescription = "Previous month",
-            onClick = onPrevious,
-        )
-        Text(
-            modifier = Modifier.weight(1f),
-            text = "${currentMonth.month.displayName()} ${currentMonth.year}",
-            textAlign = TextAlign.Center,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Medium,
-        )
-        CalendarNavigationButton(
-            icon = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = "Next month",
-            onClick = onNext,
-        )
-    }
-}
-
-@Composable
-private fun CalendarNavigationButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit,
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxHeight()
-            .aspectRatio(1f)
-            .clip(CircleShape)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(imageVector = icon, contentDescription = contentDescription)
-    }
-}
-
-@Composable
-private fun CalendarDayCell(
-    day: CalendarDay,
-    isSelected: Boolean,
-    hasEntries: Boolean,
-    onClick: () -> Unit,
-) {
-    val enabled = day.position == DayPosition.MonthDate
-    val backgroundColor = when {
-        !enabled -> MaterialTheme.colorScheme.surface
-        isSelected -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.surfaceVariant
-    }
-    val textColor = when {
-        !enabled -> MaterialTheme.colorScheme.outline
-        isSelected -> MaterialTheme.colorScheme.onPrimary
-        else -> MaterialTheme.colorScheme.onSurface
-    }
-
-    Box(
-        modifier = Modifier
-            .padding(horizontal = 2.dp, vertical = 2.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(backgroundColor)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(vertical = 8.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = day.date.dayOfMonth.toString(),
-                style = MaterialTheme.typography.bodySmall,
-                color = textColor,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Box(
-                modifier = Modifier
-                    .height(6.dp)
-                    .aspectRatio(1f)
-                    .clip(CircleShape)
-                    .background(
-                        when {
-                            hasEntries && isSelected -> MaterialTheme.colorScheme.onPrimary
-                            hasEntries -> MaterialTheme.colorScheme.primary
-                            else -> MaterialTheme.colorScheme.surfaceVariant
-                        },
-                    ),
-            )
-        }
-    }
-}
-
-@Composable
-private fun WeekHeader(week: Week) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        week.days.forEach { day ->
-            Text(
-                text = day.date.dayOfWeek.shortLabel(),
-                modifier = Modifier.weight(1f),
-                textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
 private fun buildScheduleItems(
     events: List<Event>,
     matches: List<MatchMVP>,
@@ -685,28 +335,4 @@ private fun formatEntryWindow(start: Instant, end: Instant, timeZone: TimeZone):
     val localStart = start.toLocalDateTime(timeZone)
     val localEnd = end.toLocalDateTime(timeZone)
     return "${localStart.time.format(timeFormat)} - ${localEnd.time.format(timeFormat)}"
-}
-
-private fun DayOfWeek.shortLabel(): String = name.take(3).lowercase().replaceFirstChar { char ->
-    if (char.isLowerCase()) char.titlecase() else char.toString()
-}
-
-private fun LocalDate.toYearMonth(): YearMonth = YearMonth(year, month.number)
-
-private fun YearMonth.toMonthIndex(): Int = year * 12 + month.number
-
-private fun YearMonth.previousMonth(): YearMonth {
-    val monthNumber = if (month.number == 1) 12 else month.number - 1
-    val yearValue = if (month.number == 1) year - 1 else year
-    return YearMonth(yearValue, monthNumber)
-}
-
-private fun YearMonth.nextMonth(): YearMonth {
-    val monthNumber = if (month.number == 12) 1 else month.number + 1
-    val yearValue = if (month.number == 12) year + 1 else year
-    return YearMonth(yearValue, monthNumber)
-}
-
-private fun Month.displayName(): String = name.lowercase().replaceFirstChar { char ->
-    if (char.isLowerCase()) char.titlecase() else char.toString()
 }

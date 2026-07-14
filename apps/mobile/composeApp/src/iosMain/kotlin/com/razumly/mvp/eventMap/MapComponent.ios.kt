@@ -99,10 +99,6 @@ actual class MapComponent(
         }
     }
 
-    fun setRadius(radius: Double) {
-        _currentRadiusMeters.value = radius
-    }
-
     actual fun setEvents(events: List<Event>) {
         _events.value = events
     }

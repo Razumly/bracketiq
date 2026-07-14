@@ -112,10 +112,8 @@ interface MatchContentComponent {
     val matchRosterLoading: StateFlow<Boolean>
     val matchRosterSaving: StateFlow<Boolean>
     val showMatchRosterDialog: StateFlow<Boolean>
-    val showSetConfirmDialog: StateFlow<Boolean>
     val errorState: StateFlow<String?>
 
-    fun dismissSetDialog()
     fun dismissOfficialDialog()
     fun dismissTeamCheckInDialog()
     fun confirmTeamCheckIn()
@@ -161,8 +159,7 @@ interface MatchContentComponent {
         note: String?,
     )
     fun removeMatchIncident(incidentId: String)
-    fun requestSetConfirmation()
-    fun confirmSet()
+    fun completeCurrentSet()
 }
 
 
@@ -395,9 +392,6 @@ class DefaultMatchContentComponent(
     private var lastLoadedMatchCheckInKey: String? = null
     private var scheduledMatchCheckInRetryKey: String? = null
 
-    private val _showSetConfirmDialog = MutableStateFlow(false)
-    override val showSetConfirmDialog = _showSetConfirmDialog.asStateFlow()
-
     private val currentUserState = userRepository.currentUser
         .map { result -> result.getOrNull() ?: UserData() }
         .stateIn(scope, SharingStarted.Eagerly, UserData())
@@ -504,10 +498,6 @@ class DefaultMatchContentComponent(
                 evaluateTeamCheckInPrompt()
             }
         }
-    }
-
-    override fun dismissSetDialog() {
-        _showSetConfirmDialog.value = false
     }
 
     override fun dismissOfficialDialog() {
@@ -1629,23 +1619,7 @@ class DefaultMatchContentComponent(
     }
 
 
-    override fun requestSetConfirmation() {
-        if (matchFinished.value || !isOfficial.value || officialCheckedIn.value != true) return
-
-        val scoringMatch = currentScoringMatch()
-        val rules = resolveActiveRules(scoringMatch, event.value)
-        val setIndex = currentSet.value.coerceIn(0, maxSets - 1)
-        setConfirmationValidationError(
-            match = scoringMatch,
-            rules = rules,
-            setIndex = setIndex,
-        )?.let { error ->
-            _errorState.value = error
-        }
-    }
-
-
-    override fun confirmSet() {
+    override fun completeCurrentSet() {
         if (_segmentConfirmSaving.value) return
         if (matchFinished.value || !isOfficial.value || officialCheckedIn.value != true) {
             return

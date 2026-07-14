@@ -1459,7 +1459,7 @@ fun MatchDetailScreen(
                         }
                     }
                     Button(
-                        onClick = { component.confirmSet() },
+                        onClick = { component.completeCurrentSet() },
                         enabled = confirmResultEnabled,
                     ) {
                         Row(
