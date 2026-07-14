@@ -1869,6 +1869,22 @@ class BillingRepositoryHttpTest {
                 endDate = "2026-04-01T12:00:00Z",
                 scheduledFieldIds = listOf(" field_1 ", "", "field_1", "field_2"),
                 hostRequiredTemplateIds = listOf(" host_a ", "", "host_a", "host_b"),
+                rentalSelections = listOf(
+                    RentalOrderSelectionRequest(
+                        key = "monday-court",
+                        scheduledFieldIds = listOf("field_1"),
+                        startDate = "2026-04-01T10:00:00Z",
+                        endDate = "2026-04-01T11:00:00Z",
+                        timeZone = "America/Los_Angeles",
+                    ),
+                    RentalOrderSelectionRequest(
+                        key = "wednesday-court",
+                        scheduledFieldIds = listOf("field_2"),
+                        startDate = "2026-04-03T15:00:00Z",
+                        endDate = "2026-04-03T16:00:00Z",
+                        timeZone = "America/Los_Angeles",
+                    ),
+                ),
             ),
         ).getOrThrow()
 
@@ -1878,6 +1894,58 @@ class BillingRepositoryHttpTest {
         assertTrue(capturedBody.contains("\"scheduledFieldId\":\"field_1\""))
         assertTrue(capturedBody.contains("\"scheduledFieldIds\":[\"field_1\",\"field_2\"]"))
         assertTrue(capturedBody.contains("\"hostRequiredTemplateIds\":[\"host_a\",\"host_b\"]"))
+        assertTrue(capturedBody.contains("\"rentalSelections\":[{"))
+        assertTrue(capturedBody.contains("\"key\":\"monday-court\",\"scheduledFieldIds\":[\"field_1\"]"))
+        assertTrue(capturedBody.contains("\"startDate\":\"2026-04-01T10:00:00Z\",\"endDate\":\"2026-04-01T11:00:00Z\""))
+        assertTrue(capturedBody.contains("\"key\":\"wednesday-court\",\"scheduledFieldIds\":[\"field_2\"]"))
+        assertTrue(capturedBody.contains("\"startDate\":\"2026-04-03T15:00:00Z\",\"endDate\":\"2026-04-03T16:00:00Z\""))
+    }
+
+    @Test
+    fun createPurchaseIntent_with_malformed_exact_rental_selection_fails_before_http() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        var requestCount = 0
+        val engine = MockEngine {
+            requestCount += 1
+            respond(
+                content = "{}",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(
+            api,
+            userRepo,
+            BillingRepositoryHttp_UnusedEventRepository,
+            BillingRepositoryHttp_FakeDatabaseService(),
+        )
+
+        val result = repo.createPurchaseIntent(
+            event = Event(id = "event_rental_invalid", hostId = "h1", priceCents = 1000, eventType = EventType.EVENT),
+            timeSlotContext = PurchaseIntentTimeSlotContext(
+                priceCents = 1000,
+                startDate = "2026-04-01T10:00:00Z",
+                endDate = "2026-04-01T11:00:00Z",
+                scheduledFieldIds = listOf("field_1"),
+                rentalSelections = listOf(
+                    RentalOrderSelectionRequest(
+                        scheduledFieldIds = listOf(" "),
+                        startDate = "2026-04-01T10:00:00Z",
+                        endDate = "2026-04-01T11:00:00Z",
+                    ),
+                ),
+            ),
+        )
+
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("at least one field"))
+        assertEquals(0, requestCount)
     }
 
     @Test

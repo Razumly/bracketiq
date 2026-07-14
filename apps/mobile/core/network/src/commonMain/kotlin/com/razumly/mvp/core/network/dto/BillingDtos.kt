@@ -50,6 +50,20 @@ data class BillingTimeSlotRefDto(
 )
 
 @Serializable
+data class BillingRentalSelectionDto(
+    val key: String? = null,
+    val scheduledFieldIds: List<String>,
+    val dayOfWeek: Int? = null,
+    val daysOfWeek: List<Int> = emptyList(),
+    val startTimeMinutes: Int? = null,
+    val endTimeMinutes: Int? = null,
+    val startDate: String,
+    val endDate: String,
+    val timeZone: String? = null,
+    val repeating: Boolean = false,
+)
+
+@Serializable
 data class RegistrationQuestionAnswerDto(
     val questionId: String,
     val answer: String,
@@ -66,6 +80,7 @@ data class PurchaseIntentRequestDto(
     val divisionTypeId: String? = null,
     val divisionTypeKey: String? = null,
     val timeSlot: BillingTimeSlotRefDto? = null,
+    val rentalSelections: List<BillingRentalSelectionDto> = emptyList(),
     val slotId: String? = null,
     val occurrenceDate: String? = null,
     val productId: String? = null,

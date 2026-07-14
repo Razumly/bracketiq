@@ -1059,7 +1059,10 @@ class DefaultOrganizationDetailComponent(
                         context = rentalContext,
                         userId = user.id,
                     ),
-                    timeSlotContext = buildRentalPaymentTimeSlotContext(rentalContext),
+                    timeSlotContext = buildRentalPaymentTimeSlotContext(
+                        context = rentalContext,
+                        selections = orderSelections,
+                    ),
                 ).onSuccess { intent ->
                     if (!checkoutSessionCoordinator.isCurrent(checkout)) {
                         Napier.w("Ignoring a rental intent for inactive checkout ${checkout.operationId}.")
@@ -1516,6 +1519,7 @@ class DefaultOrganizationDetailComponent(
 
     private fun buildRentalPaymentTimeSlotContext(
         context: RentalCreateContext,
+        selections: List<RentalOrderSelectionRequest>,
     ): PurchaseIntentTimeSlotContext {
         val bookingId = context.rentalBookingId?.trim()?.takeIf(String::isNotBlank) ?: newId()
         return PurchaseIntentTimeSlotContext(
@@ -1526,6 +1530,7 @@ class DefaultOrganizationDetailComponent(
             scheduledFieldId = context.selectedFieldIds.firstOrNull(),
             scheduledFieldIds = context.selectedFieldIds,
             hostRequiredTemplateIds = context.hostRequiredTemplateIds,
+            rentalSelections = selections,
         )
     }
 

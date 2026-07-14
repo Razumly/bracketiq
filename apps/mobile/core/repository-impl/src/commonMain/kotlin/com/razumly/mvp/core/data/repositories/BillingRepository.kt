@@ -41,6 +41,7 @@ import com.razumly.mvp.core.network.stripeRedirectBaseUrl
 import com.razumly.mvp.core.network.dto.BillingEventRefDto
 import com.razumly.mvp.core.network.dto.BillingAddressDto
 import com.razumly.mvp.core.network.dto.BillingRefundRequestDto
+import com.razumly.mvp.core.network.dto.BillingRentalSelectionDto
 import com.razumly.mvp.core.network.dto.BillingTeamRefDto
 import com.razumly.mvp.core.network.dto.BillingTimeSlotRefDto
 import com.razumly.mvp.core.network.dto.BillingUserRefDto
@@ -298,6 +299,7 @@ data class PurchaseIntentTimeSlotContext(
     val scheduledFieldId: String? = null,
     val scheduledFieldIds: List<String> = emptyList(),
     val hostRequiredTemplateIds: List<String> = emptyList(),
+    val rentalSelections: List<RentalOrderSelectionRequest> = emptyList(),
 )
 
 @Serializable
@@ -841,6 +843,36 @@ class BillingRepository(
             )
         }
 
+        val normalizedRentalSelections = timeSlotContext
+            ?.rentalSelections
+            .orEmpty()
+            .map { selection ->
+                val scheduledFieldIds = selection.scheduledFieldIds
+                    .map(String::trim)
+                    .filter(String::isNotBlank)
+                    .distinct()
+                require(scheduledFieldIds.isNotEmpty()) {
+                    "Every rental selection must include at least one field."
+                }
+                val startDate = selection.startDate.trim()
+                val endDate = selection.endDate.trim()
+                require(startDate.isNotBlank() && endDate.isNotBlank()) {
+                    "Every rental selection must include a start and end time."
+                }
+                BillingRentalSelectionDto(
+                    key = selection.key?.trim()?.takeIf(String::isNotBlank),
+                    scheduledFieldIds = scheduledFieldIds,
+                    dayOfWeek = selection.dayOfWeek,
+                    daysOfWeek = selection.daysOfWeek.distinct(),
+                    startTimeMinutes = selection.startTimeMinutes,
+                    endTimeMinutes = selection.endTimeMinutes,
+                    startDate = startDate,
+                    endDate = endDate,
+                    timeZone = selection.timeZone?.trim()?.takeIf(String::isNotBlank),
+                    repeating = selection.repeating,
+                )
+            }
+
         val response = api.post<PurchaseIntentRequestDto, PurchaseIntent>(
             path = "api/billing/purchase-intent",
             body = PurchaseIntentRequestDto(
@@ -876,6 +908,7 @@ class BillingRepository(
                             .distinct(),
                     )
                 },
+                rentalSelections = normalizedRentalSelections,
                 slotId = occurrence?.slotId?.trim()?.takeIf(String::isNotBlank),
                 occurrenceDate = occurrence?.occurrenceDate?.trim()?.takeIf(String::isNotBlank),
                 discountCode = discountCode?.trim()?.takeIf(String::isNotBlank),

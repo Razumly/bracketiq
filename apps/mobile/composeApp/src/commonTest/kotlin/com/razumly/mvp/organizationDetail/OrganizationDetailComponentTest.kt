@@ -55,6 +55,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.hours
@@ -496,6 +497,53 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
         }
 
     @Test
+    fun paidRental_uses_the_same_exact_selections_for_payment_and_final_order() = runTest(testDispatcher) {
+        val harness = OrganizationDetailHarness(
+            product = createProduct(period = "SINGLE"),
+            rentalCheckoutEnabled = true,
+        )
+        advance()
+        val selections = listOf(
+            RentalOrderSelectionRequest(
+                key = "monday-court",
+                scheduledFieldIds = listOf("field-1"),
+                startDate = "2099-07-14T17:00:00Z",
+                endDate = "2099-07-14T18:00:00Z",
+                timeZone = "America/Los_Angeles",
+            ),
+            RentalOrderSelectionRequest(
+                key = "wednesday-court",
+                scheduledFieldIds = listOf("field-2"),
+                startDate = "2099-07-16T22:00:00Z",
+                endDate = "2099-07-16T23:00:00Z",
+                timeZone = "America/Los_Angeles",
+            ),
+        )
+        val context = RentalCreateContext(
+            organizationId = "org-1",
+            organizationName = "Summit Indoor Volleyball Facility",
+            organizationLocation = "Portland, OR",
+            organizationCoordinates = null,
+            selectedFieldIds = listOf("field-1", "field-2"),
+            selectedTimeSlotIds = listOf("slot-1", "slot-2"),
+            rentalPriceCents = 5000,
+            rentalBookingId = "booking-exact-1",
+            startEpochMillis = Instant.parse("2099-07-14T17:00:00Z").toEpochMilliseconds(),
+            endEpochMillis = Instant.parse("2099-07-16T23:00:00Z").toEpochMilliseconds(),
+        )
+
+        harness.component.startRentalReservation(context, selections)
+        advance()
+
+        assertNotNull(harness.billingRepository.testState.purchaseIntentCalls.single().timeSlotContext).also {
+            assertEquals(selections, it.rentalSelections)
+            assertEquals(context.startEpochMillis, Instant.parse(it.startDate!!).toEpochMilliseconds())
+            assertEquals(context.endEpochMillis, Instant.parse(it.endDate!!).toEpochMilliseconds())
+        }
+        assertEquals(selections, harness.billingRepository.preparedRentalOrderCalls.single().selections)
+    }
+
+    @Test
     fun teamPaymentCompletionMessage_uses_the_registered_team_not_the_first_catalog_page() = runTest(testDispatcher) {
         val pendingTeam = catalogTeam("team-on-page-two", "Page two team")
         val refreshedTeam = pendingTeam.copy(
@@ -706,6 +754,7 @@ private class OrganizationDetailHarness(
     private val eventRepository: IEventRepository = CreateEvent_FakeEventRepository(),
     private val teamRepository: ITeamRepository = NoopTeamRepository,
     private val fieldRepository: IFieldRepository = CreateEvent_FakeFieldRepository(),
+    rentalCheckoutEnabled: Boolean = false,
 ) {
     private val organization = Organization(
         id = "org-1",
@@ -720,6 +769,8 @@ private class OrganizationDetailHarness(
         fieldIds = emptyList(),
         productIds = listOf(product.id),
         teamIds = emptyList(),
+        publicSlug = if (rentalCheckoutEnabled) "summit-sports" else null,
+        publicPageEnabled = rentalCheckoutEnabled,
     )
 
     val billingRepository = OrganizationDetailTestBillingRepository(
@@ -770,6 +821,7 @@ private class OrganizationDetailTestBillingRepository(
         private set
     var reviewSaveFailure: Throwable? = null
     val rentalOrderCalls = mutableListOf<RentalOrderCall>()
+    val preparedRentalOrderCalls = mutableListOf<RentalOrderCall>()
     var rentalOrderResult: Result<RentalOrderResult> = Result.failure(
         UnsupportedOperationException("Rental order result is not configured."),
     )
@@ -810,6 +862,25 @@ private class OrganizationDetailTestBillingRepository(
             payerUserId = payerUserId,
         )
         return rentalOrderResult
+    }
+
+    override suspend fun prepareRentalOrder(
+        publicSlug: String,
+        eventId: String,
+        selections: List<RentalOrderSelectionRequest>,
+        paymentIntentId: String,
+        payerUserId: String,
+        renterOrganizationId: String?,
+        sportId: String?,
+    ): Result<String> {
+        preparedRentalOrderCalls += RentalOrderCall(
+            publicSlug = publicSlug,
+            eventId = eventId,
+            selections = selections,
+            paymentIntentId = paymentIntentId,
+            payerUserId = payerUserId,
+        )
+        return Result.success("$eventId:$paymentIntentId")
     }
 
     override suspend fun saveOrganizationReview(
