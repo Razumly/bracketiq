@@ -59,12 +59,12 @@ import com.razumly.mvp.eventCreate.CreateEvent_FakeImagesRepository
 import com.razumly.mvp.eventCreate.CreateEvent_FakeSportsRepository
 import com.razumly.mvp.eventCreate.MainDispatcherTest
 import com.razumly.mvp.core.util.LoadingHandler
-import com.razumly.mvp.core.util.LoadingState
+import com.razumly.mvp.core.util.LoadingHandlerImpl
+import com.razumly.mvp.core.util.LoadingOperation
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -2685,20 +2685,10 @@ private object NoopNavigationHandler : INavigationHandler {
 }
 
 private class EventDetailTestLoadingHandler : LoadingHandler {
-    private val loadingStateFlow = MutableStateFlow(LoadingState())
-    override val loadingState: StateFlow<LoadingState> = loadingStateFlow.asStateFlow()
+    private val delegate = LoadingHandlerImpl()
+    override val loadingState = delegate.loadingState
 
-    override fun showLoading(message: String, progress: Float?) {
-        loadingStateFlow.value = LoadingState(isLoading = true, message = message, progress = progress)
-    }
-
-    override fun hideLoading() {
-        loadingStateFlow.value = LoadingState()
-    }
-
-    override fun updateProgress(progress: Float) {
-        loadingStateFlow.value = loadingStateFlow.value.copy(progress = progress)
-    }
+    override fun newOperation(): LoadingOperation = delegate.newOperation()
 }
 
 private fun createTestComponentContext(): DefaultComponentContext {

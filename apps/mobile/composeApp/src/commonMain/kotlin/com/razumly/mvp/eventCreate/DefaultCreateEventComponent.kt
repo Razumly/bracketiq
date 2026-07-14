@@ -369,9 +369,13 @@ class DefaultCreateEventComponent(
 
     override fun createAccount() {
         scope.launch {
-            loadingHandler.showLoading("Getting stripe onboarding URL...")
-            handleStripeAccountCreation()
-            loadingHandler.hideLoading()
+            val loadingOperation = loadingHandler.newOperation()
+            loadingOperation.showLoading("Getting stripe onboarding URL...")
+            try {
+                handleStripeAccountCreation()
+            } finally {
+                loadingOperation.hideLoading()
+            }
         }
     }
 
@@ -1188,58 +1192,58 @@ class DefaultCreateEventComponent(
     }
 
     private suspend fun createEventAfterPayment(eventDraft: Event) {
-        loadingHandler.showLoading("Creating event...")
-        val preparedEvent = prepareEventForCreation(eventDraft).getOrElse { error ->
-            _errorState.value = ErrorMessage(error.userMessage("Failed to prepare event setup."))
-            loadingHandler.hideLoading()
-            return
-        }
-        validatePendingStaffInviteDrafts(_pendingStaffInvites.value).getOrElse { error ->
-            _errorState.value = ErrorMessage(error.userMessage("Fix the pending staff invites before creating the event."))
-            loadingHandler.hideLoading()
-            return
-        }
-
-        val requiredTemplateIds = preparedEvent.event.requiredTemplateIds
-            .map(String::trim)
-            .filter(String::isNotBlank)
-            .distinct()
-
-        val desiredStaffEvent = preparedEvent.event
-        val assignmentFreeEvent = desiredStaffEvent.copy(
-            assistantHostIds = emptyList(),
-            officialIds = emptyList(),
-            eventOfficials = emptyList(),
-        )
-        eventRepository.createEvent(
-            assignmentFreeEvent,
-            requiredTemplateIds = requiredTemplateIds,
-            leagueScoringConfig = _leagueScoringConfig.value
-                .takeIf { preparedEvent.event.eventType == EventType.LEAGUE },
-            fields = preparedEvent.fields,
-            timeSlots = preparedEvent.timeSlots,
-        )
-            .onSuccess { createdEvent ->
-                syncEventStaffAssignments(
-                    createdEvent = createdEvent,
-                    desiredStaffEvent = desiredStaffEvent,
-                )
-                    .onSuccess { syncedEvent ->
-                        loadingHandler.hideLoading()
-                        onEventCreated(syncedEvent)
-                    }
-                    .onFailure { error ->
-                        _errorState.value = ErrorMessage(
-                            "Event was created without the requested staff changes. " +
-                                "Staff sync failed: ${error.userMessage()}",
-                        )
-                        loadingHandler.hideLoading()
-                    }
+        val loadingOperation = loadingHandler.newOperation()
+        loadingOperation.showLoading("Creating event...")
+        try {
+            val preparedEvent = prepareEventForCreation(eventDraft).getOrElse { error ->
+                _errorState.value = ErrorMessage(error.userMessage("Failed to prepare event setup."))
+                return
             }
-            .onFailure {
-                _errorState.value = ErrorMessage(it.userMessage())
-                loadingHandler.hideLoading()
+            validatePendingStaffInviteDrafts(_pendingStaffInvites.value).getOrElse { error ->
+                _errorState.value = ErrorMessage(error.userMessage("Fix the pending staff invites before creating the event."))
+                return
             }
+
+            val requiredTemplateIds = preparedEvent.event.requiredTemplateIds
+                .map(String::trim)
+                .filter(String::isNotBlank)
+                .distinct()
+
+            val desiredStaffEvent = preparedEvent.event
+            val assignmentFreeEvent = desiredStaffEvent.copy(
+                assistantHostIds = emptyList(),
+                officialIds = emptyList(),
+                eventOfficials = emptyList(),
+            )
+            eventRepository.createEvent(
+                assignmentFreeEvent,
+                requiredTemplateIds = requiredTemplateIds,
+                leagueScoringConfig = _leagueScoringConfig.value
+                    .takeIf { preparedEvent.event.eventType == EventType.LEAGUE },
+                fields = preparedEvent.fields,
+                timeSlots = preparedEvent.timeSlots,
+            )
+                .onSuccess { createdEvent ->
+                    syncEventStaffAssignments(
+                        createdEvent = createdEvent,
+                        desiredStaffEvent = desiredStaffEvent,
+                    )
+                        .onSuccess { syncedEvent ->
+                            onEventCreated(syncedEvent)
+                        }
+                        .onFailure { error ->
+                            _errorState.value = ErrorMessage(
+                                "Event was created without the requested staff changes. " +
+                                    "Staff sync failed: ${error.userMessage()}",
+                            )
+                        }
+                }
+                .onFailure {
+                    _errorState.value = ErrorMessage(it.userMessage())
+                }
+        } finally {
+            loadingOperation.hideLoading()
+        }
     }
 
     private suspend fun syncEventStaffAssignments(

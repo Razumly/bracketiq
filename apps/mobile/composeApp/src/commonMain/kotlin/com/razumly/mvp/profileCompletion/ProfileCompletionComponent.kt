@@ -10,6 +10,7 @@ import com.razumly.mvp.core.data.repositories.SignupProfileSnapshot
 import com.razumly.mvp.core.presentation.util.convertPhotoResultToUploadFile
 import com.razumly.mvp.core.network.userMessage
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -89,14 +90,17 @@ class DefaultProfileCompletionComponent(
         scope.launch {
             _isImageUploading.value = true
             _errorMessage.value = null
-            runCatching {
-                imageRepository.uploadImage(convertPhotoResultToUploadFile(photo)).getOrThrow()
-            }.onFailure { throwable ->
+            try {
+                _lastUploadedImageId.value = imageRepository
+                    .uploadImage(convertPhotoResultToUploadFile(photo))
+                    .getOrThrow()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (throwable: Throwable) {
                 _errorMessage.value = throwable.userMessage("Failed to upload image.")
-            }.onSuccess { imageId ->
-                _lastUploadedImageId.value = imageId
+            } finally {
+                _isImageUploading.value = false
             }
-            _isImageUploading.value = false
         }
     }
 

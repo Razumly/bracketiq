@@ -13,6 +13,7 @@ internal sealed interface EventImagePickerOutcome {
 }
 
 internal enum class EventImageFailure {
+    TOO_LARGE,
     CONVERSION,
     UPLOAD,
     DELETE,
@@ -43,6 +44,8 @@ internal fun resolveEventImagePickerOutcome(
 internal fun eventImageFailureMessage(
     failure: EventImageFailure,
 ): String = when (failure) {
+    EventImageFailure.TOO_LARGE ->
+        "Event image must be 10MB or less. Choose a smaller image and try again."
     EventImageFailure.CONVERSION ->
         "We couldn't read that event image. Choose another image and try again."
     EventImageFailure.UPLOAD ->

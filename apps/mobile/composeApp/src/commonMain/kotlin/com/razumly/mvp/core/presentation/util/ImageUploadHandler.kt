@@ -1,10 +1,17 @@
 package com.razumly.mvp.core.presentation.util
 
-
 import com.razumly.mvp.core.network.MvpUploadFile
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 
-expect fun convertPhotoResultToUploadFile(photoResult: GalleryPhotoResult): MvpUploadFile
+/** Mirrors the server-side `/api/files/upload` multipart file-size limit. */
+const val MAX_IMAGE_UPLOAD_BYTES: Int = 10 * 1024 * 1024
+
+const val IMAGE_UPLOAD_TOO_LARGE_MESSAGE: String =
+    "Image must be 10MB or less. Choose a smaller image and try again."
+
+class ImageUploadTooLargeException : IllegalArgumentException(IMAGE_UPLOAD_TOO_LARGE_MESSAGE)
+
+expect suspend fun convertPhotoResultToUploadFile(photoResult: GalleryPhotoResult): MvpUploadFile
 
 private val imageUploadMimeTypesByExtension = mapOf(
     "avif" to "image/avif",

@@ -12,7 +12,7 @@ import platform.Foundation.dataWithContentsOfURL
 import platform.Foundation.getBytes
 import kotlin.time.Clock
 
-actual fun convertPhotoResultToUploadFile(photoResult: GalleryPhotoResult): MvpUploadFile {
+actual suspend fun convertPhotoResultToUploadFile(photoResult: GalleryPhotoResult): MvpUploadFile {
     val fallbackExtension = extensionForImageUploadMimeType(photoResult.mimeType) ?: ".jpg"
     val fileName = photoResult.fileName ?: "image_${Clock.System.now().toEpochMilliseconds()}$fallbackExtension"
     val mimeType = requireSupportedImageUploadMimeType(fileName, photoResult.mimeType)

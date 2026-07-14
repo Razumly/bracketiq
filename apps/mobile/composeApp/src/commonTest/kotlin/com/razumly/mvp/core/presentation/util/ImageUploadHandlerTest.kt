@@ -47,4 +47,13 @@ class ImageUploadHandlerTest {
             )
         }
     }
+
+    @Test
+    fun imageSizeLimitMatchesServerContractAndHasActionableFeedback() {
+        assertEquals(10 * 1024 * 1024, MAX_IMAGE_UPLOAD_BYTES)
+        assertEquals(
+            "Image must be 10MB or less. Choose a smaller image and try again.",
+            ImageUploadTooLargeException().message,
+        )
+    }
 }

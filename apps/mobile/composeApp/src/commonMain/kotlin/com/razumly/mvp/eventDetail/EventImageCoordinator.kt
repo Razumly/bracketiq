@@ -2,6 +2,7 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.network.MvpUploadFile
+import com.razumly.mvp.core.presentation.util.ImageUploadTooLargeException
 import com.razumly.mvp.core.presentation.util.convertPhotoResultToUploadFile
 import com.razumly.mvp.core.util.LoadingHandler
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
@@ -16,7 +17,7 @@ internal class EventImageCoordinator(
     imageIdsFlow: Flow<List<String>>,
     private val uploadImageRequest: suspend (MvpUploadFile) -> Result<String>,
     private val deleteImageRequest: suspend (String) -> Result<Unit>,
-    private val photoToUploadFile: (GalleryPhotoResult) -> MvpUploadFile = ::convertPhotoResultToUploadFile,
+    private val photoToUploadFile: suspend (GalleryPhotoResult) -> MvpUploadFile = ::convertPhotoResultToUploadFile,
     scope: CoroutineScope,
 ) {
     constructor(
@@ -36,12 +37,15 @@ internal class EventImageCoordinator(
         photo: GalleryPhotoResult,
         loadingHandler: LoadingHandler,
     ): EventImageUploadOutcome {
-        loadingHandler.showLoading("Uploading image...")
+        val loadingOperation = loadingHandler.newOperation()
+        loadingOperation.showLoading("Uploading image...")
         return try {
             val uploadFile = try {
                 photoToUploadFile(photo)
             } catch (cancelled: CancellationException) {
                 throw cancelled
+            } catch (_: ImageUploadTooLargeException) {
+                return EventImageUploadOutcome.Failure(EventImageFailure.TOO_LARGE)
             } catch (_: Throwable) {
                 return EventImageUploadOutcome.Failure(EventImageFailure.CONVERSION)
             }
@@ -64,7 +68,7 @@ internal class EventImageCoordinator(
                 },
             )
         } finally {
-            loadingHandler.hideLoading()
+            loadingOperation.hideLoading()
         }
     }
 
@@ -72,7 +76,8 @@ internal class EventImageCoordinator(
         imageId: String,
         loadingHandler: LoadingHandler,
     ): Result<Unit> {
-        loadingHandler.showLoading("Deleting Image ...")
+        val loadingOperation = loadingHandler.newOperation()
+        loadingOperation.showLoading("Deleting Image ...")
         return try {
             val result = try {
                 deleteImageRequest(imageId)
@@ -88,7 +93,7 @@ internal class EventImageCoordinator(
             }
             result
         } finally {
-            loadingHandler.hideLoading()
+            loadingOperation.hideLoading()
         }
     }
 }

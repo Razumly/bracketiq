@@ -74,9 +74,9 @@ class DefaultPlayerInteractionComponent(
         action: suspend () -> Result<*>,
     ) {
         scope.launch {
-            val actionLoadingHandler = loadingHandler
+            val loadingOperation = loadingHandler?.newOperation()
             try {
-                actionLoadingHandler?.showLoading(loadingMessage)
+                loadingOperation?.showLoading(loadingMessage)
                 action().onFailure { error ->
                     if (error is CancellationException) throw error
                     _errorState.value = ErrorMessage(error.userMessage())
@@ -86,7 +86,7 @@ class DefaultPlayerInteractionComponent(
             } catch (error: Throwable) {
                 _errorState.value = ErrorMessage(error.userMessage())
             } finally {
-                actionLoadingHandler?.hideLoading()
+                loadingOperation?.hideLoading()
             }
         }
     }

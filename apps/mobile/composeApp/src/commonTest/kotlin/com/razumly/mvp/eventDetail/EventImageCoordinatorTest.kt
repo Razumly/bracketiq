@@ -1,19 +1,21 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.network.MvpUploadFile
+import com.razumly.mvp.core.presentation.util.ImageUploadTooLargeException
 import com.razumly.mvp.core.util.LoadingHandler
-import com.razumly.mvp.core.util.LoadingState
+import com.razumly.mvp.core.util.LoadingHandlerImpl
+import com.razumly.mvp.core.util.LoadingOperation
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -83,6 +85,50 @@ class EventImageCoordinatorTest {
     }
 
     @Test
+    fun upload_oversize_failure_is_actionable_and_always_hides_loading() = runTest {
+        val loadingHandler = RecordingLoadingHandler()
+        val coordinator = EventImageCoordinator(
+            imageIdsFlow = MutableStateFlow(emptyList()),
+            uploadImageRequest = { Result.success("unused") },
+            deleteImageRequest = { Result.success(Unit) },
+            photoToUploadFile = { throw ImageUploadTooLargeException() },
+            scope = backgroundScope,
+        )
+
+        val outcome = coordinator.uploadSelected(
+            photo = GalleryPhotoResult(uri = "file://oversize.jpg", mimeType = "image/jpeg"),
+            loadingHandler = loadingHandler,
+        )
+
+        assertEquals(
+            EventImageUploadOutcome.Failure(EventImageFailure.TOO_LARGE),
+            outcome,
+        )
+        assertTrue(eventImageFailureMessage(EventImageFailure.TOO_LARGE).contains("10MB"))
+        assertEquals(listOf("show:Uploading image...", "hide"), loadingHandler.events)
+    }
+
+    @Test
+    fun upload_conversion_cancellation_is_rethrown_and_always_hides_loading() = runTest {
+        val loadingHandler = RecordingLoadingHandler()
+        val coordinator = EventImageCoordinator(
+            imageIdsFlow = MutableStateFlow(emptyList()),
+            uploadImageRequest = { Result.success("unused") },
+            deleteImageRequest = { Result.success(Unit) },
+            photoToUploadFile = { throw CancellationException("selection cancelled") },
+            scope = backgroundScope,
+        )
+
+        assertFailsWith<CancellationException> {
+            coordinator.uploadSelected(
+                photo = GalleryPhotoResult(uri = "file://cancelled.jpg", mimeType = "image/jpeg"),
+                loadingHandler = loadingHandler,
+            )
+        }
+        assertEquals(listOf("show:Uploading image...", "hide"), loadingHandler.events)
+    }
+
+    @Test
     fun upload_repository_failure_is_classified_and_always_hides_loading() = runTest {
         val loadingHandler = RecordingLoadingHandler()
         val coordinator = EventImageCoordinator(
@@ -128,22 +174,27 @@ class EventImageCoordinatorTest {
     }
 
     private class RecordingLoadingHandler : LoadingHandler {
-        private val _loadingState = MutableStateFlow(LoadingState())
-        override val loadingState: StateFlow<LoadingState> = _loadingState.asStateFlow()
+        private val delegate = LoadingHandlerImpl()
+        override val loadingState = delegate.loadingState
         val events = mutableListOf<String>()
 
-        override fun showLoading(message: String, progress: Float?) {
-            events += "show:$message"
-            _loadingState.value = LoadingState(isLoading = true, message = message, progress = progress)
-        }
+        override fun newOperation(): LoadingOperation {
+            val operation = delegate.newOperation()
+            return object : LoadingOperation {
+                override fun showLoading(message: String, progress: Float?) {
+                    events += "show:$message"
+                    operation.showLoading(message, progress)
+                }
 
-        override fun hideLoading() {
-            events += "hide"
-            _loadingState.value = LoadingState()
-        }
+                override fun hideLoading() {
+                    events += "hide"
+                    operation.hideLoading()
+                }
 
-        override fun updateProgress(progress: Float) {
-            _loadingState.value = _loadingState.value.copy(progress = progress)
+                override fun updateProgress(progress: Float) {
+                    operation.updateProgress(progress)
+                }
+            }
         }
     }
 }

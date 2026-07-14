@@ -40,6 +40,8 @@ internal class EventRegistrationActionHandler(
     private val membershipCoordinator: EventMembershipCoordinator,
     private val weeklyOccurrenceCoordinator: EventWeeklyOccurrenceCoordinator,
     private val loadingHandler: () -> LoadingHandler,
+    private val showPaymentLoading: (String) -> Unit,
+    private val finishPaymentLoading: () -> Unit,
     private val selectedEvent: () -> Event,
     private val selectedDivision: () -> String?,
     private val currentUser: () -> UserData,
@@ -120,17 +122,16 @@ internal class EventRegistrationActionHandler(
             }
 
             if (!registrationFlowCoordinator.startTeamRegistration(teamId)) return@launch
+            val loadingOperation = loadingHandler().newOperation()
             try {
-                loadingHandler().showLoading("Preparing team registration...")
+                loadingOperation.showLoading("Preparing team registration...")
                 val registrationTeam = resolveTeamRegistrationTarget(team).getOrElse { throwable ->
                     setError(throwable.userMessage("Unable to load team registration details."))
-                    loadingHandler().hideLoading()
                     return@launch
                 }
 
                 val context = teamRepository.getTeamJoinRequestContext(teamId).getOrElse { throwable ->
                     setError(throwable.userMessage("Unable to load team registration questions."))
-                    loadingHandler().hideLoading()
                     return@launch
                 }
 
@@ -138,7 +139,6 @@ internal class EventRegistrationActionHandler(
                 val joinPolicyDecision = registrationFlowCoordinator.teamJoinPolicyDecision(joinPolicy)
                 if (!joinPolicyDecision.isAccepted) {
                     setError(joinPolicyDecision.errorMessage ?: "This team is not accepting registrations.")
-                    loadingHandler().hideLoading()
                     return@launch
                 }
 
@@ -152,7 +152,6 @@ internal class EventRegistrationActionHandler(
                         ),
                         team = registrationTeam,
                     )
-                    loadingHandler().hideLoading()
                     return@launch
                 }
 
@@ -161,8 +160,8 @@ internal class EventRegistrationActionHandler(
                     joinPolicy = joinPolicy,
                     answers = emptyMap(),
                 )
-                loadingHandler().hideLoading()
             } finally {
+                loadingOperation.hideLoading()
                 registrationFlowCoordinator.clearStartingTeamRegistrationIfNoPendingTeam()
             }
         }
@@ -185,8 +184,9 @@ internal class EventRegistrationActionHandler(
             val teamId = dialog.teamId.trim().takeIf(String::isNotBlank)
                 ?: registrationFlowCoordinator.registrationTargetTeamId(team.team)
             if (!registrationFlowCoordinator.startTeamRegistration(teamId)) return@launch
+            val loadingOperation = loadingHandler().newOperation()
             try {
-                loadingHandler().showLoading(
+                loadingOperation.showLoading(
                     registrationFlowCoordinator.teamJoinSubmitLoadingMessage(dialog.joinPolicy),
                 )
                 submitTeamJoin(
@@ -194,8 +194,8 @@ internal class EventRegistrationActionHandler(
                     joinPolicy = dialog.joinPolicy,
                     answers = answers,
                 )
-                loadingHandler().hideLoading()
             } finally {
+                loadingOperation.hideLoading()
                 registrationFlowCoordinator.clearStartingTeamRegistrationIfNoPendingTeam()
             }
         }
@@ -321,6 +321,7 @@ internal class EventRegistrationActionHandler(
 
     fun confirmTextSignature() {
         scope.launch {
+            val loadingOperation = loadingHandler().newOperation()
             signatureExecutionCoordinator.confirmTextSignature(
                 eventId = selectedEvent().id,
                 recordTeamSignature = { teamId, templateId, documentId, type, signerContext, childUserId ->
@@ -347,8 +348,8 @@ internal class EventRegistrationActionHandler(
                     billingRepository.pollBoldSignOperation(operationId).map { Unit }
                 },
                 startPolling = { block -> scope.launch { block() } },
-                showLoading = loadingHandler()::showLoading,
-                hideLoading = loadingHandler()::hideLoading,
+                showLoading = loadingOperation::showLoading,
+                hideLoading = loadingOperation::hideLoading,
                 setError = setError,
                 logError = { message, throwable -> Napier.e(message, throwable) },
             )
@@ -367,11 +368,12 @@ internal class EventRegistrationActionHandler(
 
     fun submitBillingAddress(address: BillingAddressDraft) {
         scope.launch {
+            val loadingOperation = loadingHandler().newOperation()
             purchaseIntentCoordinator.submitBillingAddress(
                 address = address,
                 updateBillingAddress = billingRepository::updateBillingAddress,
-                showLoading = loadingHandler()::showLoading,
-                hideLoading = loadingHandler()::hideLoading,
+                showLoading = loadingOperation::showLoading,
+                hideLoading = loadingOperation::hideLoading,
                 setError = setError,
             )
         }
@@ -479,15 +481,19 @@ internal class EventRegistrationActionHandler(
                 runActionAfterRequiredSigning(teamId = team.team.id) {
                     scope.launch {
                         registrationFlowCoordinator.setStartingTeamRegistrationId(team.team.id)
-                        loadingHandler().showLoading("Refreshing team registration...")
-                        teamRepository.requestTeamRegistration(team.team.id, answers)
-                            .onSuccess { refreshedResult ->
-                                continueTeamRegistration(team, refreshedResult)
-                            }.onFailure { throwable ->
-                                setError(throwable.userMessage("Unable to refresh team registration."))
-                            }
-                        loadingHandler().hideLoading()
-                        registrationFlowCoordinator.clearStartingTeamRegistrationIfNoPendingTeam()
+                        val loadingOperation = loadingHandler().newOperation()
+                        loadingOperation.showLoading("Refreshing team registration...")
+                        try {
+                            teamRepository.requestTeamRegistration(team.team.id, answers)
+                                .onSuccess { refreshedResult ->
+                                    continueTeamRegistration(team, refreshedResult)
+                                }.onFailure { throwable ->
+                                    setError(throwable.userMessage("Unable to refresh team registration."))
+                                }
+                        } finally {
+                            loadingOperation.hideLoading()
+                            registrationFlowCoordinator.clearStartingTeamRegistrationIfNoPendingTeam()
+                        }
                     }
                 }
                 return
@@ -516,27 +522,31 @@ internal class EventRegistrationActionHandler(
                     return
                 }
 
-                loadingHandler().showLoading("Preparing checkout...")
-                billingRepository.createTeamRegistrationPurchaseIntent(
-                    team = team.team,
-                    teamRegistration = result.registration,
-                ).onSuccess { intent ->
-                    intent.registrationHoldExpiresAt
-                        ?.trim()
-                        ?.takeIf(String::isNotBlank)
-                        ?.let { holdExpiresAt ->
-                            registrationFlowCoordinator.setRegistrationHoldExpiresAt(holdExpiresAt)
-                            saveCurrentRegistrationProgress(
-                                "checkout",
-                                intent.registrationId,
-                                holdExpiresAt,
-                            )
-                        }
-                    registrationFlowCoordinator.setPendingTeamRegistration(team)
-                    showPaymentSheet(intent)
-                }.onFailure { throwable ->
-                    setError(throwable.userMessage(result.userMessage("Unable to start team registration.")))
-                    loadingHandler().hideLoading()
+                val loadingOperation = loadingHandler().newOperation()
+                loadingOperation.showLoading("Preparing checkout...")
+                try {
+                    billingRepository.createTeamRegistrationPurchaseIntent(
+                        team = team.team,
+                        teamRegistration = result.registration,
+                    ).onSuccess { intent ->
+                        intent.registrationHoldExpiresAt
+                            ?.trim()
+                            ?.takeIf(String::isNotBlank)
+                            ?.let { holdExpiresAt ->
+                                registrationFlowCoordinator.setRegistrationHoldExpiresAt(holdExpiresAt)
+                                saveCurrentRegistrationProgress(
+                                    "checkout",
+                                    intent.registrationId,
+                                    holdExpiresAt,
+                                )
+                            }
+                        registrationFlowCoordinator.setPendingTeamRegistration(team)
+                        showPaymentSheet(intent)
+                    }.onFailure { throwable ->
+                        setError(throwable.userMessage(result.userMessage("Unable to start team registration.")))
+                    }
+                } finally {
+                    loadingOperation.hideLoading()
                 }
                 return
             }
@@ -621,6 +631,7 @@ internal class EventRegistrationActionHandler(
         } else {
             null
         }
+        val loadingOperation = loadingHandler().newOperation()
         joinExecutionCoordinator.executeChildRegistration(
             event = event,
             child = child,
@@ -628,8 +639,8 @@ internal class EventRegistrationActionHandler(
             weeklyOccurrence = weeklyOccurrence,
             registerChildForEvent = eventRepository::registerChildForEvent,
             refreshAfterParticipantMutation = refreshEventAfterParticipantMutation,
-            showLoading = loadingHandler()::showLoading,
-            hideLoading = loadingHandler()::hideLoading,
+            showLoading = loadingOperation::showLoading,
+            hideLoading = loadingOperation::hideLoading,
             setError = setError,
         )
     }
@@ -693,15 +704,20 @@ internal class EventRegistrationActionHandler(
         } else {
             null
         }
-        joinExecutionCoordinator.submitMinorJoinRequestForParentApproval(
-            event = event,
-            selectedDivisionId = selectedDivision(),
-            weeklyOccurrence = weeklyOccurrence,
-            requestCurrentUserRegistration = eventRepository::requestCurrentUserRegistration,
-            refreshAfterParticipantMutation = refreshEventAfterParticipantMutation,
-            showLoading = loadingHandler()::showLoading,
-            setError = setError,
-        )
+        val loadingOperation = loadingHandler().newOperation()
+        try {
+            joinExecutionCoordinator.submitMinorJoinRequestForParentApproval(
+                event = event,
+                selectedDivisionId = selectedDivision(),
+                weeklyOccurrence = weeklyOccurrence,
+                requestCurrentUserRegistration = eventRepository::requestCurrentUserRegistration,
+                refreshAfterParticipantMutation = refreshEventAfterParticipantMutation,
+                showLoading = loadingOperation::showLoading,
+                setError = setError,
+            )
+        } finally {
+            loadingOperation.hideLoading()
+        }
     }
 
     private suspend fun executeJoinEvent() {
@@ -715,6 +731,7 @@ internal class EventRegistrationActionHandler(
         } else {
             null
         }
+        val loadingOperation = loadingHandler().newOperation()
         try {
             val currentUserCanManageEvent = canManageSelectedEvent(event, currentUser())
             joinExecutionCoordinator.executeSelfJoin(
@@ -783,11 +800,11 @@ internal class EventRegistrationActionHandler(
                 setPendingJoinConfirmationTarget = { target ->
                     registrationFlowCoordinator.setPendingJoinConfirmationTarget(target)
                 },
-                showLoading = loadingHandler()::showLoading,
+                showLoading = loadingOperation::showLoading,
                 setError = setError,
             )
         } finally {
-            loadingHandler().hideLoading()
+            loadingOperation.hideLoading()
         }
     }
 
@@ -802,6 +819,7 @@ internal class EventRegistrationActionHandler(
         } else {
             null
         }
+        val loadingOperation = loadingHandler().newOperation()
         try {
             val currentUserCanManageEvent = canManageSelectedEvent(event, currentUser())
             joinExecutionCoordinator.executeTeamJoin(
@@ -871,11 +889,11 @@ internal class EventRegistrationActionHandler(
                 setPendingJoinConfirmationTarget = { target ->
                     registrationFlowCoordinator.setPendingJoinConfirmationTarget(target)
                 },
-                showLoading = loadingHandler()::showLoading,
+                showLoading = loadingOperation::showLoading,
                 setError = setError,
             )
         } finally {
-            loadingHandler().hideLoading()
+            loadingOperation.hideLoading()
         }
     }
 
@@ -951,12 +969,17 @@ internal class EventRegistrationActionHandler(
         clearPaymentResult()
         setPaymentIntent(intent)
         val billingAddress = loadSavedBillingAddress()
-        loadingHandler().showLoading("Waiting for Payment Completion ..")
-        presentPaymentSheet(
-            currentAccountEmail(),
-            currentUser().fullName,
-            billingAddress,
-        )
+        showPaymentLoading("Waiting for Payment Completion ..")
+        try {
+            presentPaymentSheet(
+                currentAccountEmail(),
+                currentUser().fullName,
+                billingAddress,
+            )
+        } catch (error: Throwable) {
+            finishPaymentLoading()
+            throw error
+        }
     }
 
     private suspend fun ensureBillingAddressOrPrompt(onReady: () -> Unit): Boolean {
@@ -987,59 +1010,64 @@ internal class EventRegistrationActionHandler(
                         Clock.System.now(),
                     ),
                 )
+            val loadingOperation = loadingHandler().newOperation()
 
-            when (
-                val result = withdrawalActionCoordinator.runWithdrawalAction(
-                    action = action,
-                    event = event,
-                    targetUserId = targetUserId,
-                    currentUserId = currentUser().id,
-                    selectedWeeklyOccurrence = currentWeeklyOccurrenceSelection(),
-                    isWeeklyParentEvent = isWeeklyParentEvent(event),
-                    currentUserIsFreeAgent = checkIsUserFreeAgent(event),
-                    eventOrOccurrenceStarted = eventOrOccurrenceStarted,
-                    refundReason = refundReason,
-                    resolveMembership = { userId ->
-                        resolveWithdrawTargetMembership(event, userId)
-                    },
-                    usersTeam = {
-                        membershipCoordinator.usersTeam()
-                    },
-                    removeTeamFromEvent = { targetEvent, team, refundMode, reason, occurrence ->
-                        eventRepository.removeTeamFromEvent(
-                            event = targetEvent,
-                            teamWithPlayers = team,
-                            refundMode = refundMode,
-                            refundReason = reason,
-                            occurrence = occurrence,
-                        )
-                    },
-                    removeCurrentUserFromEvent = { targetEvent, userId, occurrence ->
-                        eventRepository.removeCurrentUserFromEvent(
-                            event = targetEvent,
-                            targetUserId = userId,
-                            occurrence = occurrence,
-                        )
-                    },
-                    leaveAndRefundEvent = { targetEvent, reason, userId ->
-                        billingRepository.leaveAndRefundEvent(
-                            event = targetEvent,
-                            reason = reason,
-                            targetUserId = userId,
-                        )
-                    },
-                    refreshAfterSuccess = refreshEventAfterParticipantMutation,
-                    showLoading = loadingHandler()::showLoading,
-                    hideLoading = loadingHandler()::hideLoading,
-                )
-            ) {
-                EventWithdrawalExecutionResult.Success -> Unit
-                is EventWithdrawalExecutionResult.Rejected -> {
-                    setError(result.message)
+            try {
+                when (
+                    val result = withdrawalActionCoordinator.runWithdrawalAction(
+                        action = action,
+                        event = event,
+                        targetUserId = targetUserId,
+                        currentUserId = currentUser().id,
+                        selectedWeeklyOccurrence = currentWeeklyOccurrenceSelection(),
+                        isWeeklyParentEvent = isWeeklyParentEvent(event),
+                        currentUserIsFreeAgent = checkIsUserFreeAgent(event),
+                        eventOrOccurrenceStarted = eventOrOccurrenceStarted,
+                        refundReason = refundReason,
+                        resolveMembership = { userId ->
+                            resolveWithdrawTargetMembership(event, userId)
+                        },
+                        usersTeam = {
+                            membershipCoordinator.usersTeam()
+                        },
+                        removeTeamFromEvent = { targetEvent, team, refundMode, reason, occurrence ->
+                            eventRepository.removeTeamFromEvent(
+                                event = targetEvent,
+                                teamWithPlayers = team,
+                                refundMode = refundMode,
+                                refundReason = reason,
+                                occurrence = occurrence,
+                            )
+                        },
+                        removeCurrentUserFromEvent = { targetEvent, userId, occurrence ->
+                            eventRepository.removeCurrentUserFromEvent(
+                                event = targetEvent,
+                                targetUserId = userId,
+                                occurrence = occurrence,
+                            )
+                        },
+                        leaveAndRefundEvent = { targetEvent, reason, userId ->
+                            billingRepository.leaveAndRefundEvent(
+                                event = targetEvent,
+                                reason = reason,
+                                targetUserId = userId,
+                            )
+                        },
+                        refreshAfterSuccess = refreshEventAfterParticipantMutation,
+                        showLoading = loadingOperation::showLoading,
+                        hideLoading = loadingOperation::hideLoading,
+                    )
+                ) {
+                    EventWithdrawalExecutionResult.Success -> Unit
+                    is EventWithdrawalExecutionResult.Rejected -> {
+                        setError(result.message)
+                    }
+                    is EventWithdrawalExecutionResult.Failed -> {
+                        setError(result.message)
+                    }
                 }
-                is EventWithdrawalExecutionResult.Failed -> {
-                    setError(result.message)
-                }
+            } finally {
+                loadingOperation.hideLoading()
             }
         }
     }

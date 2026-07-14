@@ -67,14 +67,16 @@ class EventImageFeedbackTest {
     }
 
     @Test
-    fun conversion_upload_and_delete_failures_have_distinct_recovery_guidance() {
+    fun size_conversion_upload_and_delete_failures_have_distinct_recovery_guidance() {
+        val tooLarge = eventImageFailureMessage(EventImageFailure.TOO_LARGE)
         val conversion = eventImageFailureMessage(EventImageFailure.CONVERSION)
         val upload = eventImageFailureMessage(EventImageFailure.UPLOAD)
         val delete = eventImageFailureMessage(EventImageFailure.DELETE)
 
+        assertTrue(tooLarge.contains("10MB"))
         assertTrue(conversion.contains("read"))
         assertTrue(upload.contains("upload"))
         assertTrue(delete.contains("delete"))
-        assertTrue(setOf(conversion, upload, delete).size == 3)
+        assertTrue(setOf(tooLarge, conversion, upload, delete).size == 4)
     }
 }

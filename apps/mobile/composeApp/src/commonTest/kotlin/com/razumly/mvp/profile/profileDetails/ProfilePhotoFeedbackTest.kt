@@ -56,12 +56,14 @@ class ProfilePhotoFeedbackTest {
     }
 
     @Test
-    fun given_conversion_and_upload_failures_when_message_is_built_then_the_recovery_guidance_is_distinct() {
+    fun given_size_conversion_and_upload_failures_when_message_is_built_then_the_recovery_guidance_is_distinct() {
+        val tooLarge = profilePhotoUploadFailureMessage(ProfilePhotoUploadFailure.TOO_LARGE)
         val conversion = profilePhotoUploadFailureMessage(ProfilePhotoUploadFailure.CONVERSION)
         val upload = profilePhotoUploadFailureMessage(ProfilePhotoUploadFailure.UPLOAD)
 
+        assertTrue(tooLarge.contains("10MB"))
         assertTrue(conversion.contains("read"))
         assertTrue(upload.contains("upload"))
-        assertTrue(conversion != upload)
+        assertTrue(setOf(tooLarge, conversion, upload).size == 3)
     }
 }

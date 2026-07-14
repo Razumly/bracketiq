@@ -184,7 +184,8 @@ internal class EventLeagueStandingsCoordinator {
         refreshEvent: suspend (eventId: String) -> Result<*>,
     ): ErrorMessage {
         beginConfirming()
-        loadingHandler.showLoading("Confirming standings...")
+        val loadingOperation = loadingHandler.newOperation()
+        loadingOperation.showLoading("Confirming standings...")
         return try {
             confirmStandings(target.eventId, target.divisionId, applyReassignment)
                 .fold(
@@ -200,7 +201,7 @@ internal class EventLeagueStandingsCoordinator {
                 )
         } finally {
             finishConfirming()
-            loadingHandler.hideLoading()
+            loadingOperation.hideLoading()
         }
     }
 }

@@ -85,7 +85,8 @@ import com.razumly.mvp.core.network.dto.TeamCheckInDto
 import com.razumly.mvp.core.network.dto.TeamCheckInsResponseDto
 import com.razumly.mvp.core.network.MvpUploadFile
 import com.razumly.mvp.core.util.LoadingHandler
-import com.razumly.mvp.core.util.LoadingState
+import com.razumly.mvp.core.util.LoadingHandlerImpl
+import com.razumly.mvp.core.util.LoadingOperation
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import com.razumly.mvp.eventDetail.data.StagedMatchCreate
 import dev.icerock.moko.geo.LatLng
@@ -194,20 +195,10 @@ private fun createTestComponentContext(): DefaultComponentContext {
 }
 
 internal class CreateEvent_FakeLoadingHandler : LoadingHandler {
-    private val _loadingState = MutableStateFlow(LoadingState())
-    override val loadingState: StateFlow<LoadingState> = _loadingState
+    private val delegate = LoadingHandlerImpl()
+    override val loadingState = delegate.loadingState
 
-    override fun showLoading(message: String, progress: Float?) {
-        _loadingState.value = LoadingState(isLoading = true, message = message, progress = progress)
-    }
-
-    override fun hideLoading() {
-        _loadingState.value = LoadingState()
-    }
-
-    override fun updateProgress(progress: Float) {
-        _loadingState.update { it.copy(progress = progress) }
-    }
+    override fun newOperation(): LoadingOperation = delegate.newOperation()
 }
 
 internal class CreateEvent_FakeUserRepository : IUserRepository {

@@ -5,6 +5,7 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
+import com.arkivanov.essenty.lifecycle.doOnDestroy
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.analytics.AnalyticsEvent
 import com.razumly.mvp.core.analytics.AnalyticsTracker
@@ -84,6 +85,7 @@ import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.core.presentation.util.ShareServiceProvider
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
+import com.razumly.mvp.core.util.LoadingOperation
 import com.razumly.mvp.core.util.newId
 import com.razumly.mvp.eventDetail.data.BracketNode
 import com.razumly.mvp.eventDetail.data.IMatchRepository
@@ -235,9 +237,23 @@ class DefaultEventDetailComponent(
     override val startingTeamRegistrationId = registrationFlowCoordinator.startingTeamRegistrationId
 
     private lateinit var loadingHandler: LoadingHandler
+    private var registrationPaymentLoadingOperation: LoadingOperation? = null
 
     override fun setLoadingHandler(loadingHandler: LoadingHandler) {
         this.loadingHandler = loadingHandler
+    }
+
+    private fun showRegistrationPaymentLoading(message: String) {
+        val operation = registrationPaymentLoadingOperation
+            ?: loadingHandler.newOperation().also { created ->
+                registrationPaymentLoadingOperation = created
+            }
+        operation.showLoading(message)
+    }
+
+    private fun finishRegistrationPaymentLoading() {
+        registrationPaymentLoadingOperation?.hideLoading()
+        registrationPaymentLoadingOperation = null
     }
 
     override fun clearError() {
@@ -852,6 +868,8 @@ class DefaultEventDetailComponent(
         membershipCoordinator = membershipCoordinator,
         weeklyOccurrenceCoordinator = weeklyOccurrenceCoordinator,
         loadingHandler = { loadingHandler },
+        showPaymentLoading = ::showRegistrationPaymentLoading,
+        finishPaymentLoading = ::finishRegistrationPaymentLoading,
         selectedEvent = { selectedEvent.value },
         selectedDivision = { selectedDivision.value },
         currentUser = { currentUser.value },
@@ -1027,6 +1045,7 @@ class DefaultEventDetailComponent(
 
     init {
         backHandler.register(backCallback)
+        lifecycle.doOnDestroy(::finishRegistrationPaymentLoading)
         if (editDraftCoordinator.isEditing.value) {
             loadSports(reportErrors = true)
         }
@@ -1233,9 +1252,10 @@ class DefaultEventDetailComponent(
         scope.launch {
             paymentResult.collect {
                 if (it != null) {
-                    val pendingTeam = registrationFlowCoordinator.currentPendingTeamRegistration()
-                    val confirmationTarget = registrationFlowCoordinator.currentJoinConfirmationTarget()
-                    when (it) {
+                    try {
+                        val pendingTeam = registrationFlowCoordinator.currentPendingTeamRegistration()
+                        val confirmationTarget = registrationFlowCoordinator.currentJoinConfirmationTarget()
+                        when (it) {
                         PaymentResult.Canceled -> {
                             _errorState.value = ErrorMessage("Payment canceled.")
                             registrationFlowCoordinator.clearTeamRegistrationState()
@@ -1248,7 +1268,7 @@ class DefaultEventDetailComponent(
 
                         PaymentResult.Completed -> {
                             if (pendingTeam != null) {
-                                loadingHandler.showLoading("Refreshing Team")
+                                showRegistrationPaymentLoading("Refreshing Team")
                                 registrationFlowCoordinator.clearStartingTeamRegistrationId()
                                 val teamRegisteredSuccessfully = joinConfirmationCoordinator.waitForTeamRegistrationWithTimeout(
                                     teamId = pendingTeam.team.id,
@@ -1284,7 +1304,7 @@ class DefaultEventDetailComponent(
                                     )
                                 }
                             } else {
-                                loadingHandler.showLoading("Reloading Event")
+                                showRegistrationPaymentLoading("Reloading Event")
                                 val userJoinedSuccessfully = joinConfirmationCoordinator.waitForUserInEventWithTimeout(
                                     confirmationTarget = confirmationTarget,
                                     isUserInEvent = { membershipCoordinator.isUserInEvent.value },
@@ -1326,10 +1346,12 @@ class DefaultEventDetailComponent(
                             }
                             clearCurrentRegistrationProgress()
                         }
+                        }
+                    } finally {
+                        finishRegistrationPaymentLoading()
+                        registrationFlowCoordinator.clearPendingJoinConfirmationTarget()
+                        clearPaymentResult()
                     }
-                    loadingHandler.hideLoading()
-                    registrationFlowCoordinator.clearPendingJoinConfirmationTarget()
-                    clearPaymentResult()
                 }
             }
         }
@@ -1713,15 +1735,19 @@ class DefaultEventDetailComponent(
 
     override fun onHostCreateAccount() {
         scope.launch {
-            loadingHandler.showLoading("Redirecting to Stripe On Boarding ...")
-            billingRepository.createAccount().onSuccess { onBoardingUrl ->
-                urlHandler?.openUrlInWebView(
-                    url = onBoardingUrl,
-                )
-            }.onFailure {
-                _errorState.value = ErrorMessage(it.userMessage())
+            val loadingOperation = loadingHandler.newOperation()
+            loadingOperation.showLoading("Redirecting to Stripe On Boarding ...")
+            try {
+                billingRepository.createAccount().onSuccess { onBoardingUrl ->
+                    urlHandler?.openUrlInWebView(
+                        url = onBoardingUrl,
+                    )
+                }.onFailure {
+                    _errorState.value = ErrorMessage(it.userMessage())
+                }
+            } finally {
+                loadingOperation.hideLoading()
             }
-            loadingHandler.hideLoading()
         }
     }
 
@@ -2453,6 +2479,7 @@ class DefaultEventDetailComponent(
 
     override fun updateEvent() {
         scope.launch {
+            val loadingOperation = loadingHandler.newOperation()
             when (val result = editActionCoordinator.runSaveEventAction(
                 pendingStaffInvites = eventInviteCoordinator.pendingStaffInvites.value,
                 expectedStaffRevision = _eventStaffRevision.value,
@@ -2480,8 +2507,8 @@ class DefaultEventDetailComponent(
                 refetchMatchesOfTournament = { eventId ->
                     matchRepository.getMatchesOfTournament(eventId)
                 },
-                showLoading = { message -> loadingHandler.showLoading(message) },
-                hideLoading = loadingHandler::hideLoading,
+                showLoading = loadingOperation::showLoading,
+                hideLoading = loadingOperation::hideLoading,
             )) {
                 is EventSaveActionResult.Success -> {
                     _eventStaffInvites.value = result.staffInvites
@@ -2511,6 +2538,7 @@ class DefaultEventDetailComponent(
 
     private fun runScheduleEditAction(action: EventScheduleEditAction) {
         scope.launch {
+            val loadingOperation = loadingHandler.newOperation()
             when (val result = editActionCoordinator.runScheduleEditAction(
                 action = action,
                 prepareEventForUpdate = ::prepareEventForUpdate,
@@ -2567,8 +2595,8 @@ class DefaultEventDetailComponent(
                     )
                 },
                 refreshLeagueStandingsAfterSchedule = ::refreshLeagueStandingsAfterSchedule,
-                showLoading = { message -> loadingHandler.showLoading(message) },
-                hideLoading = loadingHandler::hideLoading,
+                showLoading = loadingOperation::showLoading,
+                hideLoading = loadingOperation::hideLoading,
             )) {
                 is EventScheduleEditResult.Success -> {
                     cancelEditingEvent()
@@ -2584,13 +2612,14 @@ class DefaultEventDetailComponent(
     override fun createTemplateFromCurrentEvent() {
         scope.launch {
             val sourceEvent = if (editDraftCoordinator.isEditing.value) editDraftCoordinator.editedEvent.value else selectedEvent.value
+            val loadingOperation = loadingHandler.newOperation()
             when (val result = editActionCoordinator.runCreateTemplateAction(
                 sourceEvent = sourceEvent,
                 createTemplate = { sourceEventId ->
                     eventRepository.createEventTemplateFromEvent(sourceEventId).getOrThrow()
                 },
-                showLoading = { message -> loadingHandler.showLoading(message) },
-                hideLoading = loadingHandler::hideLoading,
+                showLoading = loadingOperation::showLoading,
+                hideLoading = loadingOperation::hideLoading,
             )) {
                 is EventTemplateCreateResult.AlreadyTemplate -> {
                     _errorState.value = ErrorMessage(result.message)
@@ -2610,14 +2639,15 @@ class DefaultEventDetailComponent(
 
     override fun publishEvent() {
         scope.launch {
+            val loadingOperation = loadingHandler.newOperation()
             when (val result = editActionCoordinator.runPublishEventAction(
                 currentEvent = selectedEvent.value,
                 updateEvent = eventRepository::updateEvent,
                 refreshEvent = { eventId ->
                     eventRepository.getEvent(eventId)
                 },
-                showLoading = { message -> loadingHandler.showLoading(message) },
-                hideLoading = loadingHandler::hideLoading,
+                showLoading = loadingOperation::showLoading,
+                hideLoading = loadingOperation::hideLoading,
             )) {
                 EventPublishResult.AlreadyPublished,
                 EventPublishResult.Success -> Unit
@@ -2668,6 +2698,7 @@ class DefaultEventDetailComponent(
             } else {
                 null
             }
+            val loadingOperation = loadingHandler.newOperation()
             applyParticipantMutationResult(
                 participantManagementCoordinator.moveTeamParticipantDivision(
                     event = event,
@@ -2689,8 +2720,8 @@ class DefaultEventDetailComponent(
                         refreshParticipantManagementSnapshotIfNeeded(result.event)
                         refreshParticipantComplianceIfNeeded(result.event)
                     },
-                    showLoading = loadingHandler::showLoading,
-                    hideLoading = loadingHandler::hideLoading,
+                    showLoading = loadingOperation::showLoading,
+                    hideLoading = loadingOperation::hideLoading,
                 ),
             )
         }
@@ -2707,6 +2738,7 @@ class DefaultEventDetailComponent(
             } else {
                 null
             }
+            val loadingOperation = loadingHandler.newOperation()
             applyParticipantMutationResult(
                 participantManagementCoordinator.removeTeamParticipant(
                     event = event,
@@ -2725,8 +2757,8 @@ class DefaultEventDetailComponent(
                             warningMessage = warningMessage,
                         )
                     },
-                    showLoading = loadingHandler::showLoading,
-                    hideLoading = loadingHandler::hideLoading,
+                    showLoading = loadingOperation::showLoading,
+                    hideLoading = loadingOperation::hideLoading,
                 ),
             )
         }
@@ -2743,6 +2775,7 @@ class DefaultEventDetailComponent(
             } else {
                 null
             }
+            val loadingOperation = loadingHandler.newOperation()
             applyParticipantMutationResult(
                 participantManagementCoordinator.removeUserParticipant(
                     event = event,
@@ -2761,8 +2794,8 @@ class DefaultEventDetailComponent(
                             warningMessage = warningMessage,
                         )
                     },
-                    showLoading = loadingHandler::showLoading,
-                    hideLoading = loadingHandler::hideLoading,
+                    showLoading = loadingOperation::showLoading,
+                    hideLoading = loadingOperation::hideLoading,
                 ),
             )
         }
@@ -2995,27 +3028,30 @@ class DefaultEventDetailComponent(
             val currentEvent = selectedEvent.value
             val deletePlan = eventDeletePlan(currentEvent)
             var deleted = false
-            if (!deletePlan.shouldRefund) {
-                loadingHandler.showLoading(deletePlan.loadingMessage)
-                eventRepository.deleteEvent(selectedEvent.value.id)
-                    .onSuccess {
-                        deleted = true
-                    }.onFailure {
-                        _errorState.value = ErrorMessage(it.userMessage())
-                    }
-            } else {
-                loadingHandler.showLoading(deletePlan.loadingMessage)
-                billingRepository.deleteAndRefundEvent(selectedEvent.value)
-                    .onSuccess {
-                        deleted = true
-                    }.onFailure {
-                        _errorState.value = ErrorMessage(it.userMessage())
-                    }
+            val loadingOperation = loadingHandler.newOperation()
+            loadingOperation.showLoading(deletePlan.loadingMessage)
+            try {
+                if (!deletePlan.shouldRefund) {
+                    eventRepository.deleteEvent(selectedEvent.value.id)
+                        .onSuccess {
+                            deleted = true
+                        }.onFailure {
+                            _errorState.value = ErrorMessage(it.userMessage())
+                        }
+                } else {
+                    billingRepository.deleteAndRefundEvent(selectedEvent.value)
+                        .onSuccess {
+                            deleted = true
+                        }.onFailure {
+                            _errorState.value = ErrorMessage(it.userMessage())
+                        }
+                }
+                if (deleted) {
+                    backCallback.onBack()
+                }
+            } finally {
+                loadingOperation.hideLoading()
             }
-            if (deleted) {
-                backCallback.onBack()
-            }
-            loadingHandler.hideLoading()
         }
     }
 
@@ -3259,13 +3295,14 @@ class DefaultEventDetailComponent(
             return
         }
         scope.launch {
+            val loadingOperation = loadingHandler.newOperation()
             when (val result = matchEditingCoordinator.commitChanges(
                 isTournament = selectedEvent.value.eventType == EventType.TOURNAMENT,
                 updateMatchesBulk = { payload ->
                     matchRepository.updateMatchesBulk(payload.updates, payload.creates, payload.deletes)
                 },
-                onCommitStarted = { loadingHandler.showLoading("Updating matches...") },
-                onCommitFinished = { loadingHandler.hideLoading() },
+                onCommitStarted = { loadingOperation.showLoading("Updating matches...") },
+                onCommitFinished = { loadingOperation.hideLoading() },
             )) {
                 MatchEditCommitResult.Success -> Unit
                 is MatchEditCommitResult.Invalid -> {

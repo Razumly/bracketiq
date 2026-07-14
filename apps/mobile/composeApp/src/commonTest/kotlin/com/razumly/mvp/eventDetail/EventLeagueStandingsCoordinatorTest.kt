@@ -5,10 +5,8 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
 import com.razumly.mvp.core.data.repositories.LeagueStandingsConfirmResult
 import com.razumly.mvp.core.util.LoadingHandler
-import com.razumly.mvp.core.util.LoadingState
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import com.razumly.mvp.core.util.LoadingHandlerImpl
+import com.razumly.mvp.core.util.LoadingOperation
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -310,22 +308,27 @@ class EventLeagueStandingsCoordinatorTest {
         )
 
     private class RecordingLoadingHandler : LoadingHandler {
-        private val _loadingState = MutableStateFlow(LoadingState())
-        override val loadingState: StateFlow<LoadingState> = _loadingState.asStateFlow()
+        private val delegate = LoadingHandlerImpl()
+        override val loadingState = delegate.loadingState
         val events = mutableListOf<String>()
 
-        override fun showLoading(message: String, progress: Float?) {
-            events += "show:$message"
-            _loadingState.value = LoadingState(isLoading = true, message = message, progress = progress)
-        }
+        override fun newOperation(): LoadingOperation {
+            val operation = delegate.newOperation()
+            return object : LoadingOperation {
+                override fun showLoading(message: String, progress: Float?) {
+                    events += "show:$message"
+                    operation.showLoading(message, progress)
+                }
 
-        override fun hideLoading() {
-            events += "hide"
-            _loadingState.value = LoadingState()
-        }
+                override fun hideLoading() {
+                    events += "hide"
+                    operation.hideLoading()
+                }
 
-        override fun updateProgress(progress: Float) {
-            _loadingState.value = _loadingState.value.copy(progress = progress)
+                override fun updateProgress(progress: Float) {
+                    operation.updateProgress(progress)
+                }
+            }
         }
     }
 }

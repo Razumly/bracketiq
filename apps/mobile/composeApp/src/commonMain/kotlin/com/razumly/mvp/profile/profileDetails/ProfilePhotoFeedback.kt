@@ -13,6 +13,7 @@ internal sealed interface ProfilePhotoPickerOutcome {
 }
 
 internal enum class ProfilePhotoUploadFailure {
+    TOO_LARGE,
     CONVERSION,
     UPLOAD,
 }
@@ -37,6 +38,8 @@ internal fun resolveProfilePhotoPickerOutcome(
 internal fun profilePhotoUploadFailureMessage(
     failure: ProfilePhotoUploadFailure,
 ): String = when (failure) {
+    ProfilePhotoUploadFailure.TOO_LARGE ->
+        "Profile photo must be 10MB or less. Choose a smaller image and try again."
     ProfilePhotoUploadFailure.CONVERSION ->
         "We couldn't read that profile photo. Choose another image and try again."
     ProfilePhotoUploadFailure.UPLOAD ->

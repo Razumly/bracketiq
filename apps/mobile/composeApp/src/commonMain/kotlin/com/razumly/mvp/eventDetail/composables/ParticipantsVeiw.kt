@@ -1051,27 +1051,31 @@ fun ParticipantsView(
         managementTarget = null
         receivingPaymentTargetId = context.billingTeamId
         coroutineScope.launch {
-            loadingHandler.showLoading("Preparing payment QR...")
-            component.createParticipantPaymentCheckout(
-                teamId = context.billingTeamId,
-                request = EventTeamPaymentCheckoutRequest(
-                    ownerType = ownerType,
-                    ownerId = ownerId,
-                    eventAmountCents = amountCents,
-                    taxAmountCents = 0,
-                    divisionId = divisionId,
-                    label = label,
-                ),
-            ).onSuccess { checkout ->
-                paymentQrState = ParticipantPaymentQrState(
-                    title = context.title,
-                    checkout = checkout,
-                )
-            }.onFailure { throwable ->
-                popUpHandler.showPopup(throwable.userMessage("Failed to prepare payment QR."))
+            val loadingOperation = loadingHandler.newOperation()
+            loadingOperation.showLoading("Preparing payment QR...")
+            try {
+                component.createParticipantPaymentCheckout(
+                    teamId = context.billingTeamId,
+                    request = EventTeamPaymentCheckoutRequest(
+                        ownerType = ownerType,
+                        ownerId = ownerId,
+                        eventAmountCents = amountCents,
+                        taxAmountCents = 0,
+                        divisionId = divisionId,
+                        label = label,
+                    ),
+                ).onSuccess { checkout ->
+                    paymentQrState = ParticipantPaymentQrState(
+                        title = context.title,
+                        checkout = checkout,
+                    )
+                }.onFailure { throwable ->
+                    popUpHandler.showPopup(throwable.userMessage("Failed to prepare payment QR."))
+                }
+            } finally {
+                receivingPaymentTargetId = null
+                loadingOperation.hideLoading()
             }
-            receivingPaymentTargetId = null
-            loadingHandler.hideLoading()
         }
     }
 

@@ -168,7 +168,8 @@ internal class EventInviteCoordinator {
             return ErrorMessage(preflight.errorMessage ?: "Unable to add team.")
         }
 
-        loadingHandler.showLoading("Adding team...")
+        val loadingOperation = loadingHandler.newOperation()
+        loadingOperation.showLoading("Adding team...")
         return try {
             addTeam(event, team, selectedDivisionId, occurrence)
                 .fold(
@@ -185,7 +186,7 @@ internal class EventInviteCoordinator {
                     },
                 )
         } finally {
-            loadingHandler.hideLoading()
+            loadingOperation.hideLoading()
         }
     }
 
@@ -213,7 +214,8 @@ internal class EventInviteCoordinator {
             return ErrorMessage(preflight.errorMessage ?: "Unable to add player.")
         }
 
-        loadingHandler.showLoading("Adding player...")
+        val loadingOperation = loadingHandler.newOperation()
+        loadingOperation.showLoading("Adding player...")
         return try {
             addPlayer(event, user, selectedDivisionId, occurrence)
                 .fold(
@@ -230,7 +232,7 @@ internal class EventInviteCoordinator {
                     },
                 )
         } finally {
-            loadingHandler.hideLoading()
+            loadingOperation.hideLoading()
         }
     }
 
@@ -257,7 +259,8 @@ internal class EventInviteCoordinator {
             return ErrorMessage("This event accepts teams, not individual players.")
         }
 
-        loadingHandler.showLoading("Sending invite...")
+        val loadingOperation = loadingHandler.newOperation()
+        loadingOperation.showLoading("Sending invite...")
         return try {
             createInvite(event, normalizedEmail, normalizedFirstName, normalizedLastName)
                 .fold(
@@ -269,7 +272,7 @@ internal class EventInviteCoordinator {
                     },
                 )
         } finally {
-            loadingHandler.hideLoading()
+            loadingOperation.hideLoading()
         }
     }
 

@@ -3,6 +3,7 @@ package com.razumly.mvp.organizationDetail
 import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
+import com.arkivanov.essenty.lifecycle.doOnDestroy
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.Event
@@ -39,6 +40,8 @@ import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
+import com.razumly.mvp.core.util.LoadingOperation
+import com.razumly.mvp.core.util.finishAllLoadingOperations
 import com.razumly.mvp.core.util.newId
 import com.razumly.mvp.core.util.trustedBoldSignSigningUrlOrNull
 import com.razumly.mvp.eventDetail.TextSignaturePromptState
@@ -386,6 +389,7 @@ class DefaultOrganizationDetailComponent(
     private var pendingPostSignatureAction: (suspend () -> Unit)? = null
     private var pendingRentalReservation: PendingRentalReservation? = null
     private val checkoutSessionCoordinator = OrganizationCheckoutSessionCoordinator()
+    private val checkoutLoadingOperations = mutableMapOf<String, LoadingOperation>()
     private var pendingProductCheckoutOperationId: String? = null
     private var pendingTeamCheckoutOperationId: String? = null
     private var pendingRentalCheckoutOperationId: String? = null
@@ -401,6 +405,9 @@ class DefaultOrganizationDetailComponent(
 
     init {
         backHandler.register(sectionBackCallback)
+        lifecycle.doOnDestroy {
+            checkoutLoadingOperations.finishAllLoadingOperations()
+        }
         refreshOrganization()
 
         scope.launch {
@@ -488,9 +495,6 @@ class DefaultOrganizationDetailComponent(
                 }
                 finishOrganizationCheckout(checkout)
                 clearPaymentResult()
-                if (::loadingHandler.isInitialized) {
-                    loadingHandler.hideLoading()
-                }
             }
         }
     }
@@ -519,6 +523,7 @@ class DefaultOrganizationDetailComponent(
 
     private fun finishOrganizationCheckout(checkout: OrganizationCheckoutSession): Boolean {
         if (!checkoutSessionCoordinator.finish(checkout)) return false
+        checkoutLoadingOperations.remove(checkout.operationId)?.hideLoading()
         when (checkout.owner) {
             OrganizationCheckoutOwner.PRODUCT -> {
                 _startingProductCheckoutId.value = null
@@ -537,6 +542,30 @@ class DefaultOrganizationDetailComponent(
             }
         }
         return true
+    }
+
+    private fun showOrganizationCheckoutLoading(
+        checkout: OrganizationCheckoutSession,
+        message: String,
+    ) {
+        val operation = checkoutLoadingOperations[checkout.operationId]
+            ?: if (::loadingHandler.isInitialized) loadingHandler.newOperation() else null
+            ?: return
+        checkoutLoadingOperations[checkout.operationId] = operation
+        operation.showLoading(message)
+    }
+
+    private suspend fun <T> withOrganizationLoading(
+        message: String,
+        action: suspend () -> T,
+    ): T {
+        val operation = if (::loadingHandler.isInitialized) loadingHandler.newOperation() else null
+        operation?.showLoading(message)
+        return try {
+            action()
+        } finally {
+            operation?.hideLoading()
+        }
     }
 
     override fun setLoadingHandler(handler: LoadingHandler) {
@@ -931,10 +960,7 @@ class DefaultOrganizationDetailComponent(
                     description = "Enter a discount code for ${product.name}, or continue without one.",
                 )
                 checkout = beginOrganizationCheckout(OrganizationCheckoutOwner.PRODUCT) ?: return@launch
-
-                if (::loadingHandler.isInitialized) {
-                    loadingHandler.showLoading("Preparing checkout...")
-                }
+                showOrganizationCheckoutLoading(checkout, "Preparing checkout...")
                 val purchaseIntentResult = if (product.isSinglePurchase()) {
                     billingRepository.createProductPurchaseIntent(product.id, discountCode)
                 } else {
@@ -959,9 +985,6 @@ class DefaultOrganizationDetailComponent(
                         }.onFailure { error ->
                             if (finishOrganizationCheckout(activeCheckout)) {
                                 _errorState.value = ErrorMessage(error.userMessage("Unable to start payment sheet."))
-                                if (::loadingHandler.isInitialized) {
-                                    loadingHandler.hideLoading()
-                                }
                             }
                         }
                     }
@@ -969,9 +992,6 @@ class DefaultOrganizationDetailComponent(
                         checkout?.let { activeCheckout ->
                             if (finishOrganizationCheckout(activeCheckout)) {
                                 _errorState.value = ErrorMessage("Unable to start checkout: ${error.userMessage()}")
-                                if (::loadingHandler.isInitialized) {
-                                    loadingHandler.hideLoading()
-                                }
                             }
                         }
                     }
@@ -979,9 +999,6 @@ class DefaultOrganizationDetailComponent(
                 val activeCheckout = checkout
                 if (activeCheckout == null || finishOrganizationCheckout(activeCheckout)) {
                     _errorState.value = ErrorMessage("Unable to start checkout: ${error.userMessage()}")
-                    if (::loadingHandler.isInitialized) {
-                        loadingHandler.hideLoading()
-                    }
                 }
             } finally {
                 if (pendingProductPurchase == null && checkoutSessionCoordinator.activeSession == null) {
@@ -1049,10 +1066,7 @@ class DefaultOrganizationDetailComponent(
                 }
 
                 val checkout = beginOrganizationCheckout(OrganizationCheckoutOwner.RENTAL) ?: return@launch
-
-                if (::loadingHandler.isInitialized) {
-                    loadingHandler.showLoading("Preparing rental checkout...")
-                }
+                showOrganizationCheckoutLoading(checkout, "Preparing rental checkout...")
                 billingRepository.createPurchaseIntent(
                     event = buildRentalPaymentEvent(
                         organization = organization,
@@ -1106,9 +1120,6 @@ class DefaultOrganizationDetailComponent(
             } finally {
                 if (pendingRentalReservation == null) {
                     _isReservingRental.value = false
-                    if (::loadingHandler.isInitialized) {
-                        loadingHandler.hideLoading()
-                    }
                 }
             }
         }
@@ -1138,23 +1149,19 @@ class DefaultOrganizationDetailComponent(
                     return@launch
                 }
 
-                if (::loadingHandler.isInitialized) {
-                    loadingHandler.showLoading("Preparing team registration...")
-                }
-                teamRepository.requestTeamRegistration(teamId)
-                    .onSuccess { result ->
-                        handleTeamRegistrationResult(
-                            team = team,
-                            accountEmail = account?.email.orEmpty(),
-                            payerName = user.fullName,
-                            result = result,
-                        )
-                    }
-                    .onFailure { error ->
-                        _errorState.value = ErrorMessage("Unable to start registration: ${error.userMessage()}")
-                    }
-                if (::loadingHandler.isInitialized) {
-                    loadingHandler.hideLoading()
+                withOrganizationLoading("Preparing team registration...") {
+                    teamRepository.requestTeamRegistration(teamId)
+                        .onSuccess { result ->
+                            handleTeamRegistrationResult(
+                                team = team,
+                                accountEmail = account?.email.orEmpty(),
+                                payerName = user.fullName,
+                                result = result,
+                            )
+                        }
+                        .onFailure { error ->
+                            _errorState.value = ErrorMessage("Unable to start registration: ${error.userMessage()}")
+                        }
                 }
             } finally {
                 if (pendingTeamRegistration == null) {
@@ -1189,22 +1196,21 @@ class DefaultOrganizationDetailComponent(
             startTeamSigning(team.team.id) {
                 scope.launch {
                     _startingTeamRegistrationId.value = team.team.id
-                    if (::loadingHandler.isInitialized) {
-                        loadingHandler.showLoading("Refreshing team registration...")
-                    }
-                    teamRepository.requestTeamRegistration(team.team.id)
-                        .onSuccess { refreshed ->
-                            continueTeamRegistration(team, accountEmail, payerName, refreshed)
-                        }.onFailure { error ->
-                            _errorState.value = ErrorMessage(
-                                "Unable to refresh team registration: ${error.userMessage()}",
-                            )
+                    try {
+                        withOrganizationLoading("Refreshing team registration...") {
+                            teamRepository.requestTeamRegistration(team.team.id)
+                                .onSuccess { refreshed ->
+                                    continueTeamRegistration(team, accountEmail, payerName, refreshed)
+                                }.onFailure { error ->
+                                    _errorState.value = ErrorMessage(
+                                        "Unable to refresh team registration: ${error.userMessage()}",
+                                    )
+                                }
                         }
-                    if (::loadingHandler.isInitialized) {
-                        loadingHandler.hideLoading()
-                    }
-                    if (pendingTeamRegistration == null) {
-                        _startingTeamRegistrationId.value = null
+                    } finally {
+                        if (pendingTeamRegistration == null) {
+                            _startingTeamRegistrationId.value = null
+                        }
                     }
                 }
             }
@@ -1234,13 +1240,11 @@ class DefaultOrganizationDetailComponent(
                     }) {
                     return
                 }
-                if (::loadingHandler.isInitialized) {
-                    loadingHandler.showLoading("Preparing checkout...")
-                }
                 val discountCode = requestDiscountCode(
                     description = "Enter a discount code for this team registration, or continue without one.",
                 )
                 val checkout = beginOrganizationCheckout(OrganizationCheckoutOwner.TEAM) ?: return
+                showOrganizationCheckoutLoading(checkout, "Preparing checkout...")
                 billingRepository.createTeamRegistrationPurchaseIntent(
                     team = team.team,
                     teamRegistration = result.registration,
@@ -1264,9 +1268,6 @@ class DefaultOrganizationDetailComponent(
                             _errorState.value = ErrorMessage(
                                 error.userMessage("Unable to start payment sheet."),
                             )
-                            if (::loadingHandler.isInitialized) {
-                                loadingHandler.hideLoading()
-                            }
                         }
                     }
                 }.onFailure { error ->
@@ -1274,9 +1275,6 @@ class DefaultOrganizationDetailComponent(
                         _errorState.value = ErrorMessage(
                             "Unable to start registration: ${error.userMessage(result.userMessage("Unable to start registration."))}",
                         )
-                        if (::loadingHandler.isInitialized) {
-                            loadingHandler.hideLoading()
-                        }
                     }
                 }
                 return
@@ -1300,40 +1298,32 @@ class DefaultOrganizationDetailComponent(
         scope.launch {
             val teamId = team.team.id.trim()
             if (teamId.isBlank()) return@launch
-            if (::loadingHandler.isInitialized) {
-                loadingHandler.showLoading("Leaving team...")
-            }
-            teamRepository.leaveTeam(teamId)
-                .onSuccess {
-                    _message.value = "You left ${team.team.name}."
-                    refreshTeams(force = true)
-                }
-                .onFailure { error ->
-                    _errorState.value = ErrorMessage("Unable to leave team: ${error.userMessage()}")
-                }
-            if (::loadingHandler.isInitialized) {
-                loadingHandler.hideLoading()
+            withOrganizationLoading("Leaving team...") {
+                teamRepository.leaveTeam(teamId)
+                    .onSuccess {
+                        _message.value = "You left ${team.team.name}."
+                        refreshTeams(force = true)
+                    }
+                    .onFailure { error ->
+                        _errorState.value = ErrorMessage("Unable to leave team: ${error.userMessage()}")
+                    }
             }
         }
     }
 
     override fun submitBillingAddress(address: BillingAddressDraft) {
         scope.launch {
-            if (::loadingHandler.isInitialized) {
-                loadingHandler.showLoading("Saving billing address...")
-            }
-            billingRepository.updateBillingAddress(address)
-                .onSuccess {
-                    _billingAddressPrompt.value = null
-                    val action = pendingBillingAddressAction
-                    pendingBillingAddressAction = null
-                    action?.invoke()
-                }
-                .onFailure { error ->
-                    _errorState.value = ErrorMessage(error.userMessage("Unable to save billing address."))
-                }
-            if (::loadingHandler.isInitialized) {
-                loadingHandler.hideLoading()
+            withOrganizationLoading("Saving billing address...") {
+                billingRepository.updateBillingAddress(address)
+                    .onSuccess {
+                        _billingAddressPrompt.value = null
+                        val action = pendingBillingAddressAction
+                        pendingBillingAddressAction = null
+                        action?.invoke()
+                    }
+                    .onFailure { error ->
+                        _errorState.value = ErrorMessage(error.userMessage("Unable to save billing address."))
+                    }
             }
         }
     }
@@ -1363,27 +1353,23 @@ class DefaultOrganizationDetailComponent(
         }
 
         scope.launch {
-            if (::loadingHandler.isInitialized) {
-                loadingHandler.showLoading("Recording signature ...")
-            }
-            val documentId = prompt.step.resolvedDocumentId()
-                ?: "mobile-team-text-${prompt.step.templateId}-${Clock.System.now().toEpochMilliseconds()}"
+            withOrganizationLoading("Recording signature ...") {
+                val documentId = prompt.step.resolvedDocumentId()
+                    ?: "mobile-team-text-${prompt.step.templateId}-${Clock.System.now().toEpochMilliseconds()}"
 
-            billingRepository.recordTeamSignature(
-                teamId = teamId,
-                templateId = prompt.step.templateId,
-                documentId = documentId,
-                type = prompt.step.type,
-            ).onFailure { error ->
-                _errorState.value = ErrorMessage(error.userMessage("Failed to record signature."))
-            }.onSuccess {
-                _textSignaturePrompt.value = null
-                if (awaitTeamSignatureStepClearance(prompt.step)) {
-                    processNextTeamSignatureStep()
+                billingRepository.recordTeamSignature(
+                    teamId = teamId,
+                    templateId = prompt.step.templateId,
+                    documentId = documentId,
+                    type = prompt.step.type,
+                ).onFailure { error ->
+                    _errorState.value = ErrorMessage(error.userMessage("Failed to record signature."))
+                }.onSuccess {
+                    _textSignaturePrompt.value = null
+                    if (awaitTeamSignatureStepClearance(prompt.step)) {
+                        processNextTeamSignatureStep()
+                    }
                 }
-            }
-            if (::loadingHandler.isInitialized) {
-                loadingHandler.hideLoading()
             }
         }
     }
@@ -1427,9 +1413,7 @@ class DefaultOrganizationDetailComponent(
         clearPaymentResult()
         setPaymentIntent(intent)
         val billingAddress = loadSavedBillingAddress()
-        if (::loadingHandler.isInitialized) {
-            loadingHandler.showLoading("Waiting for payment completion...")
-        }
+        showOrganizationCheckoutLoading(checkout, "Waiting for payment completion...")
         check(checkoutSessionCoordinator.awaitResult(checkout)) {
             "Checkout is no longer active."
         }
@@ -1437,47 +1421,59 @@ class DefaultOrganizationDetailComponent(
     }
 
     internal suspend fun completePendingRentalReservation(pending: PendingRentalReservation) {
-        if (::loadingHandler.isInitialized) {
-            loadingHandler.showLoading("Reserving resources...")
+        val checkout = checkoutSessionCoordinator.activeSession?.takeIf { active ->
+            active.owner == OrganizationCheckoutOwner.RENTAL &&
+                active.operationId == pendingRentalCheckoutOperationId
         }
-        billingRepository.createRentalOrder(
-            publicSlug = pending.publicSlug,
-            eventId = pending.context.rentalBookingId?.trim()?.takeIf(String::isNotBlank) ?: newId(),
-            selections = pending.selections,
-            paymentIntentId = pending.paymentIntentId,
-            payerUserId = pending.payerUserId,
-        ).onSuccess { result ->
-            _completedRentalReservation.value = RentalReservationComplete(
-                bookingId = result.bookingId,
-                billId = result.billId,
-                totalCents = result.totalCents,
-            )
-            _message.value = "Resources reserved."
-            activeRentalAvailabilityWindow?.let { window ->
-                refreshRentals(
-                    rangeStart = window.start,
-                    rangeEnd = window.end,
-                    force = true,
+        if (checkout != null) {
+            showOrganizationCheckoutLoading(checkout, "Reserving resources...")
+        }
+        val standaloneOperation = if (checkout == null && ::loadingHandler.isInitialized) {
+            loadingHandler.newOperation().also { operation ->
+                operation.showLoading("Reserving resources...")
+            }
+        } else {
+            null
+        }
+        try {
+            billingRepository.createRentalOrder(
+                publicSlug = pending.publicSlug,
+                eventId = pending.context.rentalBookingId?.trim()?.takeIf(String::isNotBlank) ?: newId(),
+                selections = pending.selections,
+                paymentIntentId = pending.paymentIntentId,
+                payerUserId = pending.payerUserId,
+            ).onSuccess { result ->
+                _completedRentalReservation.value = RentalReservationComplete(
+                    bookingId = result.bookingId,
+                    billId = result.billId,
+                    totalCents = result.totalCents,
+                )
+                _message.value = "Resources reserved."
+                activeRentalAvailabilityWindow?.let { window ->
+                    refreshRentals(
+                        rangeStart = window.start,
+                        rangeEnd = window.end,
+                        force = true,
+                    )
+                }
+            }.onFailure { error ->
+                _errorState.value = ErrorMessage(
+                    if (error is RentalOrderTerminalFailureException) {
+                        "Payment was recorded, but this reservation needs staff assistance. " +
+                            "Do not submit another payment. " + error.userMessage()
+                    } else if (error is RentalOrderPayerMismatchException) {
+                        "Payment is linked to the original renter account. Sign back in as that renter to finish the reservation."
+                    } else {
+                        "Payment was recorded, but the reservation is still being finalized. " +
+                            "It will retry automatically; do not submit another payment. " +
+                            error.userMessage("Unable to reserve resources right now.")
+                    },
                 )
             }
-        }.onFailure { error ->
-            _errorState.value = ErrorMessage(
-                if (error is RentalOrderTerminalFailureException) {
-                    "Payment was recorded, but this reservation needs staff assistance. " +
-                        "Do not submit another payment. " + error.userMessage()
-                } else if (error is RentalOrderPayerMismatchException) {
-                    "Payment is linked to the original renter account. Sign back in as that renter to finish the reservation."
-                } else {
-                    "Payment was recorded, but the reservation is still being finalized. " +
-                        "It will retry automatically; do not submit another payment. " +
-                        error.userMessage("Unable to reserve resources right now.")
-                },
-            )
-        }
-        pendingRentalReservation = null
-        _isReservingRental.value = false
-        if (::loadingHandler.isInitialized) {
-            loadingHandler.hideLoading()
+        } finally {
+            pendingRentalReservation = null
+            _isReservingRental.value = false
+            standaloneOperation?.hideLoading()
         }
     }
 

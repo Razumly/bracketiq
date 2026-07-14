@@ -354,8 +354,9 @@ class DefaultTeamManagementComponent(
 
     override fun createTeam(team: Team, onResult: (Result<Unit>) -> Unit) {
         scope.launch {
+            val loadingOperation = loadingHandler?.newOperation()
             try {
-                loadingHandler?.showLoading("Creating team...")
+                loadingOperation?.showLoading("Creating team...")
                 val createResult = teamRepository.createTeam(
                     team.copy(
                         captainId = currentUser.id,
@@ -371,7 +372,7 @@ class DefaultTeamManagementComponent(
 
                 val createdTeam = createResult.getOrThrow()
 
-                loadingHandler?.showLoading("Fetching teams...")
+                loadingOperation?.showLoading("Fetching teams...")
                 val teamIdsToRefresh = (currentTeams.value.map { teamWithPlayers ->
                     teamWithPlayers.team.id
                 } + createdTeam.id)
@@ -389,7 +390,7 @@ class DefaultTeamManagementComponent(
                 _errorState.value = throwable.userMessage()
                 onResult(Result.failure(throwable))
             } finally {
-                loadingHandler?.hideLoading()
+                loadingOperation?.hideLoading()
             }
         }
     }
@@ -432,17 +433,21 @@ class DefaultTeamManagementComponent(
 
     override fun requestTeamRefund(team: Team, reason: String, onResult: (Result<Unit>) -> Unit) {
         scope.launch {
-            loadingHandler?.showLoading("Requesting refund...")
-            val result = teamRepository.requestTeamRegistrationRefund(team.id, reason)
-            result
-                .onSuccess {
-                    deselectTeam()
-                }
-                .onFailure {
-                    _errorState.value = it.userMessage("Refund request failed")
-                }
-            loadingHandler?.hideLoading()
-            onResult(result)
+            val loadingOperation = loadingHandler?.newOperation()
+            loadingOperation?.showLoading("Requesting refund...")
+            try {
+                val result = teamRepository.requestTeamRegistrationRefund(team.id, reason)
+                result
+                    .onSuccess {
+                        deselectTeam()
+                    }
+                    .onFailure {
+                        _errorState.value = it.userMessage("Refund request failed")
+                    }
+                onResult(result)
+            } finally {
+                loadingOperation?.hideLoading()
+            }
         }
     }
 

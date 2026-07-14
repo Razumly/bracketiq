@@ -197,7 +197,8 @@ internal suspend fun runRefundMutation(
     onSuccess: () -> Unit,
     onFailure: (Throwable) -> Unit,
 ) {
-    loadingHandler?.showLoading(loadingMessage)
+    val loadingOperation = loadingHandler?.newOperation()
+    loadingOperation?.showLoading(loadingMessage)
     try {
         val result = try {
             operation()
@@ -211,6 +212,6 @@ internal suspend fun runRefundMutation(
             onFailure = onFailure,
         )
     } finally {
-        loadingHandler?.hideLoading()
+        loadingOperation?.hideLoading()
     }
 }
