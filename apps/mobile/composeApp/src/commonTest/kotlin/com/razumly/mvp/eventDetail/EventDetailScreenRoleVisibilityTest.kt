@@ -5,6 +5,9 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.OrganizationStaffMember
+import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
+import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlin.test.Test
@@ -13,6 +16,74 @@ import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 class EventDetailScreenRoleVisibilityTest {
+
+    @Test
+    fun buildEventDetailAccessPresentation_hostOwnsManagementSurfaces() {
+        val event = Event(
+            id = "event-hosted",
+            hostId = "host-1",
+            eventType = EventType.LEAGUE,
+            includePlayoffs = true,
+            teamSignup = true,
+            teamCheckInMode = TeamCheckInMode.EVENT,
+        )
+
+        val presentation = buildEventDetailAccessPresentation(
+            selectedEvent = EventWithFullRelations(
+                event = event,
+                players = emptyList(),
+                matches = emptyList(),
+                teams = emptyList(),
+            ),
+            editedEvent = event,
+            sports = emptyList(),
+            currentUser = UserData().copy(id = "host-1"),
+            currentUserManagedEventTeamId = null,
+            isHost = true,
+            isEditingMatches = true,
+        )
+
+        assertTrue(presentation.hasScheduleView)
+        assertTrue(presentation.hasStandingsView)
+        assertTrue(presentation.hasBracketView)
+        assertTrue(presentation.canManageTemplate)
+        assertTrue(presentation.canManageLeagueStandings)
+        assertTrue(presentation.canEditMatches)
+        assertTrue(presentation.showEventCheckInBadges)
+    }
+
+    @Test
+    fun buildEventDetailAccessPresentation_regularViewerCannotManageEvent() {
+        val event = Event(
+            id = "event-viewer",
+            hostId = "host-1",
+            eventType = EventType.LEAGUE,
+            teamSignup = true,
+            teamCheckInMode = TeamCheckInMode.EVENT,
+        )
+
+        val presentation = buildEventDetailAccessPresentation(
+            selectedEvent = EventWithFullRelations(
+                event = event,
+                players = emptyList(),
+                matches = emptyList(),
+                teams = emptyList(),
+            ),
+            editedEvent = event,
+            sports = emptyList(),
+            currentUser = UserData().copy(id = "viewer-1"),
+            currentUserManagedEventTeamId = null,
+            isHost = false,
+            isEditingMatches = true,
+        )
+
+        assertFalse(presentation.isAssistantHost)
+        assertFalse(presentation.isEventOfficial)
+        assertFalse(presentation.canManageTemplate)
+        assertFalse(presentation.canManageLeagueStandings)
+        assertFalse(presentation.canEditMatches)
+        assertFalse(presentation.showEventCheckInBadges)
+    }
 
     @Test
     fun givenHost_whenCheckingOfficialsVisibility_thenReturnsTrue() {
@@ -224,4 +295,3 @@ class EventDetailScreenRoleVisibilityTest {
         previousRightMatch = null,
     )
 }
-

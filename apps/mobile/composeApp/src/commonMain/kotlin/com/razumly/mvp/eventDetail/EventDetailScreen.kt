@@ -36,11 +36,8 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.divisionPriceRange
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
-import com.razumly.mvp.core.data.dataTypes.canManageEventsForViewer
 import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
 import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
-import com.razumly.mvp.core.data.dataTypes.isDraftLikeState
-import com.razumly.mvp.core.data.dataTypes.isPrivateState
 import com.razumly.mvp.core.data.dataTypes.resolvedDivisionPriceCents
 import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.removeOfficialUser
@@ -163,130 +160,49 @@ fun EventDetailScreen(
     val isCaptain by component.isUserCaptain.collectAsState()
     val isDark = isSystemInDarkTheme()
     val isEditingMatches by component.isEditingMatches.collectAsState()
-    val isTemplateEvent = selectedEvent.event.state.equals("TEMPLATE", ignoreCase = true)
-    val canShowQrCode = !isTemplateEvent &&
-        !selectedEvent.event.isDraftLikeState() &&
-        !selectedEvent.event.isPrivateState()
-    val eventType = selectedEvent.event.eventType
-    val isTournamentEvent = eventType == EventType.TOURNAMENT
-    val tournamentPoolPlayEnabled = selectedEvent.event.isTournamentPoolPlayEnabled()
-    val hasBracketView = isTournamentEvent ||
-        (eventType == EventType.LEAGUE && selectedEvent.event.includePlayoffs)
-    val hasScheduleView = eventType == EventType.LEAGUE ||
-        eventType == EventType.TOURNAMENT ||
-        eventType == EventType.WEEKLY_EVENT ||
-        selectedEvent.matches.isNotEmpty()
-    val hasStandingsView = eventType == EventType.LEAGUE || tournamentPoolPlayEnabled
-    val isAssistantHost = remember(currentUser.id, selectedEvent.event.assistantHostIds) {
-        val currentUserId = currentUser.id.trim()
-        currentUserId.isNotBlank() && selectedEvent.event.assistantHostIds.any { assistantHostId ->
-            assistantHostId.trim() == currentUserId
-        }
-    }
-    val isEventOfficial = remember(
-        currentUser.id,
-        selectedEvent.event.eventOfficials,
-        selectedEvent.event.officialIds,
-    ) {
-        isCurrentUserEventOfficial(
-            currentUserId = currentUser.id,
-            event = selectedEvent.event,
-        )
-    }
-    val isOrganizationManager = remember(
-        currentUser.id,
-        selectedEvent.organization?.ownerId,
-        selectedEvent.organization?.staffMembers,
-        selectedEvent.organization?.staffInvites,
-        selectedEvent.organization?.viewerPermissions,
-    ) {
-        val currentUserId = currentUser.id.trim()
-        selectedEvent.organization?.canManageEventsForViewer(currentUserId) == true
-    }
-    val canManageTemplate = remember(isHost, isAssistantHost, isOrganizationManager) {
-        isHost || isAssistantHost || isOrganizationManager
-    }
-    val canEditEventDetails = remember(
-        isHost,
-        canManageTemplate,
-        selectedEvent.event,
-    ) {
-        canEditEventDetailsOnMobile(
-            event = selectedEvent.event,
-            isHost = isHost,
-            canManageTemplate = canManageTemplate,
-        )
-    }
-    val canDeleteEvent = remember(isHost, isTemplateEvent, canManageTemplate) {
-        if (isTemplateEvent) {
-            canManageTemplate
-        } else {
-            isHost
-        }
-    }
-    val canCreateTemplateFromCurrentEvent = remember(isHost, isTemplateEvent, selectedEvent.event.organizationId) {
-        isHost && !isTemplateEvent && selectedEvent.event.organizationId.isNullOrBlank()
-    }
-    val canManageLeagueStandings = remember(
-        currentUser.id,
-        selectedEvent.event.hostId,
-        selectedEvent.event.assistantHostIds,
-    ) {
-        val currentUserId = currentUser.id.trim()
-        currentUserId.isNotBlank() && (
-            selectedEvent.event.hostId.trim() == currentUserId ||
-                selectedEvent.event.assistantHostIds.any { assistantHostId ->
-                    assistantHostId.trim() == currentUserId
-                }
-            )
-    }
-    val showOfficialsPanel = remember(
-        currentUser.id,
-        selectedEvent.event,
-        selectedEvent.organization,
-    ) {
-        canViewOfficialsPanel(
-            currentUserId = currentUser.id,
-            event = selectedEvent.event,
-            organization = selectedEvent.organization,
-        )
-    }
-    val selectedSport = remember(sports, editedEvent.sportId) {
-        sports.firstOrNull { it.id == editedEvent.sportId }
-    }
-    val standingsSport = remember(sports, selectedEvent.event.sportId) {
-        sports.firstOrNull { it.id == selectedEvent.event.sportId }
-    }
-    val showStandingsDrawColumn = remember(selectedEvent.event, standingsSport) {
-        resolveLeagueStandingsSupportsDraw(
-            event = selectedEvent.event,
-            sport = standingsSport,
-        )
-    }
-    val canConfirmLeagueResultsFromDock = hasStandingsView && canManageLeagueStandings
-    val canManageMatchEditingFromDock = canManageTemplate
-    val canEditMatches = canManageMatchEditingFromDock && isEditingMatches
-    val showScheduleMatchManagement = canManageMatchEditingFromDock &&
-        shouldShowScheduleMatchManagement(eventType)
-    val canManageParticipantsFromDock = canManageTemplate
-    val showEventCheckInBadges = remember(
-        selectedEvent.event.teamSignup,
-        selectedEvent.event.teamCheckInMode,
-        canManageParticipantsFromDock,
-        isEventOfficial,
-    ) {
-        selectedEvent.event.teamSignup &&
-            selectedEvent.event.teamCheckInMode.name == "EVENT" &&
-            (canManageParticipantsFromDock || isEventOfficial)
-    }
-    val currentUserManagedEventTeam = remember(
+    val accessPresentation = remember(
+        selectedEvent,
+        editedEvent,
+        sports,
+        currentUser,
         currentUserManagedEventTeamId,
-        selectedEvent.teams,
+        isHost,
+        isEditingMatches,
     ) {
-        selectedEvent.teams.firstOrNull { team ->
-            team.team.id == currentUserManagedEventTeamId
-        }
+        buildEventDetailAccessPresentation(
+            selectedEvent = selectedEvent,
+            editedEvent = editedEvent,
+            sports = sports,
+            currentUser = currentUser,
+            currentUserManagedEventTeamId = currentUserManagedEventTeamId,
+            isHost = isHost,
+            isEditingMatches = isEditingMatches,
+        )
     }
+    val isTemplateEvent = accessPresentation.isTemplateEvent
+    val canShowQrCode = accessPresentation.canShowQrCode
+    val eventType = accessPresentation.eventType
+    val tournamentPoolPlayEnabled = accessPresentation.tournamentPoolPlayEnabled
+    val hasBracketView = accessPresentation.hasBracketView
+    val hasScheduleView = accessPresentation.hasScheduleView
+    val hasStandingsView = accessPresentation.hasStandingsView
+    val isAssistantHost = accessPresentation.isAssistantHost
+    val isEventOfficial = accessPresentation.isEventOfficial
+    val canManageTemplate = accessPresentation.canManageTemplate
+    val canEditEventDetails = accessPresentation.canEditEventDetails
+    val canDeleteEvent = accessPresentation.canDeleteEvent
+    val canCreateTemplateFromCurrentEvent = accessPresentation.canCreateTemplateFromCurrentEvent
+    val canManageLeagueStandings = accessPresentation.canManageLeagueStandings
+    val showOfficialsPanel = accessPresentation.showOfficialsPanel
+    val selectedSport = accessPresentation.selectedSport
+    val showStandingsDrawColumn = accessPresentation.showStandingsDrawColumn
+    val canConfirmLeagueResultsFromDock = accessPresentation.canConfirmLeagueResultsFromDock
+    val canManageMatchEditingFromDock = accessPresentation.canManageMatchEditingFromDock
+    val canEditMatches = accessPresentation.canEditMatches
+    val showScheduleMatchManagement = accessPresentation.showScheduleMatchManagement
+    val canManageParticipantsFromDock = accessPresentation.canManageParticipantsFromDock
+    val showEventCheckInBadges = accessPresentation.showEventCheckInBadges
+    val currentUserManagedEventTeam = accessPresentation.currentUserManagedEventTeam
 
     var showTeamSelectionDialog by remember { mutableStateOf(false) }
     var showOptionsDropdown by remember { mutableStateOf(false) }
