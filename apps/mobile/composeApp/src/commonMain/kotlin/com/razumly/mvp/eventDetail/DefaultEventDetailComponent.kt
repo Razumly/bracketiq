@@ -87,7 +87,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
@@ -102,17 +101,6 @@ import kotlinx.serialization.Serializable
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
-
-private data class WithdrawTargetsRefreshKey(
-    val eventId: String,
-    val occurrenceKey: String?,
-    val teamSignup: Boolean,
-    val eventType: EventType,
-    val playerIds: List<String>,
-    val waitListIds: List<String>,
-    val freeAgentIds: List<String>,
-    val teamIds: List<String>,
-)
 
 private fun FamilyChild.toJoinChildOption(): JoinChildOption {
     val normalizedFirstName = firstName.trim()
@@ -884,6 +872,8 @@ class DefaultEventDetailComponent(
         registrationFlowCoordinator.dismissDiscountCodePrompt()
     }
 
+    private val lifecycleBindings = EventDetailLifecycleBindings(scope)
+
     init {
         backHandler.register(backCallback)
         lifecycle.doOnDestroy(::finishRegistrationPaymentLoading)
@@ -891,99 +881,45 @@ class DefaultEventDetailComponent(
             loadSports(reportErrors = true)
         }
         loadEventTags()
-        scope.launch {
-            selectedEvent
-                .map { selected -> selected.organizationId?.trim().orEmpty() }
-                .distinctUntilChanged()
-                .collect { organizationId ->
-                    loadOrganizationTemplates(organizationId)
-                }
+        lifecycleBindings.bindOrganizationTemplates(selectedEvent, ::loadOrganizationTemplates)
+        lifecycleBindings.bindSelectedEventResources(selectedEvent) { eventId ->
+            participantBootstrapCoordinator.hydrateMobileEventDetail(
+                showDetailsOnSuccess = false,
+                showLoading = false,
+                reportErrors = false,
+            )
+            loadAvailableRentalResources(eventId)
         }
-        scope.launch {
-            selectedEvent
-                .map { selected -> selected.id.trim() }
-                .distinctUntilChanged()
-                .collectLatest { eventId ->
-                    participantBootstrapCoordinator.hydrateMobileEventDetail(
-                        showDetailsOnSuccess = false,
-                        showLoading = false,
-                        reportErrors = false,
-                    )
-                    loadAvailableRentalResources(eventId)
-                }
+        lifecycleBindings.bindScheduleTrackedUser(currentUser, ::refreshScheduleTrackedUserIds)
+        lifecycleBindings.bindRegistrationScope(
+            selectedEvent = selectedEvent,
+            currentUser = currentUser,
+            selectedWeeklyOccurrence = weeklyOccurrenceCoordinator.selectedWeeklyOccurrence,
+            onMissingScope = registrationFlowCoordinator::clearForMissingRegistrationScope,
+            onScopeChanged = ::loadRegistrationLifecycleScope,
+        )
+        lifecycleBindings.bindSelectedEventMode(
+            selectedEvent,
+            participantBootstrapCoordinator::onSelectedEventChanged,
+        )
+        lifecycleBindings.bindEventTeamCheckIns(
+            selectedEvent = selectedEvent,
+            eventWithRelations = eventWithRelations,
+            currentUser = currentUser,
+            currentUserManagedEventTeamId = currentUserManagedEventTeamId,
+        ) {
+            refreshEventTeamCheckInsIfAllowed()
+            evaluateEventTeamCheckInPrompt()
         }
-        scope.launch {
-            currentUser
-                .map { user -> user.id }
-                .distinctUntilChanged()
-                .collect {
-                    refreshScheduleTrackedUserIds()
-                }
-        }
-        scope.launch {
-            combine(
-                selectedEvent.map { selected -> selected.id.trim() },
-                currentUser.map { user -> user.id.trim() },
-                weeklyOccurrenceCoordinator.selectedWeeklyOccurrence,
-            ) { eventId, userId, occurrence ->
-                Triple(eventId, userId, occurrence)
-            }
-                .distinctUntilChanged()
-                .collectLatest { (eventId, userId, _) ->
-                    if (eventId.isBlank() || userId.isBlank()) {
-                        registrationFlowCoordinator.clearForMissingRegistrationScope()
-                        return@collectLatest
-                    }
-                    eventRepository.getRegistrationQuestions("EVENT", eventId)
-                        .onSuccess { questions ->
-                            registrationFlowCoordinator.replaceRegistrationQuestions(questions)
-                        }
-                        .onFailure { throwable ->
-                            Napier.w("Failed to load event registration questions.", throwable)
-                            registrationFlowCoordinator.clearRegistrationQuestionsAfterLoadFailure()
-                        }
-                    loadCurrentRegistrationProgress()
-                }
-        }
-        scope.launch {
-            selectedEvent
-                .map { selected -> selected.id to isWeeklyParentEvent(selected) }
-                .distinctUntilChanged()
-                .collect { (_, weeklyParent) ->
-                    participantBootstrapCoordinator.onSelectedEventChanged(weeklyParent)
-                }
-        }
-        scope.launch {
-            combine(
-                selectedEvent,
-                eventWithRelations,
-                currentUser,
-                currentUserManagedEventTeamId,
-            ) { eventValue, relations, user, managedTeamId ->
-                listOf(
-                    eventValue.id,
-                    relations.organization?.id.orEmpty(),
-                    user.id,
-                    managedTeamId.orEmpty(),
-                )
-            }
-                .distinctUntilChanged()
-                .collect {
-                    refreshEventTeamCheckInsIfAllowed()
-                    evaluateEventTeamCheckInPrompt()
-                }
-        }
-        scope.launch {
-            weeklyOccurrenceCoordinator.selectedWeeklyOccurrence
-                .collectLatest { selectedOccurrence ->
-                    participantBootstrapCoordinator.onWeeklyOccurrenceChanged(selectedOccurrence)
-                }
-        }
-        scope.launch {
-            participantBootstrapCoordinator.participantLocalStateFlow()
-                .collect(participantBootstrapCoordinator::applyLocalState)
-        }
-        scope.launch {
+        lifecycleBindings.bindWeeklyOccurrence(
+            weeklyOccurrenceCoordinator.selectedWeeklyOccurrence,
+            participantBootstrapCoordinator::onWeeklyOccurrenceChanged,
+        )
+        lifecycleBindings.bindParticipantLocalState(
+            participantBootstrapCoordinator.participantLocalStateFlow(),
+            participantBootstrapCoordinator::applyLocalState,
+        )
+        lifecycleBindings.bindManagedParticipantBootstrap(
             participantBootstrapCoordinator.managedBootstrapTargetFlow(
                 currentUser,
                 eventOrganization,
@@ -993,273 +929,237 @@ class DefaultEventDetailComponent(
                     user = user,
                     organization = organization,
                 )
-            }.collectLatest(participantBootstrapCoordinator::refreshManagedBootstrap)
+            },
+            participantBootstrapCoordinator::refreshManagedBootstrap,
+        )
+        lifecycleBindings.bindMembershipSources(
+            registrations = cachedCurrentUserRegistrations,
+            currentUserTeams = relationStateCoordinator.currentUserTeamIds,
+            selectedEvent = selectedEvent,
+            refreshMembership = ::refreshCurrentUserMembershipState,
+        )
+        lifecycleBindings.bindEditingBackCallback(editDraftCoordinator.isEditing) { isEditing ->
+            backCallback.isEnabled = isEditing
         }
-        scope.launch {
-            combine(
-                cachedCurrentUserRegistrations,
-                relationStateCoordinator.currentUserTeamIds,
-            ) { registrations, currentUserTeamIds ->
-                registrations to currentUserTeamIds
-            }.collect {
-                refreshCurrentUserMembershipState(selectedEvent.value)
-            }
+        lifecycleBindings.bindDetailsBackCallback(_showDetails) { showDetails ->
+            backCallback.isEnabled = showDetails
         }
-        scope.launch {
-            editDraftCoordinator.isEditing.collect { isEditing ->
-                backCallback.isEnabled = isEditing
-            }
-        }
-        scope.launch {
-            _showDetails.collect { showDetails ->
-                backCallback.isEnabled = showDetails
-            }
-        }
-        scope.launch {
-            paymentResult.collect {
-                if (it != null) {
-                    try {
-                        val pendingTeam = registrationFlowCoordinator.currentPendingTeamRegistration()
-                        val confirmationTarget = registrationFlowCoordinator.currentJoinConfirmationTarget()
-                        when (it) {
-                        PaymentResult.Canceled -> {
-                            _errorState.value = ErrorMessage("Payment canceled.")
-                            registrationFlowCoordinator.clearTeamRegistrationState()
-                        }
+        lifecycleBindings.bindPaymentResults(paymentResult, ::handleRegistrationPaymentResult)
+        lifecycleBindings.bindMatchRealtime(
+            selectedEventId = selectedEventId,
+            isEditing = editDraftCoordinator.isEditing,
+            isEditingMatches = matchEditingCoordinator.isEditingMatches,
+            resetIgnoredMatch = { matchRepository.setIgnoreMatch(null) },
+            subscribe = { eventId -> matchRepository.subscribeToMatches(eventId) },
+            setEditingPaused = { paused ->
+                matchRepository.setRealtimePaused(MATCH_REALTIME_EDIT_PAUSE_REASON, paused)
+            },
+            unsubscribe = { matchRepository.unsubscribeFromRealtime() },
+        )
+        lifecycleBindings.bindEventRelations(eventWithRelations, ::handleEventRelationsChanged)
+        lifecycleBindings.bindSelectedEventMembership(selectedEvent, ::refreshCurrentUserMembershipState)
+        lifecycleBindings.bindDefaultDivision(selectedEvent, ::handleDefaultDivisionChanged)
+        lifecycleBindings.bindWithdrawTargets(
+            selectedEvent,
+            selectedWeeklyOccurrence,
+            ::refreshWithdrawTargets,
+        )
+        lifecycleBindings.bindReadOnlyDraft(
+            eventWithRelations,
+            eventFields,
+            editDraftCoordinator.isEditing,
+            ::handleReadOnlyDraftStateChanged,
+        )
+        lifecycleBindings.bindSelectedDivision(selectedDivision, ::handleSelectedDivisionChanged)
+        lifecycleBindings.bindLeagueStandings(
+            selectedEvent,
+            selectedDivision,
+            ::resolveLeagueStandingsLifecycleTarget,
+            ::loadLeagueStandingsLifecycleTarget,
+        )
+        lifecycleBindings.bindDivisionMatches(
+            divisionContentCoordinator.divisionMatches,
+            ::generateRounds,
+        )
+    }
 
-                        is PaymentResult.Failed -> {
-                            _errorState.value = ErrorMessage(it.error)
-                            registrationFlowCoordinator.clearTeamRegistrationState()
-                        }
+    private suspend fun loadRegistrationLifecycleScope(eventId: String) {
+        eventRepository.getRegistrationQuestions("EVENT", eventId)
+            .onSuccess(registrationFlowCoordinator::replaceRegistrationQuestions)
+            .onFailure { throwable ->
+                Napier.w("Failed to load event registration questions.", throwable)
+                registrationFlowCoordinator.clearRegistrationQuestionsAfterLoadFailure()
+            }
+        loadCurrentRegistrationProgress()
+    }
 
-                        PaymentResult.Completed -> {
-                            if (pendingTeam != null) {
-                                showRegistrationPaymentLoading("Refreshing Team")
-                                registrationFlowCoordinator.clearStartingTeamRegistrationId()
-                                val teamRegisteredSuccessfully = joinConfirmationCoordinator.waitForTeamRegistrationWithTimeout(
-                                    teamId = pendingTeam.team.id,
-                                    currentUserId = currentUser.value.id,
-                                    getTeamWithPlayers = teamRepository::getTeamWithPlayers,
-                                )
-                                registrationFlowCoordinator.clearPendingTeamRegistration()
-                                if (teamRegisteredSuccessfully) {
-                                    val refreshedTeam = teamRepository.getTeamWithPlayers(pendingTeam.team.id)
-                                        .getOrNull()
-                                    val paymentPending = refreshedTeam
-                                        ?.team
-                                        ?.playerRegistrations
-                                        ?.any { registration ->
-                                            registration.userId == currentUser.value.id && registration.isPaymentPending()
-                                        } == true
-                                    membershipCoordinator.setUsersTeam(
-                                        refreshedTeam ?: pendingTeam,
-                                        currentUser.value.id,
-                                    )
-                                    refreshCurrentUserMembershipState(selectedEvent.value)
-                                    _errorState.value = ErrorMessage(
-                                        if (paymentPending) {
-                                            "Payment submitted for ${pendingTeam.team.name}. Registration is pending until the bank payment clears."
-                                        } else {
-                                            "Registration completed for ${pendingTeam.team.name}."
-                                        }
-                                    )
-                                    refreshEventDetails()
-                                } else {
-                                    _errorState.value = ErrorMessage(
-                                        "Payment submitted, but team registration confirmation is still pending. Please reload the event."
-                                    )
-                                }
-                            } else {
-                                showRegistrationPaymentLoading("Reloading Event")
-                                val userJoinedSuccessfully = joinConfirmationCoordinator.waitForUserInEventWithTimeout(
-                                    confirmationTarget = confirmationTarget,
-                                    isUserInEvent = { membershipCoordinator.isUserInEvent.value },
-                                    refreshAfterParticipantMutation = {
-                                        participantBootstrapCoordinator.refreshEventAfterParticipantMutation(
-                                            eventId = selectedEvent.value.id,
-                                            warningMessage = "Failed to refresh event while waiting for join confirmation.",
-                                        )
-                                    },
-                                    isJoinConfirmationSatisfied = { target ->
-                                        joinConfirmationCoordinator.isJoinConfirmationSatisfied(
-                                            confirmationTarget = target,
-                                            cachedCurrentUserRegistrations = { cachedCurrentUserRegistrations.value },
-                                            selectedEvent = { selectedEvent.value },
-                                            currentWeeklyOccurrenceSelection = ::currentWeeklyOccurrenceSelection,
-                                            syncCurrentUserRegistrationCache = eventRepository::syncCurrentUserRegistrationCache,
-                                            getEvent = eventRepository::getEvent,
-                                            syncEventParticipants = { event, occurrence ->
-                                                eventRepository.syncEventParticipants(
-                                                    event = event,
-                                                    occurrence = occurrence,
-                                                )
-                                            },
-                                            getTeams = teamRepository::getTeams,
-                                            applyParticipantSyncResult = participantBootstrapCoordinator::applyParticipantSyncResult,
-                                            refreshCurrentUserMembershipState = ::refreshCurrentUserMembershipState,
-                                            rememberWeeklyOccurrenceSummary = weeklyOccurrenceCoordinator::rememberWeeklyOccurrenceSummary,
-                                        )
-                                    },
-                                )
-                                if (!userJoinedSuccessfully) {
-                                    _errorState.value =
-                                        ErrorMessage("Payment submitted, but event registration confirmation is still pending. Please reload event.")
-                                } else if (membershipCoordinator.isRegistrationPaymentPending.value) {
-                                    _errorState.value = ErrorMessage(
-                                        "Payment submitted. Registration is pending until the bank payment clears."
-                                    )
-                                }
-                            }
-                            clearCurrentRegistrationProgress()
-                        }
-                        }
-                    } finally {
-                        finishRegistrationPaymentLoading()
-                        registrationFlowCoordinator.clearPendingJoinConfirmationTarget()
-                        clearPaymentResult()
-                    }
+    private suspend fun handleRegistrationPaymentResult(result: PaymentResult) {
+        try {
+            val pendingTeam = registrationFlowCoordinator.currentPendingTeamRegistration()
+            val confirmationTarget = registrationFlowCoordinator.currentJoinConfirmationTarget()
+            when (result) {
+                PaymentResult.Canceled -> {
+                    _errorState.value = ErrorMessage("Payment canceled.")
+                    registrationFlowCoordinator.clearTeamRegistrationState()
                 }
-            }
-        }
-        scope.launch {
-            matchRepository.setIgnoreMatch(null)
-            try {
-                combine(selectedEventId, editDraftCoordinator.isEditing, matchEditingCoordinator.isEditingMatches) { eventId, isEditing, isEditingMatches ->
-                    Triple(eventId, isEditing, isEditingMatches)
-                }.collectLatest { (eventId, isEditing, isEditingMatches) ->
-                    if (eventId.isBlank()) {
-                        matchRepository.setRealtimePaused(MATCH_REALTIME_EDIT_PAUSE_REASON, false)
-                        matchRepository.unsubscribeFromRealtime()
-                    } else {
-                        matchRepository.subscribeToMatches(eventId)
-                        matchRepository.setRealtimePaused(
-                            MATCH_REALTIME_EDIT_PAUSE_REASON,
-                            isEditing || isEditingMatches,
+
+                is PaymentResult.Failed -> {
+                    _errorState.value = ErrorMessage(result.error)
+                    registrationFlowCoordinator.clearTeamRegistrationState()
+                }
+
+                PaymentResult.Completed -> {
+                    if (pendingTeam != null) {
+                        showRegistrationPaymentLoading("Refreshing Team")
+                        registrationFlowCoordinator.clearStartingTeamRegistrationId()
+                        val teamRegisteredSuccessfully = joinConfirmationCoordinator.waitForTeamRegistrationWithTimeout(
+                            teamId = pendingTeam.team.id,
+                            currentUserId = currentUser.value.id,
+                            getTeamWithPlayers = teamRepository::getTeamWithPlayers,
                         )
+                        registrationFlowCoordinator.clearPendingTeamRegistration()
+                        if (teamRegisteredSuccessfully) {
+                            val refreshedTeam = teamRepository.getTeamWithPlayers(pendingTeam.team.id)
+                                .getOrNull()
+                            val paymentPending = refreshedTeam
+                                ?.team
+                                ?.playerRegistrations
+                                ?.any { registration ->
+                                    registration.userId == currentUser.value.id && registration.isPaymentPending()
+                                } == true
+                            membershipCoordinator.setUsersTeam(
+                                refreshedTeam ?: pendingTeam,
+                                currentUser.value.id,
+                            )
+                            refreshCurrentUserMembershipState(selectedEvent.value)
+                            _errorState.value = ErrorMessage(
+                                if (paymentPending) {
+                                    "Payment submitted for ${pendingTeam.team.name}. Registration is pending until the bank payment clears."
+                                } else {
+                                    "Registration completed for ${pendingTeam.team.name}."
+                                }
+                            )
+                            refreshEventDetails()
+                        } else {
+                            _errorState.value = ErrorMessage(
+                                "Payment submitted, but team registration confirmation is still pending. Please reload the event."
+                            )
+                        }
+                    } else {
+                        showRegistrationPaymentLoading("Reloading Event")
+                        val userJoinedSuccessfully = joinConfirmationCoordinator.waitForUserInEventWithTimeout(
+                            confirmationTarget = confirmationTarget,
+                            isUserInEvent = { membershipCoordinator.isUserInEvent.value },
+                            refreshAfterParticipantMutation = {
+                                participantBootstrapCoordinator.refreshEventAfterParticipantMutation(
+                                    eventId = selectedEvent.value.id,
+                                    warningMessage = "Failed to refresh event while waiting for join confirmation.",
+                                )
+                            },
+                            isJoinConfirmationSatisfied = { target ->
+                                joinConfirmationCoordinator.isJoinConfirmationSatisfied(
+                                    confirmationTarget = target,
+                                    cachedCurrentUserRegistrations = { cachedCurrentUserRegistrations.value },
+                                    selectedEvent = { selectedEvent.value },
+                                    currentWeeklyOccurrenceSelection = ::currentWeeklyOccurrenceSelection,
+                                    syncCurrentUserRegistrationCache = eventRepository::syncCurrentUserRegistrationCache,
+                                    getEvent = eventRepository::getEvent,
+                                    syncEventParticipants = { event, occurrence ->
+                                        eventRepository.syncEventParticipants(
+                                            event = event,
+                                            occurrence = occurrence,
+                                        )
+                                    },
+                                    getTeams = teamRepository::getTeams,
+                                    applyParticipantSyncResult = participantBootstrapCoordinator::applyParticipantSyncResult,
+                                    refreshCurrentUserMembershipState = ::refreshCurrentUserMembershipState,
+                                    rememberWeeklyOccurrenceSummary = weeklyOccurrenceCoordinator::rememberWeeklyOccurrenceSummary,
+                                )
+                            },
+                        )
+                        if (!userJoinedSuccessfully) {
+                            _errorState.value =
+                                ErrorMessage("Payment submitted, but event registration confirmation is still pending. Please reload event.")
+                        } else if (membershipCoordinator.isRegistrationPaymentPending.value) {
+                            _errorState.value = ErrorMessage(
+                                "Payment submitted. Registration is pending until the bank payment clears."
+                            )
+                        }
                     }
-                }
-            } finally {
-                matchRepository.setRealtimePaused(MATCH_REALTIME_EDIT_PAUSE_REASON, false)
-                matchRepository.unsubscribeFromRealtime()
-            }
-        }
-        scope.launch {
-            eventWithRelations.collect { relations ->
-                if (!canEditEventDetails(relations.event) && editDraftCoordinator.isEditing.value) {
-                    editDraftCoordinator.forceExitEditing(relations.event)
-                }
-                editDraftCoordinator.replaceReadOnlyTimeSlots(
-                    event = relations.event,
-                    timeSlots = relations.timeSlots,
-                )
-                val activeDivision = divisionContentCoordinator.currentSelectedDivision()
-                    ?: relations.event.resolveDefaultSelectedDivisionId()
-                if (!activeDivision.isNullOrBlank()) {
-                    selectDivision(activeDivision)
-                } else {
-                    refreshSelectedDivisionContent()
+                    clearCurrentRegistrationProgress()
                 }
             }
+        } finally {
+            finishRegistrationPaymentLoading()
+            registrationFlowCoordinator.clearPendingJoinConfirmationTarget()
+            clearPaymentResult()
         }
-        scope.launch {
-            selectedEvent.collect { selected ->
-                refreshCurrentUserMembershipState(selected)
-            }
+    }
+
+    private fun handleEventRelationsChanged(relations: EventWithFullRelations) {
+        if (!canEditEventDetails(relations.event) && editDraftCoordinator.isEditing.value) {
+            editDraftCoordinator.forceExitEditing(relations.event)
         }
-        scope.launch {
-            selectedEvent
-                .map { selected -> selected.resolveDefaultSelectedDivisionId() }
-                .distinctUntilChanged()
-                .collect { divisionId ->
-                    val resolvedDivisionId = divisionId?.normalizeDivisionIdentifier()?.takeIf(String::isNotBlank)
-                        ?: return@collect
-                    val availableDivisionIds = selectedEvent.value.divisions
-                        .map { it.normalizeDivisionIdentifier() }
-                        .filter(String::isNotBlank)
-                        .toSet()
-                    val currentDivisionId = divisionContentCoordinator.currentSelectedDivision()
-                        ?.normalizeDivisionIdentifier()
-                        ?.takeIf(String::isNotBlank)
-                    if (currentDivisionId == null || (availableDivisionIds.isNotEmpty() && currentDivisionId !in availableDivisionIds)) {
-                        selectDivision(resolvedDivisionId)
-                    }
-                }
+        editDraftCoordinator.replaceReadOnlyTimeSlots(
+            event = relations.event,
+            timeSlots = relations.timeSlots,
+        )
+        val activeDivision = divisionContentCoordinator.currentSelectedDivision()
+            ?: relations.event.resolveDefaultSelectedDivisionId()
+        if (!activeDivision.isNullOrBlank()) {
+            selectDivision(activeDivision)
+        } else {
+            refreshSelectedDivisionContent()
         }
-        scope.launch {
-            combine(selectedEvent, selectedWeeklyOccurrence) { selected, occurrence ->
-                WithdrawTargetsRefreshKey(
-                    eventId = selected.id.trim(),
-                    occurrenceKey = weeklyOccurrenceSummaryKey(
-                        slotId = occurrence?.slotId,
-                        occurrenceDate = occurrence?.occurrenceDate,
-                    ),
-                    teamSignup = selected.teamSignup,
-                    eventType = selected.eventType,
-                    playerIds = selected.playerIds
-                        .map(String::trim)
-                        .filter(String::isNotBlank)
-                        .distinct(),
-                    waitListIds = selected.waitList
-                        .map(String::trim)
-                        .filter(String::isNotBlank)
-                        .distinct(),
-                    freeAgentIds = selected.freeAgents
-                        .map(String::trim)
-                        .filter(String::isNotBlank)
-                        .distinct(),
-                    teamIds = selected.teamIds
-                        .map(String::trim)
-                        .filter(String::isNotBlank)
-                        .distinct(),
-                ) to selected
-            }
-                .distinctUntilChanged { old, new -> old.first == new.first }
-                .collect { (_, selected) ->
-                    refreshWithdrawTargets(selected)
-                }
+    }
+
+    private fun handleDefaultDivisionChanged(divisionId: String?) {
+        val resolvedDivisionId = divisionId
+            ?.normalizeDivisionIdentifier()
+            ?.takeIf(String::isNotBlank)
+            ?: return
+        val availableDivisionIds = selectedEvent.value.divisions
+            .map(String::normalizeDivisionIdentifier)
+            .filter(String::isNotBlank)
+            .toSet()
+        val currentDivisionId = divisionContentCoordinator.currentSelectedDivision()
+            ?.normalizeDivisionIdentifier()
+            ?.takeIf(String::isNotBlank)
+        if (currentDivisionId == null || (availableDivisionIds.isNotEmpty() && currentDivisionId !in availableDivisionIds)) {
+            selectDivision(resolvedDivisionId)
         }
-        scope.launch {
-            combine(eventWithRelations, eventFields, editDraftCoordinator.isEditing) { relations, fieldsWithMatches, editing ->
-                Triple(relations, fieldsWithMatches.map { relation -> relation.field }, editing)
-            }.collect { (relations, fields, editing) ->
-                if (!editing) {
-                    editDraftCoordinator.refreshReadOnlyDraft(
-                        event = relations.event,
-                        sourceFields = fields,
-                        leagueScoringConfig = relations.leagueScoringConfig?.toDto()
-                            ?: LeagueScoringConfigDTO(),
-                    )
-                }
-            }
-        }
-        scope.launch {
-            selectedDivision.collect { _ ->
-                divisionContentCoordinator.currentSelectedDivision()?.let { selectDivision(it) }
-            }
-        }
-        scope.launch {
-            combine(selectedEvent, selectedDivision) { eventValue, divisionValue ->
-                leagueStandingsCoordinator.resolveLoadTarget(
-                    event = eventValue,
-                    selectedDivisionId = divisionValue,
-                    isPlayoffPlacementDivision = { divisionId ->
-                        eventValue.isPlayoffPlacementDivision(divisionId)
-                    },
-                )
-            }
-                .distinctUntilChanged()
-                .collect { selection ->
-                    leagueStandingsCoordinator.loadStandingsForSelection(
-                        target = selection,
-                        showLoading = true,
-                        reportErrors = false,
-                        getStandings = eventRepository::getLeagueDivisionStandings,
-                    )?.let { errorMessage -> _errorState.value = errorMessage }
-                }
-        }
-        scope.launch {
-            divisionContentCoordinator.divisionMatches.collect { generateRounds() }
-        }
+    }
+
+    private fun handleReadOnlyDraftStateChanged(state: EventDetailReadOnlyDraftBindingState) {
+        if (state.editing) return
+        editDraftCoordinator.refreshReadOnlyDraft(
+            event = state.relations.event,
+            sourceFields = state.fields,
+            leagueScoringConfig = state.relations.leagueScoringConfig?.toDto()
+                ?: LeagueScoringConfigDTO(),
+        )
+    }
+
+    private fun handleSelectedDivisionChanged(@Suppress("UNUSED_PARAMETER") divisionId: String?) {
+        divisionContentCoordinator.currentSelectedDivision()?.let(::selectDivision)
+    }
+
+    private fun resolveLeagueStandingsLifecycleTarget(
+        event: Event,
+        divisionId: String?,
+    ): LeagueStandingsLoadTarget? = leagueStandingsCoordinator.resolveLoadTarget(
+        event = event,
+        selectedDivisionId = divisionId,
+        isPlayoffPlacementDivision = event::isPlayoffPlacementDivision,
+    )
+
+    private suspend fun loadLeagueStandingsLifecycleTarget(target: LeagueStandingsLoadTarget?) {
+        leagueStandingsCoordinator.loadStandingsForSelection(
+            target = target,
+            showLoading = true,
+            reportErrors = false,
+            getStandings = eventRepository::getLeagueDivisionStandings,
+        )?.let { errorMessage -> _errorState.value = errorMessage }
     }
 
     private fun loadSports(reportErrors: Boolean) {

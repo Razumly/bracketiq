@@ -17,11 +17,11 @@ After this plan is complete, users must see the same event overview, registratio
 - [x] (2026-07-14 13:35Z) Milestone 1: extracted the pure stage-selection, weekly-schedule presentation, onboarding/role, primary-action, and match-day rules above `EventDetailScreen()` with direct tests. The route fell from 4,137 to 3,357 lines; all 30 focused tests, iOS simulator compilation, Android debug assembly, and diff checks pass.
 - [x] (2026-07-14 14:00Z) Milestone 2a: extracted the detail-tab renderer into a typed presentation host, kept flow collection and route-local selection in `EventDetailScreen`, and added six direct regressions for tab availability, initial-tab fallback, and schedule-division filtering. The route fell from 3,357 to 2,891 lines; all 36 focused tests, iOS simulator compilation, Android debug assembly, and static/diff checks pass.
 - [x] (2026-07-14 14:30Z) Milestone 2b: extracted overview/edit, sticky-action, and overlay/dialog presentation hosts without moving business state into composables. The route fell from 2,891 to 2,192 lines; all 46 focused tests, iOS simulator compilation, Android debug assembly, and static/diff checks pass.
-- [ ] Milestone 3: extract component-owned event-team check-in, Room-backed relation state, participant hydration, and lifecycle bindings from `DefaultEventDetailComponent` while preserving its public interface and existing coordinators.
+- [x] (2026-07-14 15:29Z) Milestone 3: extracted component-owned event-team check-in, Room-backed relation state, participant hydration, and lifecycle bindings from `DefaultEventDetailComponent` while preserving its public interface and existing coordinators.
   - [x] (2026-07-14 14:40Z) Milestone 3a: integrated APP-009 commit `63451562` as `5b862d6d`, then extracted event-team check-in state, prompt policy, loading, and remote execution into `EventTeamCheckInCoordinator`. The component fell from 3,439 to 3,373 lines; all 28 focused coordinator/membership tests, four iOS migration tests, iOS simulator compilation, Android debug assembly, and diff checks pass.
   - [x] (2026-07-14 14:53Z) Milestone 3b: extracted event, player, host, cached-match, event-team, current-user-team, and managed-team derivation into `EventRelationStateCoordinator`. Membership now consumes canonical Room team IDs rather than the ignored `UserData.teamIds` compatibility field. The component fell from 3,373 to 3,272 lines; all 34 focused tests, two affected weekly integration regressions, four iOS migration tests, iOS simulator compilation, Android debug assembly, and diff checks pass.
   - [x] (2026-07-14 15:13Z) Milestone 3c: moved participant/bootstrap orchestration behind `EventParticipantBootstrapCoordinator`, preserving Room-backed participant switching, managed-bootstrap suppression and retry, hydration ordering, and weekly cache/membership/sync ordering. The component fell from 3,272 to 2,919 lines; all 55 focused state/coordinator tests, eight affected integration regressions, four iOS migration tests, iOS simulator compilation, Android debug assembly, and diff checks pass.
-  - [ ] Milestone 3d: replace the large component `init` collector block with narrow lifecycle bindings.
+  - [x] (2026-07-14 15:29Z) Milestone 3d: replaced 22 inline `init` collectors with named component-scoped lifecycle bindings, preserving launch order, `collectLatest` cancellation, withdrawal-key deduplication, and match-realtime cleanup. The component fell from 2,919 to 2,819 lines; all 61 focused state/coordinator tests, 19 passing mobile join-flow integrations, four iOS migration tests, iOS simulator compilation, Android debug assembly, and diff checks pass.
 - [ ] Milestone 4: mechanically separate repository contracts/public models and private wire DTO mappings from implementation without changing names, serialization, or dependency-injection bindings.
 - [ ] Milestone 5: split `EventRepository` behind its existing facade into Room store, remote gateway, participant synchronization, registration mutation, event catalog, and session-cache collaborators.
 - [ ] Milestone 6: split `BillingRepository` behind `IBillingRepository` into checkout/signing, rental, bill/payment, discount, catalog, organization/review, and refund collaborators.
@@ -77,6 +77,9 @@ After this plan is complete, users must see the same event overview, registratio
 - Observation: direct tests of coordinator jobs launched in `backgroundScope` must drain the current scheduler queue without waiting for the background scope itself to finish.
   Evidence: the first focused run left only background jobs outstanding in three cases; replacing `advanceUntilIdle` with `runCurrent` made all six direct coordinator tests pass while leaving production scheduling unchanged.
 
+- Observation: the component `init` block contained 22 independently cancellable collectors whose launch order is part of the effective startup behavior.
+  Evidence: organization/template loading, event hydration, registration scope, participant bootstrap, membership, payment results, match realtime, edit state, withdrawal targets, standings, and bracket rounds all begin from eager state flows. `EventDetailLifecycleBindings` exposes one named binding per collector and the component invokes them in the original order; six direct tests cover the cancellation, deduplication, projection, and cleanup-sensitive bindings.
+
 ## Decision Log
 
 - Decision: continue the existing coordinator architecture and keep `EventDetailComponent`, `IBillingRepository`, and `IEventRepository` source-compatible.
@@ -127,9 +130,13 @@ After this plan is complete, users must see the same event overview, registratio
   Rationale: participant synchronization, hydration, managed bootstrap, and weekly prefetch form one cohesive orchestration boundary. Moving collector lifecycle at the same time would combine two independently testable responsibilities and make cancellation or ordering regressions harder to localize.
   Date/Author: 2026-07-14 / Codex
 
+- Decision: keep the Decompose scope and domain handlers in `DefaultEventDetailComponent`, and let `EventDetailLifecycleBindings` own only collector launch, distinctness, latest-value cancellation, and realtime teardown.
+  Rationale: the component remains the lifecycle owner and repository/coordinator assembly boundary. Returning each child job makes cancellation directly testable without creating a second component, moving domain mutations into a generic collector, or changing the public interface.
+  Date/Author: 2026-07-14 / Codex
+
 ## Outcomes & Retrospective
 
-Research and sequencing are complete, Milestones 1, 2a, and 2b are validated, and Milestone 3 is underway through checkpoint 3c. `EventDetailScreen.kt` owns 2,192 lines instead of 4,137. APP-009 is integrated as `5b862d6d`; event-team check-in lives in a 146-line coordinator, canonical Room-backed relation derivation lives in a 222-line coordinator, and participant/bootstrap orchestration now lives in a 425-line coordinator with six direct regressions. `DefaultEventDetailComponent.kt` now owns 2,919 lines instead of 3,439. Narrow lifecycle binding remains in Milestone 3d, followed by Milestones 4 through 7. Five detailed checkpoints and five top-level milestones remain.
+Research and sequencing are complete, Milestones 1, 2a, 2b, and 3 are validated. `EventDetailScreen.kt` owns 2,192 lines instead of 4,137. APP-009 is integrated as `5b862d6d`; event-team check-in lives in a 146-line coordinator, canonical Room-backed relation derivation lives in a 222-line coordinator, participant/bootstrap orchestration lives in a 425-line coordinator, and 22 lifecycle collectors now live behind a 327-line binding owner with six direct regressions. `DefaultEventDetailComponent.kt` now owns 2,819 lines instead of 3,439. Milestones 4 through 7 remain, so AUD-004 is still open. Four detailed checkpoints and four top-level milestones remain.
 
 ## Context and Orientation
 
@@ -153,7 +160,7 @@ Milestone 2 is divided into two reviewable checkpoints. Milestone 2a moves the c
 
 Milestone 2b divided the remaining overview/edit and dialog render body into two more owners. `EventDetailOverviewEditHost.kt` receives immutable overview/edit state and callbacks and also owns the presentation-local sticky-action animation. `EventDetailOverlayHost.kt` receives transient dialog state and actions. `EventDetailScreen()` remains the route boundary that collects flows, owns route-local UI selection and dialog state, and invokes component mutations. The extracted composables do not collect repositories or duplicate business state.
 
-Milestone 3 began by integrating APP-009 and validating schema-93 migration coverage. Checkpoint 3a extracted event-team check-in execution and its check-in/prompt/save state into `EventTeamCheckInCoordinator`; the component still supplies the current event, permission decision, managed-team ID, and error presentation. Checkpoint 3b moved relation derivation into a Room-backed state graph. Checkpoint 3c moved participant/bootstrap flow construction, hydration, managed bootstrap, weekly prefetch/sync, and result fanout into `EventParticipantBootstrapCoordinator`. Checkpoint 3d remains: replace the component's remaining lifecycle collector block with narrow lifecycle bindings. Existing coordinators remain the sole owners of their mutable state. `DefaultEventDetailComponent` retains constructor and interface compatibility and becomes responsible for assembly, public state exposure, and delegation.
+Milestone 3 integrated APP-009 and validated schema-93 migration coverage. Checkpoint 3a extracted event-team check-in execution and its check-in/prompt/save state into `EventTeamCheckInCoordinator`; the component still supplies the current event, permission decision, managed-team ID, and error presentation. Checkpoint 3b moved relation derivation into a Room-backed state graph. Checkpoint 3c moved participant/bootstrap flow construction, hydration, managed bootstrap, weekly prefetch/sync, and result fanout into `EventParticipantBootstrapCoordinator`. Checkpoint 3d moved all 22 `init` collectors behind named `EventDetailLifecycleBindings` while retaining the Decompose scope and domain handlers in the component. Existing coordinators remain the sole owners of their mutable state. `DefaultEventDetailComponent` retains constructor and interface compatibility and is responsible for assembly, lifecycle ownership, public state exposure, and delegation.
 
 Milestone 4 moves types mechanically before implementation splits. Public repository interfaces and public models move to clearly named contract/model files in the same package. Private serializable request/response DTOs and mappers move to wire files grouped by domain. Keep serial names, defaults, nullability, endpoint paths, and mapping behavior byte-for-byte compatible. Run repository tests after each mechanical move before changing ownership.
 
@@ -401,6 +408,27 @@ Milestone 3c evidence on 2026-07-14:
     documented in Milestones 3a and 3b. The eight integration methods directly
     affected by participant/bootstrap and weekly-prefetch movement pass.
 
+Milestone 3d evidence on 2026-07-14:
+
+    checkpoint parent: d1da5244
+    2,819  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/DefaultEventDetailComponent.kt
+      327  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailLifecycleBindings.kt
+      285  composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventDetailLifecycleBindingsTest.kt
+
+    EventDetailLifecycleBindingsTest: 6 passed
+    focused lifecycle/state/coordinator matrix: 61 passed
+    passing EventDetailMobileJoinFlowTest integration methods: 19 passed
+    ./gradlew :core:database:iosSimulatorArm64Test: 4 migration tests remain green; BUILD SUCCESSFUL (20 actionable tasks: 2 executed, 18 up-to-date)
+    ./gradlew :composeApp:compileKotlinIosSimulatorArm64: BUILD SUCCESSFUL (67 actionable tasks: 11 executed, 56 up-to-date)
+    ./gradlew :composeApp:assembleDebug: BUILD SUCCESSFUL (174 actionable tasks: 14 executed, 160 up-to-date)
+    composeApp-debug.apk SHA-256: 7d1b287904c7accc70a3543b5f10d0df7bd5495e2bcf7e692b49b58387d59fb9
+    git diff --check: passed
+
+    Known baseline: the remaining paid-open-team fixture still fails with
+    `expected:<paid_open_team> but was:<null>`, the same assertion documented on
+    the untouched Milestone 3b parent. The other 19 methods in the class pass,
+    including paid-team signature/checkout and registration-detail lifecycle paths.
+
 ## Interfaces and Dependencies
 
 Keep `EventDetailScreen(component: EventDetailComponent, ...)`, the `EventDetailComponent` interface, and `DefaultEventDetailComponent` constructor source-compatible. Pure screen rules stay in package `com.razumly.mvp.eventDetail` with existing function names/signatures and `internal` visibility where tests and route use them. Extracted composables receive immutable state data classes and callback containers; they do not receive repositories.
@@ -422,3 +450,5 @@ Revision note (2026-07-14): Started Milestone 3 by integrating APP-009 without c
 Revision note (2026-07-14): Completed Milestone 3b by moving all Room-backed event/user/team relation observation and managed-team derivation into `EventRelationStateCoordinator`. Replaced ignored profile team IDs with canonical Room team IDs throughout component membership decisions, updated the integration fake to mirror the Room membership query, added six direct regressions, and recorded exact focused, weekly integration, parent-baseline, migration, Android, iOS, line-count, and APK evidence.
 
 Revision note (2026-07-14): Completed Milestone 3c by moving participant flow construction, managed bootstrap, hydration, weekly occurrence prefetch/sync, result fanout, and their structured jobs into `EventParticipantBootstrapCoordinator`. Retained lifecycle collector launch in `DefaultEventDetailComponent` for Milestone 3d, added six direct ordering/cancellation regressions, and recorded exact focused, affected-integration, migration, Android, iOS, line-count, and APK evidence.
+
+Revision note (2026-07-14): Completed Milestone 3d and Milestone 3 by replacing 22 inline `init` collectors with named `EventDetailLifecycleBindings` launched from the component-owned Decompose scope in their original order. Kept payment/domain handling in the component, added six direct cancellation/deduplication/realtime-cleanup regressions, and recorded exact focused, 19-path integration, migration, Android, iOS, line-count, APK, and inherited-baseline evidence.
