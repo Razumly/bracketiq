@@ -25,25 +25,17 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.materialkolor.PaletteStyle
-import com.materialkolor.dynamiccolor.ColorSpec
-import com.materialkolor.ktx.DynamicScheme
 import com.razumly.mvp.core.data.dataTypes.addOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.addOfficialUser
-import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.divisionPriceRange
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
-import com.razumly.mvp.core.data.dataTypes.resolvedDivisionPriceCents
 import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.removeOfficialUser
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.updateOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.updateOfficialUserPositions
-import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.dataTypes.usesTeamOfficialScheduling
 import com.razumly.mvp.core.data.dataTypes.withDoTeamsOfficiate
 import com.razumly.mvp.core.data.dataTypes.withOfficialSchedulingMode
@@ -54,20 +46,14 @@ import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
-import com.razumly.mvp.core.presentation.guides.EventGuideIds
-import com.razumly.mvp.core.presentation.guides.EventGuideTargets
-import com.razumly.mvp.core.presentation.guides.LocalGuideController
-import com.razumly.mvp.core.presentation.guides.eventOverviewGuide
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
-import com.razumly.mvp.core.util.resolvedTimeZone
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
 import dev.icerock.moko.geo.LatLng
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
-import kotlinx.datetime.toLocalDateTime
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
 
@@ -225,17 +211,7 @@ fun EventDetailScreen(
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
     var pendingMapPlace by remember { mutableStateOf<MVPPlace?>(null) }
     var isLocationPickerMapMode by remember { mutableStateOf(false) }
-    fun originalLocationPlace(): MVPPlace? {
-        val lat = editedEvent.lat
-        val long = editedEvent.long
-        if (editedEvent.location.isBlank() || (lat == 0.0 && long == 0.0)) return null
-        return MVPPlace(
-            name = editedEvent.location,
-            id = "__selected_event_location__",
-            coordinates = listOf(long, lat),
-            address = editedEvent.address,
-        )
-    }
+    val originalLocationPlace = editedEvent.toSelectedEventLocationPlace()
     val hasAnyPaidDivision = remember(
         selectedEvent.event.priceCents,
         selectedEvent.event.divisions,
@@ -244,25 +220,12 @@ fun EventDetailScreen(
         selectedEvent.event.hasAnyPaidDivision()
     }
 
-    var imageScheme by remember {
-        mutableStateOf(
-            DynamicScheme(
-                seedColor = Color(selectedEvent.event.seedColor),
-                isDark = isDark,
-                specVersion = ColorSpec.SpecVersion.SPEC_2025,
-                style = PaletteStyle.Neutral,
-            )
-        )
-    }
-
-    LaunchedEffect(isEditing, selectedEvent, editedEvent) {
-        imageScheme = DynamicScheme(
-            seedColor = if (isEditing) Color(editedEvent.seedColor) else Color(selectedEvent.event.seedColor),
-            isDark = isDark,
-            specVersion = ColorSpec.SpecVersion.SPEC_2025,
-            style = PaletteStyle.Neutral,
-        )
-    }
+    val imageScheme = rememberEventDetailImageScheme(
+        selectedEventSeedColor = selectedEvent.event.seedColor,
+        editedEventSeedColor = editedEvent.seedColor,
+        isEditing = isEditing,
+        isDark = isDark,
+    )
 
     val refundPolicy = getRefundPolicy(
         event = selectedEvent.event,
@@ -319,49 +282,31 @@ fun EventDetailScreen(
     val weeklyScheduleItems = weeklyPresentation.weeklyScheduleItems
     val teamSignup = weeklyPresentation.teamSignup
     val teamSelectionSportLabel = weeklyPresentation.teamSelectionSportLabel
-    val canLeaveSelf = isUserInEvent && (!teamSignup || isCaptain || isFreeAgent || isWaitListed)
-    val platformRefundsAvailable = hasAnyPaidDivision && !selectedEvent.event.usesManualRegistrationPayments()
-    val selectableWithdrawTargets = remember(withdrawTargets, teamSignup, isCaptain) {
-        withdrawTargets.filter { target ->
-            if (!target.isSelf) return@filter true
-            when (target.membership) {
-                WithdrawTargetMembership.PARTICIPANT -> !teamSignup || isCaptain
-                WithdrawTargetMembership.WAITLIST -> true
-                WithdrawTargetMembership.FREE_AGENT -> true
-            }
-        }
+    val withdrawalPresentation = remember(
+        selectedEvent.event,
+        withdrawTargets,
+        refundPolicy,
+        hasAnyPaidDivision,
+        isUserInEvent,
+        isCaptain,
+        isFreeAgent,
+        isWaitListed,
+    ) {
+        buildEventDetailWithdrawalPresentation(
+            event = selectedEvent.event,
+            withdrawTargets = withdrawTargets,
+            refundPolicy = refundPolicy,
+            hasAnyPaidDivision = hasAnyPaidDivision,
+            isUserInEvent = isUserInEvent,
+            isCaptain = isCaptain,
+            isFreeAgent = isFreeAgent,
+            isWaitListed = isWaitListed,
+        )
     }
-    val refundableWithdrawTargets = remember(withdrawTargets, platformRefundsAvailable) {
-        if (!platformRefundsAvailable) {
-            emptyList()
-        } else {
-            withdrawTargets.filter { it.membership == WithdrawTargetMembership.PARTICIPANT }
-        }
-    }
-    val canRequestRefundAfterStart = eventHasStarted && refundableWithdrawTargets.isNotEmpty()
-    val actionWithdrawTargets = if (canRequestRefundAfterStart) {
-        refundableWithdrawTargets
-    } else {
-        selectableWithdrawTargets
-    }
-    val canLeaveEvent = !eventHasStarted && (canLeaveSelf || selectableWithdrawTargets.isNotEmpty())
-    val singleWithdrawTarget = selectableWithdrawTargets.singleOrNull()
-    val leaveMessage = when {
-        selectableWithdrawTargets.size > 1 -> "Withdraw Profile"
-        singleWithdrawTarget?.membership == WithdrawTargetMembership.FREE_AGENT -> "Leave as Free Agent"
-        singleWithdrawTarget?.membership == WithdrawTargetMembership.WAITLIST -> "Leave Waitlist"
-        singleWithdrawTarget?.membership == WithdrawTargetMembership.PARTICIPANT &&
-            platformRefundsAvailable &&
-            refundPolicy.canAutoRefund -> "Withdraw and Get Refund"
-        singleWithdrawTarget?.membership == WithdrawTargetMembership.PARTICIPANT &&
-            platformRefundsAvailable -> "Withdraw and Request Refund"
-        singleWithdrawTarget?.membership == WithdrawTargetMembership.PARTICIPANT -> "Leave Event"
-        isFreeAgent -> "Leave as Free Agent"
-        isWaitListed -> "Leave Waitlist"
-        platformRefundsAvailable && refundPolicy.canAutoRefund -> "Leave and Get Refund"
-        platformRefundsAvailable -> "Leave and Request Refund"
-        else -> "Leave Event"
-    }
+    val platformRefundsAvailable = withdrawalPresentation.platformRefundsAvailable
+    val canRequestRefundAfterStart = withdrawalPresentation.canRequestRefundAfterStart
+    val actionWithdrawTargets = withdrawalPresentation.actionWithdrawTargets
+    val canLeaveEvent = withdrawalPresentation.canLeaveEvent
     val openLeaveOrRefundForTarget: (WithdrawTargetOption?) -> Unit = { target ->
         val shouldRefund = when {
             target != null -> {
@@ -384,16 +329,7 @@ fun EventDetailScreen(
             component.leaveEvent(target?.userId)
         }
     }
-    val leaveOrRefundActionLabel = when {
-        canRequestRefundAfterStart -> {
-            if (actionWithdrawTargets.size > 1) {
-                "Request Refunds"
-            } else {
-                "Request Refund"
-            }
-        }
-        else -> leaveMessage
-    }
+    val leaveOrRefundActionLabel = withdrawalPresentation.leaveOrRefundActionLabel
     val openLeaveOrRefundAction: () -> Unit = {
         when {
             actionWithdrawTargets.size > 1 -> {
@@ -494,247 +430,74 @@ fun EventDetailScreen(
             selectedJoinOptionDivisionId = null
         }
     }
-    val joinOptionPriceCents = remember(
-        selectedEvent.event.priceCents,
-        selectedEvent.event.divisions,
-        selectedEvent.event.divisionDetails,
+    val joinPresentation = remember(
+        selectedEvent.event,
         selectedDivision,
         selectedJoinOptionDivisionId,
         hasAnyPaidDivision,
         tournamentPoolPlayEnabled,
-    ) {
-        val preferredDivisionId = selectedJoinOptionDivisionId ?: if (tournamentPoolPlayEnabled) {
-            selectedEvent.event.resolveBracketDivisionForPool(selectedDivision) ?: selectedDivision
-        } else {
-            selectedDivision
-        }
-        when {
-            !preferredDivisionId.isNullOrBlank() -> selectedEvent.event.resolvedDivisionPriceCents(preferredDivisionId) ?: 0
-            selectedEvent.event.singleDivision -> selectedEvent.event.resolvedDivisionPriceCents() ?: 0
-            hasAnyPaidDivision -> selectedEvent.event.divisionPriceRange().maxPriceCents
-            else -> 0
-        }
-    }
-    val joinOptions = remember(
         isUserInEvent,
         selectedWeeklyOccurrenceJoined,
         isEventFull,
-        teamSignup,
-        joinOptionPriceCents,
         joinBlockedByStart,
         isWeeklyParentEvent,
         selectedWeeklyOccurrence,
-        selectedJoinOptionDivisionId,
-        registrationJoinDivisionOptions,
         isAffiliateEvent,
+        isRegistrationPaymentFailed,
     ) {
-        if (isAffiliateEvent) {
-            return@remember listOf(
-                JoinOption(
-                    label = "Register on website",
-                    requiresPayment = false,
-                    onClick = component::joinEvent,
-                )
-            )
-        }
-        val requiresWeeklySelection = isWeeklyParentEvent && selectedWeeklyOccurrence == null
-        val shouldHideJoinOptions = when {
-            joinBlockedByStart -> true
-            isWeeklyParentEvent -> requiresWeeklySelection || selectedWeeklyOccurrenceJoined
-            else -> isUserInEvent
-        }
-        if (shouldHideJoinOptions) {
-            emptyList()
-        } else {
-            buildList {
-                if (isEventFull) {
-                    if (teamSignup) {
-                        add(
-                            JoinOption(
-                                label = if (joinOptionPriceCents > 0) {
-                                    "Join Waitlist as Team (No Payment Yet)"
-                                } else {
-                                    "Join Waitlist as Team"
-                                },
-                                requiresPayment = joinOptionPriceCents > 0,
-                                onClick = {
-                                    selectedJoinOptionDivisionId?.let { component.selectDivision(it) }
-                                    showTeamSelectionDialog = true
-                                }
-                            )
-                        )
-                    } else {
-                        add(
-                            JoinOption(
-                                label = if (joinOptionPriceCents > 0) {
-                                    "Join Waitlist (No Payment Yet)"
-                                } else {
-                                    "Join Waitlist"
-                                },
-                                requiresPayment = joinOptionPriceCents > 0,
-                                onClick = component::joinEvent
-                            )
-                        )
-                    }
-                } else if (teamSignup) {
-                    add(
-                        JoinOption(
-                            label = "Join as Free Agent",
-                            requiresPayment = false,
-                            onClick = component::joinEvent
-                        )
-                    )
-                    add(
-                        JoinOption(
-                            label = if (joinOptionPriceCents > 0) {
-                                if (isRegistrationPaymentFailed) "Complete payment" else "Purchase Ticket for Team"
-                            } else {
-                                "Join as Team"
-                            },
-                            requiresPayment = joinOptionPriceCents > 0,
-                            onClick = {
-                                selectedJoinOptionDivisionId?.let { component.selectDivision(it) }
-                                showTeamSelectionDialog = true
-                            }
-                        )
-                    )
-                } else {
-                    add(
-                        JoinOption(
-                            label = if (joinOptionPriceCents > 0) {
-                                if (isRegistrationPaymentFailed) "Complete payment" else "Purchase Ticket"
-                            } else {
-                                "Join Event"
-                            },
-                            requiresPayment = joinOptionPriceCents > 0,
-                            onClick = component::joinEvent
-                        )
-                    )
-                }
-            }
-        }
+        buildEventDetailJoinPresentation(
+            event = selectedEvent.event,
+            selectedDivision = selectedDivision,
+            selectedJoinOptionDivisionId = selectedJoinOptionDivisionId,
+            hasAnyPaidDivision = hasAnyPaidDivision,
+            tournamentPoolPlayEnabled = tournamentPoolPlayEnabled,
+            isUserInEvent = isUserInEvent,
+            selectedWeeklyOccurrenceJoined = selectedWeeklyOccurrenceJoined,
+            isEventFull = isEventFull,
+            joinBlockedByStart = joinBlockedByStart,
+            isWeeklyParentEvent = isWeeklyParentEvent,
+            hasSelectedWeeklyOccurrence = selectedWeeklyOccurrence != null,
+            isAffiliateEvent = isAffiliateEvent,
+            isRegistrationPaymentFailed = isRegistrationPaymentFailed,
+            onJoinEvent = component::joinEvent,
+            onSelectTeam = { divisionId ->
+                divisionId?.let(component::selectDivision)
+                showTeamSelectionDialog = true
+            },
+        )
     }
-    val guideController = LocalGuideController.current
+    val joinOptions = joinPresentation.options
     val guideEventId = selectedEvent.event.id.trim()
-    val overviewJoinedGuideId = remember(guideEventId) {
-        EventGuideIds.eventOverviewJoined(guideEventId)
-    }
-    val overviewMatchDayGuideId = remember(guideEventId) {
-        EventGuideIds.eventOverviewMatchDay(guideEventId)
-    }
-    val overviewJoinedGuide = remember(overviewJoinedGuideId) {
-        eventOverviewGuide(overviewJoinedGuideId)
-    }
-    val overviewMatchDayGuide = remember(overviewMatchDayGuideId) {
-        eventOverviewGuide(overviewMatchDayGuideId)
-    }
-    val currentUserEventTeamIds = remember(currentUser.teamIds, validTeams) {
-        (currentUser.teamIds + validTeams.map { team -> team.team.id })
-            .map(String::trim)
-            .filter(String::isNotBlank)
-            .toSet()
-    }
-    val eventTimeZone = selectedEvent.event.resolvedTimeZone()
-    val eventToday = remember(eventTimeZone) {
-        Clock.System.now().toLocalDateTime(eventTimeZone).date
-    }
-    val isFirstMatchDayForCurrentUser = remember(
-        selectedEvent.matches,
-        scheduleTrackedUserIds,
-        currentUserEventTeamIds,
-        eventToday,
-        eventTimeZone,
-    ) {
-        isFirstMatchDayForTrackedUsers(
-            matches = selectedEvent.matches,
-            trackedUserIds = scheduleTrackedUserIds,
-            currentUserTeamIds = currentUserEventTeamIds,
-            today = eventToday,
-            timeZone = eventTimeZone,
-        )
-    }
-    val completedGuideIds = guideController?.completedGuideIds.orEmpty()
-    val hasOverviewHeaderTarget = guideController?.hasTarget(EventGuideTargets.OverviewHeader) == true
-    val hasOverviewPrimaryActionTarget = guideController?.hasTarget(EventGuideTargets.OverviewPrimaryAction) == true
-    val hasOverviewFormatTarget = guideController?.hasTarget(EventGuideTargets.OverviewFormat) == true
+    EventDetailOverviewGuideLifecycle(
+        selectedEvent = selectedEvent,
+        scheduleTrackedUserIds = scheduleTrackedUserIds,
+        currentUserTeamIds = currentUser.teamIds,
+        validTeams = validTeams,
+        showDetails = showDetails,
+        isEditing = isEditing,
+        showMap = showMap,
+        isUserInEvent = isUserInEvent,
+        showStickyActions = showStickyActions,
+    )
 
-    LaunchedEffect(
-        guideController,
-        guideEventId,
-        showDetails,
-        isEditing,
-        showMap,
-        isUserInEvent,
-        showStickyActions,
-        isFirstMatchDayForCurrentUser,
-        completedGuideIds,
-        hasOverviewHeaderTarget,
-        hasOverviewPrimaryActionTarget,
-        hasOverviewFormatTarget,
-    ) {
-        val controller = guideController ?: return@LaunchedEffect
-        if (guideEventId.isBlank()) return@LaunchedEffect
-        if (showDetails || isEditing || showMap || !isUserInEvent || !showStickyActions) return@LaunchedEffect
-
-        val requiredTargets = setOf(
-            EventGuideTargets.OverviewHeader,
-            EventGuideTargets.OverviewPrimaryAction,
-        )
-        if (!controller.isGuideCompleted(overviewJoinedGuideId)) {
-            controller.maybeStartGuide(
-                guide = overviewJoinedGuide,
-                requiredTargetIds = requiredTargets,
-            )
-            return@LaunchedEffect
-        }
-
-        if (isFirstMatchDayForCurrentUser) {
-            controller.maybeStartGuide(
-                guide = overviewMatchDayGuide,
-                requiredTargetIds = requiredTargets,
-            )
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        component.setLoadingHandler(loadingHandler)
-        component.errorState.collect { error ->
-            if (error != null) {
-                popupHandler.showPopup(error)
-                component.clearError()
-            }
-        }
-    }
-
-    LaunchedEffect(playerInteractionComponent, loadingHandler, popupHandler) {
-        playerInteractionComponent.setLoadingHandler(loadingHandler)
-        playerInteractionComponent.errorState.collect { error ->
-            if (error != null) {
-                popupHandler.showPopup(error)
-            }
-        }
-    }
-
-    LaunchedEffect(showDetails, isEditing, showMap) {
-        if (showDetails || isEditing || showMap) {
-            showJoinOptionsSheet = false
-            showStickyDockByScroll = true
-        }
-    }
-
-    LaunchedEffect(isEditing) {
-        if (!isEditing) {
+    EventDetailRouteLifecycleEffects(
+        eventErrors = component.errorState,
+        playerErrors = playerInteractionComponent.errorState,
+        loadingHandler = loadingHandler,
+        popupHandler = popupHandler,
+        setEventLoadingHandler = component::setLoadingHandler,
+        setPlayerLoadingHandler = playerInteractionComponent::setLoadingHandler,
+        clearEventError = component::clearError,
+        showDetails = showDetails,
+        isEditing = isEditing,
+        showMap = showMap,
+        closeJoinOptions = { showJoinOptionsSheet = false },
+        resetStickyDock = { showStickyDockByScroll = true },
+        clearMapSelection = {
             pendingMapPlace = null
             isLocationPickerMapMode = false
-        }
-    }
-
-    LaunchedEffect(showMap) {
-        if (!showMap) {
-            pendingMapPlace = null
-            isLocationPickerMapMode = false
-        }
-    }
+        },
+    )
 
     CompositionLocalProvider(LocalTournamentComponent provides component) {
         CircularRevealUnderlay(
@@ -759,7 +522,7 @@ fun EventDetailScreen(
                         mapRevealCenter = Offset(x, y)
                     },
                     selectionRequiresConfirmation = isLocationPickerMapMode,
-                    originalPlace = originalLocationPlace(),
+                    originalPlace = originalLocationPlace,
                     selectedPlace = pendingMapPlace,
                     onPlaceSelectionCleared = {
                         pendingMapPlace = null
@@ -769,8 +532,8 @@ fun EventDetailScreen(
                         pendingMapPlace != null -> {
                             LatLng(pendingMapPlace!!.latitude, pendingMapPlace!!.longitude)
                         }
-                        originalLocationPlace() != null -> {
-                            LatLng(originalLocationPlace()!!.latitude, originalLocationPlace()!!.longitude)
+                        originalLocationPlace != null -> {
+                            LatLng(originalLocationPlace.latitude, originalLocationPlace.longitude)
                         }
                         editedEvent.location.isNotBlank() -> {
                             LatLng(editedEvent.lat, editedEvent.long)
