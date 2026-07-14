@@ -2,10 +2,11 @@ package com.razumly.mvp.eventDetail.readonly
 
 import android.app.Application
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.test.assertDoesNotExist
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import com.razumly.mvp.core.data.dataTypes.Organization
@@ -38,6 +39,7 @@ class HostedByReadOnlyRowUiTest {
                         website = null,
                         hasStripeAccount = false,
                         coordinates = null,
+                        fieldIds = emptyList(),
                     ),
                     isOrganizationEvent = true,
                     fallbackHostDisplayName = "River City Sports Club",
@@ -54,6 +56,6 @@ class HostedByReadOnlyRowUiTest {
 
         composeRule.onNodeWithText("River City Sports Club").assertIsDisplayed()
         composeRule.onNodeWithTag(ORGANIZATION_HOST_CARD_TEST_TAG).assertHasNoClickAction()
-        composeRule.onNodeWithText("Follow").assertDoesNotExist()
+        composeRule.onAllNodesWithText("Follow").assertCountEquals(0)
     }
 }
