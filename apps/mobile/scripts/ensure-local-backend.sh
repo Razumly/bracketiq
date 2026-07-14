@@ -52,7 +52,6 @@ resolve_backend_dir() {
   candidates+=(
     "$REPO_ROOT/../mvp-site"
     "$HOME/Documents/Code/mvp-site"
-    "/mnt/c/Users/samue/Documents/Code/mvp-site"
     "$HOME/Projects/MVP/mvp-site"
     "$HOME/StudioProjects/mvp-site"
   )
@@ -276,4 +275,6 @@ main() {
   log "Backend ready at http://localhost:$port"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
