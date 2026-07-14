@@ -15,6 +15,10 @@ internal class EventRoomStore(
     suspend fun getEvent(eventId: String): Event? =
         databaseService.getEventDao.getEventById(eventId)
 
+    suspend fun cacheEvent(event: Event) {
+        databaseService.getEventDao.upsertEvent(event)
+    }
+
     suspend fun cacheAndReadEvent(
         event: Event,
         expectedEventId: String,

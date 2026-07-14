@@ -3,7 +3,6 @@ package com.razumly.mvp.core.data.repositories
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.Bounds
-import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.EventRegistrationCacheEntry
@@ -22,9 +21,6 @@ import com.razumly.mvp.core.data.dataTypes.usableLatitudeLongitude
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.analytics.AnalyticsEvent
 import com.razumly.mvp.core.analytics.AnalyticsTracker
-import com.razumly.mvp.core.data.util.isPlaceholderSlot
-import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
-import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.jsonMVP
 import dev.icerock.moko.geo.LatLng
@@ -33,11 +29,7 @@ import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.CreateEventRequestDto
 import com.razumly.mvp.core.network.dto.CreateEventTemplateRequestDto
 import com.razumly.mvp.core.network.dto.EventApiDto
-import com.razumly.mvp.core.network.dto.EventChildRegistrationRequestDto
-import com.razumly.mvp.core.network.dto.EventChildRegistrationResponseDto
 import com.razumly.mvp.core.network.dto.EventParticipantsSnapshotResponseDto
-import com.razumly.mvp.core.network.dto.EventParticipantsRequestDto
-import com.razumly.mvp.core.network.dto.EventParticipantsResponseDto
 import com.razumly.mvp.core.network.dto.EventResponseDto
 import com.razumly.mvp.core.network.dto.EventSearchFiltersDto
 import com.razumly.mvp.core.network.dto.EventSearchRequestDto
@@ -123,6 +115,15 @@ class EventRepository(
         registrationDao = { databaseService.getEventRegistrationDao },
         api = api,
         currentUserDataSource = currentUserDataSource,
+    )
+    private val registrationMutationCoordinator = EventRegistrationMutationCoordinator(
+        api = api,
+        roomStore = roomStore,
+        detailRemoteGateway = detailRemoteGateway,
+        participantSyncCoordinator = participantSyncCoordinator,
+        registrationCacheCoordinator = registrationCacheCoordinator,
+        teamRepository = teamRepository,
+        userRepository = userRepository,
     )
     private val sessionCacheCoordinator = EventSessionCacheCoordinator(
         databaseService = databaseService,
@@ -439,19 +440,6 @@ class EventRepository(
 
     override suspend fun clearCurrentUserRegistrationCache(): Result<Unit> =
         runCatching { registrationCacheCoordinator.clear() }
-
-    private suspend fun syncEventParticipantsAfterMutation(
-        event: Event,
-        occurrence: EventOccurrenceSelection?,
-    ): EventParticipantsSyncResult? {
-        syncCurrentUserRegistrationCache().getOrNull()
-        return syncEventParticipants(event, occurrence)
-            .onFailure {
-                databaseService.getEventDao.upsertEvent(event)
-                participantSyncCoordinator.persistEventRelations(event)
-            }
-            .getOrNull()
-    }
 
     override suspend fun getLeagueScoringConfig(eventId: String): Result<LeagueScoringConfig?> = runCatching {
         val normalizedEventId = eventId.trim().takeIf(String::isNotBlank) ?: return@runCatching null
@@ -1076,255 +1064,46 @@ class EventRepository(
         occurrence: EventOccurrenceSelection?,
         answers: Map<String, String>,
     ): Result<SelfRegistrationResult> =
-        runCatching {
-            val currentUser = userRepository.currentUser.value.getOrThrow()
-            val eventAtCapacity = if (event.teamSignup) {
-                false
-            } else {
-                isEventAtCapacity(
-                    event = event,
-                    preferredDivisionId = preferredDivisionId,
-                    occurrence = occurrence,
-                )
-            }
-            val divisionPayload = resolveRegistrationDivisionPayload(
-                event = event,
-                preferredDivisionId = preferredDivisionId,
-            )
-            val request = EventParticipantsRequestDto(
-                userId = currentUser.id,
-                divisionId = divisionPayload.divisionId,
-                divisionTypeId = divisionPayload.divisionTypeId,
-                divisionTypeKey = divisionPayload.divisionTypeKey,
-                slotId = occurrence?.slotId,
-                occurrenceDate = occurrence?.occurrenceDate,
-                answers = answers.toEventRegistrationQuestionAnswerDtos(),
-            )
-            AnalyticsTracker.capture(
-                AnalyticsEvent.EventRegistrationStarted,
-                event.analyticsProperties() + mapOf(
-                    "registration_type" to if (event.teamSignup) "free_agent" else "self",
-                    "joined_waitlist" to eventAtCapacity.toString(),
-                ),
-            )
-            val response = when {
-                eventAtCapacity -> {
-                    api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
-                        path = "api/events/${event.id}/waitlist",
-                        body = request,
-                    )
-                }
-
-                event.teamSignup -> {
-                    api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
-                        path = "api/events/${event.id}/free-agents",
-                        body = EventParticipantsRequestDto(
-                            userId = currentUser.id,
-                            slotId = occurrence?.slotId,
-                            occurrenceDate = occurrence?.occurrenceDate,
-                            answers = answers.toEventRegistrationQuestionAnswerDtos(),
-                        ),
-                    )
-                }
-
-                else -> {
-                    api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
-                        path = "api/events/${event.id}/participants",
-                        body = request,
-                    )
-                }
-            }
-
-            response.error?.takeIf(String::isNotBlank)?.let { errorMessage ->
-                error(errorMessage)
-            }
-
-            val updatedEvent = response.event?.toEventOrNull() ?: event
-            syncEventParticipantsAfterMutation(updatedEvent, occurrence)
-
-            AnalyticsTracker.capture(
-                AnalyticsEvent.EventRegistrationCompleted,
-                event.analyticsProperties() + mapOf(
-                    "registration_type" to "self",
-                    "joined_waitlist" to (eventAtCapacity && response.requiresParentApproval != true).toString(),
-                    "requires_parent_approval" to (response.requiresParentApproval == true).toString(),
-                ),
-            )
-            SelfRegistrationResult(
-                requiresParentApproval = response.requiresParentApproval == true,
-                joinedWaitlist = eventAtCapacity && response.requiresParentApproval != true,
-            )
-        }
-
+        registrationMutationCoordinator.addCurrentUser(
+            event = event,
+            preferredDivisionId = preferredDivisionId,
+            occurrence = occurrence,
+            answers = answers,
+        )
     override suspend fun addPlayerToEvent(
         event: Event,
         player: UserData,
         preferredDivisionId: String?,
         occurrence: EventOccurrenceSelection?,
     ): Result<SelfRegistrationResult> =
-        runCatching {
-            val normalizedUserId = player.id.trim()
-            if (normalizedUserId.isBlank()) {
-                error("User id is required.")
-            }
-            val divisionPayload = resolveRegistrationDivisionPayload(
-                event = event,
-                preferredDivisionId = preferredDivisionId,
-            )
-            val response = api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
-                path = "api/events/${event.id}/participants",
-                body = EventParticipantsRequestDto(
-                    userId = normalizedUserId,
-                    divisionId = divisionPayload.divisionId,
-                    divisionTypeId = divisionPayload.divisionTypeId,
-                    divisionTypeKey = divisionPayload.divisionTypeKey,
-                    slotId = occurrence?.slotId,
-                    occurrenceDate = occurrence?.occurrenceDate,
-                ),
-            )
-            response.error?.takeIf(String::isNotBlank)?.let { error(it) }
-
-            val updatedEvent = response.event?.toEventOrNull() ?: event
-            syncEventParticipantsAfterMutation(updatedEvent, occurrence)
-
-            SelfRegistrationResult(
-                requiresParentApproval = response.requiresParentApproval == true,
-                joinedWaitlist = false,
-            )
-        }
-
+        registrationMutationCoordinator.addPlayer(
+            event = event,
+            player = player,
+            preferredDivisionId = preferredDivisionId,
+            occurrence = occurrence,
+        )
     override suspend fun requestCurrentUserRegistration(
         event: Event,
         preferredDivisionId: String?,
         occurrence: EventOccurrenceSelection?,
     ): Result<SelfRegistrationResult> =
-        runCatching {
-            val currentUser = userRepository.currentUser.value.getOrThrow()
-            val divisionPayload = resolveRegistrationDivisionPayload(
-                event = event,
-                preferredDivisionId = preferredDivisionId,
-            )
-            val response = api.post<EventParticipantsRequestDto, EventChildRegistrationResponseDto>(
-                path = "api/events/${event.id}/registrations/self",
-                body = EventParticipantsRequestDto(
-                    userId = currentUser.id,
-                    divisionId = divisionPayload.divisionId,
-                    divisionTypeId = divisionPayload.divisionTypeId,
-                    divisionTypeKey = divisionPayload.divisionTypeKey,
-                    slotId = occurrence?.slotId,
-                    occurrenceDate = occurrence?.occurrenceDate,
-                ),
-            )
-            AnalyticsTracker.capture(
-                AnalyticsEvent.EventRegistrationStarted,
-                event.analyticsProperties() + mapOf(
-                    "registration_type" to "self",
-                    "requires_parent_approval" to "true",
-                ),
-            )
-            response.error?.takeIf(String::isNotBlank)?.let { error(it) }
-            val registrationStatus = response.registration?.status
-                ?.trim()
-                ?.uppercase()
-            SelfRegistrationResult(
-                requiresParentApproval = response.requiresParentApproval == true,
-                joinedWaitlist = registrationStatus == "WAITLISTED",
-            )
-        }
-
+        registrationMutationCoordinator.requestCurrentUserRegistration(
+            event = event,
+            preferredDivisionId = preferredDivisionId,
+            occurrence = occurrence,
+        )
     override suspend fun registerChildForEvent(
         eventId: String,
         childUserId: String,
         joinWaitlist: Boolean,
         occurrence: EventOccurrenceSelection?,
     ): Result<ChildRegistrationResult> =
-        runCatching {
-            val normalizedEventId = eventId.trim()
-            val normalizedChildUserId = childUserId.trim()
-            if (normalizedEventId.isBlank() || normalizedChildUserId.isBlank()) {
-                error("Event id and child user id are required.")
-            }
-
-            if (joinWaitlist) {
-                AnalyticsTracker.capture(
-                    AnalyticsEvent.EventRegistrationStarted,
-                    mapOf(
-                        "event_id" to normalizedEventId,
-                        "registration_type" to "waitlist",
-                        "requires_parent_approval" to "true",
-                    ),
-                )
-                val waitlistResponse = api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
-                    path = "api/events/$normalizedEventId/waitlist",
-                    body = EventParticipantsRequestDto(
-                        userId = normalizedChildUserId,
-                        slotId = occurrence?.slotId,
-                        occurrenceDate = occurrence?.occurrenceDate,
-                    ),
-                )
-                waitlistResponse.error?.takeIf(String::isNotBlank)?.let { error(it) }
-                val baseEvent = waitlistResponse.event?.toEventOrNull()
-                    ?: roomStore.getEvent(normalizedEventId)
-                    ?: error("Updated event not found after waitlist response.")
-                syncEventParticipantsAfterMutation(baseEvent, occurrence)
-
-                AnalyticsTracker.capture(
-                    AnalyticsEvent.EventRegistrationCompleted,
-                    mapOf(
-                        "event_id" to normalizedEventId,
-                        "registration_type" to "child",
-                        "joined_waitlist" to (waitlistResponse.requiresParentApproval != true).toString(),
-                        "requires_parent_approval" to (waitlistResponse.requiresParentApproval == true).toString(),
-                    ),
-                )
-                return@runCatching ChildRegistrationResult(
-                    registrationStatus = if (waitlistResponse.requiresParentApproval == true) {
-                        null
-                    } else {
-                        "WAITLISTED"
-                    },
-                    requiresParentApproval = waitlistResponse.requiresParentApproval == true,
-                    joinedWaitlist = waitlistResponse.requiresParentApproval != true,
-                )
-            }
-
-            AnalyticsTracker.capture(
-                AnalyticsEvent.EventRegistrationStarted,
-                mapOf(
-                    "event_id" to normalizedEventId,
-                    "registration_type" to "child",
-                    "requires_parent_approval" to "true",
-                ),
-            )
-            val response = api.post<EventChildRegistrationRequestDto, EventChildRegistrationResponseDto>(
-                path = "api/events/$normalizedEventId/registrations/child",
-                body = EventChildRegistrationRequestDto(
-                    childId = normalizedChildUserId,
-                    slotId = occurrence?.slotId,
-                    occurrenceDate = occurrence?.occurrenceDate,
-                ),
-            )
-            response.error?.takeIf(String::isNotBlank)?.let { error(it) }
-            AnalyticsTracker.capture(
-                AnalyticsEvent.EventRegistrationCompleted,
-                mapOf(
-                    "event_id" to normalizedEventId,
-                    "registration_type" to "child",
-                    "joined_waitlist" to "false",
-                    "requires_parent_approval" to (response.requiresParentApproval == true).toString(),
-                    "requires_child_email" to (response.consent?.requiresChildEmail == true).toString(),
-                ),
-            )
-            ChildRegistrationResult(
-                registrationStatus = response.registration?.status,
-                consentStatus = response.consent?.status ?: response.registration?.consentStatus,
-                requiresParentApproval = response.requiresParentApproval == true,
-                requiresChildEmail = response.consent?.requiresChildEmail == true,
-                joinedWaitlist = false,
-                warnings = response.warnings,
-            )
-        }
-
+        registrationMutationCoordinator.registerChild(
+            eventId = eventId,
+            childUserId = childUserId,
+            joinWaitlist = joinWaitlist,
+            occurrence = occurrence,
+        )
     override suspend fun addTeamToEvent(
         event: Event,
         team: Team,
@@ -1345,90 +1124,25 @@ class EventRepository(
         occurrence: EventOccurrenceSelection?,
         answers: Map<String, String>,
     ): Result<Unit> =
-        runCatching {
-            if (event.waitList.contains(team.id)) {
-                throw Exception("Team already in waitlist")
-            }
-            val divisionPreference = preferredDivisionId?.trim()?.takeIf(String::isNotBlank) ?: team.division
-            val divisionPayload = resolveRegistrationDivisionPayload(
-                event = event,
-                preferredDivisionId = divisionPreference,
-            )
-            val request = EventParticipantsRequestDto(
-                teamId = team.id,
-                divisionId = divisionPayload.divisionId,
-                divisionTypeId = divisionPayload.divisionTypeId,
-                divisionTypeKey = divisionPayload.divisionTypeKey,
-                slotId = occurrence?.slotId,
-                occurrenceDate = occurrence?.occurrenceDate,
-                answers = answers.toEventRegistrationQuestionAnswerDtos(),
-            )
-            AnalyticsTracker.capture(
-                AnalyticsEvent.EventRegistrationStarted,
-                event.analyticsProperties() + mapOf(
-                    "registration_type" to "team",
-                    "team_id" to team.id,
-                ),
-            )
-            val updated = if (
-                isEventAtCapacity(
-                    event = event,
-                    preferredDivisionId = divisionPreference,
-                    occurrence = occurrence,
-                )
-            ) {
-                api.post<EventParticipantsRequestDto, EventResponseDto>(
-                    path = "api/events/${event.id}/waitlist",
-                    body = request,
-                )
-            } else {
-                api.post<EventParticipantsRequestDto, EventResponseDto>(
-                    path = "api/events/${event.id}/participants",
-                    body = request,
-                )
-            }.event?.toEventOrNull() ?: event
-
-            syncEventParticipantsAfterMutation(updated, occurrence)
-            AnalyticsTracker.capture(
-                AnalyticsEvent.EventRegistrationCompleted,
-                event.analyticsProperties() + mapOf(
-                    "registration_type" to "team",
-                    "joined_waitlist" to updated.waitList.contains(team.id).toString(),
-                ),
-            )
-        }
-
+        registrationMutationCoordinator.addTeam(
+            event = event,
+            team = team,
+            preferredDivisionId = preferredDivisionId,
+            occurrence = occurrence,
+            answers = answers,
+        )
     override suspend fun moveTeamParticipantDivision(
         event: Event,
         team: Team,
         preferredDivisionId: String,
         occurrence: EventOccurrenceSelection?,
     ): Result<EventParticipantsSyncResult> =
-        runCatching {
-            val normalizedTeamId = team.id.trim().takeIf(String::isNotBlank)
-                ?: error("Team id is required.")
-            val divisionPreference = preferredDivisionId.trim().takeIf(String::isNotBlank)
-                ?: error("Division id is required.")
-            val divisionPayload = resolveRegistrationDivisionPayload(
-                event = event,
-                preferredDivisionId = divisionPreference,
-            )
-            val updated = api.post<EventParticipantsRequestDto, EventResponseDto>(
-                path = "api/events/${event.id}/participants",
-                body = EventParticipantsRequestDto(
-                    teamId = normalizedTeamId,
-                    divisionId = divisionPayload.divisionId,
-                    divisionTypeId = divisionPayload.divisionTypeId,
-                    divisionTypeKey = divisionPayload.divisionTypeKey,
-                    slotId = occurrence?.slotId,
-                    occurrenceDate = occurrence?.occurrenceDate,
-                ),
-            ).event?.toEventOrNull() ?: event
-
-            syncEventParticipantsAfterMutation(updated, occurrence)
-                ?: error("Failed to refresh event participants after moving team division.")
-        }
-
+        registrationMutationCoordinator.moveTeamDivision(
+            event = event,
+            team = team,
+            preferredDivisionId = preferredDivisionId,
+            occurrence = occurrence,
+        )
     override suspend fun getLeagueDivisionStandings(
         eventId: String,
         divisionId: String,
@@ -1479,44 +1193,23 @@ class EventRepository(
         refundReason: String?,
         occurrence: EventOccurrenceSelection?,
     ): Result<Unit> =
-        runCatching {
-            val updated = api.delete<EventParticipantsRequestDto, EventResponseDto>(
-                path = "api/events/${event.id}/participants",
-                body = EventParticipantsRequestDto(
-                    teamId = teamWithPlayers.team.id,
-                    slotId = occurrence?.slotId,
-                    occurrenceDate = occurrence?.occurrenceDate,
-                    refundMode = refundMode?.wireValue,
-                    refundReason = refundReason
-                        ?.trim()
-                        ?.takeIf(String::isNotBlank),
-                ),
-            ).event?.toEventOrNull() ?: event
-
-            syncEventParticipantsAfterMutation(updated, occurrence)
-        }
-
+        registrationMutationCoordinator.removeTeam(
+            event = event,
+            teamWithPlayers = teamWithPlayers,
+            refundMode = refundMode,
+            refundReason = refundReason,
+            occurrence = occurrence,
+        )
     override suspend fun removeCurrentUserFromEvent(
         event: Event,
         targetUserId: String?,
         occurrence: EventOccurrenceSelection?,
-    ): Result<Unit> {
-        val currentUser = userRepository.currentUser.value.getOrThrow()
-        val resolvedUserId = targetUserId?.trim()?.takeIf(String::isNotBlank) ?: currentUser.id
-        return runCatching {
-            val updated = api.delete<EventParticipantsRequestDto, EventResponseDto>(
-                path = "api/events/${event.id}/participants",
-                body = EventParticipantsRequestDto(
-                    userId = resolvedUserId,
-                    slotId = occurrence?.slotId,
-                    occurrenceDate = occurrence?.occurrenceDate,
-                ),
-            ).event?.toEventOrNull() ?: event
-
-            syncEventParticipantsAfterMutation(updated, occurrence)
-        }
-    }
-
+    ): Result<Unit> =
+        registrationMutationCoordinator.removeCurrentUser(
+            event = event,
+            targetUserId = targetUserId,
+            occurrence = occurrence,
+        )
     override suspend fun getMySchedule(): Result<UserScheduleSnapshot> = runCatching {
         val requestedAt = Instant.fromEpochMilliseconds(Clock.System.now().toEpochMilliseconds())
         val windowFrom = requestedAt.minus(MY_SCHEDULE_PAST_DAYS.days)
@@ -1666,106 +1359,4 @@ class EventRepository(
         return apiException.statusCode == 403 || apiException.statusCode == 404
     }
 
-    private fun resolveSelectedDivisionDetail(
-        event: Event,
-        preferredDivisionId: String?,
-    ): DivisionDetail? {
-        if (event.divisions.isEmpty()) {
-            return null
-        }
-
-        val normalizedPreferredDivision = preferredDivisionId
-            ?.normalizeDivisionIdentifier()
-            ?.ifEmpty { null }
-
-        val normalizedDivisionIds = event.divisions.normalizeDivisionIdentifiers()
-        val divisionDetails = normalizedDivisionIds.mapNotNull { divisionId ->
-            event.divisionDetails.firstOrNull { detail ->
-                detail.id.normalizeDivisionIdentifier() == divisionId
-            }
-        }
-        if (divisionDetails.isEmpty()) {
-            return null
-        }
-
-        return if (!normalizedPreferredDivision.isNullOrBlank()) {
-            divisionDetails.firstOrNull { detail ->
-                detail.id.normalizeDivisionIdentifier() == normalizedPreferredDivision
-            }
-                ?: divisionDetails.firstOrNull()
-        } else {
-            divisionDetails.firstOrNull()
-        }
-    }
-
-    private fun resolveRegistrationDivisionPayload(
-        event: Event,
-        preferredDivisionId: String?,
-    ): RegistrationDivisionPayload {
-        val selectedDivision = resolveSelectedDivisionDetail(event, preferredDivisionId)
-            ?: return RegistrationDivisionPayload()
-
-        val divisionId = selectedDivision.id.normalizeDivisionIdentifier().ifEmpty { null }
-        val divisionTypeId = selectedDivision.divisionTypeId.normalizeDivisionIdentifier().ifEmpty { null }
-        val divisionTypeKey = selectedDivision.key.normalizeDivisionIdentifier().ifEmpty { null }
-
-        return RegistrationDivisionPayload(
-            divisionId = divisionId,
-            divisionTypeId = divisionTypeId,
-            divisionTypeKey = divisionTypeKey,
-        )
-    }
-
-    private suspend fun isEventAtCapacity(
-        event: Event,
-        preferredDivisionId: String? = null,
-        occurrence: EventOccurrenceSelection? = null,
-    ): Boolean {
-        val participantSnapshot = runCatching {
-            detailRemoteGateway.fetchParticipantsSnapshot(event.id, occurrence)
-        }.getOrNull()
-
-        if (participantSnapshot?.weeklySelectionRequired == true) {
-            return false
-        }
-
-        val selectedDivision = if (event.divisions.isEmpty()) {
-            null
-        } else {
-            resolveSelectedDivisionDetail(event, preferredDivisionId)
-        }
-        val missingCapacityMessage =
-            "Set ${if (event.teamSignup) "max teams" else "max participants"} for this division before joining."
-        val maxParticipants = participantSnapshot?.participantCapacity?.takeIf { value -> value > 0 }
-            ?: if (event.divisions.isEmpty()) {
-                event.maxParticipants.takeIf { value -> value > 0 }
-            } else {
-                selectedDivision?.maxParticipants?.takeIf { value -> value > 0 }
-            }
-            ?: throw IllegalStateException(missingCapacityMessage)
-
-        val participantCount = participantSnapshot?.participantCount ?: if (event.teamSignup) {
-            val teamIds = event.teamIds
-                .map(String::trim)
-                .filter(String::isNotBlank)
-            if (teamIds.isEmpty()) {
-                0
-            } else {
-                val teams = teamRepository.getTeamsWithPlayers(teamIds).getOrElse { emptyList() }
-                val divisionId = selectedDivision?.id?.normalizeDivisionIdentifier()?.takeIf(String::isNotBlank)
-                val shouldFilterDivision = event.divisions.isNotEmpty() && divisionId != null
-                teams.count { teamWithPlayers ->
-                    val team = teamWithPlayers.team
-                    val teamDivision = team.division.normalizeDivisionIdentifier()
-                    !team.isPlaceholderSlot(event.eventType) && (
-                        !shouldFilterDivision ||
-                            (divisionId != null && teamDivision == divisionId)
-                    )
-                }
-            }
-        } else {
-            event.playerIds.size
-        }
-        return participantCount >= maxParticipants
-    }
 }
