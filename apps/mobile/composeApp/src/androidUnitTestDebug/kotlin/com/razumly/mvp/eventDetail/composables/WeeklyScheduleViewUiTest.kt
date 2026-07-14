@@ -129,11 +129,15 @@ class WeeklyScheduleViewUiTest {
         composeRule.setContent {
             CompositionLocalProvider(LocalNavBarPadding provides PaddingValues()) {
                 MaterialTheme {
+                    val recompositionMarker = unrelatedRecomposition.intValue
                     ScheduleView(
                         items = listOf(ScheduleItem.EventEntry(occurrence)),
                         fields = emptyList(),
-                        showFab = { visibilityUpdates += 1 },
-                        topContentPadding = unrelatedRecomposition.intValue.dp,
+                        showFab = {
+                            check(recompositionMarker >= 0)
+                            visibilityUpdates += 1
+                        },
+                        topContentPadding = 0.dp,
                         onMatchClick = {},
                         eventCardContent = { event, _, _, _ ->
                             Text(text = "schedule-${event.id}")
