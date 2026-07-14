@@ -45,7 +45,6 @@ import com.razumly.mvp.core.network.dto.EventApiDto
 import com.razumly.mvp.core.network.dto.EventChildRegistrationRequestDto
 import com.razumly.mvp.core.network.dto.EventChildRegistrationResponseDto
 import com.razumly.mvp.core.network.dto.EventComplianceUserSummaryDto
-import com.razumly.mvp.core.network.dto.EventDetailBootstrapResponseDto
 import com.razumly.mvp.core.network.dto.EventParticipantDivisionWarningDto
 import com.razumly.mvp.core.network.dto.EventParticipantRegistrationSectionsDto
 import com.razumly.mvp.core.network.dto.EventParticipantsSnapshotResponseDto
@@ -77,7 +76,6 @@ import com.razumly.mvp.core.network.dto.UpdateEventRequestDto
 import com.razumly.mvp.core.network.dto.toUserDataOrNull
 import com.razumly.mvp.core.network.dto.hasMoreEventRows
 import com.razumly.mvp.core.network.dto.pageContinuationOrThrow
-import com.razumly.mvp.core.network.dto.toEventOrThrow
 import com.razumly.mvp.core.network.dto.toEventsOrThrow
 import com.razumly.mvp.core.network.dto.toUpdateDto
 import io.github.aakira.napier.Napier
@@ -393,6 +391,8 @@ class EventRepository(
     private val currentUserDataSource: CurrentUserDataSource? = null,
     coroutineDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : IEventRepository {
+    private val roomStore = EventRoomStore(databaseService)
+    private val detailRemoteGateway = EventDetailRemoteGateway(api)
     private val sessionCacheCoordinator = EventSessionCacheCoordinator(
         databaseService = databaseService,
         userRepository = userRepository,
@@ -433,7 +433,7 @@ class EventRepository(
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> =
         callbackFlow {
             val localJob = launch {
-                databaseService.getEventDao.getEventWithRelationsFlow(eventId)
+                roomStore.observeEventWithRelations(eventId)
                     .collect { local ->
                         if (local != null) {
                             trySend(Result.success(local))
@@ -464,7 +464,7 @@ class EventRepository(
         if (normalizedEventId.isBlank()) {
             return flowOf(Result.failure(IllegalArgumentException("Event id is required.")))
         }
-        return databaseService.getEventDao.getEventWithRelationsFlow(normalizedEventId)
+        return roomStore.observeEventWithRelations(normalizedEventId)
             .map { relations ->
                 if (relations != null) {
                     Result.success(relations)
@@ -472,19 +472,6 @@ class EventRepository(
                     Result.failure(NoSuchElementException("Event $normalizedEventId not found in local cache"))
                 }
             }
-    }
-
-    private suspend fun fetchRemoteEventDto(eventId: String): EventApiDto {
-        return api.get<EventApiDto>("api/events/$eventId")
-    }
-
-    private suspend fun fetchRemoteLeagueScoringConfig(scoringConfigId: String): LeagueScoringConfig {
-        return api.get<LeagueScoringConfig>("api/league-scoring-configs/$scoringConfigId")
-    }
-
-    private suspend fun fetchRemoteEvent(eventId: String): Event {
-        val dto = fetchRemoteEventDto(eventId)
-        return dto.toEventOrThrow("Event $eventId response")
     }
 
     private fun List<DivisionDetail>.preservesConfiguredDivisionDetailsFrom(cached: Event): Boolean {
@@ -687,85 +674,12 @@ class EventRepository(
             })
     }
 
-    private fun appendOccurrenceQuery(
-        basePath: String,
-        occurrence: EventOccurrenceSelection?,
-        extraQueryParams: Map<String, String> = emptyMap(),
-    ): String {
-        val normalizedSlotId = occurrence?.slotId?.trim()?.takeIf(String::isNotBlank)
-        val normalizedOccurrenceDate = occurrence?.occurrenceDate?.trim()?.takeIf(String::isNotBlank)
-        val queryParams = linkedMapOf<String, String>()
-        if (normalizedSlotId != null && normalizedOccurrenceDate != null) {
-            queryParams["slotId"] = normalizedSlotId
-            queryParams["occurrenceDate"] = normalizedOccurrenceDate
-        }
-        extraQueryParams.forEach { (key, value) ->
-            val normalizedKey = key.trim()
-            val normalizedValue = value.trim()
-            if (normalizedKey.isNotBlank() && normalizedValue.isNotBlank()) {
-                queryParams[normalizedKey] = normalizedValue
-            }
-        }
-        if (queryParams.isEmpty()) {
-            return basePath
-        }
-        return buildString {
-            append(basePath)
-            append("?")
-            append(
-                queryParams.entries.joinToString("&") { (key, value) ->
-                    "${key.encodeURLQueryComponent()}=${value.encodeURLQueryComponent()}"
-                },
-            )
-        }
-    }
-
     private fun normalizedParticipantIds(
         ids: List<String>,
     ): List<String> = ids
         .map(String::trim)
         .filter(String::isNotBlank)
         .distinct()
-
-    private suspend fun fetchEventParticipantsSnapshot(
-        eventId: String,
-        occurrence: EventOccurrenceSelection?,
-        manage: Boolean = false,
-    ): EventParticipantsSnapshotResponseDto {
-        val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
-            ?: error("Event id is required.")
-        return api.get(
-            appendOccurrenceQuery(
-                basePath = "api/events/$normalizedEventId/participants",
-                occurrence = occurrence,
-                extraQueryParams = if (manage) {
-                    mapOf("manage" to "true")
-                } else {
-                    emptyMap()
-                },
-            ),
-        )
-    }
-
-    private suspend fun fetchEventDetailBootstrap(
-        eventId: String,
-        occurrence: EventOccurrenceSelection?,
-        manage: Boolean,
-    ): EventDetailBootstrapResponseDto {
-        val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
-            ?: error("Event id is required.")
-        return api.get(
-            appendOccurrenceQuery(
-                basePath = "api/events/$normalizedEventId/detail",
-                occurrence = occurrence,
-                extraQueryParams = if (manage) {
-                    mapOf("manage" to "true")
-                } else {
-                    emptyMap()
-                },
-            ),
-        )
-    }
 
     private suspend fun replaceParticipantManagementSnapshot(
         scope: EventParticipantCacheScope,
@@ -918,23 +832,24 @@ class EventRepository(
             val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
                 ?: error("Event id is required.")
             val event = try {
-                fetchRemoteEvent(normalizedEventId)
+                detailRemoteGateway.fetchEvent(normalizedEventId)
             } catch (throwable: Throwable) {
                 if (shouldEvictEventFromCache(throwable)) {
-                    databaseService.getEventDao.deleteEventWithCrossRefs(normalizedEventId)
+                    roomStore.evictEvent(normalizedEventId)
                 }
                 throw throwable
             }
-            databaseService.getEventDao.upsertEvent(event)
-            databaseService.getEventDao.getEventById(normalizedEventId)
-                ?: throw IllegalStateException("Event $normalizedEventId not cached")
+            roomStore.cacheAndReadEvent(
+                event = event,
+                expectedEventId = normalizedEventId,
+            )
         }
 
     override suspend fun syncEventParticipants(
         event: Event,
         occurrence: EventOccurrenceSelection?,
     ): Result<EventParticipantsSyncResult> = runCatching {
-        val snapshot = fetchEventParticipantsSnapshot(event.id, occurrence)
+        val snapshot = detailRemoteGateway.fetchParticipantsSnapshot(event.id, occurrence)
         mergeEventParticipantsSnapshot(
             baseEvent = event,
             snapshot = snapshot,
@@ -949,12 +864,12 @@ class EventRepository(
         val normalizedEventId = event.id.trim().takeIf(String::isNotBlank)
             ?: error("Event id is required.")
         val cacheScope = eventParticipantCacheScope(normalizedEventId, occurrence)
-        val bootstrap = fetchEventDetailBootstrap(
+        val bootstrap = detailRemoteGateway.fetchDetailBootstrap(
             eventId = normalizedEventId,
             occurrence = occurrence,
             manage = manage,
         )
-        val cachedEvent = databaseService.getEventDao.getEventById(normalizedEventId)
+        val cachedEvent = roomStore.getEvent(normalizedEventId)
         val bootstrapEvent = bootstrap.event
             ?.toEventOrNull()
         val baseEvent = bootstrapEvent ?: cachedEvent ?: event
@@ -1008,7 +923,7 @@ class EventRepository(
         eventId: String,
         occurrence: EventOccurrenceSelection?,
     ): Result<EventParticipantsSummary> = runCatching {
-        val snapshot = fetchEventParticipantsSnapshot(eventId, occurrence, manage = false)
+        val snapshot = detailRemoteGateway.fetchParticipantsSnapshot(eventId, occurrence, manage = false)
         snapshot.error?.takeIf(String::isNotBlank)?.let { error(it) }
         EventParticipantsSummary(
             participantCount = snapshot.participantCount ?: 0,
@@ -1024,14 +939,14 @@ class EventRepository(
         val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
             ?: error("Event id is required.")
         val cacheScope = eventParticipantCacheScope(normalizedEventId, occurrence)
-        val snapshot = fetchEventParticipantsSnapshot(
+        val snapshot = detailRemoteGateway.fetchParticipantsSnapshot(
             eventId = normalizedEventId,
             occurrence = occurrence,
             manage = true,
         )
-        val baseEvent = databaseService.getEventDao.getEventById(normalizedEventId)
+        val baseEvent = roomStore.getEvent(normalizedEventId)
             ?: snapshot.event?.toEventOrNull()
-            ?: fetchRemoteEvent(normalizedEventId)
+            ?: detailRemoteGateway.fetchEvent(normalizedEventId)
         mergeEventParticipantsSnapshot(
             baseEvent = baseEvent,
             snapshot = snapshot,
@@ -1063,7 +978,7 @@ class EventRepository(
             ?: error("Event id is required.")
         val cacheScope = eventParticipantCacheScope(normalizedEventId, occurrence)
         val summaries = api.get<EventTeamComplianceResponseDto>(
-            path = appendOccurrenceQuery(
+            path = detailRemoteGateway.occurrencePath(
                 basePath = "api/events/$normalizedEventId/teams/compliance",
                 occurrence = occurrence,
             ),
@@ -1104,7 +1019,7 @@ class EventRepository(
             ?: error("Event id is required.")
         val cacheScope = eventParticipantCacheScope(normalizedEventId, occurrence)
         val summaries = api.get<EventUserComplianceResponseDto>(
-            path = appendOccurrenceQuery(
+            path = detailRemoteGateway.occurrencePath(
                 basePath = "api/events/$normalizedEventId/users/compliance",
                 occurrence = occurrence,
             ),
@@ -1207,11 +1122,11 @@ class EventRepository(
 
     override suspend fun getLeagueScoringConfig(eventId: String): Result<LeagueScoringConfig?> = runCatching {
         val normalizedEventId = eventId.trim().takeIf(String::isNotBlank) ?: return@runCatching null
-        val dto = fetchRemoteEventDto(normalizedEventId)
+        val dto = detailRemoteGateway.fetchEventDto(normalizedEventId)
         val scoringConfigId = dto.leagueScoringConfigId
             ?.trim()
             ?.takeIf(String::isNotBlank)
-            ?: databaseService.getEventDao.getEventById(normalizedEventId)
+            ?: roomStore.getEvent(normalizedEventId)
                 ?.leagueScoringConfigId
                 ?.trim()
                 ?.takeIf(String::isNotBlank)
@@ -1220,13 +1135,13 @@ class EventRepository(
         if (embeddedConfig != null) {
             embeddedConfig.toLeagueScoringConfig(scoringConfigId)
         } else {
-            fetchRemoteLeagueScoringConfig(scoringConfigId)
+            detailRemoteGateway.fetchLeagueScoringConfig(scoringConfigId)
         }
     }
 
     override suspend fun getEventStaffInvites(eventId: String): Result<List<Invite>> = runCatching {
         val normalizedEventId = eventId.trim().takeIf(String::isNotBlank) ?: return@runCatching emptyList()
-        fetchRemoteEventDto(normalizedEventId).staffInvites.orEmpty()
+        detailRemoteGateway.fetchEventDto(normalizedEventId).staffInvites.orEmpty()
     }
 
     override suspend fun getEventStaffState(event: Event): Result<EventStaffState> = runCatching {
@@ -2016,7 +1931,7 @@ class EventRepository(
                 )
                 waitlistResponse.error?.takeIf(String::isNotBlank)?.let { error(it) }
                 val baseEvent = waitlistResponse.event?.toEventOrNull()
-                    ?: databaseService.getEventDao.getEventById(normalizedEventId)
+                    ?: roomStore.getEvent(normalizedEventId)
                     ?: error("Updated event not found after waitlist response.")
                 syncEventParticipantsAfterMutation(baseEvent, occurrence)
 
@@ -2544,7 +2459,7 @@ class EventRepository(
         occurrence: EventOccurrenceSelection? = null,
     ): Boolean {
         val participantSnapshot = runCatching {
-            fetchEventParticipantsSnapshot(event.id, occurrence)
+            detailRemoteGateway.fetchParticipantsSnapshot(event.id, occurrence)
         }.getOrNull()
 
         if (participantSnapshot?.weeklySelectionRequired == true) {
