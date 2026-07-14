@@ -6,6 +6,7 @@ import androidx.room.Relation
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPendingPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 @Serializable
 data class TeamWithPlayers(
@@ -27,5 +28,30 @@ data class TeamWithPlayers(
             parentColumn = "teamId",
             entityColumn = "userId"
         )
-    ) val pendingPlayers: List<UserData>
-)
+    ) val pendingPlayers: List<UserData>,
+
+    @Transient
+    @Relation(
+        parentColumn = "id",
+        entityColumn = "teamId",
+        entity = TeamPlayerCrossRef::class,
+    )
+    val playerMemberships: List<TeamPlayerCrossRef> = emptyList(),
+
+    @Transient
+    @Relation(
+        parentColumn = "id",
+        entityColumn = "teamId",
+        entity = TeamPendingPlayerCrossRef::class,
+    )
+    val pendingMemberships: List<TeamPendingPlayerCrossRef> = emptyList(),
+) {
+    fun withCanonicalMembership(): TeamWithPlayers = copy(
+        team = team
+            .copy(
+                playerIds = playerMemberships.map(TeamPlayerCrossRef::userId),
+                pending = pendingMemberships.map(TeamPendingPlayerCrossRef::userId),
+            )
+            .withCanonicalMembershipIds(),
+    )
+}

@@ -10,12 +10,18 @@ import kotlin.time.ExperimentalTime
 @Serializable
 @Entity
 @OptIn(ExperimentalTime::class)
-data class ChatGroup(
+data class ChatGroup @Ignore constructor(
     @Transient @PrimaryKey override val id: String = "",
     val name: String,
-    val userIds: List<String>,
+    @Ignore val userIds: List<String> = emptyList(),
     val hostId: String,
 ) : MVPDocument, DisplayableEntity {
+    constructor(
+        id: String = "",
+        name: String,
+        hostId: String,
+    ) : this(id = id, name = name, userIds = emptyList(), hostId = hostId)
+
     @Ignore @Transient var teamId: String? = null
     override var imageUrl: String? = null
     override var displayName: String = ""

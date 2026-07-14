@@ -9,10 +9,10 @@ import kotlinx.serialization.Serializable
 
 @Entity
 @Serializable
-data class UserData(
+data class UserData @Ignore constructor(
     val firstName: String,
     val lastName: String,
-    val teamIds: List<String>,
+    @Ignore val teamIds: List<String> = emptyList(),
     val friendIds: List<String>,
     val friendRequestIds: List<String>,
     val friendRequestSentIds: List<String>,
@@ -31,6 +31,49 @@ data class UserData(
     val notificationSettings: NotificationSettings = defaultNotificationSettings(),
     @PrimaryKey override val id: String,
 ) : MVPDocument, DisplayableEntity {
+    constructor(
+        firstName: String,
+        lastName: String,
+        friendIds: List<String>,
+        friendRequestIds: List<String>,
+        friendRequestSentIds: List<String>,
+        followingIds: List<String>,
+        blockedUserIds: List<String> = emptyList(),
+        hiddenEventIds: List<String> = emptyList(),
+        userName: String,
+        hasStripeAccount: Boolean?,
+        uploadedImages: List<String>,
+        profileImageId: String? = null,
+        privacyDisplayName: String? = null,
+        isMinor: Boolean = false,
+        isIdentityHidden: Boolean = false,
+        chatTermsAcceptedAt: String? = null,
+        chatTermsVersion: String? = null,
+        notificationSettings: NotificationSettings = defaultNotificationSettings(),
+        id: String,
+    ) : this(
+        firstName = firstName,
+        lastName = lastName,
+        teamIds = emptyList(),
+        friendIds = friendIds,
+        friendRequestIds = friendRequestIds,
+        friendRequestSentIds = friendRequestSentIds,
+        followingIds = followingIds,
+        blockedUserIds = blockedUserIds,
+        hiddenEventIds = hiddenEventIds,
+        userName = userName,
+        hasStripeAccount = hasStripeAccount,
+        uploadedImages = uploadedImages,
+        profileImageId = profileImageId,
+        privacyDisplayName = privacyDisplayName,
+        isMinor = isMinor,
+        isIdentityHidden = isIdentityHidden,
+        chatTermsAcceptedAt = chatTermsAcceptedAt,
+        chatTermsVersion = chatTermsVersion,
+        notificationSettings = notificationSettings,
+        id = id,
+    )
+
     @Ignore
     override var displayName: String = ""
         get() = fullName

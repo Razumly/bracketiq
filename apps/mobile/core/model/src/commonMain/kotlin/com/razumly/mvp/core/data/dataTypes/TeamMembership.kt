@@ -279,6 +279,96 @@ private fun Team.buildFallbackStaffAssignments(): List<TeamStaffAssignment> {
     }
 }
 
+/**
+ * Reconciles the rich registration snapshot with the exact player and invite IDs exposed by Room
+ * junctions. Existing registration metadata is retained for members who remain in the roster,
+ * live workflow rows without a junction stay intact, and stale active or invited rows are removed.
+ */
+fun Team.withCanonicalMembershipIds(): Team {
+    val canonicalPlayerIds = playerIds.mapNotNull(::normalizeIdToken).distinct()
+    val canonicalPendingIds = pending
+        .mapNotNull(::normalizeIdToken)
+        .filterNot(canonicalPlayerIds::contains)
+        .distinct()
+    val canonicalCaptainId = normalizeIdToken(captainId)
+        ?.takeIf(canonicalPlayerIds::contains)
+        ?: canonicalPlayerIds.firstOrNull().orEmpty()
+    val normalizedRegistrations = normalizeExplicitPlayerRegistrations()
+    val currentRegistrationsByUserId = normalizedRegistrations
+        .filter(TeamPlayerRegistration::countsTowardTeamCapacity)
+        .groupBy(TeamPlayerRegistration::userId)
+
+    fun canonicalRegistration(
+        userId: String,
+        status: String,
+        isCaptain: Boolean,
+    ): TeamPlayerRegistration {
+        val currentRegistrations = currentRegistrationsByUserId[userId].orEmpty()
+        val template = when (status) {
+            TEAM_MEMBERSHIP_STATUS_ACTIVE -> currentRegistrations
+                .firstOrNull(TeamPlayerRegistration::isActive)
+                ?: currentRegistrations.firstOrNull { registration ->
+                    registration.isStarted() || registration.isPaymentPending()
+                }
+            else -> currentRegistrations.firstOrNull(TeamPlayerRegistration::isInvited)
+        } ?: currentRegistrations.firstOrNull()
+        return (template ?: TeamPlayerRegistration(
+            teamId = id,
+            userId = userId,
+            registrantId = userId,
+            status = status,
+        )).copy(
+            teamId = id,
+            userId = userId,
+            registrantId = normalizeIdToken(template?.registrantId) ?: userId,
+            status = status,
+            isCaptain = isCaptain,
+        )
+    }
+
+    val canonicalUserIds = (canonicalPlayerIds + canonicalPendingIds).toSet()
+    val historicalRegistrations = normalizedRegistrations
+        .filterNot(TeamPlayerRegistration::countsTowardTeamCapacity)
+    val unassignedWorkflowRegistrations = normalizedRegistrations.filter { registration ->
+        registration.userId !in canonicalUserIds &&
+            (registration.isStarted() || registration.isPaymentPending())
+    }
+    val canonicalRegistrations = buildList {
+        canonicalPlayerIds.forEach { userId ->
+            add(
+                canonicalRegistration(
+                    userId = userId,
+                    status = TEAM_MEMBERSHIP_STATUS_ACTIVE,
+                    isCaptain = userId == canonicalCaptainId,
+                ),
+            )
+        }
+        canonicalPendingIds.forEach { userId ->
+            add(
+                canonicalRegistration(
+                    userId = userId,
+                    status = TEAM_MEMBERSHIP_STATUS_INVITED,
+                    isCaptain = false,
+                ),
+            )
+        }
+    }
+
+    return copy(
+        captainId = canonicalCaptainId,
+        playerIds = canonicalPlayerIds,
+        playerRegistrationIds = if (normalizedRegistrations.isEmpty()) {
+            playerRegistrationIds
+        } else {
+            emptyList()
+        },
+        pending = canonicalPendingIds,
+        playerRegistrations = historicalRegistrations +
+            unassignedWorkflowRegistrations +
+            canonicalRegistrations,
+    ).withSynchronizedMembership()
+}
+
 fun Team.withSynchronizedMembership(): Team {
     var normalizedPlayerRegistrations = normalizeExplicitPlayerRegistrations()
         .ifEmpty { buildFallbackPlayerRegistrations() }

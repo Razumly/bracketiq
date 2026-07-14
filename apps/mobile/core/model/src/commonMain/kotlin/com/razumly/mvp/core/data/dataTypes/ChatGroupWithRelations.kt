@@ -5,6 +5,7 @@ import androidx.room.Junction
 import androidx.room.Relation
 import com.razumly.mvp.core.data.dataTypes.crossRef.ChatUserCrossRef
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 @Serializable
 data class ChatGroupWithRelations (
@@ -26,5 +27,17 @@ data class ChatGroupWithRelations (
         entityColumn = "chatId",
         entity = MessageMVP::class
     )
-    val messages: List<MessageMVP>
-)
+    val messages: List<MessageMVP>,
+
+    @Transient
+    @Relation(
+        parentColumn = "id",
+        entityColumn = "chatId",
+        entity = ChatUserCrossRef::class,
+    )
+    val userMemberships: List<ChatUserCrossRef> = emptyList(),
+) {
+    fun withCanonicalMembership(): ChatGroupWithRelations = copy(
+        chatGroup = chatGroup.copy(userIds = userMemberships.map(ChatUserCrossRef::userId)),
+    )
+}
