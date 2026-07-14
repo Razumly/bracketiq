@@ -23,6 +23,7 @@ After this plan is complete, users must see the same event overview, registratio
   - [x] (2026-07-14 15:13Z) Milestone 3c: moved participant/bootstrap orchestration behind `EventParticipantBootstrapCoordinator`, preserving Room-backed participant switching, managed-bootstrap suppression and retry, hydration ordering, and weekly cache/membership/sync ordering. The component fell from 3,272 to 2,919 lines; all 55 focused state/coordinator tests, eight affected integration regressions, four iOS migration tests, iOS simulator compilation, Android debug assembly, and diff checks pass.
   - [x] (2026-07-14 15:29Z) Milestone 3d: replaced 22 inline `init` collectors with named component-scoped lifecycle bindings, preserving launch order, `collectLatest` cancellation, withdrawal-key deduplication, and match-realtime cleanup. The component fell from 2,919 to 2,819 lines; all 61 focused state/coordinator tests, 19 passing mobile join-flow integrations, four iOS migration tests, iOS simulator compilation, Android debug assembly, and diff checks pass.
 - [x] (2026-07-14 15:41Z) Milestone 4: mechanically separated `IEventRepository`/`IBillingRepository`, their public models, and the event plus billing-domain wire DTO/mapping families from the two implementation files. Public signatures, serializers, defaults, endpoint paths, constructors, and dependency-injection bindings are unchanged; all 122 repository HTTP cases, iOS simulator compilation, Android debug assembly, and diff checks pass.
+- [x] (2026-07-14 15:53Z) Reconciled Milestone 4 onto current audit head `20f11938`, which already contains LEG-001 commits `89cbafe6` and `1451c1b0`. The reconciled checkpoint `966aa872` preserves canonical-only identity handling in every moved Billing wire family; three production alias scans return zero matches, all 122 repository HTTP cases pass, and both platform build gates pass.
 - [ ] Milestone 5: split `EventRepository` behind its existing facade into Room store, remote gateway, participant synchronization, registration mutation, event catalog, and session-cache collaborators.
 - [ ] Milestone 6: split `BillingRepository` behind `IBillingRepository` into checkout/signing, rental, bill/payment, discount, catalog, organization/review, and refund collaborators.
 - [ ] Milestone 7: run focused and broad Gradle tests, Android assembly/install/cold-launch checks, iOS compilation/tests, and Android/iOS event-detail visual smoke; reconcile AUD-004 only after runtime evidence passes.
@@ -83,6 +84,9 @@ After this plan is complete, users must see the same event overview, registratio
 - Observation: file-private wire declarations cannot remain `private` after a same-package Kotlin file split, and several Event compliance mapper names intentionally duplicate file-private Team repository mappers.
   Evidence: moved DTOs and mappers use module-only `internal` visibility. Event and Billing answer/compliance mapper names received repository-specific prefixes so they remain unambiguous without widening any public contract; their bodies, DTO fields, serialization annotations, and call ordering are otherwise unchanged.
 
+- Observation: the original Milestone 4 branch predated LEG-001, so mechanically moved Billing wire declarations would have restored obsolete `$id` fields even though the implementation-file conflict preserved the canonical branch.
+  Evidence: the cherry-pick conflicted only in `BillingRepository.kt`, while the added catalog, rental, and payment wire files contained the old `legacyId` declarations and fallback expressions. Reapplying the canonical-only changes to their new owners and removing the two outbound legacy fields produced zero matches for serializer aliases, watch aliases, and production `legacyId` uses.
+
 ## Decision Log
 
 - Decision: continue the existing coordinator architecture and keep `EventDetailComponent`, `IBillingRepository`, and `IEventRepository` source-compatible.
@@ -141,9 +145,13 @@ After this plan is complete, users must see the same event overview, registratio
   Rationale: moving module ownership at the same time would change dependency boundaries rather than only declaration ownership. The stable package keeps every consumer and dependency-injection binding source-compatible; Milestones 5 and 6 can now introduce collaborators against explicit contracts without mixing in DTO movement.
   Date/Author: 2026-07-14 / Codex
 
+- Decision: preserve LEG-001 canonical identity as an explicit invariant of every repository extraction and require zero-alias production scans at each overlapping checkpoint.
+  Rationale: a clean textual split can silently resurrect removed response compatibility when its source branch predates a canonical contract change. Keeping `id` as the sole Billing identity and validating the moved files prevents structural refactors from undoing the server/client contract cleanup.
+  Date/Author: 2026-07-14 / Codex
+
 ## Outcomes & Retrospective
 
-Research and sequencing are complete, and Milestones 1 through 4 are validated. `EventDetailScreen.kt` owns 2,192 lines instead of 4,137. APP-009 is integrated as `5b862d6d`; event-team check-in lives in a 146-line coordinator, canonical Room-backed relation derivation lives in a 222-line coordinator, participant/bootstrap orchestration lives in a 425-line coordinator, and 22 lifecycle collectors now live behind a 327-line binding owner with six direct regressions. `DefaultEventDetailComponent.kt` now owns 2,819 lines instead of 3,439. The repository contracts/models and event plus billing-domain wire mappings now have explicit files; `EventRepository.kt` is 2,637 lines instead of 3,398 and `BillingRepository.kt` is 2,304 lines instead of 4,430. Milestones 5 through 7 remain, so AUD-004 is still open. Three detailed checkpoints and three top-level milestones remain.
+Research and sequencing are complete, and Milestones 1 through 4 are validated. `EventDetailScreen.kt` owns 2,192 lines instead of 4,137. APP-009 is integrated as `5b862d6d`; event-team check-in lives in a 146-line coordinator, canonical Room-backed relation derivation lives in a 222-line coordinator, participant/bootstrap orchestration lives in a 425-line coordinator, and 22 lifecycle collectors now live behind a 327-line binding owner with six direct regressions. `DefaultEventDetailComponent.kt` now owns 2,819 lines instead of 3,439. The repository contracts/models and event plus billing-domain wire mappings now have explicit files; `EventRepository.kt` is 2,637 lines instead of 3,398 and `BillingRepository.kt` is 2,304 lines instead of 4,430. Milestone 4 is integration-ready at reconciled checkpoint `966aa872` on top of current audit head `20f11938`, including LEG-001 canonical-only identity behavior. Milestones 5 through 7 remain, so AUD-004 is still open. Three detailed checkpoints and three top-level milestones remain.
 
 ## Context and Orientation
 
@@ -468,6 +476,26 @@ Milestone 4 evidence on 2026-07-14:
     declarations are module-private helper functions that required repository-specific
     prefixes to avoid cross-file Kotlin overload collisions.
 
+Milestone 4 current-head reconciliation evidence on 2026-07-14:
+
+    current audit base: 20f11938
+    required LEG-001 ancestors: 89cbafe6, 1451c1b0
+    reconciled checkpoint: 966aa872
+    rg -F '@SerialName("\$' over production Kotlin: 0 matches
+    rg -F 'case legacyId = "$id"' over watchOS Swift: 0 matches
+    rg 'legacyId' over production Kotlin and Swift: 0 matches
+    BillingRepositoryHttpTest: 58 passed
+    EventRepositoryHttpTest: 64 passed
+    combined repository contract matrix: 122 passed
+    ./gradlew :composeApp:compileKotlinIosSimulatorArm64: BUILD SUCCESSFUL (67 actionable tasks: 60 executed, 7 up-to-date)
+    ./gradlew :composeApp:assembleDebug: BUILD SUCCESSFUL (174 actionable tasks: 44 executed, 130 up-to-date)
+    composeApp-debug.apk SHA-256: 6fdeb0d934f3c0047a457cb72ac634453fea3366ae79cfe6a9f2bd35766021b8
+    git diff --check: passed
+
+    The reconciliation moved every LEG-001 Billing cleanup to the split file that now
+    owns the affected DTO or mapper and retained the two outbound canonical `id`
+    assignments. No canonical worktree was modified and no branch was pushed.
+
 ## Interfaces and Dependencies
 
 Keep `EventDetailScreen(component: EventDetailComponent, ...)`, the `EventDetailComponent` interface, and `DefaultEventDetailComponent` constructor source-compatible. Pure screen rules stay in package `com.razumly.mvp.eventDetail` with existing function names/signatures and `internal` visibility where tests and route use them. Extracted composables receive immutable state data classes and callback containers; they do not receive repositories.
@@ -493,3 +521,5 @@ Revision note (2026-07-14): Completed Milestone 3c by moving participant flow co
 Revision note (2026-07-14): Completed Milestone 3d and Milestone 3 by replacing 22 inline `init` collectors with named `EventDetailLifecycleBindings` launched from the component-owned Decompose scope in their original order. Kept payment/domain handling in the component, added six direct cancellation/deduplication/realtime-cleanup regressions, and recorded exact focused, 19-path integration, migration, Android, iOS, line-count, APK, and inherited-baseline evidence.
 
 Revision note (2026-07-14): Completed Milestone 4 by moving the Event and Billing public contracts/models plus event, checkout/signing, catalog/discount, rental, and bill/payment wire declarations into focused same-package files. Kept both facades, constructors, endpoints, serializer shapes, and Room-first behavior unchanged; used module-only visibility and repository-specific private-helper prefixes where Kotlin file privacy required it, then recorded the 122-test repository matrix and Android/iOS artifact evidence.
+
+Revision note (2026-07-14): Reconciled Milestone 4 onto current audit head `20f11938`, preserving all LEG-001 canonical-only identity changes across the newly split Billing files. Recorded zero-alias static scans, the 122-test repository matrix, both platform build gates, and integration-ready checkpoint `966aa872`; Milestone 5 proceeds from this reconciled base.
