@@ -413,6 +413,12 @@ Milestone 2c evidence on 2026-07-14:
     route-host flow/component/network static scan: no matches
     git diff --check: passed
 
+    canonical integration commit: d0acac09
+    canonical focused screen matrix: 50 passed
+    canonical ./gradlew :composeApp:compileKotlinIosSimulatorArm64: BUILD SUCCESSFUL
+    canonical ./gradlew :composeApp:assembleDebug: BUILD SUCCESSFUL
+    canonical composeApp-debug.apk SHA-256: 9ae2e8ba26bc5875ced5ca0b56b2d0fa6078b7558ae241a782552fd3754e3618
+
     The route host owns only presentation-local state and delegates drawing to the
     existing tab host. Room-backed event, participant, match, field, compliance,
     and standings data still arrive through the component flows collected by the
@@ -651,3 +657,4 @@ Revision note (2026-07-14): Completed Milestone 5b by moving detail endpoint con
 Revision note (2026-07-14): Split Milestone 5c at the independent viewer-registration cache boundary. Moved full/incremental profile registration synchronization, account-change invalidation, event replacement, observation, and cleanup into `EventRegistrationCacheCoordinator`; retained lazy DAO access and the original failure ordering, added four direct regressions, and recorded Event repository plus platform build evidence.
 
 Revision note (2026-07-14): Added and completed Milestone 2c after the screen remained above the acceptance target following the original renderer checkpoints. Moved detail-tab navigation, participant-section, floating-dock, manage-mode, selector, and guide lifecycle behind a callback-driven route host, retained shared pool/standings truth in `EventDetailScreen`, added four direct state-reconciliation regressions, and recorded the 50-test plus Android/iOS build evidence.
+Revision note (2026-07-14): Integrated Milestone 2c with the later Milestone 5 repository checkpoints at canonical commit `d0acac09`; the 50-test screen matrix, iOS simulator compilation, Android debug assembly, and exact integrated APK digest all pass.
