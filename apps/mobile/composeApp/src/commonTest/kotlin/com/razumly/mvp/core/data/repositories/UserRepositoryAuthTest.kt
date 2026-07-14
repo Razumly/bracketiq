@@ -300,7 +300,7 @@ class UserRepositoryAuthTest {
                             "firstName":"A",
                             "lastName":"B",
                             "userName":"ab",
-                            "teamIds":[],
+                            "teamIds":["team_server"],
                             "friendIds":[],
                             "friendRequestIds":[],
                             "friendRequestSentIds":[],
@@ -327,8 +327,11 @@ class UserRepositoryAuthTest {
 
         val user = repo.login("u1@example.com", "password123").getOrThrow()
         assertEquals("u1", user.id)
+        assertEquals(listOf("team_server"), user.teamIds)
         assertEquals("t123", tokenStore.get())
         assertEquals("u1", currentUserDataSource.getUserId().first())
+        assertEquals(listOf("team_server"), repo.currentUser.value.getOrThrow().teamIds)
+        assertEquals(listOf("team_server"), userDao.getUserDataById("u1")?.teamIds)
 
         val account = repo.currentAccount.value.getOrThrow()
         assertEquals("u1", account.id)

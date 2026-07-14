@@ -87,8 +87,15 @@ private class UserRepositoryHttp_InMemoryPreferencesDataStore(
 }
 
 private class UserRepositoryHttp_FakeUserDataDao : UserDataDao {
-    override suspend fun upsertUserData(userData: UserData) {}
-    override suspend fun upsertUsersData(usersData: List<UserData>) {}
+    var lastUpsertedUser: UserData? = null
+
+    override suspend fun upsertUserData(userData: UserData) {
+        lastUpsertedUser = userData
+    }
+
+    override suspend fun upsertUsersData(usersData: List<UserData>) {
+        lastUpsertedUser = usersData.lastOrNull()
+    }
     override suspend fun deleteUsersById(ids: List<String>) {}
     override suspend fun upsertUserEventCrossRef(crossRef: EventUserCrossRef) {}
     override suspend fun upsertUserEventCrossRefs(crossRefs: List<EventUserCrossRef>) {}
@@ -678,7 +685,7 @@ class UserRepositoryHttpTest {
                         "id": "user_1",
                         "firstName": "Sam",
                         "lastName": "Player",
-                        "teamIds": [],
+                        "teamIds": ["team_server"],
                         "friendIds": [],
                         "friendRequestIds": [],
                         "friendRequestSentIds": [],
@@ -714,7 +721,7 @@ class UserRepositoryHttpTest {
             UserData(
                 firstName = "Sam",
                 lastName = "Player",
-                teamIds = emptyList(),
+                teamIds = listOf("team_cached"),
                 friendIds = listOf("user_2"),
                 friendRequestIds = emptyList(),
                 friendRequestSentIds = emptyList(),
@@ -733,6 +740,11 @@ class UserRepositoryHttpTest {
         assertEquals(listOf("chat_1", "chat_2"), removedChatIds)
         assertEquals(listOf("chat_1", "chat_2"), fakeChatGroupDao.deletedChatIds)
         assertEquals(listOf("user_2"), cachedUser?.blockedUserIds)
+        assertEquals(listOf("team_server"), cachedUser?.teamIds)
+        assertEquals(
+            listOf("team_server"),
+            (fakeDatabase.getUserDataDao as UserRepositoryHttp_FakeUserDataDao).lastUpsertedUser?.teamIds,
+        )
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -783,7 +795,7 @@ class UserRepositoryHttpTest {
             UserData(
                 firstName = "Sam",
                 lastName = "Player",
-                teamIds = emptyList(),
+                teamIds = listOf("team_cached"),
                 friendIds = emptyList(),
                 friendRequestIds = emptyList(),
                 friendRequestSentIds = emptyList(),
@@ -801,6 +813,78 @@ class UserRepositoryHttpTest {
         val cachedUser = repository.currentUser.value.getOrNull()
 
         assertEquals(emptyList(), cachedUser?.blockedUserIds)
+        assertEquals(emptyList(), cachedUser?.teamIds)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun followUser_preserves_cached_team_ids_when_social_response_omits_them() = runTest {
+        val fakeDatabase = UserRepositoryHttp_FakeDatabaseService()
+        val engine = MockEngine { request ->
+            assertEquals("/api/users/social/following", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            respond(
+                content = """
+                    {
+                      "user": {
+                        "id": "user_1",
+                        "firstName": "Sam",
+                        "lastName": "Player",
+                        "friendIds": [],
+                        "friendRequestIds": [],
+                        "friendRequestSentIds": [],
+                        "followingIds": ["user_2"],
+                        "blockedUserIds": [],
+                        "hiddenEventIds": [],
+                        "userName": "sam_player",
+                        "hasStripeAccount": false,
+                        "uploadedImages": [],
+                        "profileImageId": null,
+                        "chatTermsAcceptedAt": null,
+                        "chatTermsVersion": null
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val client = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val repository = UserRepository(
+            databaseService = fakeDatabase,
+            api = MvpApiClient(client, "http://localhost", UserRepositoryHttp_InMemoryAuthTokenStore()),
+            tokenStore = UserRepositoryHttp_InMemoryAuthTokenStore(),
+            currentUserDataSource = CurrentUserDataSource(UserRepositoryHttp_InMemoryPreferencesDataStore()),
+        )
+        advanceUntilIdle()
+        repository.setCachedCurrentUserProfile(
+            UserData(
+                firstName = "Sam",
+                lastName = "Player",
+                teamIds = listOf("team_cached"),
+                friendIds = emptyList(),
+                friendRequestIds = emptyList(),
+                friendRequestSentIds = emptyList(),
+                followingIds = emptyList(),
+                userName = "sam_player",
+                hasStripeAccount = false,
+                uploadedImages = emptyList(),
+                profileImageId = null,
+                id = "user_1",
+            )
+        ).getOrThrow()
+
+        repository.followUser("user_2").getOrThrow()
+        val cachedUser = repository.currentUser.value.getOrThrow()
+
+        assertEquals(listOf("user_2"), cachedUser.followingIds)
+        assertEquals(listOf("team_cached"), cachedUser.teamIds)
+        assertEquals(
+            listOf("team_cached"),
+            (fakeDatabase.getUserDataDao as UserRepositoryHttp_FakeUserDataDao).lastUpsertedUser?.teamIds,
+        )
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)

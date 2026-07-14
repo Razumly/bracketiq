@@ -1641,7 +1641,14 @@ class UserRepository(
     }
 
     private suspend fun refreshCurrentUserFromSocialResponse(responseUser: UserProfileDto?) {
-        val updated = responseUser?.toUserDataOrNull()
+        val cachedProfile = currentUser.value.getOrNull()
+        val updated = responseUser?.toUserDataOrNull()?.let { responseProfile ->
+            if (responseUser.teamIds == null && cachedProfile?.id == responseProfile.id) {
+                responseProfile.copy(teamIds = cachedProfile.teamIds)
+            } else {
+                responseProfile
+            }
+        }
             ?: currentUser.value.getOrNull()?.id?.let { fetchUserProfile(it) }
             ?: error("Failed to refresh current user after social update.")
         cacheCurrentUserProfile(updated, prefetchChatTermsConsent = false)

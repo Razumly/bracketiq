@@ -216,7 +216,6 @@ data class UserUpdateDto(
     val lastName: String? = null,
     val dateOfBirth: String? = null,
     val userName: String? = null,
-    val teamIds: List<String>? = null,
     val friendIds: List<String>? = null,
     val friendRequestIds: List<String>? = null,
     val friendRequestSentIds: List<String>? = null,
