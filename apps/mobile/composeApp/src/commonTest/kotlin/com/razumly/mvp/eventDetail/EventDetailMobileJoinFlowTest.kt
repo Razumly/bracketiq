@@ -1447,7 +1447,8 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
     }
 
     @Test
-    fun startTeamRegistration_forPaidOpenTeam_createsTeamRegistrationPurchaseIntent() = runTest(testDispatcher) {
+    fun startTeamRegistration_forPaidOpenTeam_clearsPendingState_whenPaymentPresentationIsUnavailable() =
+        runTest(testDispatcher) {
         val host = mobileUser(id = "host_paid_team", firstName = "Host", lastName = "User")
         val currentUser = mobileUser(id = "paid_team_joiner", firstName = "Paid", lastName = "Joiner")
         val team = Team(
@@ -1524,8 +1525,9 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
 
         assertEquals(listOf(team.id), teamRepository.registeredTeamIds)
         assertEquals(listOf(team.id), billingRepository.teamRegistrationPurchaseIntentCalls)
-        assertEquals(team.id, component.startingTeamRegistrationId.value)
+        assertNull(component.startingTeamRegistrationId.value)
         assertFalse(component.isUserInEvent.value)
+        assertEquals("Payment setup is unavailable. Please try again.", component.errorState.value?.message)
     }
 
     @Test
