@@ -63,17 +63,12 @@ import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.guides.EventGuideIds
 import com.razumly.mvp.core.presentation.guides.EventGuideTargets
 import com.razumly.mvp.core.presentation.guides.LocalGuideController
-import com.razumly.mvp.core.presentation.guides.eventBracketTabGuide
 import com.razumly.mvp.core.presentation.guides.eventOverviewGuide
-import com.razumly.mvp.core.presentation.guides.eventParticipantsTabGuide
-import com.razumly.mvp.core.presentation.guides.eventScheduleTabGuide
-import com.razumly.mvp.core.presentation.guides.eventStandingsTabGuide
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.core.util.resolvedTimeZone
-import com.razumly.mvp.eventDetail.composables.ParticipantsSection
 import com.razumly.mvp.eventDetail.composables.ScheduleItem
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
@@ -295,7 +290,6 @@ fun EventDetailScreen(
     }
 
     var showTeamSelectionDialog by remember { mutableStateOf(false) }
-    var showFab by remember { mutableStateOf(false) }
     var showOptionsDropdown by remember { mutableStateOf(false) }
     var showQrCodeDialog by remember { mutableStateOf(false) }
     var showEventStateDropdown by remember { mutableStateOf(false) }
@@ -320,7 +314,6 @@ fun EventDetailScreen(
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
     var pendingMapPlace by remember { mutableStateOf<MVPPlace?>(null) }
     var isLocationPickerMapMode by remember { mutableStateOf(false) }
-    var isManagingParticipants by rememberSaveable { mutableStateOf(false) }
     fun originalLocationPlace(): MVPPlace? {
         val lat = editedEvent.lat
         val long = editedEvent.long
@@ -1499,444 +1492,111 @@ fun EventDetailScreen(
                     exit = ExitTransition.None,
                 ) {
                     Column(Modifier.padding(innerPadding).padding(top = 4.dp)) {
-                        val availableTabs = remember(hasBracketView, hasScheduleView, hasStandingsView) {
-                            availableEventDetailTabs(
+                        EventDetailTabsRouteHost(
+                            state = EventDetailTabsRouteState(
+                                initialTab = initialTab,
+                                showDetails = showDetails,
+                                isEditing = isEditing,
+                                showMap = showMap,
+                                guideEventId = guideEventId,
+                                canStartGuide = isUserInEvent || isHost || isAssistantHost || isEventOfficial,
                                 hasBracketView = hasBracketView,
                                 hasScheduleView = hasScheduleView,
                                 hasStandingsView = hasStandingsView,
-                            )
-                        }
-                        val requestedInitialTab = remember(initialTab, availableTabs) {
-                            resolveInitialEventDetailTab(
-                                initialTab = initialTab,
-                                availableTabs = availableTabs,
-                            )
-                        }
-                        var selectedTab by rememberSaveable { mutableStateOf(requestedInitialTab) }
-                        val bracketTabDivisionOptions = remember(
-                            tournamentPoolPlayEnabled,
-                            tournamentBracketDivisionOptions,
-                            selectedEvent.event.eventType,
-                            selectedEvent.event.splitLeaguePlayoffDivisions,
-                            joinDivisionOptions,
-                            leagueDivisionOptions,
-                            playoffDivisionOptions,
-                        ) {
-                            selectedEvent.event.detailBracketDivisionOptions(
+                                selectedEvent = selectedEvent,
                                 tournamentPoolPlayEnabled = tournamentPoolPlayEnabled,
                                 tournamentBracketDivisionOptions = tournamentBracketDivisionOptions,
                                 joinDivisionOptions = joinDivisionOptions,
                                 leagueDivisionOptions = leagueDivisionOptions,
                                 playoffDivisionOptions = playoffDivisionOptions,
-                            )
-                        }
-                        val preferredBracketDivisionId = remember(
-                            tournamentPoolPlayEnabled,
-                            selectedEvent.event.divisionDetails,
-                            selectedEvent.event.eventType,
-                            selectedEvent.event.splitLeaguePlayoffDivisions,
-                            playoffDivisionOptions,
-                            selectedJoinDivisionId,
-                        ) {
-                            selectedEvent.event.preferredBracketStageDivisionId(
-                                tournamentPoolPlayEnabled = tournamentPoolPlayEnabled,
-                                playoffDivisionOptions = playoffDivisionOptions,
-                                selectedDivisionId = selectedJoinDivisionId,
-                            )
-                        }
-                        val selectedBracketDivisionId = remember(
-                            preferredBracketDivisionId,
-                            bracketTabDivisionOptions,
-                        ) {
-                            bracketTabDivisionOptions.resolveSelectedDivisionId(preferredBracketDivisionId)
-                        }
-                        val showLosersBracketSelector = remember(
-                            selectedEvent.event.doubleElimination,
-                            selectedEvent.event.divisionDetails,
-                            selectedEvent.matches,
-                            selectedBracketDivisionId,
-                        ) {
-                            selectedEvent.event.hasLosersBracketSelector(
-                                selectedDivisionId = selectedBracketDivisionId,
-                                matches = selectedEvent.matches,
-                            )
-                        }
-                        val participantSections = remember(selectedEvent.event.teamSignup) {
-                            if (selectedEvent.event.teamSignup) {
-                                listOf(
-                                    ParticipantsSection.TEAMS,
-                                    ParticipantsSection.PARTICIPANTS,
-                                    ParticipantsSection.FREE_AGENTS
-                                )
-                            } else {
-                                listOf(ParticipantsSection.PARTICIPANTS)
-                            }
-                        }
-                        var selectedParticipantsSection by rememberSaveable {
-                            mutableStateOf(
-                                if (selectedEvent.event.teamSignup) {
-                                    ParticipantsSection.TEAMS
-                                } else {
-                                    ParticipantsSection.PARTICIPANTS
-                                }
-                            )
-                        }
-                        val selectedParticipantsDivisionId = remember(
-                            selectedDivision,
-                            registrationDivisionOptions,
-                            selectedJoinDivisionId,
-                        ) {
-                            registrationDivisionOptions.resolveSelectedEventDivisionId(selectedDivision)
-                                ?: selectedJoinDivisionId
-                        }
-                        val participantsTabDivisionOptions = remember(
-                            registrationJoinDivisionOptions,
-                            joinDivisionOptions,
-                        ) {
-                            registrationJoinDivisionOptions.ifEmpty { joinDivisionOptions }.distinctById()
-                        }
-                        var isDetailDockExpanded by rememberSaveable { mutableStateOf(false) }
-                        LaunchedEffect(availableTabs) {
-                            if (selectedTab !in availableTabs) {
-                                selectedTab = availableTabs.first()
-                            }
-                        }
-                        LaunchedEffect(initialTab, availableTabs) {
-                            if (
-                                initialTab == EventDetailInitialTab.SCHEDULE &&
-                                selectedTab == DetailTab.PARTICIPANTS &&
-                                DetailTab.SCHEDULE in availableTabs
-                            ) {
-                                selectedTab = DetailTab.SCHEDULE
-                            }
-                        }
-                        LaunchedEffect(selectedTab) {
-                            isDetailDockExpanded = false
-                        }
-                        LaunchedEffect(showFab) {
-                            if (!showFab) {
-                                isDetailDockExpanded = false
-                            }
-                        }
-                        LaunchedEffect(
-                            selectedTab,
-                            selectedStandingsDivisionId,
-                            selectedStandingsDataDivisionId,
-                            selectedBracketDivisionId,
-                            selectedDivision,
-                        ) {
-                            val targetDivisionId = when (selectedTab) {
-                                DetailTab.LEAGUES -> selectedStandingsDataDivisionId
-                                DetailTab.BRACKET -> selectedBracketDivisionId
-                                DetailTab.PARTICIPANTS,
-                                DetailTab.SCHEDULE,
-                                -> null
-                            }
-                            if (!targetDivisionId.isNullOrBlank() &&
-                                selectedDivision?.normalizeDivisionIdentifier() != targetDivisionId.normalizeDivisionIdentifier()
-                            ) {
-                                component.selectDivision(targetDivisionId)
-                            }
-                        }
-                        LaunchedEffect(participantSections) {
-                            if (selectedParticipantsSection !in participantSections) {
-                                selectedParticipantsSection = participantSections.first()
-                            }
-                        }
-                        val selectedDivisionSelectorState = remember(
-                            selectedTab,
-                            selectedDivision,
-                            selectedParticipantsDivisionId,
-                            participantsTabDivisionOptions,
-                            selectedScheduleDivisionId,
-                            selectedSchedulePoolDivisionId,
-                            schedulePoolDivisionOptions,
-                            selectedStandingsDivisionId,
-                            selectedStandingsPoolDivisionId,
-                            selectedStandingsDataDivisionId,
-                            standingsTabDivisionOptions,
-                            standingsPoolDivisionOptions,
-                            tournamentPoolPlayEnabled,
-                            tournamentBracketDivisionOptions,
-                            selectedBracketDivisionId,
-                            bracketTabDivisionOptions,
-                            joinDivisionOptions,
-                            selectedEvent.event.singleDivision,
-                            selectedEvent.event.divisionDetails,
-                        ) {
-                            val selectedDivisionForTab = when (selectedTab) {
-                                DetailTab.BRACKET -> selectedBracketDivisionId
-                                DetailTab.SCHEDULE -> selectedScheduleDivisionId
-                                DetailTab.LEAGUES -> selectedStandingsDivisionId
-                                DetailTab.PARTICIPANTS -> selectedParticipantsDivisionId
-                                    ?: selectedDivision
-                            }
-                            val divisionOptionsForTab = when (selectedTab) {
-                                DetailTab.BRACKET -> bracketTabDivisionOptions
-                                DetailTab.SCHEDULE -> if (tournamentPoolPlayEnabled &&
-                                    tournamentBracketDivisionOptions.isNotEmpty()
-                                ) {
-                                    tournamentBracketDivisionOptions
-                                } else {
-                                    joinDivisionOptions
-                                }
-                                DetailTab.LEAGUES -> standingsTabDivisionOptions
-                                DetailTab.PARTICIPANTS -> participantsTabDivisionOptions
-                            }.distinctById()
-                            val divisionState = buildSelectedDivisionPillState(
-                                selectedDivisionId = selectedDivisionForTab,
-                                options = divisionOptionsForTab,
-                                divisionDetails = selectedEvent.event.divisionDetails,
-                                singleDivision = selectedEvent.event.singleDivision,
-                            )
-                            val poolState = when (selectedTab) {
-                                DetailTab.SCHEDULE -> {
-                                    if (tournamentPoolPlayEnabled && schedulePoolDivisionOptions.isNotEmpty()) {
-                                        buildSelectedDivisionPillState(
-                                            selectedDivisionId = selectedSchedulePoolDivisionId
-                                                ?: AllPoolsDivisionOptionId,
-                                            options = listOf(
-                                                BracketDivisionOption(
-                                                    id = AllPoolsDivisionOptionId,
-                                                    label = "All pools",
-                                                ),
-                                            ) + schedulePoolDivisionOptions,
-                                            divisionDetails = selectedEvent.event.divisionDetails,
-                                            singleDivision = false,
-                                        )
+                                selectedJoinDivisionId = selectedJoinDivisionId,
+                                registrationDivisionOptions = registrationDivisionOptions,
+                                registrationJoinDivisionOptions = registrationJoinDivisionOptions,
+                                selectedDivisionId = selectedDivision,
+                                selectedScheduleDivisionId = selectedScheduleDivisionId,
+                                selectedSchedulePoolDivisionId = selectedSchedulePoolDivisionId,
+                                schedulePoolDivisionOptions = schedulePoolDivisionOptions,
+                                selectedStandingsDivisionId = selectedStandingsDivisionId,
+                                selectedStandingsPoolDivisionId = selectedStandingsPoolDivisionId,
+                                selectedStandingsDataDivisionId = selectedStandingsDataDivisionId,
+                                standingsTabDivisionOptions = standingsTabDivisionOptions,
+                                standingsPoolDivisionOptions = standingsPoolDivisionOptions,
+                                isWeeklyParentEvent = isWeeklyParentEvent,
+                                weeklyScheduleItems = weeklyScheduleItems,
+                                weeklyScheduleOptionsById = weeklyScheduleOptionsById,
+                                selectedWeeklyOccurrence = selectedWeeklyOccurrence,
+                                selectedWeeklyOccurrenceSummary = selectedWeeklyOccurrenceSummary,
+                                eventFields = eventFields,
+                                eventMatchesLoading = eventMatchesLoading,
+                                editableMatches = editableMatches,
+                                canEditMatches = canEditMatches,
+                                scheduleTrackedUserIds = scheduleTrackedUserIds,
+                                isEventOfficial = isEventOfficial,
+                                leagueDivisionStandings = leagueDivisionStandings,
+                                leagueStandings = leagueStandings,
+                                showStandingsDrawColumn = showStandingsDrawColumn,
+                                leagueStandingsConfirming = leagueStandingsConfirming,
+                                canManageLeagueStandings = canManageLeagueStandings,
+                                eventTeamsAndParticipantsLoading = eventTeamsAndParticipantsLoading,
+                                canManageParticipantsFromDock = canManageParticipantsFromDock,
+                                showEventCheckInBadges = showEventCheckInBadges,
+                                participantDivisionWarnings = participantDivisionWarnings,
+                                losersBracket = losersBracket,
+                                canManageMatchEditingFromDock = canManageMatchEditingFromDock,
+                                showScheduleMatchManagement = showScheduleMatchManagement,
+                                canConfirmLeagueResultsFromDock = canConfirmLeagueResultsFromDock,
+                                leagueDivisionStandingsLoading = leagueDivisionStandingsLoading,
+                            ),
+                            actions = EventDetailTabsRouteActions(
+                                onSelectDivision = component::selectDivision,
+                                onSchedulePoolSelected = { selectedSchedulePoolDivisionId = it },
+                                onStandingsPoolSelected = { selectedStandingsPoolDivisionId = it },
+                                onWeeklySessionSelected = { session ->
+                                    component.selectWeeklySession(
+                                        sessionStart = session.start,
+                                        sessionEnd = session.end,
+                                        slotId = session.slotId,
+                                        occurrenceDate = session.occurrenceDate,
+                                        label = session.label,
+                                    )
+                                },
+                                onMatchSelected = component::matchSelected,
+                                onEditBracketMatch = component::showMatchEditDialog,
+                                onEditScheduleMatch = { match ->
+                                    component.showMatchEditDialog(
+                                        match = match,
+                                        creationContext = MatchCreateContext.SCHEDULE,
+                                    )
+                                },
+                                onSetLockForEditableMatches = component::setLockForEditableMatches,
+                                onNavigateToChat = component::onNavigateToChat,
+                                onMoveTeamParticipantDivision = component::moveTeamParticipantDivision,
+                                onToggleLosersBracket = component::toggleLosersBracket,
+                                onStartEditingMatches = component::startEditingMatches,
+                                onCancelEditingMatches = component::cancelEditingMatches,
+                                onCommitMatchChanges = component::commitMatchChanges,
+                                onAddBracketMatch = component::addBracketMatch,
+                                onAddScheduleMatch = component::addScheduleMatch,
+                                onRequestStandingsConfirmation = { showStandingsConfirmDialog = true },
+                                onManagingParticipantsChanged = { isManaging ->
+                                    if (isManaging) {
+                                        component.startManagingParticipants()
                                     } else {
-                                        null
+                                        component.stopManagingParticipants()
                                     }
-                                }
-                                DetailTab.LEAGUES -> {
-                                    if (tournamentPoolPlayEnabled && standingsPoolDivisionOptions.isNotEmpty()) {
-                                        buildSelectedDivisionPillState(
-                                            selectedDivisionId = selectedStandingsDataDivisionId
-                                                ?: selectedStandingsPoolDivisionId,
-                                            options = standingsPoolDivisionOptions,
-                                            divisionDetails = selectedEvent.event.divisionDetails,
-                                            singleDivision = false,
-                                        )
-                                    } else {
-                                        null
-                                    }
-                                }
-                                DetailTab.BRACKET,
-                                DetailTab.PARTICIPANTS,
-                                -> null
-                            }
-                            if (divisionState == null && poolState == null) {
-                                null
-                            } else {
-                                SelectedDivisionSelectorState(
-                                    divisionState = divisionState,
-                                    poolState = poolState,
-                                )
-                            }
-                        }
-                            val tabContentTopOffset = if (selectedDivisionSelectorState != null) {
-                                DivisionPillContentTopOffset
-                            } else {
-                                0.dp
-                            }
-                            val selectedTabContentTarget = when (selectedTab) {
-                                DetailTab.BRACKET -> EventGuideTargets.BracketContent
-                                DetailTab.SCHEDULE -> EventGuideTargets.ScheduleContent
-                                DetailTab.LEAGUES -> EventGuideTargets.StandingsContent
-                                DetailTab.PARTICIPANTS -> EventGuideTargets.ParticipantsContent
-                            }
-                            val selectedTabGuideId = remember(selectedTab, guideEventId) {
-                                when (selectedTab) {
-                                    DetailTab.BRACKET -> EventGuideIds.eventBracketTab(guideEventId)
-                                    DetailTab.SCHEDULE -> EventGuideIds.eventScheduleTab(guideEventId)
-                                    DetailTab.LEAGUES -> EventGuideIds.eventStandingsTab(guideEventId)
-                                    DetailTab.PARTICIPANTS -> EventGuideIds.eventParticipantsTab(guideEventId)
-                                }
-                            }
-                            val selectedTabGuide = remember(selectedTab, selectedTabGuideId) {
-                                when (selectedTab) {
-                                    DetailTab.BRACKET -> eventBracketTabGuide(selectedTabGuideId)
-                                    DetailTab.SCHEDULE -> eventScheduleTabGuide(selectedTabGuideId)
-                                    DetailTab.LEAGUES -> eventStandingsTabGuide(selectedTabGuideId)
-                                    DetailTab.PARTICIPANTS -> eventParticipantsTabGuide(selectedTabGuideId)
-                                }
-                            }
-                            val canStartEventTabGuide = isUserInEvent || isHost || isAssistantHost || isEventOfficial
-                            val hasDetailTabsTarget = guideController?.hasTarget(EventGuideTargets.DetailTabs) == true
-                            val hasSelectedTabContentTarget =
-                                guideController?.hasTarget(selectedTabContentTarget) == true
-                            val hasDivisionSelectorTarget =
-                                guideController?.hasTarget(EventGuideTargets.DetailDivisionSelector) == true
-                            val selectedTabGuideRequiredTargets = remember(selectedTab, selectedTabContentTarget) {
-                                eventDetailTabGuideRequiredTargetIds(
-                                    selectedTab = selectedTab,
-                                    selectedTabContentTarget = selectedTabContentTarget,
-                                )
-                            }
-                            LaunchedEffect(
-                                guideController,
-                                guideEventId,
-                                selectedTab,
-                                showDetails,
-                                isEditing,
-                                showMap,
-                                canStartEventTabGuide,
-                                selectedTabGuideId,
-                                completedGuideIds,
-                                hasDetailTabsTarget,
-                                hasSelectedTabContentTarget,
-                                hasDivisionSelectorTarget,
-                                selectedTabGuideRequiredTargets,
-                            ) {
-                                val controller = guideController ?: return@LaunchedEffect
-                                if (guideEventId.isBlank()) return@LaunchedEffect
-                                if (!showDetails || isEditing || showMap || !canStartEventTabGuide) return@LaunchedEffect
-
-                                controller.maybeStartGuide(
-                                    guide = selectedTabGuide,
-                                    requiredTargetIds = selectedTabGuideRequiredTargets,
-                                )
-                            }
-                            EventDetailTabsHost(
-                                state = EventDetailTabsHostState(
-                                    availableTabs = availableTabs,
-                                    selectedTab = selectedTab,
-                                    selectedDivisionSelectorState = selectedDivisionSelectorState,
-                                    tabContentTopOffset = tabContentTopOffset,
-                                    showFab = showFab,
-                                    isDetailDockExpanded = isDetailDockExpanded,
-                                    selectedEvent = selectedEvent,
-                                    tournamentPoolPlayEnabled = tournamentPoolPlayEnabled,
-                                    selectedSchedulePoolDivisionId = selectedSchedulePoolDivisionId,
-                                    selectedScheduleDivisionId = selectedScheduleDivisionId,
-                                    schedulePoolDivisionOptions = schedulePoolDivisionOptions,
-                                    isWeeklyParentEvent = isWeeklyParentEvent,
-                                    weeklyScheduleItems = weeklyScheduleItems,
-                                    weeklyScheduleOptionsById = weeklyScheduleOptionsById,
-                                    selectedWeeklyOccurrence = selectedWeeklyOccurrence,
-                                    selectedWeeklyOccurrenceSummary = selectedWeeklyOccurrenceSummary,
-                                    eventFields = eventFields,
-                                    eventMatchesLoading = eventMatchesLoading,
-                                    editableMatches = editableMatches,
-                                    canEditMatches = canEditMatches,
-                                    scheduleTrackedUserIds = scheduleTrackedUserIds,
-                                    isEventOfficial = isEventOfficial,
-                                    selectedStandingsDataDivisionId = selectedStandingsDataDivisionId,
-                                    selectedStandingsDivisionId = selectedStandingsDivisionId,
-                                    leagueDivisionStandings = leagueDivisionStandings,
-                                    leagueStandings = leagueStandings,
-                                    showStandingsDrawColumn = showStandingsDrawColumn,
-                                    leagueStandingsConfirming = leagueStandingsConfirming,
-                                    canManageLeagueStandings = canManageLeagueStandings,
-                                    eventTeamsAndParticipantsLoading = eventTeamsAndParticipantsLoading,
-                                    selectedParticipantsSection = selectedParticipantsSection,
-                                    participantSections = participantSections,
-                                    isManagingParticipants = isManagingParticipants,
-                                    canManageParticipantsFromDock = canManageParticipantsFromDock,
-                                    showEventCheckInBadges = showEventCheckInBadges,
-                                    selectedParticipantsDivisionId = selectedParticipantsDivisionId,
-                                    selectedDivisionId = selectedDivision,
-                                    registrationDivisionOptions = registrationDivisionOptions,
-                                    participantDivisionWarnings = participantDivisionWarnings,
-                                    showLosersBracketSelector = showLosersBracketSelector,
-                                    losersBracket = losersBracket,
-                                    canManageMatchEditingFromDock = canManageMatchEditingFromDock,
-                                    showScheduleMatchManagement = showScheduleMatchManagement,
-                                    canConfirmLeagueResultsFromDock = canConfirmLeagueResultsFromDock,
-                                    leagueDivisionStandingsLoading = leagueDivisionStandingsLoading,
-                                ),
-                                actions = EventDetailTabsHostActions(
-                                    onTabSelected = { selectedTab = it },
-                                    onShowFabChanged = { showFab = it },
-                                    onDivisionSelected = { tab, divisionId ->
-                                        when (tab) {
-                                            DetailTab.BRACKET,
-                                            DetailTab.PARTICIPANTS,
-                                            -> component.selectDivision(divisionId)
-
-                                            DetailTab.SCHEDULE -> {
-                                                selectedSchedulePoolDivisionId = null
-                                                component.selectDivision(divisionId)
-                                            }
-
-                                            DetailTab.LEAGUES -> {
-                                                selectedStandingsPoolDivisionId = null
-                                                component.selectDivision(divisionId)
-                                            }
-                                        }
-                                    },
-                                    onPoolSelected = { tab, poolDivisionId ->
-                                        when (tab) {
-                                            DetailTab.SCHEDULE -> {
-                                                selectedSchedulePoolDivisionId =
-                                                    poolDivisionId.takeUnless { selectedId ->
-                                                        selectedId == AllPoolsDivisionOptionId
-                                                    }
-                                            }
-
-                                            DetailTab.LEAGUES -> {
-                                                selectedStandingsPoolDivisionId = poolDivisionId
-                                                component.selectDivision(poolDivisionId)
-                                            }
-
-                                            DetailTab.BRACKET,
-                                            DetailTab.PARTICIPANTS,
-                                            -> Unit
-                                        }
-                                    },
-                                    onWeeklySessionSelected = { session ->
-                                        component.selectWeeklySession(
-                                            sessionStart = session.start,
-                                            sessionEnd = session.end,
-                                            slotId = session.slotId,
-                                            occurrenceDate = session.occurrenceDate,
-                                            label = session.label,
-                                        )
-                                    },
-                                    onMatchSelected = component::matchSelected,
-                                    onEditBracketMatch = component::showMatchEditDialog,
-                                    onEditScheduleMatch = { match ->
-                                        component.showMatchEditDialog(
-                                            match = match,
-                                            creationContext = MatchCreateContext.SCHEDULE,
-                                        )
-                                    },
-                                    onSetLockForEditableMatches = component::setLockForEditableMatches,
-                                    onNavigateToChat = component::onNavigateToChat,
-                                    onMoveTeamParticipantDivision = component::moveTeamParticipantDivision,
-                                    onDetailDockExpandedChanged = { isDetailDockExpanded = it },
-                                    onToggleLosersBracket = component::toggleLosersBracket,
-                                    onStartEditingMatches = component::startEditingMatches,
-                                    onCancelEditingMatches = component::cancelEditingMatches,
-                                    onCommitMatchChanges = component::commitMatchChanges,
-                                    onAddBracketMatch = component::addBracketMatch,
-                                    onAddScheduleMatch = component::addScheduleMatch,
-                                    onRequestStandingsConfirmation = {
-                                        showStandingsConfirmDialog = true
-                                    },
-                                    onParticipantsSectionSelected = {
-                                        selectedParticipantsSection = it
-                                    },
-                                    onManagingParticipantsChanged = { isManaging ->
-                                        isManagingParticipants = isManaging
-                                        if (isManaging) {
-                                            component.startManagingParticipants()
-                                        } else {
-                                            component.stopManagingParticipants()
-                                        }
-                                    },
-                                    onInviteTeam = {
-                                        component.searchInviteTeams("")
-                                        showInviteTeamDialog = true
-                                    },
-                                    onInvitePlayer = {
-                                        component.searchUsers("")
-                                        showInvitePlayerDialog = true
-                                    },
-                                    onClearSelectedWeeklyOccurrence = component::clearSelectedWeeklySession,
-                                    onShowDetails = component::toggleDetails,
-                                ),
-                            )
+                                },
+                                onInviteTeam = {
+                                    component.searchInviteTeams("")
+                                    showInviteTeamDialog = true
+                                },
+                                onInvitePlayer = {
+                                    component.searchUsers("")
+                                    showInvitePlayerDialog = true
+                                },
+                                onClearSelectedWeeklyOccurrence = component::clearSelectedWeeklySession,
+                                onShowDetails = component::toggleDetails,
+                            ),
+                        )
                     }
                 }
             }

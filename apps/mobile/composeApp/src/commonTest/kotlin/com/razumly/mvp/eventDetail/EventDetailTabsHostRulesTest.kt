@@ -3,6 +3,8 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.presentation.EventDetailInitialTab
+import com.razumly.mvp.core.presentation.guides.EventGuideTargets
+import com.razumly.mvp.eventDetail.composables.ParticipantsSection
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -47,6 +49,89 @@ class EventDetailTabsHostRulesTest {
                 initialTab = EventDetailInitialTab.SCHEDULE,
                 availableTabs = listOf(DetailTab.PARTICIPANTS, DetailTab.SCHEDULE),
             ),
+        )
+    }
+
+    @Test
+    fun givenSelectedTabBecomesUnavailable_whenReconciling_thenFirstAvailableTabIsSelected() {
+        assertEquals(
+            DetailTab.PARTICIPANTS,
+            resolveAvailableEventDetailTab(
+                selectedTab = DetailTab.LEAGUES,
+                availableTabs = listOf(DetailTab.PARTICIPANTS, DetailTab.SCHEDULE),
+            ),
+        )
+        assertEquals(
+            DetailTab.SCHEDULE,
+            resolveAvailableEventDetailTab(
+                selectedTab = DetailTab.SCHEDULE,
+                availableTabs = listOf(DetailTab.PARTICIPANTS, DetailTab.SCHEDULE),
+            ),
+        )
+    }
+
+    @Test
+    fun givenScheduleDeepLinkArrivesAfterParticipants_whenReconciling_thenScheduleIsSelectedOnce() {
+        val availableTabs = listOf(DetailTab.PARTICIPANTS, DetailTab.SCHEDULE, DetailTab.BRACKET)
+
+        assertEquals(
+            DetailTab.SCHEDULE,
+            resolveRequestedEventDetailTab(
+                initialTab = EventDetailInitialTab.SCHEDULE,
+                selectedTab = DetailTab.PARTICIPANTS,
+                availableTabs = availableTabs,
+            ),
+        )
+        assertEquals(
+            DetailTab.BRACKET,
+            resolveRequestedEventDetailTab(
+                initialTab = EventDetailInitialTab.SCHEDULE,
+                selectedTab = DetailTab.BRACKET,
+                availableTabs = availableTabs,
+            ),
+        )
+    }
+
+    @Test
+    fun givenRegistrationModeChanges_whenReconcilingParticipantSection_thenOnlyAvailableSectionRemains() {
+        assertEquals(
+            listOf(
+                ParticipantsSection.TEAMS,
+                ParticipantsSection.PARTICIPANTS,
+                ParticipantsSection.FREE_AGENTS,
+            ),
+            eventDetailParticipantSections(teamSignup = true),
+        )
+        assertEquals(
+            ParticipantsSection.PARTICIPANTS,
+            resolveAvailableParticipantSection(
+                selectedSection = ParticipantsSection.FREE_AGENTS,
+                availableSections = eventDetailParticipantSections(teamSignup = false),
+            ),
+        )
+    }
+
+    @Test
+    fun givenTabSelection_whenResolvingSynchronizationAndGuideTargets_thenOnlyDomainTabsSelectDivisions() {
+        assertEquals(
+            "pool-a",
+            selectedEventDetailTabTargetDivisionId(
+                selectedTab = DetailTab.LEAGUES,
+                selectedStandingsDataDivisionId = "pool-a",
+                selectedBracketDivisionId = "gold",
+            ),
+        )
+        assertEquals(
+            null,
+            selectedEventDetailTabTargetDivisionId(
+                selectedTab = DetailTab.SCHEDULE,
+                selectedStandingsDataDivisionId = "pool-a",
+                selectedBracketDivisionId = "gold",
+            ),
+        )
+        assertEquals(
+            EventGuideTargets.BracketContent,
+            selectedEventDetailTabGuideTarget(DetailTab.BRACKET),
         )
     }
 

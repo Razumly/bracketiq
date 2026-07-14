@@ -17,6 +17,7 @@ After this plan is complete, users must see the same event overview, registratio
 - [x] (2026-07-14 13:35Z) Milestone 1: extracted the pure stage-selection, weekly-schedule presentation, onboarding/role, primary-action, and match-day rules above `EventDetailScreen()` with direct tests. The route fell from 4,137 to 3,357 lines; all 30 focused tests, iOS simulator compilation, Android debug assembly, and diff checks pass.
 - [x] (2026-07-14 14:00Z) Milestone 2a: extracted the detail-tab renderer into a typed presentation host, kept flow collection and route-local selection in `EventDetailScreen`, and added six direct regressions for tab availability, initial-tab fallback, and schedule-division filtering. The route fell from 3,357 to 2,891 lines; all 36 focused tests, iOS simulator compilation, Android debug assembly, and static/diff checks pass.
 - [x] (2026-07-14 14:30Z) Milestone 2b: extracted overview/edit, sticky-action, and overlay/dialog presentation hosts without moving business state into composables. The route fell from 2,891 to 2,192 lines; all 46 focused tests, iOS simulator compilation, Android debug assembly, and static/diff checks pass.
+- [x] (2026-07-14 17:45Z) Milestone 2c: extracted detail-tab navigation, participant-section, floating-dock, manage-mode, selector, and guide lifecycle state behind `EventDetailTabsRouteHost`, while shared pool/standings selections remain in `EventDetailScreen` because the confirmation overlay and upstream standings projection also consume them. The route fell from 2,192 to 1,852 lines; all 50 focused tests, iOS simulator compilation, Android debug assembly, presentation-boundary scans, and diff checks pass.
 - [x] (2026-07-14 15:29Z) Milestone 3: extracted component-owned event-team check-in, Room-backed relation state, participant hydration, and lifecycle bindings from `DefaultEventDetailComponent` while preserving its public interface and existing coordinators.
   - [x] (2026-07-14 14:40Z) Milestone 3a: integrated APP-009 commit `63451562` as `5b862d6d`, then extracted event-team check-in state, prompt policy, loading, and remote execution into `EventTeamCheckInCoordinator`. The component fell from 3,439 to 3,373 lines; all 28 focused coordinator/membership tests, four iOS migration tests, iOS simulator compilation, Android debug assembly, and diff checks pass.
   - [x] (2026-07-14 14:53Z) Milestone 3b: extracted event, player, host, cached-match, event-team, current-user-team, and managed-team derivation into `EventRelationStateCoordinator`. Membership now consumes canonical Room team IDs rather than the ignored `UserData.teamIds` compatibility field. The component fell from 3,373 to 3,272 lines; all 34 focused tests, two affected weekly integration regressions, four iOS migration tests, iOS simulator compilation, Android debug assembly, and diff checks pass.
@@ -62,6 +63,9 @@ After this plan is complete, users must see the same event overview, registratio
 
 - Observation: the extracted tab host can remain presentation-only even though it renders four workflows and a floating dock.
   Evidence: `EventDetailTabsHost.kt` receives immutable state and callbacks, contains no `collectAsState`, `EventDetailComponent`, repository, or network reference, and the route continues to own `selectedTab`, participant-section selection, pool selection, dock expansion, and manage-mode state.
+
+- Observation: the remaining tab-local route state has no consumer outside the detail-tab branch, while pool and standings selection do cross that boundary.
+  Evidence: `selectedTab`, `showFab`, `selectedParticipantsSection`, `isDetailDockExpanded`, and `isManagingParticipants` were referenced only by the detail-tab renderer and now live in a 522-line route host. `selectedStandingsDataDivisionId` still drives the shared confirmation overlay, and the pool selections still drive upstream schedule/standings projection, so those values remain singular in `EventDetailScreen` and are changed through callbacks.
 
 - Observation: overview/edit and dialog presentation can be extracted without transferring any route or business state ownership.
   Evidence: `EventDetailOverviewEditHost.kt` and `EventDetailOverlayHost.kt` receive typed immutable state and callback containers, contain no `collectAsState`, `StateFlow`, or `EventDetailComponent` reference, and the route still owns flow collection, local dialog/selection state, and every component mutation.
@@ -136,6 +140,10 @@ After this plan is complete, users must see the same event overview, registratio
   Rationale: this preserves the route as the lifecycle/state boundary and prevents the extracted composable from becoming a second controller. It also leaves the existing `EventDetailComponent` interface and dependency-injection graph unchanged.
   Date/Author: 2026-07-14 / Codex
 
+- Decision: supersede the route-local portion of the preceding decision with a focused presentation owner for tab navigation after the first renderer extraction proved stable.
+  Rationale: the renderer remains a pure `EventDetailTabsHost`, while `EventDetailTabsRouteHost` now owns only Compose-local tab, participant-section, dock, manage-mode, selector, and guide lifecycle state. It receives immutable inputs and callbacks, has no flow collection, component, HTTP client, or repository access, and leaves every shared selection and domain mutation at the parent route boundary.
+  Date/Author: 2026-07-14 / Codex
+
 - Decision: let the overview host own only presentation-local sticky-action animation while the route retains business and dialog state.
   Rationale: animation height and visibility are renderer concerns, but flow collection, dialog flags, selected entities, report drafts, and component actions remain at the route boundary. This keeps both new hosts lifecycle-free and source-compatible with the existing component.
   Date/Author: 2026-07-14 / Codex
@@ -178,7 +186,7 @@ After this plan is complete, users must see the same event overview, registratio
 
 ## Outcomes & Retrospective
 
-Research and sequencing are complete, Milestones 1 through 4 are validated, and Milestone 5 is in progress. `EventDetailScreen.kt` owns 2,192 lines instead of 4,137. APP-009 is integrated as `5b862d6d`; event-team check-in lives in a 146-line coordinator, canonical Room-backed relation derivation lives in a 222-line coordinator, participant/bootstrap orchestration lives in a 425-line coordinator, and 22 lifecycle collectors now live behind a 327-line binding owner with six direct regressions. `DefaultEventDetailComponent.kt` now owns 2,819 lines instead of 3,439. The repository contracts/models and event plus billing-domain wire mappings now have explicit files; viewer-scoped cache lifecycle lives in a 77-line coordinator, detail HTTP mechanics in a 99-line gateway, canonical detail cache access in a 30-line Room store, and viewer registration cache synchronization in a 130-line coordinator with four direct regressions. `EventRepository.kt` is 2,410 lines instead of 3,398 and `BillingRepository.kt` is 2,304 lines instead of 4,430. Milestone 4 is integration-ready at reconciled checkpoint `966aa872` on top of current audit head `20f11938`, including LEG-001 canonical-only identity behavior. Milestones 5c2 through 7 remain, so AUD-004 is still open.
+Research and sequencing are complete, Milestones 1 through 4 plus the additional screen-ownership checkpoint are validated, and Milestone 5 is in progress. `EventDetailScreen.kt` owns 1,852 lines instead of 4,137, and its detail-tab presentation lifecycle now lives in a 522-line callback-driven route host. APP-009 is integrated as `5b862d6d`; event-team check-in lives in a 146-line coordinator, canonical Room-backed relation derivation lives in a 222-line coordinator, participant/bootstrap orchestration lives in a 425-line coordinator, and 22 lifecycle collectors now live behind a 327-line binding owner with six direct regressions. `DefaultEventDetailComponent.kt` now owns 2,819 lines instead of 3,439. The repository contracts/models and event plus billing-domain wire mappings now have explicit files; viewer-scoped cache lifecycle lives in a 77-line coordinator, detail HTTP mechanics in a 99-line gateway, canonical detail cache access in a 30-line Room store, and viewer registration cache synchronization in a 130-line coordinator with four direct regressions. `EventRepository.kt` is 2,410 lines instead of 3,398 and `BillingRepository.kt` is 2,304 lines instead of 4,430. Milestones 5c2 through 7 remain, and the screen remains above the approximate 1,200-line acceptance target, so AUD-004 is still open.
 
 ## Context and Orientation
 
@@ -201,6 +209,8 @@ Milestone 1 moves only pure functions currently above `EventDetailScreen()` into
 Milestone 2 is divided into two reviewable checkpoints. Milestone 2a moves the complete detail-tab renderer into `EventDetailTabsHost.kt`. The host receives `EventDetailTabsHostState` and `EventDetailTabsHostActions`, renders the participant, schedule, standings, and bracket tabs plus the shared division selector and floating dock, and contains no flow collection or component/repository reference. `EventDetailScreen()` retains tab, participant-section, pool, dock, and manage-mode selection. `EventDetailTabsHostRules.kt` owns the pure tab-list, initial-tab, and schedule-match filtering rules with direct tests.
 
 Milestone 2b divided the remaining overview/edit and dialog render body into two more owners. `EventDetailOverviewEditHost.kt` receives immutable overview/edit state and callbacks and also owns the presentation-local sticky-action animation. `EventDetailOverlayHost.kt` receives transient dialog state and actions. `EventDetailScreen()` remains the route boundary that collects flows, owns route-local UI selection and dialog state, and invokes component mutations. The extracted composables do not collect repositories or duplicate business state.
+
+Milestone 2c continues the screen acceptance work without reopening the stable render hosts. `EventDetailTabsRouteHost.kt` owns the detail branch's Compose-local tab, participant-section, floating-dock, manage-mode, division-selector, and guide lifecycle. It receives immutable state plus callbacks, delegates rendering to `EventDetailTabsHost`, and has no `EventDetailComponent`, flow collection, repository, or HTTP client reference. `EventDetailScreen()` continues to own component flow collection, the shared schedule/standings pool selections, standings computation, confirmation overlays, and every domain mutation. Pure reconciliation rules for disappearing tabs, schedule deep links, participant-mode changes, and tab-specific division synchronization remain directly testable in `EventDetailTabsHostRules.kt`.
 
 Milestone 3 integrated APP-009 and validated schema-93 migration coverage. Checkpoint 3a extracted event-team check-in execution and its check-in/prompt/save state into `EventTeamCheckInCoordinator`; the component still supplies the current event, permission decision, managed-team ID, and error presentation. Checkpoint 3b moved relation derivation into a Room-backed state graph. Checkpoint 3c moved participant/bootstrap flow construction, hydration, managed bootstrap, weekly prefetch/sync, and result fanout into `EventParticipantBootstrapCoordinator`. Checkpoint 3d moved all 22 `init` collectors behind named `EventDetailLifecycleBindings` while retaining the Decompose scope and domain handlers in the component. Existing coordinators remain the sole owners of their mutable state. `DefaultEventDetailComponent` retains constructor and interface compatibility and is responsible for assembly, lifecycle ownership, public state exposure, and delegation.
 
@@ -256,6 +266,8 @@ For the overview/edit and overlay/dialog checkpoint, add `EventDetailPresentatio
     ./gradlew :composeApp:assembleDebug
 
 Expect 46 focused tests with zero failures. A static search of `EventDetailOverviewEditHost.kt` and `EventDetailOverlayHost.kt` for `collectAsState`, `StateFlow`, and `EventDetailComponent` must return no matches.
+
+For the detail-tab route ownership checkpoint, repeat that six-suite command and expect 50 focused tests after the four route-state regressions are added. Run the same iOS simulator compilation and Android debug assembly gates. A static search of `EventDetailTabsRouteHost.kt` for `collectAsState`, `StateFlow`, `EventDetailComponent`, `HttpClient`, or direct request calls must return no matches.
 
 Do not run Gradle tests concurrently with another agent in this checkout. Isolated worktrees may run independently, but each result must identify its exact commit and checkout.
 
@@ -379,6 +391,32 @@ Milestone 2b evidence on 2026-07-14:
     composeApp-debug.apk SHA-256: 842919daf9041a4b3f94005b375cbdaba9f05246668bff95505b567762802b15
     overview/overlay host state/component static scan: no matches
     git diff --check: passed
+
+Milestone 2c evidence on 2026-07-14:
+
+    checkpoint parent: 324d7b0e
+    1,852  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt
+      522  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailTabsRouteHost.kt
+      117  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailTabsHostRules.kt
+      250  composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventDetailTabsHostRulesTest.kt
+
+    EventDetailDivisionOptionsTest: 9 passed
+    EventDetailWeeklyBehaviorTest: 14 passed
+    EventDetailOnboardingGuideTest: 2 passed
+    EventDetailScreenRoleVisibilityTest: 5 passed
+    EventDetailTabsHostRulesTest: 10 passed
+    EventDetailPresentationHostsTest: 10 passed
+    focused screen matrix: 50 passed
+    ./gradlew :composeApp:compileKotlinIosSimulatorArm64: BUILD SUCCESSFUL (67 actionable tasks: 12 executed, 55 up-to-date)
+    ./gradlew :composeApp:assembleDebug: BUILD SUCCESSFUL (174 actionable tasks: 13 executed, 161 up-to-date)
+    composeApp-debug.apk SHA-256: fe21711f5bdce9b178e52ccba1dfbd5e7c19fe3217642cd96714bddd0ce8c4e8
+    route-host flow/component/network static scan: no matches
+    git diff --check: passed
+
+    The route host owns only presentation-local state and delegates drawing to the
+    existing tab host. Room-backed event, participant, match, field, compliance,
+    and standings data still arrive through the component flows collected by the
+    parent route; no repository, endpoint, schema, or AUD-008 artwork changed.
 
 Milestone 3a evidence on 2026-07-14:
 
@@ -611,3 +649,5 @@ Revision note (2026-07-14): Started Milestone 5 with the isolated session-cache 
 Revision note (2026-07-14): Completed Milestone 5b by moving detail endpoint construction and response decoding into an HTTP-only gateway and canonical detail observation/cache/re-read/eviction into a Room-only store. Kept orchestration, validation, failure policy, and remote-to-Room ordering explicit in the facade, then recorded the 65-test Event repository gate plus Android/iOS artifact evidence.
 
 Revision note (2026-07-14): Split Milestone 5c at the independent viewer-registration cache boundary. Moved full/incremental profile registration synchronization, account-change invalidation, event replacement, observation, and cleanup into `EventRegistrationCacheCoordinator`; retained lazy DAO access and the original failure ordering, added four direct regressions, and recorded Event repository plus platform build evidence.
+
+Revision note (2026-07-14): Added and completed Milestone 2c after the screen remained above the acceptance target following the original renderer checkpoints. Moved detail-tab navigation, participant-section, floating-dock, manage-mode, selector, and guide lifecycle behind a callback-driven route host, retained shared pool/standings truth in `EventDetailScreen`, added four direct state-reconciliation regressions, and recorded the 50-test plus Android/iOS build evidence.
