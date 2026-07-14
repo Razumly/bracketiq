@@ -28,9 +28,9 @@ After this plan is complete, users must see the same event overview, registratio
 - [ ] Milestone 5: split `EventRepository` behind its existing facade into Room store, remote gateway, participant synchronization, registration mutation, event catalog, and session-cache collaborators.
   - [x] (2026-07-14 15:58Z) Milestone 5a: extracted viewer-scoped event filtering, startup cache cleanup, user-session invalidation, and lifecycle cancellation into `EventSessionCacheCoordinator`. The facade remains source-compatible and fell from 2,637 to 2,593 lines; all 65 Event repository HTTP cases, iOS simulator compilation, Android debug assembly, zero-alias scans, and diff checks pass.
   - [x] (2026-07-14 16:05Z) Milestone 5b: extracted event-detail request/decoding mechanics into `EventDetailRemoteGateway` and canonical detail observation/cache-read/eviction into `EventRoomStore`. The facade still orders remote fetch before Room persistence/re-read and keeps 403/404 eviction explicit; all 65 Event repository HTTP cases, iOS simulator compilation, Android debug assembly, zero-alias scans, and diff checks pass.
-  - [ ] Milestone 5c: extract participant/management/compliance synchronization and current-user registration cache ownership.
+  - [x] (2026-07-14 20:42Z) Milestone 5c: extracted participant/management/compliance synchronization and current-user registration cache ownership.
     - [x] (2026-07-14 16:13Z) Milestone 5c1: moved current-viewer registration full sync, account-switch invalidation, event-scoped replacement, observation, and cleanup into `EventRegistrationCacheCoordinator`. Four direct regressions cover watermark reuse, viewer changes, failed-refresh cache preservation, and authoritative empty replacement; all 65 Event repository HTTP cases and both platform build gates pass.
-    - [ ] Milestone 5c2: extract participant relation, management snapshot, and compliance synchronization behind the existing facade.
+    - [x] (2026-07-14 20:42Z) Milestone 5c2: moved participant snapshot merging, relation persistence, management-cache replacement/observation, and team/user compliance synchronization into the 699-line `EventParticipantSyncCoordinator`; compliance HTTP mechanics remain in the remote gateway. `EventRepository.kt` fell from 2,410 to 1,771 lines. At integrated commit `900a9106`, all 65 Event repository HTTP cases, iOS simulator compilation, Android debug assembly, canonical-identity scans, and diff checks pass.
   - [ ] Milestone 5d: extract registration mutations plus catalog/search/host/organization query ownership and complete the facade-only boundary.
 - [ ] Milestone 6: split `BillingRepository` behind `IBillingRepository` into checkout/signing, rental, bill/payment, discount, catalog, organization/review, and refund collaborators.
 - [ ] Milestone 7: run focused and broad Gradle tests, Android assembly/install/cold-launch checks, iOS compilation/tests, and Android/iOS event-detail visual smoke; reconcile AUD-004 only after runtime evidence passes.
@@ -105,6 +105,9 @@ After this plan is complete, users must see the same event overview, registratio
 
 - Observation: current-viewer registration synchronization is an independent cache lifecycle with a narrower failure boundary than participant relation hydration.
   Evidence: full sync owns viewer watermark state and clears all rows only on sign-out or viewer change, while event sync fetches before replacing one event so a failed request preserves the last valid snapshot. `EventRegistrationCacheCoordinator` now owns those rules through a lazily supplied `EventRegistrationDao`, so repositories whose tests do not configure that DAO retain the original constructor behavior.
+
+- Observation: participant relations, management rows, and compliance rows share one event-and-occurrence cache scope but not one infrastructure boundary.
+  Evidence: `EventParticipantSyncCoordinator` owns the normalized scope, remote-result mapping, Room replacement/re-read, participant relation graph, and weekly-roster rules. `EventDetailRemoteGateway` owns only the two newly delegated compliance requests and still has no DAO reference; the coordinator receives that gateway and the Room-backed collaborators explicitly.
 
 ## Decision Log
 
@@ -184,9 +187,13 @@ After this plan is complete, users must see the same event overview, registratio
   Rationale: the registration cache has its own profile endpoint, viewer watermark, DAO, and failure-preservation contract. Moving it first with direct tests avoids coupling account-transition semantics to the larger event participant relation extraction and creates a clean rollback boundary.
   Date/Author: 2026-07-14 / Codex
 
+- Decision: keep participant relation, management, and compliance convergence in one coordinator while leaving endpoint construction and response decoding in the remote gateway.
+  Rationale: those three cache families share event/occurrence scope and must converge through Room before callers observe success, while HTTP mechanics have a separate infrastructure reason to change. The 699-line coordinator remains below the plan's collaborator ceiling and has one participant-state synchronization responsibility covered through the 65-case facade contract suite.
+  Date/Author: 2026-07-14 / Codex
+
 ## Outcomes & Retrospective
 
-Research and sequencing are complete, Milestones 1 through 4 plus the additional screen-ownership checkpoint are validated, and Milestone 5 is in progress. `EventDetailScreen.kt` owns 1,852 lines instead of 4,137, and its detail-tab presentation lifecycle now lives in a 522-line callback-driven route host. APP-009 is integrated as `5b862d6d`; event-team check-in lives in a 146-line coordinator, canonical Room-backed relation derivation lives in a 222-line coordinator, participant/bootstrap orchestration lives in a 425-line coordinator, and 22 lifecycle collectors now live behind a 327-line binding owner with six direct regressions. `DefaultEventDetailComponent.kt` now owns 2,819 lines instead of 3,439. The repository contracts/models and event plus billing-domain wire mappings now have explicit files; viewer-scoped cache lifecycle lives in a 77-line coordinator, detail HTTP mechanics in a 99-line gateway, canonical detail cache access in a 30-line Room store, and viewer registration cache synchronization in a 130-line coordinator with four direct regressions. `EventRepository.kt` is 2,410 lines instead of 3,398 and `BillingRepository.kt` is 2,304 lines instead of 4,430. Milestones 5c2 through 7 remain, and the screen remains above the approximate 1,200-line acceptance target, so AUD-004 is still open.
+Research and sequencing are complete, Milestones 1 through 4 plus the additional screen-ownership checkpoint are validated, and Milestone 5 is in progress. `EventDetailScreen.kt` owns 1,852 lines instead of 4,137, and its detail-tab presentation lifecycle now lives in a 522-line callback-driven route host. APP-009 is integrated as `5b862d6d`; event-team check-in lives in a 146-line coordinator, canonical Room-backed relation derivation lives in a 222-line coordinator, participant/bootstrap orchestration lives in a 425-line coordinator, and 22 lifecycle collectors now live behind a 327-line binding owner with six direct regressions. `DefaultEventDetailComponent.kt` now owns 2,819 lines instead of 3,439. The repository contracts/models and event plus billing-domain wire mappings now have explicit files; viewer-scoped cache lifecycle lives in a 77-line coordinator, detail HTTP mechanics in a 129-line gateway, canonical detail cache access in a 30-line Room store, viewer registration cache synchronization in a 130-line coordinator with four direct regressions, and participant/relation/management/compliance synchronization in a 699-line coordinator. `EventRepository.kt` is 1,771 lines instead of 3,398 and `BillingRepository.kt` is 2,304 lines instead of 4,430. Milestones 5d through 7 remain, and the screen, component, and repository facades remain above their acceptance targets, so AUD-004 is still open.
 
 ## Context and Orientation
 
@@ -622,6 +629,27 @@ Milestone 5c1 evidence on 2026-07-14:
     still fetches before deleting its prior rows, so a failed request cannot erase the
     last valid event registration snapshot.
 
+Milestone 5c2 integrated evidence on 2026-07-14:
+
+    isolated checkpoint: 5bb13bed
+    integrated checkpoint: 900a9106
+    1,771  core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/EventRepository.kt
+      699  core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/EventParticipantSyncCoordinator.kt
+      129  core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/EventDetailRemoteGateway.kt
+    EventRepositoryHttpTest: 65 passed, 0 skipped, 0 failures, 0 errors
+    ./gradlew :composeApp:compileKotlinIosSimulatorArm64: BUILD SUCCESSFUL (67 actionable tasks: 12 executed, 55 up-to-date)
+    ./gradlew :composeApp:assembleDebug: BUILD SUCCESSFUL (175 actionable tasks: 13 executed, 162 up-to-date)
+    composeApp-debug.apk SHA-256: a7c2d417daf7b00b05889a17b9c701ab29d3aa7e4ec452ee8a0043efab642c51
+    three canonical identity production scans: 0 matches
+    git diff --check: passed
+
+    The complete Event repository facade suite exercises participant bootstrap,
+    authoritative participant replacement, partial division preservation, weekly
+    selection clearing, management-cache persistence, compliance persistence, and
+    participant mutation convergence through the extracted coordinator. No public
+    repository signature, endpoint path, DAO contract, or dependency-injection binding
+    changed.
+
 ## Interfaces and Dependencies
 
 Keep `EventDetailScreen(component: EventDetailComponent, ...)`, the `EventDetailComponent` interface, and `DefaultEventDetailComponent` constructor source-compatible. Pure screen rules stay in package `com.razumly.mvp.eventDetail` with existing function names/signatures and `internal` visibility where tests and route use them. Extracted composables receive immutable state data classes and callback containers; they do not receive repositories.
@@ -658,3 +686,4 @@ Revision note (2026-07-14): Split Milestone 5c at the independent viewer-registr
 
 Revision note (2026-07-14): Added and completed Milestone 2c after the screen remained above the acceptance target following the original renderer checkpoints. Moved detail-tab navigation, participant-section, floating-dock, manage-mode, selector, and guide lifecycle behind a callback-driven route host, retained shared pool/standings truth in `EventDetailScreen`, added four direct state-reconciliation regressions, and recorded the 50-test plus Android/iOS build evidence.
 Revision note (2026-07-14): Integrated Milestone 2c with the later Milestone 5 repository checkpoints at canonical commit `d0acac09`; the 50-test screen matrix, iOS simulator compilation, Android debug assembly, and exact integrated APK digest all pass.
+Revision note (2026-07-14): Completed Milestone 5c2 and Milestone 5c by moving participant snapshot merging, relation persistence, management cache, and compliance convergence into `EventParticipantSyncCoordinator` while retaining compliance request mechanics in the remote gateway. Integrated the isolated checkpoint as `900a9106`, reduced the Event repository facade to 1,771 lines, and recorded the 65-case repository matrix plus Android/iOS artifact evidence.
