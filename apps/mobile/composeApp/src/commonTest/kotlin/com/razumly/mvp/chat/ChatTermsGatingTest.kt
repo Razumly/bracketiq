@@ -315,6 +315,7 @@ private class ChatTerms_FakeChatGroupRepository(
     }
 
     override suspend fun refreshChatGroupsAndMessages(): Result<Unit> = Result.success(Unit)
+    override suspend fun refreshChatGroupSummary(chatGroupId: String): Result<Unit> = Result.success(Unit)
     override suspend fun createChatGroup(newChatGroup: ChatGroupWithRelations): Result<Unit> = Result.success(Unit)
     override suspend fun updateChatGroup(newChatGroup: ChatGroup): Result<ChatGroup> = Result.success(newChatGroup)
     override suspend fun deleteChatGroup(chatGroupId: String): Result<Unit> = Result.success(Unit)

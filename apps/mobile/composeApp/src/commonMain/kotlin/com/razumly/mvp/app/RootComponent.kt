@@ -58,10 +58,12 @@ import dev.icerock.moko.permissions.PermissionsController
 import dev.icerock.moko.permissions.location.LOCATION
 import dev.icerock.moko.permissions.notifications.REMOTE_NOTIFICATION
 import io.github.aakira.napier.Napier
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -109,6 +111,25 @@ internal suspend fun LifecycleOwner.repeatCenterActionRefreshWhileStarted(
     }
 }
 
+internal suspend fun LifecycleOwner.repeatChatRefreshOnForeground(
+    isActiveUser: () -> Boolean,
+    refresh: suspend () -> Unit,
+    context: CoroutineContext = Dispatchers.Main,
+) {
+    repeatOnLifecycle(
+        minActiveState = Lifecycle.State.STARTED,
+        context = context,
+    ) {
+        if (isActiveUser()) {
+            refresh()
+        }
+
+        // Keep this lifecycle session open without polling. Leaving STARTED cancels
+        // the block, and the next foreground session performs one fresh sync.
+        awaitCancellation()
+    }
+}
+
 class RootComponent(
     componentContext: ComponentContext,
     deepLinkNavStart: DeepLinkNav?,
@@ -128,7 +149,6 @@ class RootComponent(
             "We couldn't restore your session in time. Please log in."
         private const val PUSH_TARGET_REGISTRATION_ATTEMPTS = 3
         private const val PUSH_TARGET_REGISTRATION_RETRY_DELAY_MS = 2_000L
-        private const val CHAT_REFRESH_INTERVAL_MS = 30_000L
         private const val CENTER_ACTION_SCHEDULE_REFRESH_INTERVAL_MS = 60_000L
     }
 
@@ -157,13 +177,11 @@ class RootComponent(
 
     private val deepLinkNav = MutableStateFlow(deepLinkNavStart)
     private var registeredPushUserId: String? = null
-    private var syncedChatUserId: String? = null
     private var startupDecisionMade = false
     private var unreadCountJob: Job? = null
     private var pendingInviteCountJob: Job? = null
     private var pushRegistrationRetryJob: Job? = null
     private var deepLinkNavigationJob: Job? = null
-    private var chatStartupSyncJob: Job? = null
     private var chatRefreshJob: Job? = null
     private var registrationSyncJob: Job? = null
     private var centerActionRefreshJob: Job? = null
@@ -277,8 +295,7 @@ class RootComponent(
                         if (userData.id.isNotBlank()) {
                             refreshRegistrationCacheOnStartupIfNeeded(userData.id)
                             registerPushTargetIfNeeded(userData.id)
-                            refreshChatsOnStartupIfNeeded(userData.id)
-                            startChatRefreshLoopIfNeeded(userData.id)
+                            startChatForegroundRefreshIfNeeded(userData.id)
                             startCenterActionRefreshLoopIfNeeded(userData.id)
                             scope.launch {
                                 _koin.get<IBillingRepository>().syncPendingRentalOrders()
@@ -289,8 +306,7 @@ class RootComponent(
                         } else if (userRepository.startupAuthState.value == StartupAuthState.Unauthenticated) {
                             clearRegistrationCacheSyncState()
                             clearPushTargetIfNeeded()
-                            clearChatStartupSyncState()
-                            clearChatRefreshLoop()
+                            clearChatForegroundRefresh()
                             clearCenterActionRefreshLoop()
                         }
                     },
@@ -298,8 +314,7 @@ class RootComponent(
                         if (userRepository.startupAuthState.value == StartupAuthState.Unauthenticated) {
                             clearRegistrationCacheSyncState()
                             clearPushTargetIfNeeded()
-                            clearChatStartupSyncState()
-                            clearChatRefreshLoop()
+                            clearChatForegroundRefresh()
                             clearCenterActionRefreshLoop()
                         }
                     }
@@ -679,44 +694,31 @@ class RootComponent(
         }
     }
 
-    private fun refreshChatsOnStartupIfNeeded(userId: String) {
-        if (syncedChatUserId == userId || chatStartupSyncJob?.isActive == true) return
-        chatStartupSyncJob = scope.launch(Dispatchers.Default) {
-            chatGroupRepository.refreshChatGroupsAndMessages()
-                .onSuccess {
-                    syncedChatUserId = userId
-                }
-                .onFailure {
-                    if (syncedChatUserId == userId) {
-                        syncedChatUserId = null
-                    }
-                    Napier.w("Startup chat refresh failed: ${it.message}")
-                }
-        }
-    }
-
-    private fun clearChatStartupSyncState() {
-        chatStartupSyncJob?.cancel()
-        chatStartupSyncJob = null
-        syncedChatUserId = null
-    }
-
-    private fun startChatRefreshLoopIfNeeded(userId: String) {
+    private fun startChatForegroundRefreshIfNeeded(userId: String) {
         if (activeChatRefreshUserId == userId && chatRefreshJob?.isActive == true) return
 
         chatRefreshJob?.cancel()
         activeChatRefreshUserId = userId
-        chatRefreshJob = scope.launch(Dispatchers.Default) {
-            while (isActive && activeChatRefreshUserId == userId) {
-                chatGroupRepository.refreshChatGroupsAndMessages().onFailure { throwable ->
-                    Napier.w("Periodic chat refresh failed for user $userId: ${throwable.message}")
-                }
-                delay(CHAT_REFRESH_INTERVAL_MS)
-            }
+        chatRefreshJob = scope.launch {
+            repeatChatRefreshOnForeground(
+                isActiveUser = { activeChatRefreshUserId == userId },
+                refresh = {
+                    try {
+                        chatGroupRepository.refreshChatGroupsAndMessages().onFailure { throwable ->
+                            Napier.w("Foreground chat refresh failed for user $userId: ${throwable.message}")
+                        }
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (throwable: Throwable) {
+                        Napier.w("Foreground chat refresh failed for user $userId: ${throwable.message}")
+                    }
+                },
+                context = Dispatchers.Default,
+            )
         }
     }
 
-    private fun clearChatRefreshLoop() {
+    private fun clearChatForegroundRefresh() {
         activeChatRefreshUserId = null
         chatRefreshJob?.cancel()
         chatRefreshJob = null

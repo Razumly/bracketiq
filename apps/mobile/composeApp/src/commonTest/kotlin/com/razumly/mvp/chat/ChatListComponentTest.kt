@@ -119,6 +119,8 @@ private class ChatList_FakeChatGroupRepository : IChatGroupRepository {
         return refreshFailure?.let(Result.Companion::failure) ?: Result.success(Unit)
     }
 
+    override suspend fun refreshChatGroupSummary(chatGroupId: String): Result<Unit> = Result.success(Unit)
+
     override suspend fun createChatGroup(newChatGroup: ChatGroupWithRelations): Result<Unit> {
         createCallCount += 1
         return createFailure?.let(Result.Companion::failure) ?: Result.success(Unit)

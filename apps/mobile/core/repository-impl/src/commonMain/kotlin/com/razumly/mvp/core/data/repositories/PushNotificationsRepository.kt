@@ -2,6 +2,7 @@ package com.razumly.mvp.core.data.repositories
 
 import com.mmk.kmpnotifier.notification.NotifierManager
 import com.mmk.kmpnotifier.notification.PayloadData
+import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.chat.data.IMessageRepository
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.DatabaseService
@@ -108,6 +109,7 @@ class PushNotificationsRepository(
     private val api: MvpApiClient,
     private val messageRepository: IMessageRepository,
     private val databaseService: DatabaseService,
+    private val chatGroupRepositoryProvider: () -> IChatGroupRepository,
 ) : IPushNotificationsRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pushTokenState =
@@ -632,25 +634,19 @@ class PushNotificationsRepository(
     }
 
     private suspend fun refreshChatMessagesFromPushIfNeeded(topicId: String?) {
-        val chatGroupId = topicId.toChatGroupTopicIdOrNull() ?: return
-        messageRepository.getMessagesInChatGroup(chatGroupId).onFailure { error ->
-            Napier.w(
-                tag = "PushNotificationsRepository",
-                message = "Failed to refresh messages from push for chatId=$chatGroupId: ${error.message}"
-            )
-        }
-    }
-
-    private fun String?.toChatGroupTopicIdOrNull(): String? {
-        val normalizedTopicId = this?.trim()?.takeIf(String::isNotBlank) ?: return null
-        return when {
-            normalizedTopicId.startsWith(USER_TOPIC_PREFIX) -> null
-            normalizedTopicId.startsWith(TEAM_TOPIC_PREFIX) -> null
-            normalizedTopicId.startsWith(EVENT_TOPIC_PREFIX) -> null
-            normalizedTopicId.startsWith(TOURNAMENT_TOPIC_PREFIX) -> null
-            normalizedTopicId.startsWith(MATCH_TOPIC_PREFIX) -> null
-            else -> normalizedTopicId
-        }
+        refreshChatCachesFromPush(
+            topicId = topicId,
+            refreshMessages = messageRepository::getMessagesInChatGroup,
+            refreshSummary = { chatGroupId ->
+                chatGroupRepositoryProvider().refreshChatGroupSummary(chatGroupId)
+            },
+            onFailure = { cacheName, chatGroupId, error ->
+                Napier.w(
+                    tag = "PushNotificationsRepository",
+                    message = "Failed to refresh $cacheName from push for chatId=$chatGroupId: ${error.message}",
+                )
+            },
+        )
     }
 
     private fun userIdFromTopicId(topicId: String): String? {
@@ -681,6 +677,49 @@ class PushNotificationsRepository(
         const val DEFERRED_TOKEN_SYNC_INTERVAL_MS = 2_000L
         const val DEVICE_TARGET_SYNC_ATTEMPTS = 3
         const val DEVICE_TARGET_SYNC_BASE_DELAY_MS = 1_500L
+    }
+}
+
+internal suspend fun refreshChatCachesFromPush(
+    topicId: String?,
+    refreshMessages: suspend (String) -> Result<*>,
+    refreshSummary: suspend (String) -> Result<Unit>,
+    onFailure: (cacheName: String, chatGroupId: String, error: Throwable) -> Unit = { _, _, _ -> },
+) {
+    val chatGroupId = topicId.toChatGroupTopicIdOrNull() ?: return
+
+    suspend fun refreshCache(
+        cacheName: String,
+        refresh: suspend () -> Result<*>,
+    ) {
+        val failure = try {
+            refresh().exceptionOrNull()
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (throwable: Throwable) {
+            throwable
+        }
+        if (failure != null) {
+            onFailure(cacheName, chatGroupId, failure)
+        }
+    }
+
+    // Message rows drive the open conversation; the summary drives unread
+    // badges and list previews. A failure in either refresh must not suppress
+    // the other cache invalidation.
+    refreshCache("messages") { refreshMessages(chatGroupId) }
+    refreshCache("chat summary") { refreshSummary(chatGroupId) }
+}
+
+internal fun String?.toChatGroupTopicIdOrNull(): String? {
+    val normalizedTopicId = this?.trim()?.takeIf(String::isNotBlank) ?: return null
+    return when {
+        normalizedTopicId.startsWith("user_") -> null
+        normalizedTopicId.startsWith("team_") -> null
+        normalizedTopicId.startsWith("event_") -> null
+        normalizedTopicId.startsWith("tournament_") -> null
+        normalizedTopicId.startsWith("match_") -> null
+        else -> normalizedTopicId
     }
 }
 
