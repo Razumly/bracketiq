@@ -37,7 +37,6 @@ import com.razumly.mvp.core.data.dataTypes.divisionPriceRange
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
-import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
 import com.razumly.mvp.core.data.dataTypes.resolvedDivisionPriceCents
 import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.removeOfficialUser
@@ -48,7 +47,6 @@ import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.dataTypes.usesTeamOfficialScheduling
 import com.razumly.mvp.core.data.dataTypes.withDoTeamsOfficiate
 import com.razumly.mvp.core.data.dataTypes.withOfficialSchedulingMode
-import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.presentation.EventDetailInitialTab
@@ -61,11 +59,9 @@ import com.razumly.mvp.core.presentation.guides.EventGuideTargets
 import com.razumly.mvp.core.presentation.guides.LocalGuideController
 import com.razumly.mvp.core.presentation.guides.eventOverviewGuide
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
-import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.core.util.resolvedTimeZone
-import com.razumly.mvp.eventDetail.composables.ScheduleItem
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
 import dev.icerock.moko.geo.LatLng
@@ -273,46 +269,34 @@ fun EventDetailScreen(
         effectiveStart = selectedWeeklyOccurrence?.sessionStart ?: selectedEvent.event.start,
     )
     val eventHasStarted = refundPolicy.eventHasStarted
-    val isWeeklyEvent = selectedEvent.event.eventType == EventType.WEEKLY_EVENT
-    val selectedWeeklyOccurrenceStarted = remember(selectedWeeklyOccurrence?.sessionStart) {
-        selectedWeeklyOccurrence?.sessionStart?.let { sessionStart ->
-            Clock.System.now() >= sessionStart
-        } == true
-    }
-    val joinBlockedByStart = if (isWeeklyEvent) {
-        selectedWeeklyOccurrenceStarted
-    } else {
-        eventHasStarted
-    }
-    val hasWeeklyParentTimeSlots = remember(selectedEvent.event.timeSlotIds) {
-        selectedEvent.event.timeSlotIds.any { slotId -> slotId.isNotBlank() }
-    }
-    val hasDirectionsTarget = remember(
-        selectedEvent.event.address,
-        selectedEvent.event.lat,
-        selectedEvent.event.long,
+    val weeklyPresentation = remember(
+        selectedEvent,
+        selectedWeeklyOccurrence,
+        sports,
+        eventHasStarted,
+        isUserInEvent,
+        isHost,
+        isAssistantHost,
+        isEventOfficial,
     ) {
-        !selectedEvent.event.address.isNullOrBlank() ||
-            selectedEvent.event.lat != 0.0 ||
-            selectedEvent.event.long != 0.0
+        buildEventDetailWeeklyRoutePresentation(
+            selectedEvent = selectedEvent,
+            selectedWeeklyOccurrence = selectedWeeklyOccurrence,
+            sports = sports,
+            now = Clock.System.now(),
+            eventHasStarted = eventHasStarted,
+            isUserInEvent = isUserInEvent,
+            isHost = isHost,
+            isAssistantHost = isAssistantHost,
+            isEventOfficial = isEventOfficial,
+        )
     }
-    val isWeeklyParentEvent = isWeeklyEvent && hasWeeklyParentTimeSlots
-    val weeklySessionOptions = remember(
-        isWeeklyParentEvent,
-        selectedEvent.event.id,
-        selectedEvent.event.divisions,
-        selectedEvent.event.divisionDetails,
-        selectedEvent.timeSlots,
-    ) {
-        if (!isWeeklyParentEvent) {
-            emptyList()
-        } else {
-            buildWeeklySessionOptions(
-                event = selectedEvent.event,
-                timeSlots = selectedEvent.timeSlots,
-            )
-        }
-    }
+    val isWeeklyEvent = weeklyPresentation.isWeeklyEvent
+    val selectedWeeklyOccurrenceStarted = weeklyPresentation.selectedWeeklyOccurrenceStarted
+    val joinBlockedByStart = weeklyPresentation.joinBlockedByStart
+    val hasDirectionsTarget = weeklyPresentation.hasDirectionsTarget
+    val isWeeklyParentEvent = weeklyPresentation.isWeeklyParentEvent
+    val weeklySessionOptions = weeklyPresentation.weeklySessionOptions
     LaunchedEffect(
         isWeeklyParentEvent,
         selectedEvent.event.id,
@@ -330,54 +314,11 @@ fun EventDetailScreen(
             },
         )
     }
-    val weeklyScheduleOptions = remember(
-        isWeeklyParentEvent,
-        selectedEvent.event.id,
-        selectedEvent.event.start,
-        selectedEvent.event.end,
-        selectedEvent.event.divisions,
-        selectedEvent.event.divisionDetails,
-        selectedEvent.timeSlots,
-    ) {
-        if (!isWeeklyParentEvent) {
-            emptyList()
-        } else {
-            buildWeeklyScheduleOptions(
-                event = selectedEvent.event,
-                timeSlots = selectedEvent.timeSlots,
-            )
-        }
-    }
-    val weeklyScheduleOptionsById = remember(weeklyScheduleOptions) {
-        weeklyScheduleOptions.associateBy { session -> session.id }
-    }
-    val weeklyScheduleItems = remember(
-        weeklyScheduleOptions,
-        selectedEvent.event,
-    ) {
-        weeklyScheduleOptions.map { session ->
-            ScheduleItem.EventEntry(
-                event = selectedEvent.event.copy(
-                    id = session.id,
-                    name = session.label,
-                    location = session.divisionLabel,
-                    start = session.start,
-                    end = session.end,
-                ),
-            )
-        }
-    }
-    val teamSignup = selectedEvent.event.teamSignup
-    val teamSelectionSportLabel = remember(selectedEvent.sport, sports, selectedEvent.event.sportId) {
-        selectedEvent.sport?.name
-            ?: sports.firstOrNull { it.id == selectedEvent.event.sportId }?.name
-            ?: selectedEvent.event.sportId
-                ?.takeIf(String::isNotBlank)
-                ?.replace('_', ' ')
-                ?.replace('-', ' ')
-                ?.toTitleCase()
-            ?: "this event"
-    }
+    val weeklyScheduleOptions = weeklyPresentation.weeklyScheduleOptions
+    val weeklyScheduleOptionsById = weeklyPresentation.weeklyScheduleOptionsById
+    val weeklyScheduleItems = weeklyPresentation.weeklyScheduleItems
+    val teamSignup = weeklyPresentation.teamSignup
+    val teamSelectionSportLabel = weeklyPresentation.teamSelectionSportLabel
     val canLeaveSelf = isUserInEvent && (!teamSignup || isCaptain || isFreeAgent || isWaitListed)
     val platformRefundsAvailable = hasAnyPaidDivision && !selectedEvent.event.usesManualRegistrationPayments()
     val selectableWithdrawTargets = remember(withdrawTargets, teamSignup, isCaptain) {
@@ -468,18 +409,10 @@ fun EventDetailScreen(
             }
         }
     }
-    val selectedWeeklyOccurrenceJoined =
-        isWeeklyParentEvent && selectedWeeklyOccurrence != null && isUserInEvent
-    val isAffiliateEvent = selectedEvent.event.isAffiliateEvent()
-    val shouldShowViewSchedulePrimaryAction = shouldUseViewSchedulePrimaryAction(
-        isWeeklyParentEvent = isWeeklyParentEvent,
-        isAffiliateEvent = isAffiliateEvent,
-        isUserInEvent = isUserInEvent,
-        isHost = isHost,
-        isAssistantHost = isAssistantHost,
-        isEventOfficial = isEventOfficial,
-    )
-    val showOverviewOpenDetailsAction = !isAffiliateEvent && (isWeeklyParentEvent || !shouldShowViewSchedulePrimaryAction)
+    val selectedWeeklyOccurrenceJoined = weeklyPresentation.selectedWeeklyOccurrenceJoined
+    val isAffiliateEvent = weeklyPresentation.isAffiliateEvent
+    val shouldShowViewSchedulePrimaryAction = weeklyPresentation.shouldShowViewSchedulePrimaryAction
+    val showOverviewOpenDetailsAction = weeklyPresentation.showOverviewOpenDetailsAction
     val showStickyActions = !showDetails && !isEditing && !showMap && showStickyDockByScroll
     val isEventRefreshInProgress = eventTeamsAndParticipantsLoading || eventMatchesLoading
     val divisionPresentation = remember(
