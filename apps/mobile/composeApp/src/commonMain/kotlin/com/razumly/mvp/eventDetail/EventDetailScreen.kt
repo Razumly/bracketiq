@@ -1,52 +1,18 @@
 package com.razumly.mvp.eventDetail
 
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.animateDp
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Announcement
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.QrCode
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonColors
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MenuDefaults
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -57,12 +23,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
@@ -95,10 +58,6 @@ import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.presentation.EventDetailInitialTab
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
-import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
-import com.razumly.mvp.core.presentation.composables.DiscountCodeDialog
-import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
-import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.guides.EventGuideIds
@@ -109,19 +68,13 @@ import com.razumly.mvp.core.presentation.guides.eventOverviewGuide
 import com.razumly.mvp.core.presentation.guides.eventParticipantsTabGuide
 import com.razumly.mvp.core.presentation.guides.eventScheduleTabGuide
 import com.razumly.mvp.core.presentation.guides.eventStandingsTabGuide
-import com.razumly.mvp.core.presentation.guides.guideTarget
-import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
-import com.razumly.mvp.core.presentation.util.getEventQrCodeUrl
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.core.util.resolvedTimeZone
-import com.razumly.mvp.eventDetail.composables.MatchEditDialog
 import com.razumly.mvp.eventDetail.composables.ParticipantsSection
 import com.razumly.mvp.eventDetail.composables.ScheduleItem
-import com.razumly.mvp.eventDetail.composables.SendNotificationDialog
-import com.razumly.mvp.eventDetail.composables.TeamSelectionDialog
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
 import dev.icerock.moko.geo.LatLng
@@ -1288,544 +1241,256 @@ fun EventDetailScreen(
                     exit = ExitTransition.None,
                 ) {
                     Box {
-                            EventDetails(
+                        EventDetailOverviewEditHost(
+                            state = EventDetailOverviewEditHostState(
                                 paymentProcessor = component,
                                 mapComponent = mapComponent,
-                            hostHasAccount = currentUser.hasStripeAccount == true,
-                            eventWithRelations = selectedEvent,
-                            editEvent = editedEvent,
-                            navPadding = LocalNavBarPadding.current,
-                            topInset = innerPadding.calculateTopPadding(),
-                            editView = isEditing,
-                            showOfficialsPanel = showOfficialsPanel,
-                            isNewEvent = false,
-                            onOpenLocationMap = {
-                                pendingMapPlace = null
-                                isLocationPickerMapMode = true
-                                mapComponent.toggleMap()
-                            },
-                            onAddCurrentUser = {},
-                            imageScheme = imageScheme,
-                            imageIds = eventImageIds,
-                            eventRegistrationQuestions = eventRegistrationQuestions,
-                            eventRegistrationQuestionAnswers = eventRegistrationQuestionAnswers,
-                            eventRegistrationQuestionsExpanded = eventRegistrationQuestionsExpanded,
-                            availableRentalResources = availableRentalResources,
-                            selectedRentalResourceIds = selectedRentalResourceIds,
-                            onRentalResourceSelectionChange = component::setRentalResourceSelected,
-                            registrationHoldExpiresAt = registrationHoldExpiresAt,
-                            onToggleEventRegistrationQuestions = component::toggleEventRegistrationQuestionsExpanded,
-                            onEventRegistrationQuestionAnswerChange = component::updateEventRegistrationQuestionAnswer,
-                            onRegistrationHoldExpired = component::registrationHoldExpired,
-                            onHostCreateAccount = component::onHostCreateAccount,
-                            onPlaceSelected = component::selectPlace,
-                            onEditEvent = component::editEventField,
-                            onEditTournament = component::editTournamentField,
-                            onEventTypeSelected = component::onTypeSelected,
-                            quoteInclusivePrice = component::quoteInclusivePrice,
-                            onSportSelected = { sportId ->
-                                component.editEventField {
-                                    copy(
-                                        sportId = sportId.takeIf(String::isNotBlank),
-                                        matchRulesOverride = null,
-                                        resolvedMatchRules = null,
-                                    )
-                                }
-                            },
-                            sports = sports,
-                            eventTagOptions = eventTags,
-                            divisionTypeParameters = divisionTypeParameters,
-                            onUpdateDoTeamsOfficiate = { doTeamsOfficiate ->
-                                component.editEventField {
-                                    withDoTeamsOfficiate(doTeamsOfficiate)
-                                }
-                            },
-                            onUpdateTeamOfficialsMaySwap = { teamOfficialsMaySwap ->
-                                component.editEventField {
-                                    copy(
-                                        teamOfficialsMaySwap = if (usesTeamOfficialScheduling()) teamOfficialsMaySwap else false,
-                                    )
-                                }
-                            },
-                            onUpdateTeamCheckInMode = { mode ->
-                                component.editEventField {
-                                    copy(teamCheckInMode = if (teamSignup) mode else TeamCheckInMode.OFF)
-                                }
-                            },
-                            onUpdateTeamCheckInOpenMinutesBefore = { minutes ->
-                                component.editEventField {
-                                    copy(teamCheckInOpenMinutesBefore = minutes.coerceAtLeast(0))
-                                }
-                            },
-                            onUpdateAllowMatchRosterEdits = { enabled ->
-                                component.editEventField {
-                                    copy(
-                                        allowMatchRosterEdits = teamSignup && enabled,
-                                        allowTemporaryMatchPlayers = teamSignup && enabled && allowTemporaryMatchPlayers,
-                                    )
-                                }
-                            },
-                            onUpdateAllowTemporaryMatchPlayers = { enabled ->
-                                component.editEventField {
-                                    copy(
-                                        allowTemporaryMatchPlayers = teamSignup && allowMatchRosterEdits && enabled,
-                                    )
-                                }
-                            },
-                            onUpdateOfficialSchedulingMode = { mode ->
-                                component.editEventField {
-                                    withOfficialSchedulingMode(mode)
-                                }
-                            },
-                            onLoadOfficialPositionDefaults = {
-                                component.editEventField {
-                                    syncOfficialStaffing(
-                                        sport = sports.firstOrNull { sport -> sport.id == sportId },
-                                        replacePositionsWithSportDefaults = true,
-                                    )
-                                }
-                            },
-                            onAddOfficialPosition = {
-                                component.editEventField {
-                                    addOfficialPosition(sport = selectedSport)
-                                }
-                            },
-                            onUpdateOfficialPositionName = { positionId, name ->
-                                component.editEventField {
-                                    updateOfficialPosition(
-                                        positionId = positionId,
-                                        name = name,
-                                        sport = selectedSport,
-                                    )
-                                }
-                            },
-                            onUpdateOfficialPositionCount = { positionId, count ->
-                                component.editEventField {
-                                    updateOfficialPosition(
-                                        positionId = positionId,
-                                        count = count,
-                                        sport = selectedSport,
-                                    )
-                                }
-                            },
-                            onRemoveOfficialPosition = { positionId ->
-                                component.editEventField {
-                                    removeOfficialPosition(
-                                        positionId = positionId,
-                                        sport = selectedSport,
-                                    )
-                                }
-                            },
-                            onUpdateOfficialUserPositions = { userId, positionIds ->
-                                component.editEventField {
-                                    updateOfficialUserPositions(
-                                        userId = userId,
-                                        positionIds = positionIds,
-                                        sport = selectedSport,
-                                    )
-                                }
-                            },
-                            editableFields = editableFieldsForDetails,
-                            leagueTimeSlots = editableLeagueTimeSlots,
-                            leagueScoringConfig = editableLeagueScoringConfig,
-                            onAddLeagueTimeSlot = component::addLeagueTimeSlot,
-                            onUpdateLeagueTimeSlot = { index, updated ->
-                                component.updateLeagueTimeSlot(index) { updated }
-                            },
-                            onRemoveLeagueTimeSlot = component::removeLeagueTimeSlot,
-                            onSelectFieldCount = component::selectFieldCount,
-                            onUpdateLocalFieldName = component::updateLocalFieldName,
-                            onLeagueScoringConfigChange = { updated ->
-                                component.updateLeagueScoringConfig { updated }
-                            },
-                            onUploadSelected = component::onUploadSelected,
-                            onDeleteImage = component::deleteImage,
-                            currentUserForHostActions = currentUser,
-                            onHostMessageUser = component::onNavigateToChat,
-                            onHostSendFriendRequest = { user ->
-                                playerInteractionComponent.sendFriendRequest(user)
-                            },
-                            onHostFollowUser = { user ->
-                                playerInteractionComponent.followUser(user)
-                            },
-                            onHostUnfollowUser = { user ->
-                                playerInteractionComponent.unfollowUser(user)
-                            },
-                            onHostBlockUser = { user, leaveSharedChats ->
-                                playerInteractionComponent.blockUser(user, leaveSharedChats)
-                            },
-                            onHostUnblockUser = { user ->
-                                playerInteractionComponent.unblockUser(user)
-                            },
-                            onMapRevealCenterChange = { center ->
-                                mapRevealCenter = center
-                            },
-                            onFloatingDockVisibilityChange = { shouldShow ->
-                                showStickyDockByScroll = shouldShow
-                            },
-                            organizationTemplates = organizationTemplates,
-                            organizationTemplatesLoading = organizationTemplatesLoading,
-                            organizationTemplatesError = organizationTemplatesError,
-                            pendingStaffInvites = pendingStaffInvites,
-                            userSuggestions = suggestedUsers,
-                            onSearchUsers = component::searchUsers,
-                            onAddPendingStaffInvite = { firstName, lastName, email, roles ->
-                                component.addPendingStaffInvite(firstName, lastName, email, roles)
-                            },
-                            onRemovePendingStaffInvite = component::removePendingStaffInvite,
-                            onUpdateAssistantHostIds = { assistantHostIds ->
-                                component.editEventField {
-                                    copy(
-                                        assistantHostIds = assistantHostIds
-                                            .map(String::trim)
-                                            .filter(String::isNotBlank)
-                                            .filterNot { userId -> userId == hostId }
-                                            .distinct(),
-                                    )
-                                }
-                            },
-                                onAddOfficialId = { officialId ->
+                                hostHasAccount = currentUser.hasStripeAccount == true,
+                                eventWithRelations = selectedEvent,
+                                editEvent = editedEvent,
+                                navPadding = LocalNavBarPadding.current,
+                                topInset = innerPadding.calculateTopPadding(),
+                                editView = isEditing,
+                                showOfficialsPanel = showOfficialsPanel,
+                                showMap = showMap,
+                                imageScheme = imageScheme,
+                                imageIds = eventImageIds,
+                                eventRegistrationQuestions = eventRegistrationQuestions,
+                                eventRegistrationQuestionAnswers = eventRegistrationQuestionAnswers,
+                                eventRegistrationQuestionsExpanded = eventRegistrationQuestionsExpanded,
+                                availableRentalResources = availableRentalResources,
+                                selectedRentalResourceIds = selectedRentalResourceIds,
+                                registrationHoldExpiresAt = registrationHoldExpiresAt,
+                                sports = sports,
+                                eventTagOptions = eventTags,
+                                divisionTypeParameters = divisionTypeParameters,
+                                editableFields = editableFieldsForDetails,
+                                leagueTimeSlots = editableLeagueTimeSlots,
+                                leagueScoringConfig = editableLeagueScoringConfig,
+                                currentUserForHostActions = currentUser,
+                                organizationTemplates = organizationTemplates,
+                                organizationTemplatesLoading = organizationTemplatesLoading,
+                                organizationTemplatesError = organizationTemplatesError,
+                                pendingStaffInvites = pendingStaffInvites,
+                                userSuggestions = suggestedUsers,
+                                canEditEventDetails = canEditEventDetails,
+                                canCreateTemplateFromCurrentEvent = canCreateTemplateFromCurrentEvent,
+                                canShowQrCode = canShowQrCode,
+                                canRequestLeaveOrRefund = canRequestRefundAfterStart || canLeaveEvent,
+                                leaveOrRefundActionLabel = leaveOrRefundActionLabel,
+                                canDeleteEvent = canDeleteEvent,
+                                showHostJoinAction = isHost && joinOptions.isNotEmpty(),
+                                isAffiliateEvent = isAffiliateEvent,
+                                isHost = isHost,
+                                showOptionsDropdown = showOptionsDropdown,
+                                showEventStateDropdown = showEventStateDropdown,
+                                teamsAndParticipantsLoading = eventTeamsAndParticipantsLoading,
+                                matchesLoading = eventMatchesLoading,
+                                showFullnessSummary = !isWeeklyParentEvent ||
+                                    selectedWeeklyOccurrenceSummary != null,
+                                selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
+                                selectedWeeklyOccurrenceSummary = selectedWeeklyOccurrenceSummary,
+                                overviewParticipantSummary = overviewParticipantSummary,
+                                showOpenDetailsAction = showOverviewOpenDetailsAction,
+                            ),
+                            actions = EventDetailOverviewEditHostActions(
+                                onOpenLocationMap = {
+                                    pendingMapPlace = null
+                                    isLocationPickerMapMode = true
+                                    mapComponent.toggleMap()
+                                },
+                                onRentalResourceSelectionChange = component::setRentalResourceSelected,
+                                onToggleEventRegistrationQuestions =
+                                    component::toggleEventRegistrationQuestionsExpanded,
+                                onEventRegistrationQuestionAnswerChange =
+                                    component::updateEventRegistrationQuestionAnswer,
+                                onRegistrationHoldExpired = component::registrationHoldExpired,
+                                onHostCreateAccount = component::onHostCreateAccount,
+                                onPlaceSelected = component::selectPlace,
+                                onEditEvent = component::editEventField,
+                                onEditTournament = component::editTournamentField,
+                                onEventTypeSelected = component::onTypeSelected,
+                                quoteInclusivePrice = component::quoteInclusivePrice,
+                                onSportSelected = { sportId ->
                                     component.editEventField {
-                                        addOfficialUser(
-                                            userId = officialId,
+                                        copy(
+                                            sportId = sportId.takeIf(String::isNotBlank),
+                                            matchRulesOverride = null,
+                                            resolvedMatchRules = null,
+                                        )
+                                    }
+                                },
+                                onUpdateDoTeamsOfficiate = { doTeamsOfficiate ->
+                                    component.editEventField {
+                                        withDoTeamsOfficiate(doTeamsOfficiate)
+                                    }
+                                },
+                                onUpdateTeamOfficialsMaySwap = { teamOfficialsMaySwap ->
+                                    component.editEventField {
+                                        copy(
+                                            teamOfficialsMaySwap =
+                                                if (usesTeamOfficialScheduling()) teamOfficialsMaySwap else false,
+                                        )
+                                    }
+                                },
+                                onUpdateTeamCheckInMode = { mode ->
+                                    component.editEventField {
+                                        copy(teamCheckInMode = if (teamSignup) mode else TeamCheckInMode.OFF)
+                                    }
+                                },
+                                onUpdateTeamCheckInOpenMinutesBefore = { minutes ->
+                                    component.editEventField {
+                                        copy(teamCheckInOpenMinutesBefore = minutes.coerceAtLeast(0))
+                                    }
+                                },
+                                onUpdateAllowMatchRosterEdits = { enabled ->
+                                    component.editEventField {
+                                        copy(
+                                            allowMatchRosterEdits = teamSignup && enabled,
+                                            allowTemporaryMatchPlayers =
+                                                teamSignup && enabled && allowTemporaryMatchPlayers,
+                                        )
+                                    }
+                                },
+                                onUpdateAllowTemporaryMatchPlayers = { enabled ->
+                                    component.editEventField {
+                                        copy(
+                                            allowTemporaryMatchPlayers =
+                                                teamSignup && allowMatchRosterEdits && enabled,
+                                        )
+                                    }
+                                },
+                                onUpdateOfficialSchedulingMode = { mode ->
+                                    component.editEventField {
+                                        withOfficialSchedulingMode(mode)
+                                    }
+                                },
+                                onLoadOfficialPositionDefaults = {
+                                    component.editEventField {
+                                        syncOfficialStaffing(
+                                            sport = sports.firstOrNull { sport -> sport.id == sportId },
+                                            replacePositionsWithSportDefaults = true,
+                                        )
+                                    }
+                                },
+                                onAddOfficialPosition = {
+                                    component.editEventField {
+                                        addOfficialPosition(sport = selectedSport)
+                                    }
+                                },
+                                onUpdateOfficialPositionName = { positionId, name ->
+                                    component.editEventField {
+                                        updateOfficialPosition(
+                                            positionId = positionId,
+                                            name = name,
                                             sport = selectedSport,
                                         )
+                                    }
+                                },
+                                onUpdateOfficialPositionCount = { positionId, count ->
+                                    component.editEventField {
+                                        updateOfficialPosition(
+                                            positionId = positionId,
+                                            count = count,
+                                            sport = selectedSport,
+                                        )
+                                    }
+                                },
+                                onRemoveOfficialPosition = { positionId ->
+                                    component.editEventField {
+                                        removeOfficialPosition(
+                                            positionId = positionId,
+                                            sport = selectedSport,
+                                        )
+                                    }
+                                },
+                                onUpdateOfficialUserPositions = { userId, positionIds ->
+                                    component.editEventField {
+                                        updateOfficialUserPositions(
+                                            userId = userId,
+                                            positionIds = positionIds,
+                                            sport = selectedSport,
+                                        )
+                                    }
+                                },
+                                onAddLeagueTimeSlot = component::addLeagueTimeSlot,
+                                onUpdateLeagueTimeSlot = { index, updated ->
+                                    component.updateLeagueTimeSlot(index) { updated }
+                                },
+                                onRemoveLeagueTimeSlot = component::removeLeagueTimeSlot,
+                                onSelectFieldCount = component::selectFieldCount,
+                                onUpdateLocalFieldName = component::updateLocalFieldName,
+                                onLeagueScoringConfigChange = { updated ->
+                                    component.updateLeagueScoringConfig { updated }
+                                },
+                                onUploadSelected = component::onUploadSelected,
+                                onDeleteImage = component::deleteImage,
+                                onHostMessageUser = component::onNavigateToChat,
+                                onHostSendFriendRequest = playerInteractionComponent::sendFriendRequest,
+                                onHostFollowUser = playerInteractionComponent::followUser,
+                                onHostUnfollowUser = playerInteractionComponent::unfollowUser,
+                                onHostBlockUser = playerInteractionComponent::blockUser,
+                                onHostUnblockUser = playerInteractionComponent::unblockUser,
+                                onMapRevealCenterChange = { mapRevealCenter = it },
+                                onFloatingDockVisibilityChange = { showStickyDockByScroll = it },
+                                onSearchUsers = component::searchUsers,
+                                onAddPendingStaffInvite = component::addPendingStaffInvite,
+                                onRemovePendingStaffInvite = component::removePendingStaffInvite,
+                                onUpdateAssistantHostIds = { assistantHostIds ->
+                                    component.editEventField {
+                                        copy(
+                                            assistantHostIds = assistantHostIds
+                                                .map(String::trim)
+                                                .filter(String::isNotBlank)
+                                                .filterNot { userId -> userId == hostId }
+                                                .distinct(),
+                                        )
+                                    }
+                                },
+                                onAddOfficialId = { officialId ->
+                                    component.editEventField {
+                                        addOfficialUser(userId = officialId, sport = selectedSport)
                                     }
                                 },
                                 onRemoveOfficialId = { officialId ->
                                     component.editEventField {
-                                        removeOfficialUser(
-                                            userId = officialId,
-                                            sport = selectedSport,
-                                        )
+                                        removeOfficialUser(userId = officialId, sport = selectedSport)
                                     }
                                 },
-                                heroTopControls = {
-                                    if (!showMap) {
-                                        Box(
-                                            Modifier.padding(top = 64.dp, start = 16.dp)
-                                                .align(Alignment.TopStart)
-                                        ) {
-                                            IconButton(
-                                                { component.backCallback.onBack() },
-                                                modifier = Modifier.background(
-                                                    Color(imageScheme.surface).copy(alpha = 0.7f),
-                                                    shape = CircleShape
-                                                ),
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.Close,
-                                                    contentDescription = "Close",
-                                                    tint = Color(imageScheme.onSurface)
-                                                )
-                                            }
-                                        }
-                                        Box(
-                                            modifier = Modifier.align(Alignment.TopEnd)
-                                                .padding(top = 64.dp, end = 16.dp)
-                                        ) {
-                                            IconButton(
-                                                onClick = { showOptionsDropdown = true },
-                                                modifier = Modifier.background(
-                                                    Color(imageScheme.surface).copy(alpha = 0.7f),
-                                                    shape = CircleShape
-                                                )
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.MoreVert,
-                                                    contentDescription = "More options",
-                                                    tint = Color(imageScheme.onSurface)
-                                                )
-                                            }
-
-                                            DropdownMenu(
-                                                expanded = showOptionsDropdown,
-                                                onDismissRequest = { showOptionsDropdown = false }) {
-                                                // Edit option
-                                                if (canEditEventDetails) {
-                                                    DropdownMenuItem(
-                                                        text = { Text("Edit") }, onClick = {
-                                                        component.startEditingEvent()
-                                                        showOptionsDropdown = false
-                                                    }, leadingIcon = {
-                                                        Icon(Icons.Default.Edit, contentDescription = null)
-                                                    }, enabled = canEditEventDetails
-                                                    )
-                                                }
-
-                                                if (canCreateTemplateFromCurrentEvent) {
-                                                    DropdownMenuItem(
-                                                        text = { Text("Create Template") },
-                                                        onClick = {
-                                                            component.createTemplateFromCurrentEvent()
-                                                            showOptionsDropdown = false
-                                                        },
-                                                        leadingIcon = {
-                                                            Icon(Icons.Default.Check, contentDescription = null)
-                                                        },
-                                                    )
-                                                }
-
-                                                if (isHost && joinOptions.isNotEmpty()) {
-                                                    DropdownMenuItem(
-                                                        text = { Text(if (isAffiliateEvent) "Register on website" else "Join Event") },
-                                                        onClick = {
-                                                            if (isAffiliateEvent) {
-                                                                component.joinEvent()
-                                                            } else {
-                                                                showJoinOptionsSheet = true
-                                                            }
-                                                            showOptionsDropdown = false
-                                                        },
-                                                        leadingIcon = {
-                                                            Icon(Icons.Default.Add, contentDescription = null)
-                                                        },
-                                                    )
-                                                }
-
-                                                DropdownMenuItem(text = { Text("Share") }, onClick = {
-                                                    component.shareEvent()
-                                                    showOptionsDropdown = false
-                                                }, leadingIcon = {
-                                                    Icon(Icons.Default.Share, contentDescription = null)
-                                                })
-
-                                                if (canShowQrCode) {
-                                                    DropdownMenuItem(
-                                                        text = { Text("QR Code") },
-                                                        onClick = {
-                                                            showQrCodeDialog = true
-                                                            showOptionsDropdown = false
-                                                        },
-                                                        leadingIcon = {
-                                                            Icon(Icons.Default.QrCode, contentDescription = null)
-                                                        },
-                                                    )
-                                                }
-
-                                                if (!isHost) {
-                                                    DropdownMenuItem(
-                                                        text = { Text("Report Event") },
-                                                        onClick = {
-                                                            showReportEventDialog = true
-                                                            showOptionsDropdown = false
-                                                        },
-                                                        leadingIcon = {
-                                                            Icon(Icons.Default.Close, contentDescription = null)
-                                                        },
-                                                    )
-                                                }
-
-                                                if (canRequestRefundAfterStart || canLeaveEvent) {
-                                                    DropdownMenuItem(
-                                                        text = { Text(leaveOrRefundActionLabel) },
-                                                        onClick = {
-                                                            showOptionsDropdown = false
-                                                            openLeaveOrRefundAction()
-                                                        },
-                                                        leadingIcon = {
-                                                            Icon(Icons.Default.Close, contentDescription = null)
-                                                        },
-                                                    )
-                                                }
-
-                                                if (isHost) {
-                                                    DropdownMenuItem(
-                                                        text = { Text("Notify Players") },
-                                                        onClick = {
-                                                            showNotifyDialog = true
-                                                            showOptionsDropdown = false
-                                                        },
-                                                        leadingIcon = {
-                                                            Icon(
-                                                                Icons.AutoMirrored.Filled.Announcement,
-                                                                contentDescription = null,
-                                                            )
-                                                        })
-                                                }
-
-                                                if (canDeleteEvent) {
-                                                    DropdownMenuItem(
-                                                        text = { Text("Delete") }, onClick = {
-                                                        showDeleteConfirmation = true
-                                                        showOptionsDropdown = false
-                                                    }, leadingIcon = {
-                                                        Icon(
-                                                            Icons.Default.Delete,
-                                                            contentDescription = null,
-                                                            tint = MaterialTheme.colorScheme.error
-                                                        )
-                                                    }, colors = MenuDefaults.itemColors(
-                                                        textColor = MaterialTheme.colorScheme.error
-                                                    )
-                                                    )
-                                                }
-                                            }
-                                        }
+                                onBack = { component.backCallback.onBack() },
+                                onOptionsDropdownChanged = { showOptionsDropdown = it },
+                                onStartEditing = component::startEditingEvent,
+                                onCreateTemplate = component::createTemplateFromCurrentEvent,
+                                onHostJoinAction = {
+                                    if (isAffiliateEvent) {
+                                        component.joinEvent()
+                                    } else {
+                                        showJoinOptionsSheet = true
                                     }
                                 },
-                                modifier = Modifier.guideTarget(EventGuideTargets.OverviewHeader),
-                            ) { isValid ->
-                            val buttonColors = ButtonColors(
-                                containerColor = Color(imageScheme.primary),
-                                contentColor = Color(imageScheme.onPrimary),
-                                disabledContainerColor = Color(imageScheme.onSurface),
-                                disabledContentColor = Color(imageScheme.onSurfaceVariant)
-                            )
-                            AnimatedContent(
-                                targetState = isEditing,
-                                transitionSpec = { buttonTransitionSpec() },
-                                label = "buttonTransition"
-                            ) { editMode ->
-                                if (editMode) {
-                                    val canRescheduleEditedEvent =
-                                        editedEvent.eventType == EventType.LEAGUE ||
-                                            editedEvent.eventType == EventType.TOURNAMENT
-                                    val canBuildBracketsForEditedEvent =
-                                        editedEvent.eventType == EventType.TOURNAMENT ||
-                                            (
-                                                editedEvent.eventType == EventType.LEAGUE &&
-                                                    editedEvent.includePlayoffs
-                                                )
-                                    val eventActionEnabled =
-                                        !editedEvent.state.equals("TEMPLATE", ignoreCase = true)
-                                    Column(
-                                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally
-                                    ) {
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Button(
-                                                onClick = {
-                                                    component.updateEvent()
-                                                }, enabled = isValid, colors = buttonColors
-                                            ) {
-                                                Text("Confirm")
-                                            }
-                                            Button(
-                                                onClick = {
-                                                    component.cancelEditingEvent()
-                                                }, colors = buttonColors
-                                            ) {
-                                                Text("Cancel")
-                                            }
-                                        }
-                                        if (isHost && !editedEvent.state.equals("TEMPLATE", ignoreCase = true)) {
-                                            val selectedLifecycleState = remember(editedEvent.state) {
-                                                editedEvent.toEditableLifecycleState()
-                                            }
-                                            Box(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                contentAlignment = Alignment.Center,
-                                            ) {
-                                                Button(
-                                                    onClick = { showEventStateDropdown = true },
-                                                    colors = buttonColors,
-                                                ) {
-                                                    Row(
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                                    ) {
-                                                        Text(selectedLifecycleState.label)
-                                                        Icon(
-                                                            imageVector = Icons.Default.KeyboardArrowDown,
-                                                            contentDescription = null,
-                                                        )
-                                                    }
-                                                }
-                                                DropdownMenu(
-                                                    expanded = showEventStateDropdown,
-                                                    onDismissRequest = { showEventStateDropdown = false },
-                                                ) {
-                                                    EditableLifecycleState.values().forEach { option ->
-                                                        DropdownMenuItem(
-                                                            text = { Text(option.label) },
-                                                            onClick = {
-                                                                component.editEventField {
-                                                                    copy(
-                                                                        state = option.toEventState(currentState = state),
-                                                                    )
-                                                                }
-                                                                showEventStateDropdown = false
-                                                            },
-                                                            leadingIcon = if (option == selectedLifecycleState) {
-                                                                {
-                                                                    Icon(
-                                                                        imageVector = Icons.Default.Check,
-                                                                        contentDescription = null,
-                                                                    )
-                                                                }
-                                                            } else {
-                                                                null
-                                                            },
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        if (canRescheduleEditedEvent) {
-                                            Button(
-                                                onClick = { component.rescheduleEvent() },
-                                                enabled = eventActionEnabled,
-                                                colors = buttonColors,
-                                                modifier = Modifier.fillMaxWidth(),
-                                            ) {
-                                                Text("Reschedule Event")
-                                            }
-                                            if (canBuildBracketsForEditedEvent) {
-                                                Button(
-                                                    onClick = { showBuildBracketConfirmDialog = true },
-                                                    enabled = eventActionEnabled,
-                                                    colors = buttonColors,
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                ) {
-                                                    Text("Rebuild Bracket(s)")
-                                                }
-                                            }
-                                            Button(
-                                                onClick = { showRebuildWithoutPlaceholdersConfirmDialog = true },
-                                                enabled = eventActionEnabled,
-                                                colors = buttonColors,
-                                                modifier = Modifier.fillMaxWidth(),
-                                            ) {
-                                                Text("Rebuild Without Placeholders")
-                                            }
-                                        }
-                                        if (
-                                            isHost &&
-                                            !editedEvent.state.equals("TEMPLATE", ignoreCase = true) &&
-                                            editedEvent.organizationId.isNullOrBlank()
-                                        ) {
-                                            Button(
-                                                onClick = { component.createTemplateFromCurrentEvent() },
-                                                enabled = true,
-                                                colors = buttonColors,
-                                            ) {
-                                                Text("Create Template")
-                                            }
-                                        }
+                                onShare = component::shareEvent,
+                                onShowQrCode = { showQrCodeDialog = true },
+                                onReportEvent = { showReportEventDialog = true },
+                                onLeaveOrRefund = openLeaveOrRefundAction,
+                                onNotifyPlayers = { showNotifyDialog = true },
+                                onDelete = { showDeleteConfirmation = true },
+                                onConfirmEdit = component::updateEvent,
+                                onCancelEdit = component::cancelEditingEvent,
+                                onEventStateDropdownChanged = { showEventStateDropdown = it },
+                                onLifecycleStateSelected = { option ->
+                                    component.editEventField {
+                                        copy(state = option.toEventState(currentState = state))
                                     }
-                                } else {
-                                        EventOverviewSections(
-                                            state = EventDetailOverviewState(
-                                            eventWithRelations = selectedEvent,
-                                            teamsAndParticipantsLoading = eventTeamsAndParticipantsLoading,
-                                            matchesLoading = eventMatchesLoading,
-                                            showFullnessSummary = !isWeeklyParentEvent ||
-                                                selectedWeeklyOccurrenceSummary != null,
-                                            selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
-                                            selectedWeeklyOccurrenceSummary = selectedWeeklyOccurrenceSummary,
-                                            overviewParticipantSummary = overviewParticipantSummary,
-                                            showOpenDetailsAction = showOverviewOpenDetailsAction,
-                                        ),
-                                            actions = EventDetailOverviewActions(
-                                                onOpenDetails = component::viewEvent,
-                                            ),
-                                            formatModifier = Modifier.guideTarget(EventGuideTargets.OverviewFormat),
-                                        )
-                                }
-                            }
-                        }
-
+                                    showEventStateDropdown = false
+                                },
+                                onRescheduleEvent = component::rescheduleEvent,
+                                onBuildBrackets = { showBuildBracketConfirmDialog = true },
+                                onRebuildWithoutPlaceholders = {
+                                    showRebuildWithoutPlaceholdersConfirmDialog = true
+                                },
+                                onOpenDetails = component::viewEvent,
+                            ),
+                        )
                     }
                 }
                 AnimatedVisibility(
@@ -2275,617 +1940,253 @@ fun EventDetailScreen(
                     }
                 }
             }
-            var stickyActionBarHeightPx by remember { mutableStateOf(0) }
-            val stickyActionBarTransition = updateTransition(
-                targetState = showStickyActions,
-                label = "StickyActionBarVisibility",
-            )
-            val stickyActionBarMotionDurationMillis = 180
-            val stickyActionBarEnterShadowDurationMillis = 120
-            val stickyActionBarExitShadowDurationMillis = 1
-            val stickyActionBarExitMotionDelayMillis = 40
-            val stickyActionBarAlpha by stickyActionBarTransition.animateFloat(
-                transitionSpec = {
-                    if (!initialState && targetState) {
-                        tween(durationMillis = stickyActionBarMotionDurationMillis)
-                    } else {
-                        tween(
-                            durationMillis = stickyActionBarMotionDurationMillis,
-                            delayMillis = stickyActionBarExitMotionDelayMillis,
-                        )
-                    }
-                },
-                label = "StickyActionBarAlpha",
-            ) { visible ->
-                if (visible) 1f else 0f
-            }
-            val stickyActionBarOffsetFraction by stickyActionBarTransition.animateFloat(
-                transitionSpec = {
-                    if (!initialState && targetState) {
-                        tween(durationMillis = stickyActionBarMotionDurationMillis)
-                    } else {
-                        tween(
-                            durationMillis = stickyActionBarMotionDurationMillis,
-                            delayMillis = stickyActionBarExitMotionDelayMillis,
-                        )
-                    }
-                },
-                label = "StickyActionBarOffsetFraction",
-            ) { visible ->
-                if (visible) 0f else 0.5f
-            }
-            val stickyActionBarShadowElevation by stickyActionBarTransition.animateDp(
-                transitionSpec = {
-                    if (!initialState && targetState) {
-                        tween(
-                            durationMillis = stickyActionBarEnterShadowDurationMillis,
-                            delayMillis = stickyActionBarMotionDurationMillis,
-                        )
-                    } else {
-                        tween(durationMillis = stickyActionBarExitShadowDurationMillis)
-                    }
-                },
-                label = "StickyActionBarShadowElevation",
-            ) { visible ->
-                if (visible) 6.dp else 0.dp
-            }
-            val shouldRenderStickyActionBar =
-                showStickyActions ||
-                    stickyActionBarAlpha > 0.01f ||
-                    stickyActionBarShadowElevation > 0.dp ||
-                    stickyActionBarTransition.currentState != stickyActionBarTransition.targetState
-
-            if (shouldRenderStickyActionBar) {
-                StickyActionBar(
-                    primaryLabel = when {
-                        isAffiliateEvent -> "Register on website"
-                        isRegistrationPaymentPending -> "Payment pending"
-                        isRegistrationPaymentFailed && !joinBlockedByStart -> "Complete payment"
-                        isWeeklyParentEvent && !joinBlockedByStart -> "Join Event"
-                        shouldShowViewSchedulePrimaryAction -> "View Schedule and Participants"
-                        !isUserInEvent && !joinBlockedByStart -> "Join options"
-                        joinBlockedByStart && isWeeklyParentEvent -> "Occurrence Started"
-                        joinBlockedByStart -> "Event Started"
-                        else -> "Joined with Team"
-                    },
-                    primaryEnabled = if (isAffiliateEvent) {
-                        true
-                    } else if (isWeeklyParentEvent) {
-                        !isRegistrationPaymentPending && !joinBlockedByStart
-                    } else {
-                        !isRegistrationPaymentPending &&
-                            (
-                                (isRegistrationPaymentFailed && !joinBlockedByStart) ||
-                                    shouldShowViewSchedulePrimaryAction ||
-                                    (!isUserInEvent && !joinBlockedByStart)
-                                )
-                    },
-                    onPrimaryClick = {
-                        when {
-                            isAffiliateEvent -> component.joinEvent()
-                            isRegistrationPaymentPending -> Unit
-                            isRegistrationPaymentFailed && !joinBlockedByStart -> showJoinOptionsSheet = true
-                            isWeeklyParentEvent && !joinBlockedByStart -> showJoinOptionsSheet = true
-                            shouldShowViewSchedulePrimaryAction -> component.viewEvent()
-                            !isUserInEvent && !joinBlockedByStart -> showJoinOptionsSheet = true
-                        }
-                    },
+            EventDetailOverviewStickyActionHost(
+                state = EventDetailOverviewStickyActionState(
+                    visible = showStickyActions,
+                    isAffiliateEvent = isAffiliateEvent,
+                    isRegistrationPaymentPending = isRegistrationPaymentPending,
+                    isRegistrationPaymentFailed = isRegistrationPaymentFailed,
+                    joinBlockedByStart = joinBlockedByStart,
+                    isWeeklyParentEvent = isWeeklyParentEvent,
+                    shouldShowViewSchedulePrimaryAction = shouldShowViewSchedulePrimaryAction,
+                    isUserInEvent = isUserInEvent,
+                    directionsEnabled = hasDirectionsTarget,
+                    selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
+                ),
+                actions = EventDetailOverviewStickyActionActions(
+                    onAffiliateJoin = component::joinEvent,
+                    onOpenJoinOptions = { showJoinOptionsSheet = true },
+                    onViewEvent = component::viewEvent,
                     onMapClick = mapComponent::toggleMap,
                     onDirectionsClick = component::openEventDirections,
-                    directionsEnabled = hasDirectionsTarget,
-                    onMapButtonPositioned = { center ->
-                        mapRevealCenter = center
-                    },
+                    onMapButtonPositioned = { mapRevealCenter = it },
                     onShareClick = component::shareEvent,
-                    selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
-                    onClearSelectedWeeklyOccurrence = if (isWeeklyParentEvent) {
-                        component::clearSelectedWeeklySession
-                    } else {
-                        null
-                    },
-                    barAlpha = stickyActionBarAlpha,
-                    shadowElevation = stickyActionBarShadowElevation,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(LocalNavBarPadding.current)
-                        .padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
-                        .offset {
-                            IntOffset(
-                                x = 0,
-                                y = (stickyActionBarHeightPx * stickyActionBarOffsetFraction).toInt(),
-                            )
-                        }
-                        .onSizeChanged { size ->
-                            stickyActionBarHeightPx = size.height
-                        }
-                        .guideTarget(EventGuideTargets.OverviewPrimaryAction),
-                )
-            }
-            }
-                }
-        }
-
-        if (showWithdrawTargetDialog && actionWithdrawTargets.isNotEmpty()) {
-            WithdrawTargetDialog(
-                targets = actionWithdrawTargets,
-                onDismiss = { showWithdrawTargetDialog = false },
-                onTargetSelected = { target ->
-                    showWithdrawTargetDialog = false
-                    openLeaveOrRefundForTarget(target)
-                },
+                    onClearSelectedWeeklyOccurrence = component::clearSelectedWeeklySession,
+                ),
             )
+            }
+                }
         }
 
-            val canRenderJoinOptionsSheet = isWeeklyParentEvent || joinOptions.isNotEmpty()
-            if (showJoinOptionsSheet && canRenderJoinOptionsSheet) {
-                ModalBottomSheet(
-                    onDismissRequest = { showJoinOptionsSheet = false }
-                ) {
-                    JoinOptionsSheet(
-                        state = EventDetailJoinSheetsState(
-                            options = joinOptions,
-                            paymentProcessor = component,
-                            registrationHoldExpiresAt = registrationHoldExpiresAt,
-                            isWeeklyParentEvent = isWeeklyParentEvent,
-                            weeklySessionOptions = weeklySessionOptions,
-                            weeklyOccurrenceSummaries = weeklyOccurrenceSummaries,
-                            selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
-                            selectedWeeklyOccurrenceSummary = selectedWeeklyOccurrenceSummary,
-                            selectedWeeklyOccurrenceJoined = selectedWeeklyOccurrenceJoined,
-                            selectedWeeklyOccurrenceStarted = joinBlockedByStart && isWeeklyParentEvent,
-                            selectedDivisionId = selectedJoinOptionDivisionId,
-                            divisionOptions = if (teamSignup) {
-                                registrationJoinDivisionOptions
-                            } else {
-                                emptyList()
-                            },
-                        ),
-                        actions = EventDetailJoinSheetsActions(
-                            onDivisionSelected = { divisionId ->
-                                selectedJoinOptionDivisionId = divisionId
-                                component.selectDivision(divisionId)
-                            },
-                            onDismiss = { showJoinOptionsSheet = false },
-                            onSelectOption = { action ->
-                                showJoinOptionsSheet = false
-                                action.onClick()
-                            },
-                            onSelectWeeklySession = { session ->
-                                component.selectWeeklySession(
-                                    sessionStart = session.start,
-                                    sessionEnd = session.end,
-                                    slotId = session.slotId,
-                                    occurrenceDate = session.occurrenceDate,
-                                    label = session.label,
-                                )
-                            },
-                            onRegistrationHoldExpired = component::registrationHoldExpired,
-                        ),
-                    )
-                }
-            }
-
-            showTeamDialog?.let { dialogState ->
-                TeamSelectionDialog(
-                    dialogState = dialogState, onTeamSelected = { teamId ->
-                        component.selectTeamForMatch(
-                            dialogState.matchId, dialogState.position, teamId
-                        )
-                    }, onDismiss = component::dismissTeamSelection
-                )
-            }
-            showMatchEditDialog?.let { dialogState ->
-                MatchEditDialog(
-                    match = dialogState.match,
-                    teams = dialogState.teams,
-                    fields = dialogState.fields,
-                    allMatches = dialogState.allMatches,
-                    eventOfficials = dialogState.eventOfficials,
-                    officialPositions = dialogState.officialPositions,
-                    users = dialogState.players,
-                    eventType = dialogState.eventType,
-                    isCreateMode = dialogState.isCreateMode,
-                    creationContext = dialogState.creationContext,
-                    onDismissRequest = component::dismissMatchEditDialog,
-                    onConfirm = component::updateMatchFromDialog,
-                    onDelete = component::deleteMatchFromDialog,
-                )
-            }
-            if (showTeamSelectionDialog) {
-                TeamSelectionDialog(
-                    eventSportLabel = teamSelectionSportLabel,
-                    teams = validTeams,
-                    onTeamSelected = { selectedTeam ->
-                        showTeamSelectionDialog = false
-                        component.joinEventAsTeam(selectedTeam)
+        EventDetailOverlayHost(
+            state = EventDetailOverlayHostState(
+                showWithdrawTargetDialog = showWithdrawTargetDialog,
+                withdrawTargets = actionWithdrawTargets,
+                showJoinOptionsSheet = showJoinOptionsSheet,
+                joinSheetsState = EventDetailJoinSheetsState(
+                    options = joinOptions,
+                    paymentProcessor = component,
+                    registrationHoldExpiresAt = registrationHoldExpiresAt,
+                    isWeeklyParentEvent = isWeeklyParentEvent,
+                    weeklySessionOptions = weeklySessionOptions,
+                    weeklyOccurrenceSummaries = weeklyOccurrenceSummaries,
+                    selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
+                    selectedWeeklyOccurrenceSummary = selectedWeeklyOccurrenceSummary,
+                    selectedWeeklyOccurrenceJoined = selectedWeeklyOccurrenceJoined,
+                    selectedWeeklyOccurrenceStarted = joinBlockedByStart && isWeeklyParentEvent,
+                    selectedDivisionId = selectedJoinOptionDivisionId,
+                    divisionOptions = if (teamSignup) {
+                        registrationJoinDivisionOptions
+                    } else {
+                        emptyList()
                     },
-                    onDismiss = {
-                        showTeamSelectionDialog = false
-                    },
-                    onCreateTeam = { component.createNewTeam() },
-                )
-            }
-            if (showEventTeamCheckInDialog) {
-                val teamName = currentUserManagedEventTeam
+                ),
+                showTeamDialog = showTeamDialog,
+                showMatchEditDialog = showMatchEditDialog,
+                showTeamSelectionDialog = showTeamSelectionDialog,
+                teamSelectionSportLabel = teamSelectionSportLabel,
+                validTeams = validTeams,
+                showEventTeamCheckInDialog = showEventTeamCheckInDialog,
+                eventTeamCheckInSaving = eventTeamCheckInSaving,
+                eventTeamName = currentUserManagedEventTeam
                     ?.team
                     ?.name
                     ?.takeIf(String::isNotBlank)
-                    ?: "your team"
-                AlertDialog(
-                    onDismissRequest = {
-                        if (!eventTeamCheckInSaving) {
-                            component.dismissEventTeamCheckInDialog()
-                        }
+                    ?: "your team",
+                joinChoiceDialog = joinChoiceDialog,
+                childJoinSelectionDialog = childJoinSelectionDialog,
+                teamJoinQuestionDialog = teamJoinQuestionDialog,
+                eventRegistrationQuestionDialog = eventRegistrationQuestionDialog,
+                paymentPlanPreviewDialog = paymentPlanPreviewDialog,
+                showStandingsConfirmDialog = showStandingsConfirmDialog,
+                showBuildBracketConfirmDialog = showBuildBracketConfirmDialog,
+                showRebuildWithoutPlaceholdersConfirmDialog =
+                    showRebuildWithoutPlaceholdersConfirmDialog,
+                showQrCodeDialog = showQrCodeDialog,
+                canShowQrCode = canShowQrCode,
+                eventName = selectedEvent.event.name,
+                eventId = selectedEvent.event.id,
+                showDeleteConfirmation = showDeleteConfirmation,
+                isTemplateEvent = isTemplateEvent,
+                hasAnyPaidDivision = hasAnyPaidDivision,
+                showNotifyDialog = showNotifyDialog,
+                showInviteTeamDialog = showInviteTeamDialog,
+                inviteTeamSuggestions = inviteTeamSuggestions,
+                inviteTeamsLoading = inviteTeamsLoading,
+                selectedDivisionId = selectedDivision,
+                registrationDivisionOptions = splitRegistrationDivisionOptions,
+                showInvitePlayerDialog = showInvitePlayerDialog,
+                suggestedUsers = suggestedUsers,
+                existingParticipantIds = (
+                    selectedEvent.event.playerIds +
+                        selectedEvent.event.waitListIds +
+                        selectedEvent.event.freeAgentIds
+                    ).map(String::trim).filter(String::isNotBlank).toSet(),
+                showReportEventDialog = showReportEventDialog,
+                reportEventNotes = reportEventNotes,
+                showRefundReasonDialog = showRefundReasonDialog,
+                refundReason = refundReason,
+                textSignaturePrompt = textSignaturePrompt,
+                webSignaturePrompt = webSignaturePrompt,
+                discountCodePrompt = discountCodePrompt,
+                billingAddressPrompt = billingAddressPrompt,
+            ),
+            actions = EventDetailOverlayHostActions(
+                joinSheetsActions = EventDetailJoinSheetsActions(
+                    onDivisionSelected = { divisionId ->
+                        selectedJoinOptionDivisionId = divisionId
+                        component.selectDivision(divisionId)
                     },
-                    title = { Text("Check in for event?") },
-                    text = { Text("Check in $teamName for this event.") },
-                    confirmButton = {
-                        Button(
-                            onClick = component::confirmEventTeamCheckIn,
-                            enabled = !eventTeamCheckInSaving,
-                        ) {
-                            Text(if (eventTeamCheckInSaving) "Saving..." else "Check in")
-                        }
+                    onDismiss = { showJoinOptionsSheet = false },
+                    onSelectOption = { action ->
+                        showJoinOptionsSheet = false
+                        action.onClick()
                     },
-                    dismissButton = {
-                        Button(
-                            onClick = component::dismissEventTeamCheckInDialog,
-                            enabled = !eventTeamCheckInSaving,
-                        ) {
-                            Text("Not now")
-                        }
-                    },
-                )
-            }
-            joinChoiceDialog?.let {
-                AlertDialog(
-                    onDismissRequest = component::dismissJoinChoiceDialog,
-                    title = { Text("Join Event") },
-                    text = {
-                        Text("You have linked children. Do you want to join yourself or register a child instead?")
-                    },
-                    confirmButton = {
-                        Button(onClick = component::confirmJoinAsSelf) {
-                            Text("Join Myself")
-                        }
-                    },
-                    dismissButton = {
-                        Button(onClick = component::showChildJoinSelection) {
-                            Text("Register Child")
-                        }
-                    },
-                )
-            }
-            childJoinSelectionDialog?.let { dialogState ->
-                ChildJoinSelectionDialog(
-                    dialogState = dialogState,
-                    onDismiss = component::dismissChildJoinSelectionDialog,
-                    onChildSelected = component::selectChildForJoin,
-                )
-            }
-            teamJoinQuestionDialog?.let { dialogState ->
-                TeamJoinQuestionsDialog(
-                    dialogState = dialogState,
-                    onDismiss = component::dismissTeamJoinQuestionDialog,
-                    onSubmit = component::submitTeamJoinQuestionAnswers,
-                )
-            }
-            eventRegistrationQuestionDialog?.let { dialogState ->
-                EventRegistrationQuestionsDialog(
-                    dialogState = dialogState,
-                    onDismiss = component::dismissEventRegistrationQuestionDialog,
-                    onSubmit = component::submitEventRegistrationQuestionDialogAnswers,
-                )
-            }
-            paymentPlanPreviewDialog?.let { dialogState ->
-                PaymentPlanPreviewDialog(
-                    dialogState = dialogState,
-                    onContinue = component::confirmPaymentPlanPreviewDialog,
-                    onCancel = component::dismissPaymentPlanPreviewDialog,
-                )
-            }
-            if (showStandingsConfirmDialog) {
-                AlertDialog(
-                    onDismissRequest = { showStandingsConfirmDialog = false },
-                    title = { Text("Confirm Results") },
-                    text = {
-                        Text("Update playoff assignments based on these results?")
-                    },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                showStandingsConfirmDialog = false
-                                selectedStandingsDataDivisionId?.let(component::selectDivision)
-                                component.confirmLeagueStandings(applyReassignment = true)
-                            }
-                        ) {
-                            Text("Yes")
-                        }
-                    },
-                    dismissButton = {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            TextButton(
-                                onClick = {
-                                    showStandingsConfirmDialog = false
-                                    selectedStandingsDataDivisionId?.let(component::selectDivision)
-                                    component.confirmLeagueStandings(applyReassignment = false)
-                                }
-                            ) {
-                                Text("No")
-                            }
-                            TextButton(
-                                onClick = { showStandingsConfirmDialog = false }
-                            ) {
-                                Text("Cancel")
-                            }
-                        }
-                    },
-                )
-            }
-            if (showBuildBracketConfirmDialog) {
-                AlertDialog(
-                    onDismissRequest = { showBuildBracketConfirmDialog = false },
-                    title = { Text("Rebuild Bracket(s)") },
-                    text = {
-                        Text(
-                            "This rebuilds playoff/tournament bracket(s) from max participant count. " +
-                                "It will reset the bracket and any playoff/tournament match results."
+                    onSelectWeeklySession = { session ->
+                        component.selectWeeklySession(
+                            sessionStart = session.start,
+                            sessionEnd = session.end,
+                            slotId = session.slotId,
+                            occurrenceDate = session.occurrenceDate,
+                            label = session.label,
                         )
                     },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                showBuildBracketConfirmDialog = false
-                                component.buildBrackets()
-                            }
-                        ) {
-                            Text("Rebuild")
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(
-                            onClick = { showBuildBracketConfirmDialog = false }
-                        ) {
-                            Text("Cancel")
-                        }
-                    },
-                )
-            }
-            if (showRebuildWithoutPlaceholdersConfirmDialog) {
-                AlertDialog(
-                    onDismissRequest = { showRebuildWithoutPlaceholdersConfirmDialog = false },
-                    title = { Text("Rebuild Without Placeholders") },
-                    text = {
-                        Text(
-                            "This removes empty placeholder teams and rebuilds matches from registered teams only."
-                        )
-                    },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                showRebuildWithoutPlaceholdersConfirmDialog = false
-                                component.rebuildWithoutPlaceholderTeams()
-                            }
-                        ) {
-                            Text("Rebuild")
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(
-                            onClick = { showRebuildWithoutPlaceholdersConfirmDialog = false }
-                        ) {
-                            Text("Cancel")
-                        }
-                    },
-                )
-            }
-            if (showQrCodeDialog && canShowQrCode) {
-                EventQrCodeDialog(
-                    eventName = selectedEvent.event.name,
-                    qrImageUrl = getEventQrCodeUrl(selectedEvent.event.id),
-                    onDismiss = { showQrCodeDialog = false },
-                    onShareQrCode = component::shareEventQrCode,
-                )
-            }
-            if (showDeleteConfirmation) {
-                AlertDialog(
-                    onDismissRequest = { showDeleteConfirmation = false },
-                    title = { Text(if (isTemplateEvent) "Delete Template" else "Delete Event") },
-                    text = {
-                        Text(
-                            if (isTemplateEvent) {
-                                "Are you sure you want to delete this template? This action cannot be undone."
-                            } else if (hasAnyPaidDivision) {
-                                "Are you sure you want to delete this event? All participants will receive a full refund. This action cannot be undone."
-                            } else {
-                                "Are you sure you want to delete this event? This action cannot be undone."
-                            }
-                        )
-                    },
-                    confirmButton = {
-                        Button(
-                            onClick = {
-                                component.deleteEvent()
-                                showDeleteConfirmation = false
-                            }, colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.error
-                            )
-                        ) {
-                            Text("Delete")
-                        }
-                    },
-                    dismissButton = {
-                        Button(onClick = { showDeleteConfirmation = false }) {
-                            Text("Cancel")
-                        }
-                    })
-            }
-
-            if (showNotifyDialog) {
-                SendNotificationDialog(
-                    onSend = component::sendNotification,
-                    onSent = { showNotifyDialog = false },
-                    onDismiss = { showNotifyDialog = false },
-                )
-            }
-
-            if (showInviteTeamDialog) {
-                EventTeamInviteDialog(
-                    teams = inviteTeamSuggestions,
-                    isLoading = inviteTeamsLoading,
-                    selectedDivisionId = selectedDivision,
-                    divisionOptions = splitRegistrationDivisionOptions,
-                    onSearch = component::searchInviteTeams,
-                    onDivisionSelected = component::selectDivision,
-                    onTeamSelected = { team ->
-                        component.inviteTeamToEvent(team)
-                        component.searchInviteTeams("")
-                        showInviteTeamDialog = false
-                    },
-                    onDismiss = {
-                        component.searchInviteTeams("")
-                        showInviteTeamDialog = false
-                    },
-                )
-            }
-
-            if (showInvitePlayerDialog) {
-                EventPlayerInviteDialog(
-                    eventName = selectedEvent.event.name,
-                    suggestions = suggestedUsers,
-                    existingParticipantIds = (
-                        selectedEvent.event.playerIds +
-                            selectedEvent.event.waitListIds +
-                            selectedEvent.event.freeAgentIds
-                        ).map(String::trim).filter(String::isNotBlank).toSet(),
-                    onSearch = component::searchUsers,
-                    onPlayerSelected = { user ->
-                        component.invitePlayerToEvent(user)
-                        component.searchUsers("")
-                        showInvitePlayerDialog = false
-                    },
-                    onInviteByEmail = { firstName, lastName, email ->
-                        component.invitePlayerToEventByEmail(firstName, lastName, email)
-                        component.searchUsers("")
-                        showInvitePlayerDialog = false
-                    },
-                    onDismiss = {
-                        component.searchUsers("")
-                        showInvitePlayerDialog = false
-                    },
-                )
-            }
-
-            if (showReportEventDialog) {
-                AlertDialog(
-                    onDismissRequest = { showReportEventDialog = false },
-                    title = { Text("Report event") },
-                    text = {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text("Report objectionable content or abusive behavior tied to this event.")
-                            StandardTextField(
-                                value = reportEventNotes,
-                                onValueChange = { reportEventNotes = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = "Notes (optional)",
-                            )
-                        }
-                    },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                component.reportEvent(reportEventNotes)
-                                reportEventNotes = ""
-                                showReportEventDialog = false
-                            }
-                        ) {
-                            Text("Report")
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(
-                            onClick = {
-                                reportEventNotes = ""
-                                showReportEventDialog = false
-                            }
-                        ) {
-                            Text("Cancel")
-                        }
-                    },
-                )
-            }
-
-            if (showRefundReasonDialog) {
-                RefundReasonDialog(
-                    currentReason = refundReason,
-                    onReasonChange = { refundReason = it },
-                    onConfirm = {
-                        component.requestRefund(
-                            reason = refundReason,
-                            targetUserId = selectedWithdrawalTarget?.userId,
-                        )
-                        showRefundReasonDialog = false
-                        refundReason = ""
-                        selectedWithdrawalTarget = null
-                    },
-                    onDismiss = {
-                        showRefundReasonDialog = false
-                        refundReason = ""
-                        selectedWithdrawalTarget = null
-                    })
-            }
-
-            textSignaturePrompt?.let { prompt ->
-                TextSignatureDialog(
-                    prompt = prompt,
-                    onConfirm = component::confirmTextSignature,
-                    onDismiss = component::dismissTextSignature,
-                )
-            }
-
-            webSignaturePrompt?.let { prompt ->
-                val signerLabel = prompt.step?.requiredSignerLabel
-                    ?.trim()
-                    ?.takeIf(String::isNotBlank)
-                    ?.let { label -> "Required signer: $label" }
-                val progressLabel = if (prompt.totalSteps > 1) {
-                    "Document ${prompt.currentStep} of ${prompt.totalSteps}"
-                } else {
-                    null
-                }
-                val description = listOfNotNull(progressLabel, signerLabel).joinToString(" - ")
-
-                EmbeddedWebModal(
-                    title = prompt.step?.title ?: "Sign required document",
-                    url = prompt.url,
-                    description = description,
-                    onDismiss = component::dismissWebSignaturePrompt,
-                )
-            }
-
-            discountCodePrompt?.let { prompt ->
-                DiscountCodeDialog(
-                    title = prompt.title,
-                    description = prompt.description,
-                    initialCode = prompt.initialCode,
-                    originalAmountCents = prompt.originalAmountCents,
-                    preview = prompt.preview,
-                    error = prompt.error,
-                    loading = prompt.loading,
-                    onApply = component::applyDiscountCodePrompt,
-                    onCodeChange = { component.clearDiscountCodePromptFeedback() },
-                    onContinue = component::continueFromDiscountCodePrompt,
-                    onDismiss = component::dismissDiscountCodePrompt,
-                )
-            }
-
-            billingAddressPrompt?.let { address ->
-                BillingAddressDialog(
-                    initialAddress = address,
-                    onConfirm = component::submitBillingAddress,
-                    onDismiss = component::dismissBillingAddressPrompt,
-                )
-            }
+                    onRegistrationHoldExpired = component::registrationHoldExpired,
+                ),
+                onDismissWithdrawTargetDialog = { showWithdrawTargetDialog = false },
+                onWithdrawTargetSelected = { target ->
+                    showWithdrawTargetDialog = false
+                    openLeaveOrRefundForTarget(target)
+                },
+                onMatchTeamSelected = { matchId, position, teamId ->
+                    component.selectTeamForMatch(matchId, position, teamId)
+                },
+                onDismissMatchTeamSelection = component::dismissTeamSelection,
+                onDismissMatchEdit = component::dismissMatchEditDialog,
+                onConfirmMatchEdit = component::updateMatchFromDialog,
+                onDeleteMatch = component::deleteMatchFromDialog,
+                onJoinTeamSelected = { selectedTeam ->
+                    showTeamSelectionDialog = false
+                    component.joinEventAsTeam(selectedTeam)
+                },
+                onDismissJoinTeamSelection = { showTeamSelectionDialog = false },
+                onCreateTeam = component::createNewTeam,
+                onDismissEventTeamCheckIn = component::dismissEventTeamCheckInDialog,
+                onConfirmEventTeamCheckIn = component::confirmEventTeamCheckIn,
+                onDismissJoinChoice = component::dismissJoinChoiceDialog,
+                onConfirmJoinAsSelf = component::confirmJoinAsSelf,
+                onShowChildJoinSelection = component::showChildJoinSelection,
+                onDismissChildJoinSelection = component::dismissChildJoinSelectionDialog,
+                onChildSelected = component::selectChildForJoin,
+                onDismissTeamJoinQuestions = component::dismissTeamJoinQuestionDialog,
+                onSubmitTeamJoinQuestions = component::submitTeamJoinQuestionAnswers,
+                onDismissRegistrationQuestions = component::dismissEventRegistrationQuestionDialog,
+                onSubmitRegistrationQuestions =
+                    component::submitEventRegistrationQuestionDialogAnswers,
+                onContinuePaymentPlan = component::confirmPaymentPlanPreviewDialog,
+                onCancelPaymentPlan = component::dismissPaymentPlanPreviewDialog,
+                onDismissStandingsConfirmation = { showStandingsConfirmDialog = false },
+                onConfirmStandings = { applyReassignment ->
+                    showStandingsConfirmDialog = false
+                    selectedStandingsDataDivisionId?.let(component::selectDivision)
+                    component.confirmLeagueStandings(applyReassignment = applyReassignment)
+                },
+                onDismissBuildBracketConfirmation = {
+                    showBuildBracketConfirmDialog = false
+                },
+                onBuildBrackets = {
+                    showBuildBracketConfirmDialog = false
+                    component.buildBrackets()
+                },
+                onDismissRebuildWithoutPlaceholdersConfirmation = {
+                    showRebuildWithoutPlaceholdersConfirmDialog = false
+                },
+                onRebuildWithoutPlaceholders = {
+                    showRebuildWithoutPlaceholdersConfirmDialog = false
+                    component.rebuildWithoutPlaceholderTeams()
+                },
+                onDismissQrCode = { showQrCodeDialog = false },
+                onShareQrCode = component::shareEventQrCode,
+                onDismissDeleteConfirmation = { showDeleteConfirmation = false },
+                onDeleteEvent = {
+                    component.deleteEvent()
+                    showDeleteConfirmation = false
+                },
+                onSendNotification = component::sendNotification,
+                onDismissNotification = { showNotifyDialog = false },
+                onSearchInviteTeams = component::searchInviteTeams,
+                onInviteTeamDivisionSelected = component::selectDivision,
+                onInviteTeamSelected = { team ->
+                    component.inviteTeamToEvent(team)
+                    component.searchInviteTeams("")
+                    showInviteTeamDialog = false
+                },
+                onDismissInviteTeam = {
+                    component.searchInviteTeams("")
+                    showInviteTeamDialog = false
+                },
+                onSearchUsers = component::searchUsers,
+                onInvitePlayerSelected = { user ->
+                    component.invitePlayerToEvent(user)
+                    component.searchUsers("")
+                    showInvitePlayerDialog = false
+                },
+                onInvitePlayerByEmail = { firstName, lastName, email ->
+                    component.invitePlayerToEventByEmail(firstName, lastName, email)
+                    component.searchUsers("")
+                    showInvitePlayerDialog = false
+                },
+                onDismissInvitePlayer = {
+                    component.searchUsers("")
+                    showInvitePlayerDialog = false
+                },
+                onReportNotesChanged = { reportEventNotes = it },
+                onSubmitReport = {
+                    component.reportEvent(reportEventNotes)
+                    reportEventNotes = ""
+                    showReportEventDialog = false
+                },
+                onRequestDismissReport = { showReportEventDialog = false },
+                onDismissReport = {
+                    reportEventNotes = ""
+                    showReportEventDialog = false
+                },
+                onRefundReasonChanged = { refundReason = it },
+                onConfirmRefundRequest = {
+                    component.requestRefund(
+                        reason = refundReason,
+                        targetUserId = selectedWithdrawalTarget?.userId,
+                    )
+                    showRefundReasonDialog = false
+                    refundReason = ""
+                    selectedWithdrawalTarget = null
+                },
+                onDismissRefundRequest = {
+                    showRefundReasonDialog = false
+                    refundReason = ""
+                    selectedWithdrawalTarget = null
+                },
+                onConfirmTextSignature = component::confirmTextSignature,
+                onDismissTextSignature = component::dismissTextSignature,
+                onDismissWebSignature = component::dismissWebSignaturePrompt,
+                onApplyDiscountCode = component::applyDiscountCodePrompt,
+                onDiscountCodeChanged = component::clearDiscountCodePromptFeedback,
+                onContinueDiscountCode = component::continueFromDiscountCodePrompt,
+                onDismissDiscountCode = component::dismissDiscountCodePrompt,
+                onSubmitBillingAddress = component::submitBillingAddress,
+                onDismissBillingAddress = component::dismissBillingAddressPrompt,
+            ),
+        )
         }
     }
 }
