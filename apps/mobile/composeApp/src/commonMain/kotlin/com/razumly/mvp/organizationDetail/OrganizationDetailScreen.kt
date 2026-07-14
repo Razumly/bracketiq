@@ -79,8 +79,11 @@ import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventDetail.TextSignatureDialog
 import com.razumly.mvp.eventSearch.RentalConfirmationContent
+import com.razumly.mvp.eventSearch.RentalAvailabilityWindow
+import com.razumly.mvp.eventSearch.RentalBusyBlock
 import com.razumly.mvp.eventSearch.RentalDetailsContent
 import com.razumly.mvp.eventSearch.RentalDetailsStep
+import com.razumly.mvp.eventSearch.RentalFieldOption
 import com.razumly.mvp.eventSearch.RentalSelectionDraft
 import com.razumly.mvp.eventSearch.ResolvedRentalSelection
 import com.razumly.mvp.eventSearch.SLOT_INTERVAL_MINUTES
@@ -90,8 +93,8 @@ import com.razumly.mvp.eventSearch.isRentalIntervalInPast
 import com.razumly.mvp.eventSearch.isRangeCoveredByRentalAvailability
 import com.razumly.mvp.eventSearch.isRentalSelectionValidForAvailabilitySnapshot
 import com.razumly.mvp.eventSearch.rangeOverlapsBusyBlockOnDate
-import com.razumly.mvp.eventSearch.rangesOverlap
 import com.razumly.mvp.eventSearch.rentalAvailabilityFetchWindowForDate
+import com.razumly.mvp.eventSearch.rentalSelectionOverlapsRange
 import com.razumly.mvp.eventSearch.resolveRentalSelection
 import com.razumly.mvp.eventSearch.resolvedRentalTimeZone
 import com.razumly.mvp.eventSearch.toRentalDayIndex
@@ -359,9 +362,26 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     }
 
     LaunchedEffect(rentalAvailabilityWindow.start, rentalAvailabilityWindow.end) {
-        rentalSelections = emptyList()
         rentalDetailsStep = RentalDetailsStep.BUILDER
-        nextRentalSelectionId = 1L
+    }
+
+    LaunchedEffect(
+        loadedRentalAvailabilityWindow,
+        rentalAvailabilityWindow,
+        isLoadingRentals,
+        rentalFieldOptions,
+        rentalBusyBlocks,
+        timeZone,
+    ) {
+        if (!isLoadingRentals && loadedRentalAvailabilityWindow == rentalAvailabilityWindow) {
+            rentalSelections = retainRentalSelectionsCoveredBySnapshot(
+                selections = rentalSelections,
+                fieldOptions = rentalFieldOptions,
+                availabilityWindow = rentalAvailabilityWindow,
+                busyBlocks = rentalBusyBlocks,
+                timeZone = timeZone,
+            )
+        }
     }
 
     LaunchedEffect(selectedTab) {
@@ -540,14 +560,11 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                             },
                         )
                     } else if (rentalDetailsStep == RentalDetailsStep.BUILDER) {
-                        val selectionsForCurrentDate = remember(rentalSelections, selectedRentalDate) {
-                            rentalSelections.filter { selection -> selection.date == selectedRentalDate }
-                        }
                         RentalDetailsContent(
                             selectedDate = selectedRentalDate,
                             fieldOptions = rentalFieldOptions,
                             busyBlocks = rentalBusyBlocks,
-                            selectionsForSelectedDate = selectionsForCurrentDate,
+                            selections = rentalSelections,
                             allSelectionCount = rentalSelections.size,
                             totalPriceCents = totalRentalPriceCents,
                             isLoadingFields = isLoadingRentals,
@@ -569,12 +586,12 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                                 val fieldTimeZone = fieldOption?.resolvedRentalTimeZone(timeZone) ?: timeZone
                                 val overlapsSelection = rentalSelections.any { selection ->
                                     selection.fieldId == fieldId &&
-                                        selection.date == selectedRentalDate &&
-                                        rangesOverlap(
-                                            selection.startMinutes,
-                                            selection.endMinutes,
-                                            startMinutes,
-                                            endMinutes,
+                                        rentalSelectionOverlapsRange(
+                                            selection = selection,
+                                            date = selectedRentalDate,
+                                            startMinutes = startMinutes,
+                                            endMinutes = endMinutes,
+                                            timeZone = fieldTimeZone,
                                         )
                                 }
                                 val overlapsBusyBlock = rentalBusyBlocks.any { block ->
@@ -788,6 +805,28 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
             onDismiss = component::dismissWebSignaturePrompt,
         )
     }
+}
+
+internal fun retainRentalSelectionsCoveredBySnapshot(
+    selections: List<RentalSelectionDraft>,
+    fieldOptions: List<RentalFieldOption>,
+    availabilityWindow: RentalAvailabilityWindow,
+    busyBlocks: List<RentalBusyBlock>,
+    timeZone: TimeZone,
+): List<RentalSelectionDraft> = selections.filter { selection ->
+    val resolvedSelection = resolveRentalSelection(
+        selection = selection,
+        fieldOptions = fieldOptions,
+        timeZone = timeZone,
+    ) ?: return@filter false
+
+    isRentalSelectionValidForAvailabilitySnapshot(
+        fieldId = resolvedSelection.field.id,
+        start = resolvedSelection.startInstant,
+        end = resolvedSelection.endInstant,
+        availabilityWindow = availabilityWindow,
+        busyBlocks = busyBlocks,
+    )
 }
 
 private fun OrganizationDetailTab.label(): String {
