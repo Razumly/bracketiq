@@ -74,7 +74,6 @@ import com.razumly.mvp.core.presentation.util.ShareServiceProvider
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.LoadingOperation
-import com.razumly.mvp.core.util.newId
 import com.razumly.mvp.eventDetail.data.BracketNode
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
@@ -98,7 +97,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
-import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
@@ -665,6 +663,21 @@ class DefaultEventDetailComponent(
     override val editableRounds = matchEditingCoordinator.editableRounds
     override val showTeamSelectionDialog = matchEditingCoordinator.showTeamSelectionDialog
     override val showMatchEditDialog = matchEditingCoordinator.showMatchEditDialog
+    private val matchEditActionHandler = EventMatchEditActionHandler(
+        scope = scope,
+        matchEditingCoordinator = matchEditingCoordinator,
+        bracketRoundsCoordinator = bracketRoundsCoordinator,
+        notificationCoordinator = notificationCoordinator,
+        matchRepository = matchRepository,
+        loadingHandler = { loadingHandler },
+        selectedEvent = { selectedEvent.value },
+        selectedDivisionId = { selectedDivision.value },
+        eventWithRelations = { eventWithRelations.value },
+        divisionFields = { divisionFields.value },
+        canManageMatchEditing = ::canManageMatchEditing,
+        canEditMatchesNow = ::canEditMatchesNow,
+        setError = { message -> _errorState.value = ErrorMessage(message) },
+    )
 
     override val joinChoiceDialog = registrationFlowCoordinator.joinChoiceDialog
     override val childJoinSelectionDialog = registrationFlowCoordinator.childJoinSelectionDialog
@@ -1254,7 +1267,7 @@ class DefaultEventDetailComponent(
             relations = eventWithRelations.value,
         )
         if (matchEditingCoordinator.isEditingMatches.value) {
-            refreshEditableRounds()
+            matchEditActionHandler.refreshEditableRounds()
         }
     }
 
@@ -1264,7 +1277,7 @@ class DefaultEventDetailComponent(
             relations = eventWithRelations.value,
         )
         if (matchEditingCoordinator.isEditingMatches.value) {
-            refreshEditableRounds()
+            matchEditActionHandler.refreshEditableRounds()
         }
     }
 
@@ -1353,7 +1366,7 @@ class DefaultEventDetailComponent(
     override fun toggleLosersBracket() {
         bracketRoundsCoordinator.toggleLosersBracket(divisionContentCoordinator.divisionMatches.value)
         if (matchEditingCoordinator.isEditingMatches.value) {
-            refreshEditableRounds()
+            matchEditActionHandler.refreshEditableRounds()
         }
     }
 
@@ -2620,200 +2633,48 @@ class DefaultEventDetailComponent(
         registrationActionHandler.dismissBillingAddressPrompt()
     }
 
-    private fun refreshEditableRounds() {
-        matchEditingCoordinator.refreshEditableRounds(
-            event = selectedEvent.value,
-            selectedDivisionId = selectedDivision.value,
-            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
-        )
-    }
+    override fun startEditingMatches() = matchEditActionHandler.startEditingMatches()
 
-    private fun createStagedMatch(
-        creationContext: MatchCreateContext,
-        seed: MatchMVP? = null,
-        openEditor: Boolean = false,
-    ): MatchWithRelations? {
-        return matchEditingCoordinator.createStagedMatchIfEditable(
-            canEditMatchesNow = canEditMatchesNow(),
-            input = StagedMatchInput(
-                event = selectedEvent.value,
-                selectedDivisionId = selectedDivision.value,
-                creationContext = creationContext,
-                seed = seed,
-                clientId = newId(),
-                now = Clock.System.now(),
-            ),
-            openEditor = openEditor,
-            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
-        ) { relation, context, isCreateMode ->
-            showMatchEditDialog(
-                match = relation,
-                creationContext = context,
-                isCreateMode = isCreateMode,
-            )
-        }
-    }
+    override fun cancelEditingMatches() = matchEditActionHandler.cancelEditingMatches()
 
-    override fun startEditingMatches() {
-        scope.launch {
-            matchEditingCoordinator.beginEditingIfAllowed(
-                canManageMatchEditing = canManageMatchEditing(),
-                matches = eventWithRelations.value.matches,
-                event = selectedEvent.value,
-                selectedDivisionId = selectedDivision.value,
-                buildRounds = bracketRoundsCoordinator::buildBracketRounds,
-            )
-        }
-    }
+    override fun commitMatchChanges() = matchEditActionHandler.commitMatchChanges()
 
-    override fun cancelEditingMatches() {
-        matchEditingCoordinator.cancelEditing()
-    }
+    override fun updateEditableMatch(matchId: String, updater: (MatchMVP) -> MatchMVP) =
+        matchEditActionHandler.updateEditableMatch(matchId, updater)
 
-    override fun commitMatchChanges() {
-        if (!canEditMatchesNow()) {
-            return
-        }
-        scope.launch {
-            val loadingOperation = loadingHandler.newOperation()
-            when (val result = matchEditingCoordinator.commitChanges(
-                isTournament = selectedEvent.value.eventType == EventType.TOURNAMENT,
-                updateMatchesBulk = { payload ->
-                    matchRepository.updateMatchesBulk(payload.updates, payload.creates, payload.deletes)
-                },
-                onCommitStarted = { loadingOperation.showLoading("Updating matches...") },
-                onCommitFinished = { loadingOperation.hideLoading() },
-            )) {
-                MatchEditCommitResult.Success -> Unit
-                is MatchEditCommitResult.Invalid -> {
-                    _errorState.value = ErrorMessage(result.errorMessage)
-                }
-                is MatchEditCommitResult.Failure -> {
-                    _errorState.value = ErrorMessage(result.throwable.userMessage("Failed to update matches"))
-                }
-            }
-        }
-    }
+    override fun setLockForEditableMatches(matchIds: List<String>, locked: Boolean) =
+        matchEditActionHandler.setLockForEditableMatches(matchIds, locked)
 
-    override fun updateEditableMatch(matchId: String, updater: (MatchMVP) -> MatchMVP) {
-        matchEditingCoordinator.updateEditableMatch(
-            matchId = matchId,
-            event = selectedEvent.value,
-            selectedDivisionId = selectedDivision.value,
-            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
-            updater = updater,
-        )
-    }
+    override fun addScheduleMatch() = matchEditActionHandler.addScheduleMatch()
 
-    override fun setLockForEditableMatches(matchIds: List<String>, locked: Boolean) {
-        matchEditingCoordinator.setLockForEditableMatchesIfEditable(
-            canEditMatchesNow = canEditMatchesNow(),
-            matchIds = matchIds,
-            locked = locked,
-            event = selectedEvent.value,
-            selectedDivisionId = selectedDivision.value,
-            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
-        )
-    }
+    override fun addBracketMatch() = matchEditActionHandler.addBracketMatch()
 
-    override fun addScheduleMatch() {
-        createStagedMatch(
-            creationContext = MatchCreateContext.SCHEDULE,
-            openEditor = true,
-        )
-    }
+    override fun addBracketMatchFromAnchor(anchorMatchId: String, slot: BracketAddSlot) =
+        matchEditActionHandler.addBracketMatchFromAnchor(anchorMatchId, slot)
 
-    override fun addBracketMatch() {
-        createStagedMatch(
-            creationContext = MatchCreateContext.BRACKET,
-            openEditor = true,
-        )
-    }
+    override fun showTeamSelection(matchId: String, position: TeamPosition) =
+        matchEditActionHandler.showTeamSelection(matchId, position)
 
-    override fun addBracketMatchFromAnchor(anchorMatchId: String, slot: BracketAddSlot) {
-        matchEditingCoordinator.addBracketMatchFromAnchorIfEditable(
-            canEditMatchesNow = canEditMatchesNow(),
-            anchorMatchId = anchorMatchId,
-            slot = slot,
-            event = selectedEvent.value,
-            selectedDivisionId = selectedDivision.value,
-            clientId = newId(),
-            now = Clock.System.now(),
-            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
-        )
-    }
+    override fun selectTeamForMatch(matchId: String, position: TeamPosition, teamId: String?) =
+        matchEditActionHandler.selectTeamForMatch(matchId, position, teamId)
 
-    override fun showTeamSelection(matchId: String, position: TeamPosition) {
-        matchEditingCoordinator.showTeamSelection(matchId, position, eventWithRelations.value.teams)
-    }
-
-    override fun selectTeamForMatch(matchId: String, position: TeamPosition, teamId: String?) {
-        matchEditingCoordinator.selectTeamForMatch(
-            matchId = matchId,
-            position = position,
-            teamId = teamId,
-            event = selectedEvent.value,
-            selectedDivisionId = selectedDivision.value,
-            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
-        )
-    }
-
-    override fun dismissTeamSelection() {
-        matchEditingCoordinator.dismissTeamSelection()
-    }
+    override fun dismissTeamSelection() = matchEditActionHandler.dismissTeamSelection()
 
     override fun showMatchEditDialog(
         match: MatchWithRelations,
         creationContext: MatchCreateContext,
         isCreateMode: Boolean,
-    ) {
-        matchEditingCoordinator.showMatchEditDialogIfEditable(
-            canEditMatchesNow = canEditMatchesNow(),
-            match = match,
-            teams = eventWithRelations.value.teams,
-            fields = divisionFields.value,
-            fallbackMatches = eventWithRelations.value.matches,
-            event = selectedEvent.value,
-            players = eventWithRelations.value.players,
-            isCreateMode = isCreateMode,
-            creationContext = creationContext,
-        )
-    }
+    ) = matchEditActionHandler.showMatchEditDialog(match, creationContext, isCreateMode)
 
     override suspend fun sendNotification(title: String, message: String): Result<Unit> =
-        notificationCoordinator.sendEventNotification(
-            eventWithRelations.value.event.id,
-            eventWithRelations.value.event.eventType,
-            title,
-            message,
-        )
+        matchEditActionHandler.sendNotification(title, message)
 
-    override fun dismissMatchEditDialog() {
-        matchEditingCoordinator.dismissMatchEditDialog(
-            event = selectedEvent.value,
-            selectedDivisionId = selectedDivision.value,
-            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
-        )
-    }
+    override fun dismissMatchEditDialog() = matchEditActionHandler.dismissMatchEditDialog()
 
-    override fun deleteMatchFromDialog(matchId: String) {
-        matchEditingCoordinator.deleteMatchFromDialogIfEditable(
-            canEditMatchesNow = canEditMatchesNow(),
-            matchId = matchId,
-            event = selectedEvent.value,
-            selectedDivisionId = selectedDivision.value,
-            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
-        )
-    }
+    override fun deleteMatchFromDialog(matchId: String) =
+        matchEditActionHandler.deleteMatchFromDialog(matchId)
 
-    override fun updateMatchFromDialog(updatedMatch: MatchWithRelations) {
-        matchEditingCoordinator.updateMatchFromDialogIfEditable(
-            canEditMatchesNow = canEditMatchesNow(),
-            updatedMatch = updatedMatch,
-            event = selectedEvent.value,
-            selectedDivisionId = selectedDivision.value,
-            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
-        )
-    }
+    override fun updateMatchFromDialog(updatedMatch: MatchWithRelations) =
+        matchEditActionHandler.updateMatchFromDialog(updatedMatch)
 
 }
