@@ -170,8 +170,8 @@ final class WatchMatchRepository {
             .sorted { left, right in
                 (left.startIso ?? "", left.number) < (right.startIso ?? "", right.number)
             }
-        return matches.map { match in
-            applyPendingOperations(to: match, currentUserId: sessionUserId)
+        return try matches.map { match in
+            try applyPendingOperations(to: match, currentUserId: sessionUserId)
         }
     }
 
@@ -188,14 +188,14 @@ final class WatchMatchRepository {
                 }
             }
         }
-        return patchMatchLocalFirst(match: match, body: ["officialCheckIn": checkIn])
+        return try patchMatchLocalFirst(match: match, body: ["officialCheckIn": checkIn])
     }
 
     func startCurrentSegment(match: WatchMatch) async throws -> WatchMatchDTO {
         let now = ISO8601DateFormatter.api.string(from: Date())
         let segment = match.raw.activeSegment ?? match.raw.nextPlayableSegment(rules: match.rules)
         let sequence = segment?.sequence ?? match.raw.nextPlayableSequence(rules: match.rules) ?? 1
-        return patchMatchLocalFirst(match: match, body: [
+        return try patchMatchLocalFirst(match: match, body: [
             "lifecycle": [
                 "status": "IN_PROGRESS",
                 "actualStart": match.raw.actualStart.trimmedOrNil == nil ? now : NSNull()
@@ -237,14 +237,14 @@ final class WatchMatchRepository {
                 "actualEnd": NSNull()
             ]
         }
-        return patchMatchLocalFirst(match: match, body: body)
+        return try patchMatchLocalFirst(match: match, body: body)
     }
 
     func endCurrentSegment(match: WatchMatch) async throws -> WatchMatchDTO {
         guard let segment = match.raw.activeSegment ?? match.raw.nextPlayableSegment(rules: match.rules) else {
             return match.raw
         }
-        return patchMatchLocalFirst(match: match, body: [
+        return try patchMatchLocalFirst(match: match, body: [
             "segmentOperations": [
                 segmentOperation(
                     segment: segment,
@@ -269,7 +269,7 @@ final class WatchMatchRepository {
             throw WatchAPIError.server(status: 400, message: "No remaining segment is available.")
         }
         let now = ISO8601DateFormatter.api.string(from: Date())
-        return patchMatchLocalFirst(match: match, body: [
+        return try patchMatchLocalFirst(match: match, body: [
             "lifecycle": [
                 "status": "IN_PROGRESS",
                 "actualStart": match.raw.actualStart.trimmedOrNil == nil ? now : NSNull()
@@ -305,7 +305,7 @@ final class WatchMatchRepository {
                 )
             ]
         }
-        return patchMatchLocalFirst(match: match, body: body)
+        return try patchMatchLocalFirst(match: match, body: body)
     }
 
     func recordIncident(
@@ -351,7 +351,7 @@ final class WatchMatchRepository {
         if let linkedPointDelta {
             operation["linkedPointDelta"] = linkedPointDelta
         }
-        return patchMatchLocalFirst(match: match, body: ["incidentOperations": [operation]])
+        return try patchMatchLocalFirst(match: match, body: ["incidentOperations": [operation]])
     }
 
     func updateIncident(
@@ -397,7 +397,7 @@ final class WatchMatchRepository {
         if let officialUserId = tokenStore.currentUserId {
             operation["officialUserId"] = officialUserId
         }
-        return patchMatchLocalFirst(match: match, body: ["incidentOperations": [operation]])
+        return try patchMatchLocalFirst(match: match, body: ["incidentOperations": [operation]])
     }
 
     func defaultIncidentMinute(match: WatchMatch) -> Int {
@@ -452,7 +452,7 @@ final class WatchMatchRepository {
                 "actualStart": now
             ]
         }
-        return patchMatchLocalFirst(match: match, body: body)
+        return try patchMatchLocalFirst(match: match, body: body)
     }
 
     private func patchMatch(match: WatchMatch, body: [String: Any]) async throws -> WatchMatchDTO {
@@ -470,8 +470,8 @@ final class WatchMatchRepository {
         return updated
     }
 
-    private func patchMatchLocalFirst(match: WatchMatch, body: [String: Any]) -> WatchMatchDTO {
-        let provisional = operationStore.newOperation(eventId: match.eventId, matchId: match.id)
+    private func patchMatchLocalFirst(match: WatchMatch, body: [String: Any]) throws -> WatchMatchDTO {
+        let provisional = try operationStore.newOperation(eventId: match.eventId, matchId: match.id)
         let payload = body.withClientOperation(provisional)
         guard let payloadJson = payload.jsonString() else {
             let local = applyLocalPatch(match: match, body: body)
@@ -480,31 +480,31 @@ final class WatchMatchRepository {
         }
         let operation = provisional.withPayload(payloadJson)
         let local = applyLocalPatch(match: match, body: payload)
-        operationStore.upsertOperation(operation)
+        try operationStore.upsertOperation(operation)
         schedulePendingSync(matchId: match.id)
         return local
     }
 
     @discardableResult
-    func syncPendingOperations(matchId: String? = nil) async -> Int {
+    func syncPendingOperations(matchId: String? = nil) async throws -> Int {
         guard beginPendingSync() else {
             return 0
         }
         defer { endPendingSync() }
 
         var syncedCount = 0
-        for operation in operationStore.pendingOperations(matchId: matchId) {
-            operationStore.markAttempting(operation.id)
+        for operation in try operationStore.pendingOperations(matchId: matchId) {
+            try operationStore.markAttempting(operation.id)
             guard let body = operation.payloadBody else {
-                operationStore.markFailed(operation.id, error: "Pending match operation payload is invalid.")
+                try operationStore.markFailed(operation.id, error: "Pending match operation payload is invalid.")
                 break
             }
             do {
                 _ = try await patchMatch(eventId: operation.eventId, matchId: operation.matchId, body: body)
-                operationStore.markAcked(operation.id)
+                try operationStore.markAcked(operation.id)
                 syncedCount += 1
             } catch {
-                operationStore.markFailed(operation.id, error: error.localizedDescription)
+                try operationStore.markFailed(operation.id, error: error.localizedDescription)
                 break
             }
         }
@@ -512,11 +512,22 @@ final class WatchMatchRepository {
     }
 
     private func schedulePendingSync(matchId: String? = nil) {
-        guard !operationStore.pendingOperations(matchId: matchId).isEmpty else {
+        let hasPendingOperations: Bool
+        do {
+            hasPendingOperations = try !operationStore.pendingOperations(matchId: matchId).isEmpty
+        } catch {
+            NSLog("Watch score update queue is unreadable: %@", error.localizedDescription)
+            return
+        }
+        guard hasPendingOperations else {
             return
         }
         Task { [weak self] in
-            await self?.syncPendingOperations(matchId: matchId)
+            do {
+                _ = try await self?.syncPendingOperations(matchId: matchId)
+            } catch {
+                NSLog("Watch score update queue sync failed: %@", error.localizedDescription)
+            }
         }
     }
 
@@ -542,8 +553,8 @@ final class WatchMatchRepository {
         }
     }
 
-    private func applyPendingOperations(to match: WatchMatch, currentUserId: String?) -> WatchMatch {
-        let operations = operationStore.pendingOperations(matchId: match.id)
+    private func applyPendingOperations(to match: WatchMatch, currentUserId: String?) throws -> WatchMatch {
+        let operations = try operationStore.pendingOperations(matchId: match.id)
         guard !operations.isEmpty else {
             return match
         }

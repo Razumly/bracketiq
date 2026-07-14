@@ -84,6 +84,10 @@ import com.razumly.mvp.core.network.dto.StandingsDivisionDto
 import com.razumly.mvp.core.network.dto.StandingsResponseDto
 import com.razumly.mvp.core.network.dto.UpdateEventRequestDto
 import com.razumly.mvp.core.network.dto.toUserDataOrNull
+import com.razumly.mvp.core.network.dto.hasMoreEventRows
+import com.razumly.mvp.core.network.dto.pageContinuationOrThrow
+import com.razumly.mvp.core.network.dto.toEventOrThrow
+import com.razumly.mvp.core.network.dto.toEventsOrThrow
 import com.razumly.mvp.core.network.dto.toUpdateDto
 import io.github.aakira.napier.Napier
 import io.ktor.http.encodeURLQueryComponent
@@ -1269,7 +1273,7 @@ class EventRepository(
 
     private suspend fun fetchRemoteEvent(eventId: String): Event {
         val dto = fetchRemoteEventDto(eventId)
-        return dto.toEventOrNull() ?: error("Event $eventId response missing required fields")
+        return dto.toEventOrThrow("Event $eventId response")
     }
 
     private fun List<DivisionDetail>.preservesConfiguredDivisionDetailsFrom(cached: Event): Boolean {
@@ -1318,7 +1322,7 @@ class EventRepository(
     private suspend fun fetchRemoteEventsByHost(hostId: String): List<Event> {
         val encodedHostId = hostId.encodeURLQueryComponent()
         val res = api.get<EventsResponseDto>("api/events?hostId=$encodedHostId&limit=200")
-        return res.events.mapNotNull { it.toEventOrNull() }
+        return res.events.toEventsOrThrow("Hosted events response")
     }
 
     private suspend fun fetchRemoteEventsPageByHost(
@@ -1332,13 +1336,12 @@ class EventRepository(
         val response = api.get<EventsResponseDto>(
             "api/events?hostId=$encodedHostId&limit=$safeLimit&offset=$safeOffset",
         )
-        val events = response.events.mapNotNull { it.toEventOrNull() }
-        val serverNextOffset = response.pagination?.nextOffset
-            ?.takeIf { candidate -> candidate > safeOffset }
+        val events = response.events.toEventsOrThrow("Hosted events page")
+        val continuation = response.pageContinuationOrThrow("Hosted events page", safeOffset)
         return HostEventPage(
             events = events,
-            nextOffset = serverNextOffset ?: safeOffset + events.size,
-            hasMore = response.pagination?.hasMore == true && serverNextOffset != null,
+            nextOffset = continuation.nextOffset,
+            hasMore = continuation.hasMore,
         )
     }
 
@@ -1356,7 +1359,7 @@ class EventRepository(
         val res = api.get<EventsResponseDto>(
             "api/events?organizationId=$encodedOrganizationId&limit=$safeLimit"
         )
-        return res.events.mapNotNull { it.toEventOrNull() }
+        return res.events.toEventsOrThrow("Organization events response")
     }
 
     private suspend fun fetchRemoteEventsPageByOrganization(
@@ -1370,14 +1373,12 @@ class EventRepository(
         val response = api.get<EventsResponseDto>(
             "api/events?organizationId=$encodedOrganizationId&limit=$safeLimit&offset=$safeOffset",
         )
-        val events = response.events.mapNotNull { it.toEventOrNull() }
-        val pagination = response.pagination
-        val fallbackNextOffset = safeOffset + events.size
-        val nextOffset = pagination?.nextOffset?.takeIf { candidate -> candidate > safeOffset }
+        val events = response.events.toEventsOrThrow("Organization events page")
+        val continuation = response.pageContinuationOrThrow("Organization events page", safeOffset)
         return OrganizationEventPage(
             events = events,
-            nextOffset = nextOffset ?: fallbackNextOffset,
-            hasMore = pagination?.hasMore == true && nextOffset != null,
+            nextOffset = continuation.nextOffset,
+            hasMore = continuation.hasMore,
         )
     }
 
@@ -1390,7 +1391,7 @@ class EventRepository(
         for (idChunk in idChunks) {
             val encodedIds = idChunk.joinToString(",").encodeURLQueryComponent()
             val res = api.get<EventsResponseDto>("api/events?ids=$encodedIds&limit=${idChunk.size}")
-            res.events.mapNotNull { it.toEventOrNull() }.forEach { event ->
+            res.events.toEventsOrThrow("Event id batch response").forEach { event ->
                 eventsById[event.id] = event
             }
         }
@@ -2413,7 +2414,7 @@ class EventRepository(
             )
 
             val events = filterHiddenEvents(
-                res.events.mapNotNull { it.toEventOrNull() },
+                res.events.toEventsOrThrow("Event bounds search response"),
                 userRepository.currentUser.value.getOrNull(),
             )
             databaseService.getEventDao.upsertEvents(events)
@@ -2429,7 +2430,7 @@ class EventRepository(
 
             Pair(
                 orderedEvents,
-                events.size == normalizedLimit,
+                res.hasMoreEventRows(normalizedLimit),
             )
         }
     }
@@ -2453,7 +2454,7 @@ class EventRepository(
             )
 
             val events = filterHiddenEvents(
-                res.events.mapNotNull { it.toEventOrNull() },
+                res.events.toEventsOrThrow("Event search response"),
                 userRepository.currentUser.value.getOrNull(),
             )
             databaseService.getEventDao.upsertEvents(events)
@@ -2470,7 +2471,7 @@ class EventRepository(
 
             Pair(
                 orderedEvents,
-                events.size == normalizedLimit,
+                res.hasMoreEventRows(normalizedLimit),
             )
         }
     }
@@ -3080,7 +3081,7 @@ class EventRepository(
                 "api/profile/schedule?$encodedWindow&limit=$MY_SCHEDULE_PAGE_SIZE$cursorQuery",
             )
 
-            response.events.mapNotNull { it.toEventOrNull() }
+            response.events.toEventsOrThrow("Schedule events page")
                 .forEach { event -> eventsById[event.id] = event }
             response.matches.mapNotNull { it.toMatchOrNull() }
                 .forEach { match -> matchesById[match.id] = match }

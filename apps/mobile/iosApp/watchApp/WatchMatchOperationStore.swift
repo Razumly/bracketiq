@@ -6,6 +6,20 @@ private let watchOperationStatusSyncing = "SYNCING"
 private let watchOperationStatusFailed = "FAILED"
 private let watchOperationSourceDevice = "WATCH_OS"
 
+enum WatchMatchOperationStoreError: LocalizedError {
+    case corruptOperations(Error)
+    case encodeOperations(Error)
+
+    var errorDescription: String? {
+        switch self {
+        case .corruptOperations:
+            return "Saved score updates could not be read. They were kept on this watch. Update the app or retry before recording more scores."
+        case .encodeOperations:
+            return "The score update could not be saved on this watch. Retry before leaving the match."
+        }
+    }
+}
+
 struct WatchPendingMatchOperation: Codable, Equatable {
     let id: String
     let eventId: String
@@ -89,9 +103,9 @@ final class WatchMatchOperationStore {
         }
     }
 
-    func newOperation(eventId: String, matchId: String) -> WatchPendingMatchOperation {
-        queue.sync {
-            let sequence = nextSequenceUnlocked()
+    func newOperation(eventId: String, matchId: String) throws -> WatchPendingMatchOperation {
+        try queue.sync {
+            let sequence = try nextSequenceUnlocked()
             let deviceId = deviceIdUnlocked()
             return WatchPendingMatchOperation(
                 id: "\(deviceId):\(matchId):\(sequence)",
@@ -111,29 +125,29 @@ final class WatchMatchOperationStore {
         }
     }
 
-    func upsertOperation(_ operation: WatchPendingMatchOperation) {
-        queue.sync {
-            let next = operationsUnlocked()
+    func upsertOperation(_ operation: WatchPendingMatchOperation) throws {
+        try queue.sync {
+            let next = try operationsUnlocked()
                 .filter { $0.id != operation.id }
                 .appending(operation)
                 .sortedBySyncOrder()
-            writeOperationsUnlocked(next)
+            try writeOperationsUnlocked(next)
         }
     }
 
-    func pendingOperations(matchId: String? = nil) -> [WatchPendingMatchOperation] {
-        queue.sync {
+    func pendingOperations(matchId: String? = nil) throws -> [WatchPendingMatchOperation] {
+        try queue.sync {
             let normalizedMatchId = matchId?.trimmedOrNil
             let retryableStatuses = [watchOperationStatusPending, watchOperationStatusFailed, watchOperationStatusSyncing]
-            return operationsUnlocked()
+            return try operationsUnlocked()
                 .filter { retryableStatuses.contains($0.status) }
                 .filter { normalizedMatchId == nil || $0.matchId.trimmedOrNil == normalizedMatchId }
                 .sortedBySyncOrder()
         }
     }
 
-    func markAttempting(_ operationId: String) {
-        updateOperation(operationId) { operation in
+    func markAttempting(_ operationId: String) throws {
+        try updateOperation(operationId) { operation in
             operation.copy(
                 status: watchOperationStatusSyncing,
                 attemptCount: operation.attemptCount + 1,
@@ -143,8 +157,8 @@ final class WatchMatchOperationStore {
         }
     }
 
-    func markFailed(_ operationId: String, error: String) {
-        updateOperation(operationId) { operation in
+    func markFailed(_ operationId: String, error: String) throws {
+        try updateOperation(operationId) { operation in
             operation.copy(
                 status: watchOperationStatusFailed,
                 lastError: .some(error),
@@ -153,27 +167,27 @@ final class WatchMatchOperationStore {
         }
     }
 
-    func markAcked(_ operationId: String) {
-        queue.sync {
-            writeOperationsUnlocked(operationsUnlocked().filter { $0.id != operationId })
+    func markAcked(_ operationId: String) throws {
+        try queue.sync {
+            try writeOperationsUnlocked(try operationsUnlocked().filter { $0.id != operationId })
         }
     }
 
     private func updateOperation(
         _ operationId: String,
         update: (WatchPendingMatchOperation) -> WatchPendingMatchOperation
-    ) {
-        queue.sync {
-            writeOperationsUnlocked(operationsUnlocked().map { operation in
+    ) throws {
+        try queue.sync {
+            try writeOperationsUnlocked(try operationsUnlocked().map { operation in
                 operation.id == operationId ? update(operation) : operation
             })
         }
     }
 
-    private func nextSequenceUnlocked() -> Int64 {
+    private func nextSequenceUnlocked() throws -> Int64 {
         let next = max(
             Int64(defaults.integer(forKey: Keys.lastSequence)),
-            operationsUnlocked().map(\.clientSequence).max() ?? 0
+            try operationsUnlocked().map(\.clientSequence).max() ?? 0
         ) + 1
         defaults.set(next, forKey: Keys.lastSequence)
         return next
@@ -188,17 +202,23 @@ final class WatchMatchOperationStore {
         return generated
     }
 
-    private func operationsUnlocked() -> [WatchPendingMatchOperation] {
-        guard let data = defaults.data(forKey: Keys.operations),
-              let decoded = try? decoder.decode(WatchPendingMatchOperationList.self, from: data) else {
+    private func operationsUnlocked() throws -> [WatchPendingMatchOperation] {
+        guard let data = defaults.data(forKey: Keys.operations) else {
             return []
         }
-        return decoded.operations
+        do {
+            return try decoder.decode(WatchPendingMatchOperationList.self, from: data).operations
+        } catch {
+            throw WatchMatchOperationStoreError.corruptOperations(error)
+        }
     }
 
-    private func writeOperationsUnlocked(_ operations: [WatchPendingMatchOperation]) {
-        guard let data = try? encoder.encode(WatchPendingMatchOperationList(operations: operations)) else {
-            return
+    private func writeOperationsUnlocked(_ operations: [WatchPendingMatchOperation]) throws {
+        let data: Data
+        do {
+            data = try encoder.encode(WatchPendingMatchOperationList(operations: operations))
+        } catch {
+            throw WatchMatchOperationStoreError.encodeOperations(error)
         }
         defaults.set(data, forKey: Keys.operations)
     }

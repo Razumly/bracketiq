@@ -955,6 +955,111 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    fun getHostEventsPage_fails_the_retryable_page_when_any_event_row_is_malformed() = runTest {
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        val engine = MockEngine {
+            respond(
+                content = """
+                    {
+                      "events": [
+                        {
+                          "id": "event_201",
+                          "name": "Valid Event",
+                          "hostId": "host_1",
+                          "start": "2026-07-13T12:00:00Z",
+                          "end": "2026-07-13T13:00:00Z"
+                        },
+                        {
+                          "id": "event_202",
+                          "name": "Malformed Event",
+                          "hostId": "host_1",
+                          "start": "not-a-date",
+                          "end": "2026-07-13T13:00:00Z"
+                        }
+                      ],
+                      "pagination": {
+                        "limit": 2,
+                        "offset": 200,
+                        "nextOffset": 202,
+                        "hasMore": true
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            EventRepositoryHttp_InMemoryAuthTokenStore("t123"),
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val result = repo.getHostEventsPage("host_1", limit = 2, offset = 200)
+
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("Hosted events page row 2"))
+        assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("id=event_202"))
+        assertTrue(eventDao.getAllCachedEvents().first().isEmpty())
+    }
+
+    @Test
+    fun getHostEventsPage_fails_when_server_claims_more_rows_without_a_continuation() = runTest {
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        val engine = MockEngine {
+            respond(
+                content = """
+                    {
+                      "events": [
+                        {
+                          "id": "event_201",
+                          "name": "Hosted Event",
+                          "hostId": "host_1",
+                          "start": "2026-07-13T12:00:00Z",
+                          "end": "2026-07-13T13:00:00Z"
+                        }
+                      ],
+                      "pagination": {
+                        "limit": 50,
+                        "offset": 200,
+                        "hasMore": true
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            EventRepositoryHttp_InMemoryAuthTokenStore("t123"),
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val result = repo.getHostEventsPage("host_1", limit = 50, offset = 200)
+
+        assertTrue(result.isFailure)
+        assertEquals(
+            "Hosted events page is missing a valid continuation offset",
+            result.exceptionOrNull()?.message,
+        )
+    }
+
+    @Test
     fun getOrganizationEventsPage_includes_offset_and_maps_server_pagination() = runTest {
         val eventDao = EventRepositoryHttp_FakeEventDao()
         val db = EventRepositoryHttp_FakeDatabaseService(

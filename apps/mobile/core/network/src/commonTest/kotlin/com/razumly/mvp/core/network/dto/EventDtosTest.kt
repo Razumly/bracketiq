@@ -24,12 +24,75 @@ import kotlinx.serialization.decodeFromString
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 class EventDtosTest {
+    @Test
+    fun event_page_conversion_reports_the_malformed_row_instead_of_dropping_it() {
+        val failure = assertFailsWith<IllegalArgumentException> {
+            listOf(
+                EventApiDto(
+                    id = "event-valid",
+                    name = "Valid Event",
+                    hostId = "host-1",
+                    start = "2026-07-13T12:00:00Z",
+                    end = "2026-07-13T13:00:00Z",
+                ),
+                EventApiDto(
+                    id = "event-bad",
+                    name = "Malformed Event",
+                    hostId = "host-1",
+                    start = "not-a-date",
+                    end = "2026-07-13T13:00:00Z",
+                ),
+            ).toEventsOrThrow("Hosted events page")
+        }
+
+        assertTrue(failure.message.orEmpty().contains("Hosted events page row 2"))
+        assertTrue(failure.message.orEmpty().contains("id=event-bad"))
+        assertTrue(failure.message.orEmpty().contains("start is invalid"))
+    }
+
+    @Test
+    fun event_page_continuation_refuses_to_turn_incomplete_metadata_into_a_terminal_page() {
+        val response = EventsResponseDto(
+            events = listOf(
+                EventApiDto(id = "event-201"),
+            ),
+            pagination = EventsPaginationDto(
+                offset = 200,
+                hasMore = true,
+                nextOffset = null,
+            ),
+        )
+
+        val failure = assertFailsWith<IllegalStateException> {
+            response.pageContinuationOrThrow("Hosted events page", requestedOffset = 200)
+        }
+
+        assertEquals(
+            "Hosted events page is missing a valid continuation offset",
+            failure.message,
+        )
+    }
+
+    @Test
+    fun event_search_pagination_uses_server_or_raw_page_size_not_rendered_count() {
+        val fullRawPage = EventsResponseDto(
+            events = listOf(EventApiDto(id = "visible"), EventApiDto(id = "hidden")),
+        )
+        val explicitTerminalPage = fullRawPage.copy(
+            pagination = EventsPaginationDto(hasMore = false),
+        )
+
+        assertTrue(fullRawPage.hasMoreEventRows(requestedLimit = 2))
+        assertFalse(explicitTerminalPage.hasMoreEventRows(requestedLimit = 2))
+    }
+
     @Test
     fun schedule_event_response_decodes_matches_with_partial_embedded_fields() {
         val response = jsonMVP.decodeFromString<ScheduleEventResponseDto>(

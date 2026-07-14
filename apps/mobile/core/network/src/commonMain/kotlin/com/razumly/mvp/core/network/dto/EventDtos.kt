@@ -453,6 +453,71 @@ data class EventApiDto(
     }
 }
 
+/**
+ * Convert an API event at a repository boundary where dropping a row would make the server page
+ * look complete. Nullable conversion remains available for explicitly optional embedded records,
+ * but collection responses must fail as a unit so callers can surface and retry the same page.
+ */
+fun EventApiDto.toEventOrThrow(context: String = "event response"): Event =
+    toEventOrNull() ?: throw IllegalArgumentException(
+        "$context contains a malformed event (${eventPayloadIdentity()}): ${eventPayloadValidationFailure()}",
+    )
+
+fun List<EventApiDto>.toEventsOrThrow(context: String): List<Event> =
+    mapIndexed { index, event ->
+        event.toEventOrThrow("$context row ${index + 1}")
+    }
+
+private fun EventApiDto.eventPayloadIdentity(): String {
+    val resolvedId = id?.trim()?.takeIf(String::isNotBlank)
+        ?: legacyId?.trim()?.takeIf(String::isNotBlank)
+    return resolvedId?.let { "id=$it" } ?: "missing id"
+}
+
+private fun EventApiDto.eventPayloadValidationFailure(): String {
+    val resolvedId = id?.trim()?.takeIf(String::isNotBlank)
+        ?: legacyId?.trim()?.takeIf(String::isNotBlank)
+    if (resolvedId == null) return "id is required"
+    if (name.isNullOrBlank()) return "name is required"
+    if (hostId.isNullOrBlank() && affiliateUrl.isNullOrBlank()) {
+        return "hostId or affiliateUrl is required"
+    }
+    val resolvedStart = start?.trim()?.takeIf(String::isNotBlank)
+        ?: return "start is required"
+    val resolvedTimeZone = timeZone?.trim()?.takeIf(String::isNotBlank) ?: "UTC"
+    if (parseApiInstant(resolvedStart, resolvedTimeZone) == null) return "start is invalid"
+    val resolvedEnd = end?.trim()?.takeIf(String::isNotBlank)
+    if (resolvedEnd == null && noFixedEndDateTime != true) return "end is required"
+    if (resolvedEnd != null && parseApiInstant(resolvedEnd, resolvedTimeZone) == null) {
+        return "end is invalid"
+    }
+    return "required fields are invalid"
+}
+
+data class EventsPageContinuation(
+    val nextOffset: Int,
+    val hasMore: Boolean,
+)
+
+fun EventsResponseDto.pageContinuationOrThrow(
+    context: String,
+    requestedOffset: Int,
+): EventsPageContinuation {
+    val safeOffset = requestedOffset.coerceAtLeast(0)
+    val serverNextOffset = pagination?.nextOffset?.takeIf { candidate -> candidate > safeOffset }
+    val hasMore = pagination?.hasMore == true
+    check(!hasMore || serverNextOffset != null) {
+        "$context is missing a valid continuation offset"
+    }
+    return EventsPageContinuation(
+        nextOffset = serverNextOffset ?: safeOffset + events.size,
+        hasMore = hasMore,
+    )
+}
+
+fun EventsResponseDto.hasMoreEventRows(requestedLimit: Int): Boolean =
+    pagination?.hasMore ?: (events.size >= requestedLimit.coerceAtLeast(1))
+
 @Serializable
 data class EventsResponseDto(
     val events: List<EventApiDto> = emptyList(),
