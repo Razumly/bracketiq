@@ -127,6 +127,42 @@ class EventDetailWeeklyBehaviorTest {
     }
 
     @Test
+    fun weekly_session_options_buildThreeWeeksFromTheSlotStart() {
+        val event = Event(
+            id = "weekly-session-event",
+            name = "Weekly Sessions",
+            eventType = EventType.WEEKLY_EVENT,
+            start = Instant.parse("2099-04-13T00:00:00Z"),
+            end = Instant.parse("2099-05-31T23:59:59Z"),
+            timeZone = "UTC",
+            divisions = listOf("open"),
+            timeSlotIds = listOf("slot-weekly"),
+        )
+        val slot = TimeSlot(
+            id = "slot-weekly",
+            dayOfWeek = 0,
+            daysOfWeek = (0..6).toList(),
+            divisions = listOf("open"),
+            startTimeMinutes = 9 * 60,
+            endTimeMinutes = 10 * 60 + 30,
+            startDate = Instant.parse("2099-04-13T00:00:00Z"),
+            repeating = true,
+            endDate = Instant.parse("2099-05-31T23:59:59Z"),
+            scheduledFieldId = "field-1",
+            scheduledFieldIds = listOf("field-1"),
+            price = null,
+        )
+
+        val options = buildWeeklySessionOptions(event, listOf(slot))
+
+        assertEquals("2099-04-13", options.first().occurrenceDate)
+        assertEquals("CoEd Open 18+", options.first().divisionLabel)
+        assertEquals(9, options.first().start.toString().substring(11, 13).toInt())
+        assertEquals(21, options.size)
+        assertEquals(options.map { option -> option.id }.distinct().size, options.size)
+    }
+
+    @Test
     fun teams_needing_players_summary_uses_singular_copy_for_single_team_and_player() {
         assertEquals(
             "1 team needs 1 player",

@@ -1,11 +1,16 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.OrganizationStaffMember
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.time.Instant
 
 class EventDetailScreenRoleVisibilityTest {
 
@@ -147,6 +152,76 @@ class EventDetailScreenRoleVisibilityTest {
             ),
         )
     }
-}
 
+    @Test
+    fun givenTrackedTeamMatches_whenCheckingFirstMatchDay_thenUsesEarliestDate() {
+        val matches = listOf(
+            matchWithRelations(
+                id = "match-later",
+                team1Id = "tracked-team",
+                start = Instant.parse("2026-07-21T18:00:00Z"),
+            ),
+            matchWithRelations(
+                id = "match-first",
+                team1Id = "tracked-team",
+                start = Instant.parse("2026-07-20T18:00:00Z"),
+            ),
+            matchWithRelations(
+                id = "match-unrelated",
+                team1Id = "other-team",
+                start = Instant.parse("2026-07-19T18:00:00Z"),
+            ),
+        )
+
+        assertTrue(
+            isFirstMatchDayForTrackedUsers(
+                matches = matches,
+                trackedUserIds = emptySet(),
+                currentUserTeamIds = setOf(" tracked-team "),
+                today = LocalDate(2026, 7, 20),
+                timeZone = TimeZone.UTC,
+            ),
+        )
+        assertFalse(
+            isFirstMatchDayForTrackedUsers(
+                matches = matches,
+                trackedUserIds = emptySet(),
+                currentUserTeamIds = setOf("tracked-team"),
+                today = LocalDate(2026, 7, 21),
+                timeZone = TimeZone.UTC,
+            ),
+        )
+        assertFalse(
+            isFirstMatchDayForTrackedUsers(
+                matches = matches,
+                trackedUserIds = emptySet(),
+                currentUserTeamIds = emptySet(),
+                today = LocalDate(2026, 7, 20),
+                timeZone = TimeZone.UTC,
+            ),
+        )
+    }
+
+    private fun matchWithRelations(
+        id: String,
+        team1Id: String,
+        start: Instant,
+    ): MatchWithRelations = MatchWithRelations(
+        match = MatchMVP(
+            matchId = id.hashCode(),
+            team1Id = team1Id,
+            eventId = "event-1",
+            start = start,
+            id = id,
+        ),
+        field = null,
+        team1 = null,
+        team2 = null,
+        teamOfficial = null,
+        winnerNextMatch = null,
+        loserNextMatch = null,
+        previousLeftMatch = null,
+        previousRightMatch = null,
+    )
+}
 

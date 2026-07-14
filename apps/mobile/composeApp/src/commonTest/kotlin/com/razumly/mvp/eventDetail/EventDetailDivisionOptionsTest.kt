@@ -355,4 +355,31 @@ class EventDetailDivisionOptionsTest {
         assertNull(options.findEventDivisionOption("skill_open_age_18plus"))
         assertNull(options.findEventDivisionOption("m_skill_open_age_18plus"))
     }
+
+    @Test
+    fun playoffDivisionIdsForSelection_collectsExplicitAndPlacementDivisions() {
+        val event = Event(
+            id = "event-playoff-selection",
+            eventType = EventType.LEAGUE,
+            includePlayoffs = true,
+            splitLeaguePlayoffDivisions = true,
+            divisions = listOf("league_open", "playoff_gold"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "league_open",
+                    key = "league_open",
+                    name = "Open League",
+                    playoffPlacementDivisionIds = listOf(" playoff_gold "),
+                ),
+                DivisionDetail(
+                    id = "PLAYOFF_GOLD",
+                    kind = "playoff",
+                    key = "playoff_gold",
+                    name = "Gold Playoff",
+                ),
+            ),
+        )
+
+        assertEquals(setOf("playoff_gold"), event.playoffDivisionIdsForSelection())
+    }
 }

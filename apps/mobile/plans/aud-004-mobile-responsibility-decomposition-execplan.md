@@ -14,7 +14,7 @@ After this plan is complete, users must see the same event overview, registratio
 
 - [x] (2026-07-14 21:45Z) Reconciled AUD-004 against the current audit branch and measured `EventDetailScreen.kt` at 4,137 lines, `DefaultEventDetailComponent.kt` at 3,439 lines, `BillingRepository.kt` at 4,430 lines, and `EventRepository.kt` at 3,398 lines.
 - [x] (2026-07-14 21:50Z) Mapped current responsibilities, existing coordinators, Room-first paths, test coverage, and the interaction with in-flight APP-009 membership persistence.
-- [ ] Milestone 1: extract the pure stage-selection, weekly-schedule presentation, onboarding/role, primary-action, and match-day rules above `EventDetailScreen()` with direct tests.
+- [x] (2026-07-14 13:35Z) Milestone 1: extracted the pure stage-selection, weekly-schedule presentation, onboarding/role, primary-action, and match-day rules above `EventDetailScreen()` with direct tests. The route fell from 4,137 to 3,357 lines; all 30 focused tests, iOS simulator compilation, Android debug assembly, and diff checks pass.
 - [ ] Milestone 2: split the remaining screen body into typed overview/edit, detail-tab, and overlay/dialog presentation hosts without moving business state into composables.
 - [ ] Milestone 3: after APP-009 is integrated, extract event-team check-in, Room-backed relation state, participant hydration, and lifecycle bindings from `DefaultEventDetailComponent` while preserving its public interface and existing coordinators.
 - [ ] Milestone 4: mechanically separate repository contracts/public models and private wire DTO mappings from implementation without changing names, serialization, or dependency-injection bindings.
@@ -39,6 +39,12 @@ After this plan is complete, users must see the same event overview, registratio
 - Observation: the pure rules above `EventDetailScreen()` are isolated from APP-009 and are the safest first slice.
   Evidence: they transform event/division/schedule/guide inputs into presentation values and do not own a `StateFlow`, repository, DAO, endpoint, or mutable component state.
 
+- Observation: moving the stage-selection family into a sibling file required five helpers to become package-visible rather than file-private.
+  Evidence: `tournamentBracketDivisionOptions`, `tournamentPoolDivisionOptions`, `resolveBracketDivisionForPool`, `hasLosersBracketSelector`, and `teamIdsForDivision` are still `internal` to the module and retain their existing signatures and behavior; no public API or call site outside the package was added.
+
+- Observation: the canonical display label for the default `open` division is `CoEd Open 18+`, not the raw identifier `Open`.
+  Evidence: the new weekly-session regression test initially asserted `Open`; the unchanged `toDivisionDisplayLabel` behavior produced `CoEd Open 18+`. The expectation was corrected and the complete focused set then passed 30 of 30 tests.
+
 ## Decision Log
 
 - Decision: continue the existing coordinator architecture and keep `EventDetailComponent`, `IBillingRepository`, and `IEventRepository` source-compatible.
@@ -61,9 +67,13 @@ After this plan is complete, users must see the same event overview, registratio
   Rationale: state flows, repositories, and long-lived coroutine jobs belong to components/coordinators. Screen hosts receive immutable state and callbacks so Android and iOS render the same authoritative state.
   Date/Author: 2026-07-14 / Codex
 
+- Decision: allow extracted pure helpers to use `internal` visibility when both the route and focused tests need them across files in the same package.
+  Rationale: Kotlin `private` is file-scoped. Package/module visibility preserves encapsulation outside the module while keeping the extraction mechanical and directly testable.
+  Date/Author: 2026-07-14 / Codex
+
 ## Outcomes & Retrospective
 
-Research and sequencing are complete. Implementation has not started under this plan. Existing event-detail extraction work is retained and will be finished rather than rewritten. The first slice is deliberately pure and APP-009-independent; component and repository milestones remain gated on the membership migration landing cleanly.
+Research and sequencing are complete, and Milestone 1 is implemented and validated. `EventDetailScreen.kt` now owns 3,357 lines instead of 4,137, while the extracted stage-selection, weekly-schedule, and route-rule files are 414, 262, and 128 lines respectively. The extraction preserved behavior across 30 focused tests, an iOS simulator compilation, and an Android debug assembly. Existing event-detail extraction work is retained and will be finished rather than rewritten; component and repository milestones remain gated on the membership migration landing cleanly.
 
 ## Context and Orientation
 
@@ -169,6 +179,21 @@ Planning measurements on 2026-07-14:
 
 The first slice must not touch the four currently unstaged APP-009 starter paths under `core/database`. Test counts, artifact hashes, runtime screenshots, and logs will be appended here as milestones complete.
 
+Milestone 1 evidence on 2026-07-14:
+
+    3,357  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt
+      414  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailStageSelection.kt
+      262  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailWeeklySchedulePresentation.kt
+      128  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreenRules.kt
+
+    EventDetailDivisionOptionsTest: 9 passed
+    EventDetailWeeklyBehaviorTest: 14 passed
+    EventDetailOnboardingGuideTest: 2 passed
+    EventDetailScreenRoleVisibilityTest: 5 passed
+    ./gradlew :composeApp:compileKotlinIosSimulatorArm64: BUILD SUCCESSFUL
+    ./gradlew :composeApp:assembleDebug: BUILD SUCCESSFUL
+    git diff --check: passed
+
 ## Interfaces and Dependencies
 
 Keep `EventDetailScreen(component: EventDetailComponent, ...)`, the `EventDetailComponent` interface, and `DefaultEventDetailComponent` constructor source-compatible. Pure screen rules stay in package `com.razumly.mvp.eventDetail` with existing function names/signatures and `internal` visibility where tests and route use them. Extracted composables receive immutable state data classes and callback containers; they do not receive repositories.
@@ -178,3 +203,5 @@ Keep `IBillingRepository`, `BillingRepository`, `IEventRepository`, and `EventRe
 Use Kotlin coroutines with structured cancellation, existing `StateFlow`/Decompose lifecycle helpers, existing Room DAOs, current Ktor serialization, and current test fakes. Every collaborator must receive explicit dependencies through its constructor so tests can replace network, clock, or store boundaries without global state.
 
 Revision note (2026-07-14): Created the self-contained AUD-004 continuation after current-source mapping showed that prior screen/coordinator extraction was substantial but pure presentation rules, lifecycle assembly, repository contracts/mappings, and Room-first domain ownership remained concentrated. Sequenced membership-dependent work after APP-009 and selected a pure no-overlap first milestone.
+
+Revision note (2026-07-14): Completed Milestone 1 by moving pure stage, weekly schedule, and route rules into three cohesive files, adding direct regression coverage, and recording exact Android/iOS build evidence. Five formerly file-private helpers became module-internal because Kotlin privacy is file-scoped; no public contract changed.
