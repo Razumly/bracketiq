@@ -40,7 +40,6 @@ import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.CreateEventRequestDto
 import com.razumly.mvp.core.network.dto.CreateEventTemplateRequestDto
-import com.razumly.mvp.core.network.dto.CurrentUserEventRegistrationsResponseDto
 import com.razumly.mvp.core.network.dto.EventApiDto
 import com.razumly.mvp.core.network.dto.EventChildRegistrationRequestDto
 import com.razumly.mvp.core.network.dto.EventChildRegistrationResponseDto
@@ -388,11 +387,16 @@ class EventRepository(
     private val api: MvpApiClient,
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
-    private val currentUserDataSource: CurrentUserDataSource? = null,
+    currentUserDataSource: CurrentUserDataSource? = null,
     coroutineDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : IEventRepository {
     private val roomStore = EventRoomStore(databaseService)
     private val detailRemoteGateway = EventDetailRemoteGateway(api)
+    private val registrationCacheCoordinator = EventRegistrationCacheCoordinator(
+        registrationDao = { databaseService.getEventRegistrationDao },
+        api = api,
+        currentUserDataSource = currentUserDataSource,
+    )
     private val sessionCacheCoordinator = EventSessionCacheCoordinator(
         databaseService = databaseService,
         userRepository = userRepository,
@@ -594,57 +598,6 @@ class EventRepository(
             }
         }
         return ids.mapNotNull(eventsById::get)
-    }
-
-    private suspend fun fetchCurrentUserRegistrations(
-        updatedAfter: Instant?,
-        eventId: String? = null,
-    ): List<EventRegistrationCacheEntry> {
-        val queryParams = mutableListOf<String>()
-        updatedAfter?.let { timestamp ->
-            queryParams += "updatedAfter=${timestamp.toString().encodeURLQueryComponent()}"
-        }
-        eventId
-            ?.trim()
-            ?.takeIf(String::isNotBlank)
-            ?.let { normalizedEventId ->
-                queryParams += "eventId=${normalizedEventId.encodeURLQueryComponent()}"
-            }
-        val path = buildString {
-            append("api/profile/registrations")
-            if (queryParams.isNotEmpty()) {
-                append("?")
-                append(queryParams.joinToString("&"))
-            }
-        }
-        val response = api.get<CurrentUserEventRegistrationsResponseDto>(path)
-        return response.registrations.mapNotNull { dto ->
-            val id = dto.id?.trim()?.takeIf(String::isNotBlank) ?: return@mapNotNull null
-            val eventId = dto.eventId?.trim()?.takeIf(String::isNotBlank) ?: return@mapNotNull null
-            val registrantId = dto.registrantId?.trim()?.takeIf(String::isNotBlank) ?: return@mapNotNull null
-            val registrantType = dto.registrantType?.trim()?.takeIf(String::isNotBlank) ?: return@mapNotNull null
-            EventRegistrationCacheEntry(
-                id = id,
-                eventId = eventId,
-                registrantId = registrantId,
-                parentId = dto.parentId?.trim()?.takeIf(String::isNotBlank),
-                registrantType = registrantType,
-                rosterRole = dto.rosterRole?.trim()?.takeIf(String::isNotBlank),
-                status = dto.status?.trim()?.takeIf(String::isNotBlank),
-                eventTeamId = dto.eventTeamId?.trim()?.takeIf(String::isNotBlank),
-                sourceTeamRegistrationId = dto.sourceTeamRegistrationId?.trim()?.takeIf(String::isNotBlank),
-                divisionId = dto.divisionId?.trim()?.takeIf(String::isNotBlank),
-                divisionTypeId = dto.divisionTypeId?.trim()?.takeIf(String::isNotBlank),
-                divisionTypeKey = dto.divisionTypeKey?.trim()?.takeIf(String::isNotBlank),
-                jerseyNumber = dto.jerseyNumber?.trim()?.takeIf(String::isNotBlank),
-                position = dto.position?.trim()?.takeIf(String::isNotBlank),
-                isCaptain = dto.isCaptain,
-                slotId = dto.slotId?.trim()?.takeIf(String::isNotBlank),
-                occurrenceDate = dto.occurrenceDate?.trim()?.takeIf(String::isNotBlank),
-                createdAt = dto.createdAt?.trim()?.takeIf(String::isNotBlank),
-                updatedAt = dto.updatedAt?.trim()?.takeIf(String::isNotBlank),
-            )
-        }
     }
 
     private suspend fun insertEventCrossReferences(
@@ -1043,69 +996,18 @@ class EventRepository(
         ).map { rows -> rows.map(EventUserComplianceCacheEntry::toComplianceUserSummary) }
     }
 
-    override suspend fun syncCurrentUserRegistrationCache(): Result<Unit> = runCatching {
-        val dataSource = currentUserDataSource ?: return@runCatching
-        val currentUserId = dataSource.getUserIdNow().trim()
-        if (currentUserId.isBlank()) {
-            dataSource.clearRegistrationSyncState()
-            databaseService.getEventRegistrationDao.clearAll()
-            return@runCatching
-        }
+    override suspend fun syncCurrentUserRegistrationCache(): Result<Unit> =
+        runCatching { registrationCacheCoordinator.syncAll() }
 
-        val storedUserId = dataSource.getRegistrationSyncUserId()
-        val updatedAfter = if (storedUserId == currentUserId) {
-            dataSource.getRegistrationSyncStartedAt()
-        } else {
-            databaseService.getEventRegistrationDao.clearAll()
-            null
-        }
-        val syncStartedAt = Clock.System.now()
-        dataSource.saveRegistrationSyncState(
-            userId = currentUserId,
-            startedAt = syncStartedAt,
-        )
-
-        val registrations = fetchCurrentUserRegistrations(updatedAfter = updatedAfter)
-        if (registrations.isNotEmpty()) {
-            databaseService.getEventRegistrationDao.upsertRegistrations(registrations)
-        }
-    }
-
-    override suspend fun syncCurrentUserRegistrationCacheForEvent(eventId: String): Result<Unit> = runCatching {
-        val normalizedEventId = eventId.trim()
-        if (normalizedEventId.isBlank()) {
-            return@runCatching
-        }
-
-        val dataSource = currentUserDataSource ?: return@runCatching
-        val currentUserId = dataSource.getUserIdNow().trim()
-        if (currentUserId.isBlank()) {
-            databaseService.getEventRegistrationDao.deleteRegistrationsForEvent(normalizedEventId)
-            return@runCatching
-        }
-
-        val registrations = fetchCurrentUserRegistrations(
-            updatedAfter = null,
-            eventId = normalizedEventId,
-        )
-        databaseService.getEventRegistrationDao.deleteRegistrationsForEvent(normalizedEventId)
-        if (registrations.isNotEmpty()) {
-            databaseService.getEventRegistrationDao.upsertRegistrations(registrations)
-        }
-    }
+    override suspend fun syncCurrentUserRegistrationCacheForEvent(eventId: String): Result<Unit> =
+        runCatching { registrationCacheCoordinator.syncForEvent(eventId) }
 
     override fun observeCurrentUserRegistrationsForEvent(eventId: String): Flow<List<EventRegistrationCacheEntry>> {
-        val normalizedEventId = eventId.trim()
-        if (normalizedEventId.isBlank()) {
-            return flowOf(emptyList())
-        }
-        return databaseService.getEventRegistrationDao.observeRegistrationsForEvent(normalizedEventId)
+        return registrationCacheCoordinator.observeForEvent(eventId)
     }
 
-    override suspend fun clearCurrentUserRegistrationCache(): Result<Unit> = runCatching {
-        currentUserDataSource?.clearRegistrationSyncState()
-        databaseService.getEventRegistrationDao.clearAll()
-    }
+    override suspend fun clearCurrentUserRegistrationCache(): Result<Unit> =
+        runCatching { registrationCacheCoordinator.clear() }
 
     private suspend fun syncEventParticipantsAfterMutation(
         event: Event,
