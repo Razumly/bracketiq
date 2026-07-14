@@ -18,14 +18,7 @@ import com.razumly.mvp.core.data.dataTypes.Subscription
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.network.MvpApiClient
-import com.razumly.mvp.core.network.dto.BillingEventRefDto
-import com.razumly.mvp.core.network.dto.BillingRefundRequestDto
 import com.razumly.mvp.core.network.dto.BillingUserRefDto
-import com.razumly.mvp.core.network.dto.RefundAllRequestDto
-import com.razumly.mvp.core.network.dto.RefundRequestsResponseDto
-import com.razumly.mvp.core.network.dto.UpdateRefundRequestDto
-import io.github.aakira.napier.Napier
-import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.flow.Flow
 
 class BillingRepository(
@@ -62,6 +55,12 @@ class BillingRepository(
     )
     private val organizationCoordinator = BillingOrganizationCoordinator(
         api = api,
+        databaseService = databaseService,
+    )
+    private val refundCoordinator = BillingRefundCoordinator(
+        api = api,
+        userRepository = userRepository,
+        eventRepository = eventRepository,
         databaseService = databaseService,
     )
 
@@ -568,83 +567,19 @@ class BillingRepository(
         organizationCoordinator.listOrganizationTemplates(organizationId)
 
     override suspend fun leaveAndRefundEvent(event: Event, reason: String, targetUserId: String?): Result<Unit> =
-        runCatching {
-            val response = api.post<BillingRefundRequestDto, RefundResponse>(
-                path = "api/billing/refund",
-                body = BillingRefundRequestDto(
-                    payloadEvent = BillingEventRefDto(
-                        id = event.id,
-                        hostId = event.hostId,
-                        organizationId = event.organizationId,
-                    ),
-                    userId = targetUserId,
-                    reason = reason,
-                ),
-            )
+        refundCoordinator.leaveAndRefundEvent(event, reason, targetUserId)
 
-            if (!response.error.isNullOrBlank()) throw Exception(response.error)
-            if (response.success == false) throw Exception(response.message ?: "Refund request failed")
-        }
-
-    override suspend fun deleteAndRefundEvent(event: Event): Result<Unit> = runCatching {
-        // Server-side operation: create refund requests for event participants.
-        api.post<RefundAllRequestDto, RefundResponse>(
-            path = "api/billing/refund-all",
-            body = RefundAllRequestDto(eventId = event.id),
-        )
-
-        eventRepository.deleteEvent(event.id).getOrThrow()
-    }
+    override suspend fun deleteAndRefundEvent(event: Event): Result<Unit> =
+        refundCoordinator.deleteAndRefundEvent(event)
 
     override suspend fun getRefundsWithRelations(): Result<List<RefundRequestWithRelations>> =
-        runCatching {
-            val currentUserId = userRepository.currentUser.value.getOrThrow().id
-            val encoded = currentUserId.encodeURLQueryComponent()
+        refundCoordinator.getRefundsWithRelations()
 
-            val serverRefunds = api.get<RefundRequestsResponseDto>("api/refund-requests?hostId=$encoded&limit=200").refunds
-            databaseService.getRefundRequestDao.upsertRefundRequests(serverRefunds)
+    override suspend fun getRefunds(): Result<List<RefundRequest>> = refundCoordinator.getRefunds()
 
-            val refundUserIds = serverRefunds.map { refund -> refund.userId }.distinct()
-            if (refundUserIds.isNotEmpty()) {
-                userRepository.getUsers(refundUserIds).onFailure { e ->
-                    Napier.e("Failed to cache users for refund hydration", e)
-                }
-            }
+    override suspend fun approveRefund(refundRequest: RefundRequest): Result<Unit> =
+        refundCoordinator.approveRefund(refundRequest)
 
-            val refundEventIds = serverRefunds.map { refund -> refund.eventId }.distinct()
-            if (refundEventIds.isNotEmpty()) {
-                eventRepository.getEventsByIds(refundEventIds).onFailure { e ->
-                    Napier.e("Failed to cache events for refund hydration", e)
-                }
-            }
-
-            databaseService.getRefundRequestDao.getRefundRequestsWithRelations(currentUserId)
-        }
-
-    override suspend fun getRefunds(): Result<List<RefundRequest>> = runCatching {
-        val currentUserId = userRepository.currentUser.value.getOrThrow().id
-        val encoded = currentUserId.encodeURLQueryComponent()
-
-        val serverRefunds = api.get<RefundRequestsResponseDto>("api/refund-requests?hostId=$encoded&limit=200").refunds
-        databaseService.getRefundRequestDao.upsertRefundRequests(serverRefunds)
-        serverRefunds
-    }
-
-    override suspend fun approveRefund(refundRequest: RefundRequest): Result<Unit> = runCatching {
-        api.patch<UpdateRefundRequestDto, RefundRequest>(
-            path = "api/refund-requests/${refundRequest.id}",
-            body = UpdateRefundRequestDto(status = "APPROVED"),
-        )
-
-        databaseService.getRefundRequestDao.deleteRefundRequest(refundRequest.id)
-    }
-
-    override suspend fun rejectRefund(refundId: String): Result<Unit> = runCatching {
-        api.patch<UpdateRefundRequestDto, RefundRequest>(
-            path = "api/refund-requests/$refundId",
-            body = UpdateRefundRequestDto(status = "REJECTED"),
-        )
-
-        databaseService.getRefundRequestDao.deleteRefundRequest(refundId)
-    }
+    override suspend fun rejectRefund(refundId: String): Result<Unit> =
+        refundCoordinator.rejectRefund(refundId)
 }
