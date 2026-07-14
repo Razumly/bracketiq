@@ -4,42 +4,23 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.animateDp
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Announcement
 import androidx.compose.material.icons.filled.Add
@@ -58,15 +39,12 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -74,7 +52,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -85,26 +62,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
 import com.razumly.mvp.core.data.dataTypes.addOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.addOfficialUser
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.divisionPriceRange
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
-import com.razumly.mvp.core.data.dataTypes.TimeSlot
-import com.razumly.mvp.core.data.dataTypes.Team
-import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.canManageEventsForViewer
 import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
 import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
@@ -123,7 +91,6 @@ import com.razumly.mvp.core.data.dataTypes.withOfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
-import com.razumly.mvp.core.data.util.resolveParticipantCapacity
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.presentation.EventDetailInitialTab
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
@@ -134,7 +101,6 @@ import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
-import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.guides.EventGuideIds
 import com.razumly.mvp.core.presentation.guides.EventGuideTargets
 import com.razumly.mvp.core.presentation.guides.LocalGuideController
@@ -147,26 +113,20 @@ import com.razumly.mvp.core.presentation.guides.guideTarget
 import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.presentation.util.getEventQrCodeUrl
-import com.razumly.mvp.core.presentation.util.toNameCase
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.core.util.resolvedTimeZone
 import com.razumly.mvp.eventDetail.composables.MatchEditDialog
 import com.razumly.mvp.eventDetail.composables.ParticipantsSection
-import com.razumly.mvp.eventDetail.composables.ParticipantsView
 import com.razumly.mvp.eventDetail.composables.ScheduleItem
-import com.razumly.mvp.eventDetail.composables.ScheduleView
 import com.razumly.mvp.eventDetail.composables.SendNotificationDialog
 import com.razumly.mvp.eventDetail.composables.TeamSelectionDialog
-import com.razumly.mvp.eventDetail.composables.TournamentBracketView
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
 import dev.icerock.moko.geo.LatLng
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.datetime.toLocalDateTime
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
@@ -1875,20 +1835,17 @@ fun EventDetailScreen(
                 ) {
                     Column(Modifier.padding(innerPadding).padding(top = 4.dp)) {
                         val availableTabs = remember(hasBracketView, hasScheduleView, hasStandingsView) {
-                            buildList {
-                                add(DetailTab.PARTICIPANTS)
-                                if (hasScheduleView) add(DetailTab.SCHEDULE)
-                                if (hasStandingsView) add(DetailTab.LEAGUES)
-                                if (hasBracketView) add(DetailTab.BRACKET)
-                            }
+                            availableEventDetailTabs(
+                                hasBracketView = hasBracketView,
+                                hasScheduleView = hasScheduleView,
+                                hasStandingsView = hasStandingsView,
+                            )
                         }
                         val requestedInitialTab = remember(initialTab, availableTabs) {
-                            when {
-                                initialTab == EventDetailInitialTab.SCHEDULE &&
-                                    DetailTab.SCHEDULE in availableTabs -> DetailTab.SCHEDULE
-
-                                else -> DetailTab.PARTICIPANTS
-                            }
+                            resolveInitialEventDetailTab(
+                                initialTab = initialTab,
+                                availableTabs = availableTabs,
+                            )
                         }
                         var selectedTab by rememberSaveable { mutableStateOf(requestedInitialTab) }
                         val bracketTabDivisionOptions = remember(
@@ -2175,569 +2132,146 @@ fun EventDetailScreen(
                                     requiredTargetIds = selectedTabGuideRequiredTargets,
                                 )
                             }
-                            EventDetailTabStrip(
-                                availableTabs = availableTabs,
-                                selectedTab = selectedTab,
-                                onTabSelected = { selectedTab = it },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .guideTarget(EventGuideTargets.DetailTabs)
-                                    .padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
-                            )
-                        Box(Modifier.fillMaxSize()) {
-                                when (selectedTab) {
-                                    DetailTab.BRACKET -> {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .guideTarget(EventGuideTargets.BracketContent),
-                                        ) {
-                                            TournamentBracketView(
-                                                showFab = { showFab = it },
-                                                topContentPadding = tabContentTopOffset,
-                                                canManageBracket = canManageMatchEditingFromDock,
-                                                onMatchClick = { match ->
-                                                    if (!canEditMatches) {
-                                                        component.matchSelected(match)
-                                                    }
-                                                },
-                                                isEditingMatches = canEditMatches,
-                                                editableMatches = editableMatches,
-                                                onEditMatch = { match ->
-                                                    if (canEditMatches) {
-                                                        component.showMatchEditDialog(match)
-                                                    } else {
-                                                        component.matchSelected(match)
-                                                    }
-                                                },
-                                                showEventOfficialNames = canEditMatches || isEventOfficial,
-                                                limitOfficialsToCurrentUser = isEventOfficial && !canEditMatches,
-                                            )
-                                        }
-                                    }
+                            EventDetailTabsHost(
+                                state = EventDetailTabsHostState(
+                                    availableTabs = availableTabs,
+                                    selectedTab = selectedTab,
+                                    selectedDivisionSelectorState = selectedDivisionSelectorState,
+                                    tabContentTopOffset = tabContentTopOffset,
+                                    showFab = showFab,
+                                    isDetailDockExpanded = isDetailDockExpanded,
+                                    selectedEvent = selectedEvent,
+                                    tournamentPoolPlayEnabled = tournamentPoolPlayEnabled,
+                                    selectedSchedulePoolDivisionId = selectedSchedulePoolDivisionId,
+                                    selectedScheduleDivisionId = selectedScheduleDivisionId,
+                                    schedulePoolDivisionOptions = schedulePoolDivisionOptions,
+                                    isWeeklyParentEvent = isWeeklyParentEvent,
+                                    weeklyScheduleItems = weeklyScheduleItems,
+                                    weeklyScheduleOptionsById = weeklyScheduleOptionsById,
+                                    selectedWeeklyOccurrence = selectedWeeklyOccurrence,
+                                    selectedWeeklyOccurrenceSummary = selectedWeeklyOccurrenceSummary,
+                                    eventFields = eventFields,
+                                    eventMatchesLoading = eventMatchesLoading,
+                                    editableMatches = editableMatches,
+                                    canEditMatches = canEditMatches,
+                                    scheduleTrackedUserIds = scheduleTrackedUserIds,
+                                    isEventOfficial = isEventOfficial,
+                                    selectedStandingsDataDivisionId = selectedStandingsDataDivisionId,
+                                    selectedStandingsDivisionId = selectedStandingsDivisionId,
+                                    leagueDivisionStandings = leagueDivisionStandings,
+                                    leagueStandings = leagueStandings,
+                                    showStandingsDrawColumn = showStandingsDrawColumn,
+                                    leagueStandingsConfirming = leagueStandingsConfirming,
+                                    canManageLeagueStandings = canManageLeagueStandings,
+                                    eventTeamsAndParticipantsLoading = eventTeamsAndParticipantsLoading,
+                                    selectedParticipantsSection = selectedParticipantsSection,
+                                    participantSections = participantSections,
+                                    isManagingParticipants = isManagingParticipants,
+                                    canManageParticipantsFromDock = canManageParticipantsFromDock,
+                                    showEventCheckInBadges = showEventCheckInBadges,
+                                    selectedParticipantsDivisionId = selectedParticipantsDivisionId,
+                                    selectedDivisionId = selectedDivision,
+                                    registrationDivisionOptions = registrationDivisionOptions,
+                                    participantDivisionWarnings = participantDivisionWarnings,
+                                    showLosersBracketSelector = showLosersBracketSelector,
+                                    losersBracket = losersBracket,
+                                    canManageMatchEditingFromDock = canManageMatchEditingFromDock,
+                                    showScheduleMatchManagement = showScheduleMatchManagement,
+                                    canConfirmLeagueResultsFromDock = canConfirmLeagueResultsFromDock,
+                                    leagueDivisionStandingsLoading = leagueDivisionStandingsLoading,
+                                ),
+                                actions = EventDetailTabsHostActions(
+                                    onTabSelected = { selectedTab = it },
+                                    onShowFabChanged = { showFab = it },
+                                    onDivisionSelected = { tab, divisionId ->
+                                        when (tab) {
+                                            DetailTab.BRACKET,
+                                            DetailTab.PARTICIPANTS,
+                                            -> component.selectDivision(divisionId)
 
-                                    DetailTab.SCHEDULE -> {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .guideTarget(EventGuideTargets.ScheduleContent),
-                                        ) {
-                                        if (isWeeklyParentEvent) {
-                                            ScheduleView(
-                                            items = weeklyScheduleItems,
-                                            fields = eventFields,
-                                            showFab = { showFab = it },
-                                            topContentPadding = tabContentTopOffset,
-                                            timeZone = selectedEvent.event.resolvedTimeZone(),
-                                            onMatchClick = {},
-                                            onEventClick = { selectedOccurrenceEvent ->
-                                                weeklyScheduleOptionsById[selectedOccurrenceEvent.id]?.let { session ->
-                                                    component.selectWeeklySession(
-                                                        sessionStart = session.start,
-                                                        sessionEnd = session.end,
-                                                        slotId = session.slotId,
-                                                        occurrenceDate = session.occurrenceDate,
-                                                        label = session.label,
-                                                    )
-                                                }
-                                            },
-                                            eventCardContent = { scheduleEvent, _, _, onClick ->
-                                                val session = weeklyScheduleOptionsById[scheduleEvent.id]
-                                                if (session != null) {
-                                                    val activeOccurrence = selectedWeeklyOccurrence
-                                                    val isSelectedOccurrence = activeOccurrence?.slotId == session.slotId &&
-                                                        activeOccurrence?.occurrenceDate == session.occurrenceDate
-                                                    val isClosedOccurrence = Clock.System.now() >= session.start
-                                                    Surface(
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .padding(horizontal = 16.dp, vertical = 20.dp)
-                                                            .clickable(onClick = onClick),
-                                                        shape = RoundedCornerShape(16.dp),
-                                                        color = if (isSelectedOccurrence) {
-                                                            MaterialTheme.colorScheme.primaryContainer
-                                                        } else {
-                                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f)
-                                                        },
-                                                        tonalElevation = if (isSelectedOccurrence) 3.dp else 0.dp,
-                                                    ) {
-                                                        Column(
-                                                            modifier = Modifier
-                                                                .fillMaxWidth()
-                                                                .padding(14.dp),
-                                                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                                                        ) {
-                                                            Text(
-                                                                text = session.label,
-                                                                style = MaterialTheme.typography.titleSmall,
-                                                                fontWeight = FontWeight.SemiBold,
-                                                                color = if (isSelectedOccurrence) {
-                                                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                                                } else {
-                                                                    MaterialTheme.colorScheme.onSurface
-                                                                },
-                                                            )
-                                                            Text(
-                                                                text = session.divisionLabel,
-                                                                style = MaterialTheme.typography.bodySmall,
-                                                                color = if (isSelectedOccurrence) {
-                                                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                                                } else {
-                                                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                                                },
-                                                            )
-                                                            if (isSelectedOccurrence) {
-                                                                selectedWeeklyOccurrenceSummary?.let { summary ->
-                                                                    val fullnessLabel = summary.participantCapacity?.let { capacity ->
-                                                                        "${summary.participantCount} of $capacity spots filled"
-                                                                    } ?: "${summary.participantCount} spots filled"
-                                                                    Text(
-                                                                        text = fullnessLabel,
-                                                                        style = MaterialTheme.typography.bodySmall,
-                                                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                                                    )
-                                                                }
-                                                            } else if (isClosedOccurrence) {
-                                                                Text(
-                                                                    text = "Started",
-                                                                    style = MaterialTheme.typography.bodySmall,
-                                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                                )
-                                                            }
-                                                        }
+                                            DetailTab.SCHEDULE -> {
+                                                selectedSchedulePoolDivisionId = null
+                                                component.selectDivision(divisionId)
+                                            }
+
+                                            DetailTab.LEAGUES -> {
+                                                selectedStandingsPoolDivisionId = null
+                                                component.selectDivision(divisionId)
+                                            }
+                                        }
+                                    },
+                                    onPoolSelected = { tab, poolDivisionId ->
+                                        when (tab) {
+                                            DetailTab.SCHEDULE -> {
+                                                selectedSchedulePoolDivisionId =
+                                                    poolDivisionId.takeUnless { selectedId ->
+                                                        selectedId == AllPoolsDivisionOptionId
                                                     }
-                                                } else {
-                                                    Surface(
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .padding(horizontal = 16.dp, vertical = 20.dp)
-                                                            .clickable(onClick = onClick),
-                                                        shape = RoundedCornerShape(16.dp),
-                                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f),
-                                                    ) {
-                                                        Column(
-                                                            modifier = Modifier
-                                                                .fillMaxWidth()
-                                                                .padding(14.dp),
-                                                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                                                        ) {
-                                                            Text(
-                                                                text = scheduleEvent.name.ifBlank { "Weekly occurrence" },
-                                                                style = MaterialTheme.typography.titleSmall,
-                                                                fontWeight = FontWeight.SemiBold,
-                                                                color = MaterialTheme.colorScheme.onSurface,
-                                                            )
-                                                            scheduleEvent.location.takeIf { it.isNotBlank() }?.let { label ->
-                                                                Text(
-                                                                    text = label,
-                                                                    style = MaterialTheme.typography.bodySmall,
-                                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                                )
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            },
+                                            }
+
+                                            DetailTab.LEAGUES -> {
+                                                selectedStandingsPoolDivisionId = poolDivisionId
+                                                component.selectDivision(poolDivisionId)
+                                            }
+
+                                            DetailTab.BRACKET,
+                                            DetailTab.PARTICIPANTS,
+                                            -> Unit
+                                        }
+                                    },
+                                    onWeeklySessionSelected = { session ->
+                                        component.selectWeeklySession(
+                                            sessionStart = session.start,
+                                            sessionEnd = session.end,
+                                            slotId = session.slotId,
+                                            occurrenceDate = session.occurrenceDate,
+                                            label = session.label,
                                         )
-                                    } else if (eventMatchesLoading) {
-                                        showFab = false
-                                        DetailTabLoadingState("Loading schedule matches...")
-                                    } else {
-                                        val allScheduleMatches = if (canEditMatches) {
-                                            editableMatches
+                                    },
+                                    onMatchSelected = component::matchSelected,
+                                    onEditBracketMatch = component::showMatchEditDialog,
+                                    onEditScheduleMatch = { match ->
+                                        component.showMatchEditDialog(
+                                            match = match,
+                                            creationContext = MatchCreateContext.SCHEDULE,
+                                        )
+                                    },
+                                    onSetLockForEditableMatches = component::setLockForEditableMatches,
+                                    onNavigateToChat = component::onNavigateToChat,
+                                    onMoveTeamParticipantDivision = component::moveTeamParticipantDivision,
+                                    onDetailDockExpandedChanged = { isDetailDockExpanded = it },
+                                    onToggleLosersBracket = component::toggleLosersBracket,
+                                    onStartEditingMatches = component::startEditingMatches,
+                                    onCancelEditingMatches = component::cancelEditingMatches,
+                                    onCommitMatchChanges = component::commitMatchChanges,
+                                    onAddBracketMatch = component::addBracketMatch,
+                                    onAddScheduleMatch = component::addScheduleMatch,
+                                    onRequestStandingsConfirmation = {
+                                        showStandingsConfirmDialog = true
+                                    },
+                                    onParticipantsSectionSelected = {
+                                        selectedParticipantsSection = it
+                                    },
+                                    onManagingParticipantsChanged = { isManaging ->
+                                        isManagingParticipants = isManaging
+                                        if (isManaging) {
+                                            component.startManagingParticipants()
                                         } else {
-                                            selectedEvent.matches
+                                            component.stopManagingParticipants()
                                         }
-                                        val scheduleMatches = when {
-                                            tournamentPoolPlayEnabled && !selectedSchedulePoolDivisionId.isNullOrBlank() -> {
-                                                val selectedPoolDivisionId = selectedSchedulePoolDivisionId
-                                                val normalizedPoolDivisionId =
-                                                    selectedPoolDivisionId.orEmpty().normalizeDivisionIdentifier()
-                                                allScheduleMatches.filter { match ->
-                                                    match.match.division?.normalizeDivisionIdentifier() ==
-                                                        normalizedPoolDivisionId
-                                                }
-                                            }
-
-                                            tournamentPoolPlayEnabled && !selectedScheduleDivisionId.isNullOrBlank() -> {
-                                                val poolDivisionIds = schedulePoolDivisionOptions.map { option -> option.id }
-                                                val normalizedScheduleDivisionId =
-                                                    selectedScheduleDivisionId.normalizeDivisionIdentifier()
-                                                allScheduleMatches.filter { match ->
-                                                    val normalizedMatchDivision =
-                                                        match.match.division?.normalizeDivisionIdentifier()
-                                                    normalizedMatchDivision == normalizedScheduleDivisionId ||
-                                                        poolDivisionIds.any { poolDivisionId ->
-                                                            normalizedMatchDivision ==
-                                                                poolDivisionId.normalizeDivisionIdentifier()
-                                                        }
-                                                }
-                                            }
-
-                                            selectedEvent.event.singleDivision || selectedDivision.isNullOrBlank() -> {
-                                                allScheduleMatches
-                                            }
-
-                                            else -> {
-                                                val selectedScheduleFallbackDivision = selectedDivision
-                                                val normalizedSelectedDivision =
-                                                    selectedScheduleFallbackDivision.orEmpty().normalizeDivisionIdentifier()
-                                                allScheduleMatches.filter { match ->
-                                                    match.match.division?.normalizeDivisionIdentifier() ==
-                                                        normalizedSelectedDivision
-                                                }
-                                            }
-                                        }
-                                        val scheduledMatches = scheduleMatches.filter { match ->
-                                            match.match.start != null
-                                        }
-                                        ScheduleView(
-                                            items = scheduledMatches.map { match -> ScheduleItem.MatchEntry(match) },
-                                            fields = eventFields,
-                                            showFab = { showFab = it },
-                                            topContentPadding = tabContentTopOffset,
-                                            timeZone = selectedEvent.event.resolvedTimeZone(),
-                                            trackedUserIds = scheduleTrackedUserIds,
-                                            showEventOfficialNames = canEditMatches || isEventOfficial,
-                                            limitOfficialsToCurrentUser = isEventOfficial && !canEditMatches,
-                                            canManageMatches = canEditMatches,
-                                            onToggleLockAllMatches = { locked, matchIds ->
-                                                component.setLockForEditableMatches(matchIds, locked)
-                                            },
-                                            onMatchClick = { match ->
-                                                if (canEditMatches) {
-                                                    component.showMatchEditDialog(
-                                                        match = match,
-                                                        creationContext = MatchCreateContext.SCHEDULE,
-                                                    )
-                                                } else {
-                                                    component.matchSelected(match)
-                                                }
-                                                }
-                                            )
-                                        }
-                                        }
-                                    }
-                                    DetailTab.LEAGUES -> {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .guideTarget(EventGuideTargets.StandingsContent),
-                                        ) {
-                                            val selectedLeagueDivisionStandings = leagueDivisionStandings?.takeIf { standings ->
-                                                !selectedStandingsDataDivisionId.isNullOrBlank() &&
-                                                    standings.divisionId.normalizeDivisionIdentifier() ==
-                                                        selectedStandingsDataDivisionId.normalizeDivisionIdentifier()
-                                            }
-                                            LeagueStandingsTab(
-                                                state = EventDetailStandingsState(
-                                                    standings = leagueStandings,
-                                                    standingsDivisionKey = selectedStandingsDataDivisionId
-                                                        ?.trim()
-                                                        ?.takeIf(String::isNotBlank)
-                                                        ?: selectedStandingsDivisionId
-                                                            ?.trim()
-                                                            ?.takeIf(String::isNotBlank)
-                                                        ?: "all",
-                                                    showDrawColumn = showStandingsDrawColumn,
-                                                    topContentPadding = tabContentTopOffset,
-                                                    standingsConfirmedAt = selectedLeagueDivisionStandings?.standingsConfirmedAt,
-                                                    validationMessages = selectedLeagueDivisionStandings?.validationMessages.orEmpty(),
-                                                    isLoading = false,
-                                                    isConfirming = leagueStandingsConfirming,
-                                                    canConfirmStandings = canManageLeagueStandings,
-                                                ),
-                                                actions = EventDetailStandingsActions(
-                                                    showFab = { showFab = it },
-                                                ),
-                                            )
-                                        }
-                                    }
-
-                                    DetailTab.PARTICIPANTS -> {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .guideTarget(EventGuideTargets.ParticipantsContent),
-                                        ) {
-                                        if (eventTeamsAndParticipantsLoading) {
-                                            showFab = false
-                                        DetailTabLoadingState("Loading teams and participants...")
-                                    } else if (isWeeklyParentEvent && selectedWeeklyOccurrence == null) {
-                                        showFab = true
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .padding(horizontal = 24.dp),
-                                            contentAlignment = Alignment.Center,
-                                        ) {
-                                            Text(
-                                                text = "Select an occurrence from the Schedule tab to view or manage participants.",
-                                                style = MaterialTheme.typography.bodyLarge,
-                                                textAlign = TextAlign.Center,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                    } else {
-                                        ParticipantsView(
-                                            showFab = { showFab = it },
-                                            section = selectedParticipantsSection,
-                                            onNavigateToChat = component::onNavigateToChat,
-                                            manageMode = isManagingParticipants,
-                                            canManageParticipants = canManageParticipantsFromDock,
-                                            showEventCheckInBadges = showEventCheckInBadges,
-                                            topContentPadding = tabContentTopOffset,
-                                            selectedDivisionId = selectedParticipantsDivisionId
-                                                ?: selectedDivision,
-                                            divisionOptions = registrationDivisionOptions,
-                                            divisionWarnings = participantDivisionWarnings,
-                                                onTeamDivisionSelected = component::moveTeamParticipantDivision,
-                                            )
-                                        }
-                                        }
-                                    }
-                                }
-                            @Suppress("RedundantQualifierName")
-                            androidx.compose.animation.AnimatedVisibility(
-                                visible = selectedDivisionSelectorState != null,
-                                    modifier = Modifier
-                                        .align(Alignment.TopCenter)
-                                        .padding(top = 4.dp)
-                                        .guideTarget(EventGuideTargets.DetailDivisionSelector)
-                                        .zIndex(2f),
-                                enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-                                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
-                            ) {
-                                selectedDivisionSelectorState?.let { selectorState ->
-                                    EventDetailDivisionSelectorBar(
-                                        divisionState = selectorState.divisionState,
-                                        poolState = selectorState.poolState,
-                                        onDivisionSelected = { divisionId ->
-                                            when (selectedTab) {
-                                                DetailTab.BRACKET -> {
-                                                    component.selectDivision(divisionId)
-                                                }
-                                                DetailTab.SCHEDULE -> {
-                                                    selectedSchedulePoolDivisionId = null
-                                                    component.selectDivision(divisionId)
-                                                }
-                                                DetailTab.LEAGUES -> {
-                                                    selectedStandingsPoolDivisionId = null
-                                                    component.selectDivision(divisionId)
-                                                }
-                                                DetailTab.PARTICIPANTS -> {
-                                                    component.selectDivision(divisionId)
-                                                }
-                                            }
-                                        },
-                                        onPoolSelected = { poolDivisionId ->
-                                            when (selectedTab) {
-                                                DetailTab.SCHEDULE -> {
-                                                    selectedSchedulePoolDivisionId =
-                                                        poolDivisionId.takeUnless { selectedId ->
-                                                            selectedId == AllPoolsDivisionOptionId
-                                                        }
-                                                }
-                                                DetailTab.LEAGUES -> {
-                                                    selectedStandingsPoolDivisionId = poolDivisionId
-                                                    component.selectDivision(poolDivisionId)
-                                                }
-                                                DetailTab.BRACKET,
-                                                DetailTab.PARTICIPANTS,
-                                                -> Unit
-                                            }
-                                        },
-                                    )
-                                }
-                            }
-                            @Suppress("RedundantQualifierName")
-                            androidx.compose.animation.AnimatedVisibility(
-                                visible = showFab,
-                                modifier = Modifier.align(Alignment.BottomCenter)
-                                    .padding(LocalNavBarPadding.current)
-                                    .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
-                                enter = slideInVertically() + fadeIn(),
-                                exit = slideOutVertically() + fadeOut()
-                            ) {
-                                when (selectedTab) {
-                                    DetailTab.BRACKET -> ExpandableFloatingDock(
-                                        expanded = isDetailDockExpanded,
-                                        onExpandClick = { isDetailDockExpanded = true },
-                                        onCollapseClick = { isDetailDockExpanded = false },
-                                    ) { dockModifier, onCloseClick ->
-                                        BracketFloatingBar(
-                                            showBracketToggle = showLosersBracketSelector,
-                                            isLosersBracket = losersBracket,
-                                            onBracketToggle = component::toggleLosersBracket,
-                                            showMatchEditAction = canManageMatchEditingFromDock,
-                                            isEditingMatches = canEditMatches,
-                                            onStartMatchEdit = component::startEditingMatches,
-                                            onCancelMatchEdit = component::cancelEditingMatches,
-                                            onCommitMatchEdit = component::commitMatchChanges,
-                                            primaryActionLabel = if (canEditMatches) {
-                                                "Add Match"
-                                            } else {
-                                                null
-                                            },
-                                            onPrimaryActionClick = if (canEditMatches) {
-                                                component::addBracketMatch
-                                            } else {
-                                                null
-                                            },
-                                            primaryActionEnabled = canEditMatches,
-                                            primaryActionColors = if (canEditMatches) {
-                                                ButtonDefaults.buttonColors(
-                                                    containerColor = Color(0xFF2E7D32),
-                                                    contentColor = Color.White,
-                                                )
-                                            } else {
-                                                null
-                                            },
-                                            showPrimaryActionFirst = true,
-                                            useVerticalLayout = true,
-                                            onCloseClick = onCloseClick,
-                                            wrapInSurface = false,
-                                            selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
-                                            onClearSelectedWeeklyOccurrence = if (isWeeklyParentEvent) {
-                                                component::clearSelectedWeeklySession
-                                            } else {
-                                                null
-                                            },
-                                            onShowDetailsClick = component::toggleDetails,
-                                            modifier = dockModifier,
-                                        )
-                                    }
-
-                                    DetailTab.SCHEDULE -> ExpandableFloatingDock(
-                                        expanded = isDetailDockExpanded,
-                                        onExpandClick = { isDetailDockExpanded = true },
-                                        onCollapseClick = { isDetailDockExpanded = false },
-                                    ) { dockModifier, onCloseClick ->
-                                        BracketFloatingBar(
-                                            showMatchEditAction = showScheduleMatchManagement,
-                                            isEditingMatches = showScheduleMatchManagement && canEditMatches,
-                                            onStartMatchEdit = component::startEditingMatches,
-                                            onCancelMatchEdit = component::cancelEditingMatches,
-                                            onCommitMatchEdit = component::commitMatchChanges,
-                                            primaryActionLabel = if (showScheduleMatchManagement && canEditMatches) {
-                                                "Add Match"
-                                            } else {
-                                                null
-                                            },
-                                            onPrimaryActionClick = if (showScheduleMatchManagement && canEditMatches) {
-                                                component::addScheduleMatch
-                                            } else {
-                                                null
-                                            },
-                                            primaryActionEnabled = showScheduleMatchManagement && canEditMatches,
-                                            primaryActionColors = if (showScheduleMatchManagement && canEditMatches) {
-                                                ButtonDefaults.buttonColors(
-                                                    containerColor = Color(0xFF2E7D32),
-                                                    contentColor = Color.White,
-                                                )
-                                            } else {
-                                                null
-                                            },
-                                            showPrimaryActionFirst = true,
-                                            useVerticalLayout = true,
-                                            onCloseClick = onCloseClick,
-                                            wrapInSurface = false,
-                                            selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
-                                            onClearSelectedWeeklyOccurrence = if (isWeeklyParentEvent) {
-                                                component::clearSelectedWeeklySession
-                                            } else {
-                                                null
-                                            },
-                                            onShowDetailsClick = component::toggleDetails,
-                                            modifier = dockModifier,
-                                        )
-                                    }
-
-                                    DetailTab.LEAGUES -> ExpandableFloatingDock(
-                                        expanded = isDetailDockExpanded,
-                                        onExpandClick = { isDetailDockExpanded = true },
-                                        onCollapseClick = { isDetailDockExpanded = false },
-                                    ) { dockModifier, onCloseClick ->
-                                        BracketFloatingBar(
-                                            showMatchEditAction = canManageMatchEditingFromDock,
-                                            isEditingMatches = canEditMatches,
-                                            onStartMatchEdit = component::startEditingMatches,
-                                            onCancelMatchEdit = component::cancelEditingMatches,
-                                            onCommitMatchEdit = component::commitMatchChanges,
-                                            showConfirmResultsAction = canConfirmLeagueResultsFromDock,
-                                            confirmResultsEnabled = canConfirmLeagueResultsFromDock &&
-                                                !leagueDivisionStandingsLoading &&
-                                                !leagueStandingsConfirming &&
-                                                leagueStandings.isNotEmpty(),
-                                            confirmResultsInProgress = leagueStandingsConfirming,
-                                            onConfirmResultsClick = { showStandingsConfirmDialog = true },
-                                            useVerticalLayout = true,
-                                            onCloseClick = onCloseClick,
-                                            wrapInSurface = false,
-                                            selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
-                                            onClearSelectedWeeklyOccurrence = if (isWeeklyParentEvent) {
-                                                component::clearSelectedWeeklySession
-                                            } else {
-                                                null
-                                            },
-                                            onShowDetailsClick = component::toggleDetails,
-                                            modifier = dockModifier,
-                                        )
-                                    }
-
-                                    DetailTab.PARTICIPANTS -> ExpandableFloatingDock(
-                                        expanded = isDetailDockExpanded,
-                                        onExpandClick = { isDetailDockExpanded = true },
-                                        onCollapseClick = { isDetailDockExpanded = false },
-                                    ) { dockModifier, onCloseClick ->
-                                        ParticipantsFloatingBar(
-                                            selectedSection = selectedParticipantsSection,
-                                            availableSections = participantSections,
-                                            onSectionSelected = { selectedParticipantsSection = it },
-                                            showManageAction = canManageParticipantsFromDock,
-                                            isManagingParticipants = isManagingParticipants,
-                                            onStartManagingParticipants = {
-                                                isManagingParticipants = true
-                                                component.startManagingParticipants()
-                                            },
-                                            onStopManagingParticipants = {
-                                                isManagingParticipants = false
-                                                component.stopManagingParticipants()
-                                            },
-                                            inviteActionLabel = if (canManageParticipantsFromDock && isManagingParticipants) {
-                                                if (selectedEvent.event.teamSignup) "Invite Team" else "Invite Player"
-                                            } else {
-                                                null
-                                            },
-                                            onInviteClick = if (canManageParticipantsFromDock && isManagingParticipants) {
-                                                {
-                                                    if (selectedEvent.event.teamSignup) {
-                                                        component.searchInviteTeams("")
-                                                        showInviteTeamDialog = true
-                                                    } else {
-                                                        component.searchUsers("")
-                                                        showInvitePlayerDialog = true
-                                                    }
-                                                }
-                                            } else {
-                                                null
-                                            },
-                                            useVerticalLayout = true,
-                                            onCloseClick = onCloseClick,
-                                            wrapInSurface = false,
-                                            selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
-                                            onClearSelectedWeeklyOccurrence = if (isWeeklyParentEvent) {
-                                                component::clearSelectedWeeklySession
-                                            } else {
-                                                null
-                                            },
-                                            onShowDetailsClick = component::toggleDetails,
-                                            modifier = dockModifier,
-                                        )
-                                    }
-                                }
-                            }
-                        }
+                                    },
+                                    onInviteTeam = {
+                                        component.searchInviteTeams("")
+                                        showInviteTeamDialog = true
+                                    },
+                                    onInvitePlayer = {
+                                        component.searchUsers("")
+                                        showInvitePlayerDialog = true
+                                    },
+                                    onClearSelectedWeeklyOccurrence = component::clearSelectedWeeklySession,
+                                    onShowDetails = component::toggleDetails,
+                                ),
+                            )
                     }
                 }
             }

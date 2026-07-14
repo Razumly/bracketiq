@@ -15,7 +15,8 @@ After this plan is complete, users must see the same event overview, registratio
 - [x] (2026-07-14 21:45Z) Reconciled AUD-004 against the current audit branch and measured `EventDetailScreen.kt` at 4,137 lines, `DefaultEventDetailComponent.kt` at 3,439 lines, `BillingRepository.kt` at 4,430 lines, and `EventRepository.kt` at 3,398 lines.
 - [x] (2026-07-14 21:50Z) Mapped current responsibilities, existing coordinators, Room-first paths, test coverage, and the interaction with in-flight APP-009 membership persistence.
 - [x] (2026-07-14 13:35Z) Milestone 1: extracted the pure stage-selection, weekly-schedule presentation, onboarding/role, primary-action, and match-day rules above `EventDetailScreen()` with direct tests. The route fell from 4,137 to 3,357 lines; all 30 focused tests, iOS simulator compilation, Android debug assembly, and diff checks pass.
-- [ ] Milestone 2: split the remaining screen body into typed overview/edit, detail-tab, and overlay/dialog presentation hosts without moving business state into composables.
+- [x] (2026-07-14 14:00Z) Milestone 2a: extracted the detail-tab renderer into a typed presentation host, kept flow collection and route-local selection in `EventDetailScreen`, and added six direct regressions for tab availability, initial-tab fallback, and schedule-division filtering. The route fell from 3,357 to 2,891 lines; all 36 focused tests, iOS simulator compilation, Android debug assembly, and static/diff checks pass.
+- [ ] Milestone 2b: extract the remaining overview/edit and overlay/dialog presentation hosts without moving business state into composables.
 - [ ] Milestone 3: after APP-009 is integrated, extract event-team check-in, Room-backed relation state, participant hydration, and lifecycle bindings from `DefaultEventDetailComponent` while preserving its public interface and existing coordinators.
 - [ ] Milestone 4: mechanically separate repository contracts/public models and private wire DTO mappings from implementation without changing names, serialization, or dependency-injection bindings.
 - [ ] Milestone 5: split `EventRepository` behind its existing facade into Room store, remote gateway, participant synchronization, registration mutation, event catalog, and session-cache collaborators.
@@ -45,6 +46,12 @@ After this plan is complete, users must see the same event overview, registratio
 - Observation: the canonical display label for the default `open` division is `CoEd Open 18+`, not the raw identifier `Open`.
   Evidence: the new weekly-session regression test initially asserted `Open`; the unchanged `toDivisionDisplayLabel` behavior produced `CoEd Open 18+`. The expectation was corrected and the complete focused set then passed 30 of 30 tests.
 
+- Observation: the detail-tab body contained one non-visual policy that deserved a direct test boundary before movement: tournament schedules include both the selected bracket division and all of its pool divisions, while a selected pool narrows to that pool alone.
+  Evidence: `EventDetailTabsHostRulesTest` now exercises selected-pool, bracket-plus-pools, ordinary-division, and single-division cases; all six tests pass and the extracted host calls the tested `filterScheduleMatchesForDivision` helper.
+
+- Observation: the extracted tab host can remain presentation-only even though it renders four workflows and a floating dock.
+  Evidence: `EventDetailTabsHost.kt` receives immutable state and callbacks, contains no `collectAsState`, `EventDetailComponent`, repository, or network reference, and the route continues to own `selectedTab`, participant-section selection, pool selection, dock expansion, and manage-mode state.
+
 ## Decision Log
 
 - Decision: continue the existing coordinator architecture and keep `EventDetailComponent`, `IBillingRepository`, and `IEventRepository` source-compatible.
@@ -71,15 +78,23 @@ After this plan is complete, users must see the same event overview, registratio
   Rationale: Kotlin `private` is file-scoped. Package/module visibility preserves encapsulation outside the module while keeping the extraction mechanical and directly testable.
   Date/Author: 2026-07-14 / Codex
 
+- Decision: split the original screen-host milestone into independently verifiable detail-tab and overview/dialog checkpoints.
+  Rationale: the detail tabs form one cohesive renderer with shared navigation, division selectors, and a floating dock. Extracting that complete family first reduces the route by 466 lines while keeping the next overview/edit and overlay/dialog movement mechanically separate and reviewable.
+  Date/Author: 2026-07-14 / Codex
+
+- Decision: keep tab selection and all mutations in `EventDetailScreen` and pass only immutable state plus callback containers to `EventDetailTabsHost`.
+  Rationale: this preserves the route as the lifecycle/state boundary and prevents the extracted composable from becoming a second controller. It also leaves the existing `EventDetailComponent` interface and dependency-injection graph unchanged.
+  Date/Author: 2026-07-14 / Codex
+
 ## Outcomes & Retrospective
 
-Research and sequencing are complete, and Milestone 1 is implemented and validated. `EventDetailScreen.kt` now owns 3,357 lines instead of 4,137, while the extracted stage-selection, weekly-schedule, and route-rule files are 414, 262, and 128 lines respectively. The extraction preserved behavior across 30 focused tests, an iOS simulator compilation, and an Android debug assembly. Existing event-detail extraction work is retained and will be finished rather than rewritten; component and repository milestones remain gated on the membership migration landing cleanly.
+Research and sequencing are complete, and Milestones 1 and 2a are implemented and validated. `EventDetailScreen.kt` now owns 2,891 lines instead of 4,137. Pure rules remain in the three Milestone 1 files, while the four detail tabs, division selector, and floating dock now render through the 695-line `EventDetailTabsHost.kt` boundary. The latest extraction preserved behavior across 36 focused tests, an iOS simulator compilation, and an Android debug assembly. Overview/edit and overlay/dialog hosts remain in the route, and component/repository milestones remain gated on the membership migration landing cleanly.
 
 ## Context and Orientation
 
 Work from `/Users/elesesy/StudioProjects/mvp-app-critical-audit` on the current audit branch. This is a Kotlin Multiplatform app. Shared Compose UI and Decompose components live in `composeApp/src/commonMain/kotlin/com/razumly/mvp/`. Shared repository implementation lives under `core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/`. Room is the local SQL database and source of truth for fetched data. Ktor is the HTTP client. The backend contract is the `mvp-site` repository at `/Users/elesesy/StudioProjects/mvp-site`.
 
-`composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt` is the Compose route. It currently contains pure division/stage/weekly/guide/role rules, collects component flows, owns transient tab/dialog UI state, derives presentation, and hosts overview, edit, tab, sticky-dock, and overlay content. It does not fetch data directly.
+`composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt` is the Compose route. It collects component flows, owns transient tab/dialog UI state, derives presentation, and still hosts overview, edit, sticky-action, and overlay content. Pure division/stage/weekly/guide/role rules and the detail-tab renderer now live in focused sibling files. The route does not fetch data directly.
 
 `composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/DefaultEventDetailComponent.kt` is the concrete Decompose component. A Decompose component is a lifecycle-aware object that exposes observable state and actions to a screen. This component assembles existing coordinators, binds Room observation and lifecycle collectors, refreshes event details and participants, owns realtime subscriptions, and delegates registration, billing, editing, publication, match, and participant actions.
 
@@ -93,7 +108,9 @@ A facade is the existing public class/interface that remains stable while delega
 
 Milestone 1 moves only pure functions currently above `EventDetailScreen()` into three files in the same package. Create `EventDetailStageSelection.kt` for canonical division, playoff, pool, bracket, and selected-stage rules. Create `EventDetailWeeklySchedulePresentation.kt` for `WeeklySessionOption`, weekly-session construction, schedule labels, and 12-hour time formatting. Create `EventDetailScreenRules.kt` for onboarding-guide requirements, primary-action/role visibility, schedule-management visibility, and first-match-day detection. Keep existing function names, signatures, package visibility, and behavior. Add missing tests for `playoffDivisionIdsForSelection`, `buildWeeklySessionOptions`, and `isFirstMatchDayForTrackedUsers`. Do not touch any APP-009 model, DAO, Room schema, relation, or repository file in this milestone.
 
-Milestone 2 divides the screen body into three render owners. An overview/edit host receives immutable overview and edit state plus callbacks. A detail-tab host receives the selected tab, division/stage models, and tab-specific state/actions. An overlay/dialog host receives transient dialog state and actions. `EventDetailScreen()` remains the route boundary that collects flows and owns route-local UI selection. Extracted composables do not collect repositories or duplicate business state. Existing state/action containers and section files should be extended rather than replaced.
+Milestone 2 is divided into two reviewable checkpoints. Milestone 2a moves the complete detail-tab renderer into `EventDetailTabsHost.kt`. The host receives `EventDetailTabsHostState` and `EventDetailTabsHostActions`, renders the participant, schedule, standings, and bracket tabs plus the shared division selector and floating dock, and contains no flow collection or component/repository reference. `EventDetailScreen()` retains tab, participant-section, pool, dock, and manage-mode selection. `EventDetailTabsHostRules.kt` owns the pure tab-list, initial-tab, and schedule-match filtering rules with direct tests.
+
+Milestone 2b divides the remaining screen body into two more render owners. An overview/edit host receives immutable overview and edit state plus callbacks. An overlay/dialog host receives transient dialog state and actions. `EventDetailScreen()` remains the route boundary that collects flows and owns route-local UI selection. Extracted composables do not collect repositories or duplicate business state. Existing state/action containers and section files should be extended rather than replaced.
 
 Milestone 3 begins only after APP-009 is integrated and its migrations/tests pass. Extract event-team check-in execution into a coordinator, relation derivation into a Room-backed state graph, participant/bootstrap work into a hydration controller, and the large lifecycle collector block into narrow lifecycle bindings. Existing coordinators remain the sole owners of their mutable state. `DefaultEventDetailComponent` retains constructor and interface compatibility and becomes responsible for assembly, public state exposure, and delegation.
 
@@ -122,6 +139,19 @@ For the pure screen-rule slice, run:
       --tests 'com.razumly.mvp.eventDetail.EventDetailScreenRoleVisibilityTest'
     ./gradlew :composeApp:compileKotlinIosSimulatorArm64
     ./gradlew :composeApp:assembleDebug
+
+For the detail-tab host checkpoint, run:
+
+    ./gradlew :composeApp:testDebugUnitTest \
+      --tests 'com.razumly.mvp.eventDetail.EventDetailDivisionOptionsTest' \
+      --tests 'com.razumly.mvp.eventDetail.EventDetailWeeklyBehaviorTest' \
+      --tests 'com.razumly.mvp.eventDetail.EventDetailOnboardingGuideTest' \
+      --tests 'com.razumly.mvp.eventDetail.EventDetailScreenRoleVisibilityTest' \
+      --tests 'com.razumly.mvp.eventDetail.EventDetailTabsHostRulesTest'
+    ./gradlew :composeApp:compileKotlinIosSimulatorArm64
+    ./gradlew :composeApp:assembleDebug
+
+Expect 36 focused tests with zero failures. A static search of `EventDetailTabsHost.kt` for `collectAsState`, `EventDetailComponent`, `Repository`, and `repository` must return no matches.
 
 Do not run Gradle tests concurrently with another agent in this checkout. Isolated worktrees may run independently, but each result must identify its exact commit and checkout.
 
@@ -194,6 +224,24 @@ Milestone 1 evidence on 2026-07-14:
     ./gradlew :composeApp:assembleDebug: BUILD SUCCESSFUL
     git diff --check: passed
 
+Milestone 2a evidence on 2026-07-14:
+
+    2,891  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailScreen.kt
+      695  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailTabsHost.kt
+       62  composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailTabsHostRules.kt
+      165  composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventDetailTabsHostRulesTest.kt
+
+    EventDetailDivisionOptionsTest: 9 passed
+    EventDetailWeeklyBehaviorTest: 14 passed
+    EventDetailOnboardingGuideTest: 2 passed
+    EventDetailScreenRoleVisibilityTest: 5 passed
+    EventDetailTabsHostRulesTest: 6 passed
+    ./gradlew :composeApp:compileKotlinIosSimulatorArm64: BUILD SUCCESSFUL
+    ./gradlew :composeApp:assembleDebug: BUILD SUCCESSFUL
+    composeApp-debug.apk SHA-256: c8f3a9c9515db5abae61bf5bb599e3298edac87ea7ffe111ec401ca3de2604d6
+    detail-host controller/repository static scan: no matches
+    git diff --check: passed
+
 ## Interfaces and Dependencies
 
 Keep `EventDetailScreen(component: EventDetailComponent, ...)`, the `EventDetailComponent` interface, and `DefaultEventDetailComponent` constructor source-compatible. Pure screen rules stay in package `com.razumly.mvp.eventDetail` with existing function names/signatures and `internal` visibility where tests and route use them. Extracted composables receive immutable state data classes and callback containers; they do not receive repositories.
@@ -205,3 +253,5 @@ Use Kotlin coroutines with structured cancellation, existing `StateFlow`/Decompo
 Revision note (2026-07-14): Created the self-contained AUD-004 continuation after current-source mapping showed that prior screen/coordinator extraction was substantial but pure presentation rules, lifecycle assembly, repository contracts/mappings, and Room-first domain ownership remained concentrated. Sequenced membership-dependent work after APP-009 and selected a pure no-overlap first milestone.
 
 Revision note (2026-07-14): Completed Milestone 1 by moving pure stage, weekly schedule, and route rules into three cohesive files, adding direct regression coverage, and recording exact Android/iOS build evidence. Five formerly file-private helpers became module-internal because Kotlin privacy is file-scoped; no public contract changed.
+
+Revision note (2026-07-14): Completed Milestone 2a by moving all detail-tab rendering, selector, and dock UI behind typed immutable state/callback containers. Added direct coverage for the pure navigation and schedule-filter rules, kept route-local state and component calls in `EventDetailScreen`, and recorded the exact focused-test, Android, iOS, static-scan, line-count, and APK evidence. Split the remaining screen-host work into Milestone 2b so overview/edit and overlay/dialog extraction stays independently reviewable.
