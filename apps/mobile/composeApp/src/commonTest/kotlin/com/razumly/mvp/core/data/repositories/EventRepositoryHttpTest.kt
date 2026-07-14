@@ -1249,6 +1249,39 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun close_stops_session_cache_invalidation() = runTest {
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        val api = MvpApiClient(
+            HttpClient(MockEngine { error("HTTP should not be used in session-cache test") }) {
+                install(ContentNegotiation) { json(jsonMVP) }
+            },
+            "http://localhost",
+            EventRepositoryHttp_InMemoryAuthTokenStore(),
+        )
+        val repo = EventRepository(
+            db,
+            api,
+            EventRepositoryHttp_UnusedTeamRepository,
+            userRepo,
+            coroutineDispatcher = StandardTestDispatcher(testScheduler),
+        )
+
+        advanceUntilIdle()
+        repo.close()
+        userRepo.emitCurrentUser(makeUser("u2"))
+        advanceUntilIdle()
+
+        assertEquals(0, eventDao.clearAllEventsWithCrossRefsCalls)
+    }
+
+    @Test
     fun reportEvent_removes_hidden_events_from_cache_and_updates_current_user() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()

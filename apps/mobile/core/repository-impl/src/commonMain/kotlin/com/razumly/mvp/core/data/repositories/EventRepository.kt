@@ -83,10 +83,7 @@ import com.razumly.mvp.core.network.dto.toUpdateDto
 import io.github.aakira.napier.Napier
 import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -396,48 +393,15 @@ class EventRepository(
     private val currentUserDataSource: CurrentUserDataSource? = null,
     coroutineDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : IEventRepository {
-    private val scope = CoroutineScope(SupervisorJob() + coroutineDispatcher)
+    private val sessionCacheCoordinator = EventSessionCacheCoordinator(
+        databaseService = databaseService,
+        userRepository = userRepository,
+        coroutineDispatcher = coroutineDispatcher,
+    )
     private val eventPageSize = 50
 
-    init {
-        scope.launch {
-            databaseService.getEventDao.deleteAllEvents()
-        }
-        scope.launch(start = CoroutineStart.UNDISPATCHED) {
-            var hasObservedUser = false
-            var lastUserId: String? = null
-            userRepository.currentUser.collect { currentUserResult ->
-                val currentUserId = currentUserResult.getOrNull()
-                    ?.id
-                    ?.trim()
-                    ?.takeIf(String::isNotBlank)
-                if (!hasObservedUser) {
-                    lastUserId = currentUserId
-                    hasObservedUser = true
-                    return@collect
-                }
-                if (currentUserId != lastUserId) {
-                    clearEventCacheForSessionChange()
-                    lastUserId = currentUserId
-                }
-            }
-        }
-    }
-
     fun close() {
-        scope.cancel()
-    }
-
-    private fun filterHiddenEvents(events: List<Event>, currentUser: UserData?): List<Event> {
-        val hiddenEventIds = currentUser?.hiddenEventIds
-            ?.map { hiddenId -> hiddenId.trim() }
-            ?.filter(String::isNotBlank)
-            ?.toSet()
-            ?: emptySet()
-        if (hiddenEventIds.isEmpty()) {
-            return events
-        }
-        return events.filterNot { event -> hiddenEventIds.contains(event.id) }
+        sessionCacheCoordinator.close()
     }
 
     override fun resetCursor() {
@@ -464,12 +428,7 @@ class EventRepository(
     }
 
     override fun getCachedEventsFlow(): Flow<Result<List<Event>>> =
-        combine(
-            databaseService.getEventDao.getAllCachedEvents(),
-            userRepository.currentUser,
-        ) { cached, currentUserResult ->
-            Result.success(filterHiddenEvents(cached, currentUserResult.getOrNull()))
-        }
+        sessionCacheCoordinator.observeCachedEvents()
 
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> =
         callbackFlow {
@@ -1603,7 +1562,10 @@ class EventRepository(
             databaseService.getEventDao.getAllCachedEvents(),
             userRepository.currentUser,
         ) { cached, currentUserResult ->
-            val visibleEvents = filterHiddenEvents(cached, currentUserResult.getOrNull())
+            val visibleEvents = sessionCacheCoordinator.filterHiddenEvents(
+                events = cached,
+                currentUser = currentUserResult.getOrNull(),
+            )
             val inBounds = visibleEvents.filter { event ->
                 calcDistance(bounds.center, LatLng(event.lat, event.long)) <= bounds.radiusMiles
             }
@@ -1665,7 +1627,7 @@ class EventRepository(
                 ),
             )
 
-            val events = filterHiddenEvents(
+            val events = sessionCacheCoordinator.filterHiddenEvents(
                 res.events.toEventsOrThrow("Event bounds search response"),
                 userRepository.currentUser.value.getOrNull(),
             )
@@ -1705,7 +1667,7 @@ class EventRepository(
                 ),
             )
 
-            val events = filterHiddenEvents(
+            val events = sessionCacheCoordinator.filterHiddenEvents(
                 res.events.toEventsOrThrow("Event search response"),
                 userRepository.currentUser.value.getOrNull(),
             )
@@ -2519,12 +2481,6 @@ class EventRepository(
             emptyList()
         }
         insertEventCrossReferences(event.id, relatedUsers, teams)
-    }
-
-    private suspend fun clearEventCacheForSessionChange() {
-        databaseService.getEventDao.clearAllEventsWithCrossRefs()
-        databaseService.getEventParticipantManagementDao.clearAll()
-        databaseService.getEventComplianceDao.clearAll()
     }
 
     private fun shouldEvictEventFromCache(throwable: Throwable): Boolean {

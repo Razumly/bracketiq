@@ -25,6 +25,10 @@ After this plan is complete, users must see the same event overview, registratio
 - [x] (2026-07-14 15:41Z) Milestone 4: mechanically separated `IEventRepository`/`IBillingRepository`, their public models, and the event plus billing-domain wire DTO/mapping families from the two implementation files. Public signatures, serializers, defaults, endpoint paths, constructors, and dependency-injection bindings are unchanged; all 122 repository HTTP cases, iOS simulator compilation, Android debug assembly, and diff checks pass.
 - [x] (2026-07-14 15:53Z) Reconciled Milestone 4 onto current audit head `20f11938`, which already contains LEG-001 commits `89cbafe6` and `1451c1b0`. The reconciled checkpoint `966aa872` preserves canonical-only identity handling in every moved Billing wire family; three production alias scans return zero matches, all 122 repository HTTP cases pass, and both platform build gates pass.
 - [ ] Milestone 5: split `EventRepository` behind its existing facade into Room store, remote gateway, participant synchronization, registration mutation, event catalog, and session-cache collaborators.
+  - [x] (2026-07-14 15:58Z) Milestone 5a: extracted viewer-scoped event filtering, startup cache cleanup, user-session invalidation, and lifecycle cancellation into `EventSessionCacheCoordinator`. The facade remains source-compatible and fell from 2,637 to 2,593 lines; all 65 Event repository HTTP cases, iOS simulator compilation, Android debug assembly, zero-alias scans, and diff checks pass.
+  - [ ] Milestone 5b: extract the Room event store and remote detail gateway while retaining remote-to-Room-to-render ordering and eviction policy.
+  - [ ] Milestone 5c: extract participant/management/compliance synchronization and current-user registration cache ownership.
+  - [ ] Milestone 5d: extract registration mutations plus catalog/search/host/organization query ownership and complete the facade-only boundary.
 - [ ] Milestone 6: split `BillingRepository` behind `IBillingRepository` into checkout/signing, rental, bill/payment, discount, catalog, organization/review, and refund collaborators.
 - [ ] Milestone 7: run focused and broad Gradle tests, Android assembly/install/cold-launch checks, iOS compilation/tests, and Android/iOS event-detail visual smoke; reconcile AUD-004 only after runtime evidence passes.
 
@@ -86,6 +90,9 @@ After this plan is complete, users must see the same event overview, registratio
 
 - Observation: the original Milestone 4 branch predated LEG-001, so mechanically moved Billing wire declarations would have restored obsolete `$id` fields even though the implementation-file conflict preserved the canonical branch.
   Evidence: the cherry-pick conflicted only in `BillingRepository.kt`, while the added catalog, rental, and payment wire files contained the old `legacyId` declarations and fallback expressions. Reapplying the canonical-only changes to their new owners and removing the two outbound legacy fields produced zero matches for serializer aliases, watch aliases, and production `legacyId` uses.
+
+- Observation: event cache invalidation is viewer-scoped lifecycle work, not event-detail hydration, but it also supplies hidden-event filtering to cached, bounds, and text-search projections.
+  Evidence: one constructor-owned coroutine deletes the startup cache, a second watches current-user identity and clears event/participant/compliance rows on a real identity transition, and four query paths apply the same hidden-event policy. `EventSessionCacheCoordinator` now owns that complete family and the facade delegates lifecycle plus projections without changing any DAO or endpoint behavior.
 
 ## Decision Log
 
@@ -149,9 +156,13 @@ After this plan is complete, users must see the same event overview, registratio
   Rationale: a clean textual split can silently resurrect removed response compatibility when its source branch predates a canonical contract change. Keeping `id` as the sole Billing identity and validating the moved files prevents structural refactors from undoing the server/client contract cleanup.
   Date/Author: 2026-07-14 / Codex
 
+- Decision: begin Milestone 5 with the session-cache lifecycle family before moving detail synchronization or mutations.
+  Rationale: startup cleanup, user-change invalidation, hidden-event projection, and scope cancellation already form one isolated responsibility with direct repository regressions. Extracting it first removes constructor-owned coroutine state without changing remote/Room ordering, allowing the larger persistence and gateway boundaries to proceed from a validated facade.
+  Date/Author: 2026-07-14 / Codex
+
 ## Outcomes & Retrospective
 
-Research and sequencing are complete, and Milestones 1 through 4 are validated. `EventDetailScreen.kt` owns 2,192 lines instead of 4,137. APP-009 is integrated as `5b862d6d`; event-team check-in lives in a 146-line coordinator, canonical Room-backed relation derivation lives in a 222-line coordinator, participant/bootstrap orchestration lives in a 425-line coordinator, and 22 lifecycle collectors now live behind a 327-line binding owner with six direct regressions. `DefaultEventDetailComponent.kt` now owns 2,819 lines instead of 3,439. The repository contracts/models and event plus billing-domain wire mappings now have explicit files; `EventRepository.kt` is 2,637 lines instead of 3,398 and `BillingRepository.kt` is 2,304 lines instead of 4,430. Milestone 4 is integration-ready at reconciled checkpoint `966aa872` on top of current audit head `20f11938`, including LEG-001 canonical-only identity behavior. Milestones 5 through 7 remain, so AUD-004 is still open. Three detailed checkpoints and three top-level milestones remain.
+Research and sequencing are complete, Milestones 1 through 4 are validated, and Milestone 5 is in progress. `EventDetailScreen.kt` owns 2,192 lines instead of 4,137. APP-009 is integrated as `5b862d6d`; event-team check-in lives in a 146-line coordinator, canonical Room-backed relation derivation lives in a 222-line coordinator, participant/bootstrap orchestration lives in a 425-line coordinator, and 22 lifecycle collectors now live behind a 327-line binding owner with six direct regressions. `DefaultEventDetailComponent.kt` now owns 2,819 lines instead of 3,439. The repository contracts/models and event plus billing-domain wire mappings now have explicit files; viewer-scoped cache lifecycle now lives in a 77-line coordinator, `EventRepository.kt` is 2,593 lines instead of 3,398, and `BillingRepository.kt` is 2,304 lines instead of 4,430. Milestone 4 is integration-ready at reconciled checkpoint `966aa872` on top of current audit head `20f11938`, including LEG-001 canonical-only identity behavior. Milestones 5b through 7 remain, so AUD-004 is still open.
 
 ## Context and Orientation
 
@@ -179,7 +190,7 @@ Milestone 3 integrated APP-009 and validated schema-93 migration coverage. Check
 
 Milestone 4 moved types mechanically before implementation splits. Public repository interfaces and public models now live in clearly named contract/model files in the same package. Serializable request/response DTOs and mappers now live in module-private wire files grouped by event, checkout/signing, catalog/discount, rental, and bill/payment domains. Serial names, defaults, nullability, endpoint paths, mapping bodies, constructors, and dependency-injection bindings remain compatible. Both repository suites passed independently and together before ownership work begins.
 
-Milestone 5 keeps `EventRepository` as the dependency-injected facade while introducing internal collaborators for the Room event store, remote event gateway, participant/compliance synchronization, registration mutations, event catalog/search, and session cache. A remote detail refresh is successful only after the related event, fields, matches, participants, compliance, and relations commit consistently. UI-facing flows continue to observe Room. Cancellation is rethrown; failed refreshes may expose an existing valid cache but cannot partially overwrite it or render a one-off remote object.
+Milestone 5 keeps `EventRepository` as the dependency-injected facade while introducing internal collaborators for the Room event store, remote event gateway, participant/compliance synchronization, registration mutations, event catalog/search, and session cache. Checkpoint 5a first moves startup cleanup, current-user identity invalidation, hidden-event projection, and scope cancellation into `EventSessionCacheCoordinator`; no HTTP or detail persistence path changes in that checkpoint. A remote detail refresh is successful only after the related event, fields, matches, participants, compliance, and relations commit consistently. UI-facing flows continue to observe Room. Cancellation is rethrown; failed refreshes may expose an existing valid cache but cannot partially overwrite it or render a one-off remote object.
 
 Milestone 6 keeps `BillingRepository` and `IBillingRepository` stable while introducing collaborators for checkout/signing, rental orders, bills/payments/subscriptions, discounts, product catalog, organizations/reviews, and refunds. Product/organization/time-slot/review snapshots retain viewer ownership and atomic replacement. A successful remote catalog read is persisted and re-read from the DAO before it becomes canonical; an empty authoritative response replaces stale rows, and an ordinary transport failure does not masquerade as a successful empty result.
 
@@ -496,6 +507,24 @@ Milestone 4 current-head reconciliation evidence on 2026-07-14:
     owns the affected DTO or mapper and retained the two outbound canonical `id`
     assignments. No canonical worktree was modified and no branch was pushed.
 
+Milestone 5a evidence on 2026-07-14:
+
+    checkpoint parent: 6d781637
+    2,593  core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/EventRepository.kt
+       77  core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/EventSessionCacheCoordinator.kt
+    EventRepositoryHttpTest: 65 passed
+    ./gradlew :composeApp:compileKotlinIosSimulatorArm64: BUILD SUCCESSFUL (67 actionable tasks: 13 executed, 54 up-to-date)
+    ./gradlew :composeApp:assembleDebug: BUILD SUCCESSFUL (174 actionable tasks: 12 executed, 162 up-to-date)
+    composeApp-debug.apk SHA-256: 3153b8bd4d56100a83d2f9bcbb1240aa323f0aebaf88314effe1698f9a5820ab
+    three canonical identity production scans: 0 matches
+    git diff --check: passed
+
+    Existing regressions directly cover hidden-event projection and identity-change
+    invalidation, and a new regression proves that the facade's existing `close()`
+    stops later session invalidation. The coordinator retains the original
+    undispatched first-user observation, ignores that initial value, and clears all
+    three cache families only on a subsequent identity change.
+
 ## Interfaces and Dependencies
 
 Keep `EventDetailScreen(component: EventDetailComponent, ...)`, the `EventDetailComponent` interface, and `DefaultEventDetailComponent` constructor source-compatible. Pure screen rules stay in package `com.razumly.mvp.eventDetail` with existing function names/signatures and `internal` visibility where tests and route use them. Extracted composables receive immutable state data classes and callback containers; they do not receive repositories.
@@ -523,3 +552,5 @@ Revision note (2026-07-14): Completed Milestone 3d and Milestone 3 by replacing 
 Revision note (2026-07-14): Completed Milestone 4 by moving the Event and Billing public contracts/models plus event, checkout/signing, catalog/discount, rental, and bill/payment wire declarations into focused same-package files. Kept both facades, constructors, endpoints, serializer shapes, and Room-first behavior unchanged; used module-only visibility and repository-specific private-helper prefixes where Kotlin file privacy required it, then recorded the 122-test repository matrix and Android/iOS artifact evidence.
 
 Revision note (2026-07-14): Reconciled Milestone 4 onto current audit head `20f11938`, preserving all LEG-001 canonical-only identity changes across the newly split Billing files. Recorded zero-alias static scans, the 122-test repository matrix, both platform build gates, and integration-ready checkpoint `966aa872`; Milestone 5 proceeds from this reconciled base.
+
+Revision note (2026-07-14): Started Milestone 5 with the isolated session-cache lifecycle family. Moved startup deletion, viewer identity observation, cache-family invalidation, hidden-event projection, and scope cancellation into `EventSessionCacheCoordinator`, retained the public facade and coroutine ordering, and recorded the 64-test Event repository gate plus Android/iOS artifact evidence. Split the remaining Event repository work into Room/gateway, participant/compliance, and mutation/catalog checkpoints.
