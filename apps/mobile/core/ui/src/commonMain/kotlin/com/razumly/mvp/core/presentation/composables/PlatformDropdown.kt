@@ -31,3 +31,23 @@ data class DropdownOption(
     val label: String,
     val enabled: Boolean = true
 )
+
+internal fun dropdownDisplayText(
+    selectedValue: String,
+    selectedValues: List<String>,
+    options: List<DropdownOption>,
+    multiSelect: Boolean,
+): String {
+    val labelsByValue = options.associate { option -> option.value to option.label }
+    return if (multiSelect) {
+        selectedValues
+            .map { value -> labelsByValue[value] ?: value }
+            .filter(String::isNotBlank)
+            .joinToString(", ")
+    } else {
+        selectedValue
+            .takeIf(String::isNotBlank)
+            ?.let { value -> labelsByValue[value] ?: value }
+            .orEmpty()
+    }
+}

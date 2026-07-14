@@ -420,6 +420,7 @@ private fun resolveKeyboardType(
 ): UIKeyboardType = when {
     isSecure || keyboardType == "password" -> UIKeyboardTypeDefault
     keyboardType == "email" -> UIKeyboardTypeEmailAddress
+    keyboardType == "decimal" -> UIKeyboardTypeDecimalPad
     keyboardType == "number" || keyboardType == "money" -> UIKeyboardTypeNumberPad
     else -> UIKeyboardTypeDefault
 }

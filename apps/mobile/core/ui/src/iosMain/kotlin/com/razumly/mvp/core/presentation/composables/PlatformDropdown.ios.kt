@@ -629,25 +629,6 @@ fun updateNativeDropdownButton(
     updateButtonSelectionAction(button, options, callbacks, sheetTitle)
 }
 
-private fun dropdownDisplayText(
-    selectedValue: String,
-    selectedValues: List<String>,
-    options: List<DropdownOption>,
-    multiSelect: Boolean,
-): String {
-    return if (multiSelect) {
-        selectedValues
-            .map { value -> options.firstOrNull { it.value == value }?.label ?: value }
-            .filter(String::isNotBlank)
-            .joinToString(", ")
-    } else {
-        selectedValue
-            .takeIf(String::isNotBlank)
-            ?.let { value -> options.firstOrNull { it.value == value }?.label ?: value }
-            .orEmpty()
-    }
-}
-
 private fun UIViewController.topPresentedViewController(): UIViewController {
     var current = this
     while (current.presentedViewController != null) {

@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,12 +50,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -636,6 +639,8 @@ internal const val PRICE_FILTER_SWITCH_TEST_TAG = "event-filter-price-switch"
 internal const val MIN_PRICE_INPUT_TEST_TAG = "event-filter-min-price"
 internal const val MAX_PRICE_INPUT_TEST_TAG = "event-filter-max-price"
 internal const val APPLY_FILTERS_TEST_TAG = "event-filter-apply"
+internal const val START_DATE_FILTER_FIELD_TEST_TAG = "event-filter-start-date"
+internal const val END_DATE_FILTER_FIELD_TEST_TAG = "event-filter-end-date"
 
 @OptIn(ExperimentalTime::class)
 internal fun normalizeFilterStartDate(
@@ -708,6 +713,7 @@ private fun DateFilterSection(
                 ).date.format(dateFormat),
                 modifier = Modifier.weight(1f),
                 label = "Start Date",
+                testTag = START_DATE_FILTER_FIELD_TEST_TAG,
                 onClick = onStartDateClicked,
             )
             FilterDateField(
@@ -716,6 +722,7 @@ private fun DateFilterSection(
                 )?.date?.format(dateFormat) ?: "Select an End Date",
                 modifier = Modifier.weight(1f),
                 label = "End Date",
+                testTag = END_DATE_FILTER_FIELD_TEST_TAG,
                 onClick = onEndDateClicked,
             )
         }
@@ -726,30 +733,50 @@ private fun DateFilterSection(
 private fun FilterDateField(
     value: String,
     label: String,
+    testTag: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(
-        modifier = modifier.clickable(
-            indication = null,
-            interactionSource = remember { MutableInteractionSource() },
-            onClick = onClick,
-        )
+        modifier = modifier
+            .testTag(testTag)
+            .semantics {
+                contentDescription = label
+                stateDescription = value
+            }
+            .clickable(
+                role = Role.Button,
+                onClick = onClick,
+            ),
     ) {
         OutlinedTextField(
             value = value,
             onValueChange = {},
             modifier = Modifier.fillMaxWidth(),
             label = { Text(label) },
-            enabled = false,
+            enabled = true,
             readOnly = true,
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
-                disabledTextColor = MaterialTheme.colorScheme.onSurface,
-                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                disabledBorderColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                disabledLabelColor = MaterialTheme.colorScheme.onSurface,
+                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                focusedLabelColor = MaterialTheme.colorScheme.primary,
+                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ),
+        )
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .clip(OutlinedTextFieldDefaults.shape)
+                .clickable(
+                    role = Role.Button,
+                    onClick = onClick,
+                )
+                .clearAndSetSemantics {},
         )
     }
 }

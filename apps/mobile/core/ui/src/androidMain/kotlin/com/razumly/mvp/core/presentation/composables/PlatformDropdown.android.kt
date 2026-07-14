@@ -49,21 +49,12 @@ actual fun PlatformDropdown(
     var fieldWidthPx by remember { mutableStateOf(0) }
     val density = LocalDensity.current
 
-    val displayValue = when {
-        multiSelect -> {
-            if (selectedValues.isEmpty()) {
-                placeholder
-            } else {
-                selectedValues.mapNotNull { value ->
-                    options.find { it.value == value }?.label
-                }.joinToString(", ")
-            }
-        }
-        selectedValue.isNotEmpty() -> {
-            options.find { it.value == selectedValue }?.label ?: selectedValue
-        }
-        else -> placeholder
-    }
+    val displayValue = dropdownDisplayText(
+        selectedValue = selectedValue,
+        selectedValues = selectedValues,
+        options = options,
+        multiSelect = multiSelect,
+    ).ifBlank { placeholder }
 
     Box(modifier = modifier) {
         StandardTextField(

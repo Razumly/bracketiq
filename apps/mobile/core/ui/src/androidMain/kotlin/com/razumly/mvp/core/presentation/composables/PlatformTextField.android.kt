@@ -2,7 +2,6 @@ package com.razumly.mvp.core.presentation.composables
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,13 +15,18 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
@@ -216,14 +220,23 @@ actual fun PlatformTextField(
 
     if (readOnly && onTap != null) {
         Box(
-            modifier = finalModifier.clickable(
-                enabled = enabled,
-                indication = null,
-                interactionSource = remember { MutableInteractionSource() },
-            ) {
-                onTap()
-                composeFocusManager.clearFocus()
-            },
+            modifier = finalModifier
+                .semantics {
+                    contentDescription = label.ifBlank { placeholder.ifBlank { value } }
+                    if (value.isNotBlank() && value != label) {
+                        stateDescription = value
+                    }
+                    if (isError && supportingText.isNotBlank()) {
+                        error(supportingText)
+                    }
+                }
+                .clickable(
+                    enabled = enabled,
+                    role = Role.Button,
+                ) {
+                    onTap()
+                    composeFocusManager.clearFocus()
+                },
         ) {
             OutlinedTextField(
                 value = value,
@@ -235,7 +248,7 @@ actual fun PlatformTextField(
                 placeholder = if (placeholder.isNotEmpty()) {
                     { Text(placeholder) }
                 } else null,
-                enabled = false,
+                enabled = enabled,
                 readOnly = true,
                 textStyle = finalTextStyle,
                 visualTransformation = if (isPassword) {
@@ -246,12 +259,10 @@ actual fun PlatformTextField(
                     VisualTransformation.None
                 },
                 keyboardOptions = KeyboardOptions(
-                    keyboardType = when (keyboardType) {
-                        "email" -> KeyboardType.Email
-                        "number", "money" -> KeyboardType.Number
-                        "password" -> KeyboardType.Password
-                        else -> KeyboardType.Text
-                    },
+                    keyboardType = resolveComposeKeyboardType(
+                        keyboardType = keyboardType,
+                        usesPasswordKeyboard = isPassword || keyboardType == "password",
+                    ),
                     imeAction = imeAction,
                 ),
                 keyboardActions = KeyboardActions(
@@ -274,6 +285,19 @@ actual fun PlatformTextField(
                 singleLine = true,
                 shape = fieldShape,
                 colors = colors,
+            )
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(fieldShape)
+                    .clickable(
+                        enabled = enabled,
+                        role = Role.Button,
+                    ) {
+                        onTap()
+                        composeFocusManager.clearFocus()
+                    }
+                    .clearAndSetSemantics {},
             )
         }
     } else {
@@ -301,12 +325,10 @@ actual fun PlatformTextField(
                 VisualTransformation.None
             },
             keyboardOptions = KeyboardOptions(
-                keyboardType = when (keyboardType) {
-                    "email" -> KeyboardType.Email
-                    "number", "money" -> KeyboardType.Number
-                    "password" -> KeyboardType.Password
-                    else -> KeyboardType.Text
-                },
+                keyboardType = resolveComposeKeyboardType(
+                    keyboardType = keyboardType,
+                    usesPasswordKeyboard = isPassword || keyboardType == "password",
+                ),
                 imeAction = imeAction
             ),
             keyboardActions = KeyboardActions(

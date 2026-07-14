@@ -423,7 +423,7 @@ private fun CreateDiscountDialog(
                             },
                             modifier = Modifier.weight(1f),
                             label = "Discount %",
-                            keyboardType = "number",
+                            keyboardType = "decimal",
                             enabled = selectedTarget != null,
                             inputFilter = ::discountPercentInputFilter,
                             containerColor = dialogContainerColor,
