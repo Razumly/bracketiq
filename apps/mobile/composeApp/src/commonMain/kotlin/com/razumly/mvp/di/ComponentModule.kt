@@ -94,11 +94,19 @@ val componentModule = module {
         )
     }
 
-    factory<CreateEventComponent> { (componentContext: ComponentContext, onCreatedEvent: (Event) -> Unit, seed: com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft?) ->
+    factory<CreateEventComponent> { (
+        componentContext: ComponentContext,
+        onCreatedEvent: (Event) -> Unit,
+        seed: com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft?,
+        rentalBookingId: String?,
+        rentalBookingItems: List<com.razumly.mvp.core.presentation.RentalBookingItemManifest>,
+    ) ->
         DefaultCreateEventComponent(
             componentContext = componentContext,
             onEventCreated = onCreatedEvent,
             initialSeed = seed,
+            initialRentalBookingId = rentalBookingId,
+            initialRentalBookingItems = rentalBookingItems,
             userRepository = get(),
             eventRepository = get(),
             fieldRepository = get(),

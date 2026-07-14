@@ -49,6 +49,7 @@ import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
+import com.razumly.mvp.core.presentation.RentalBookingItemManifest
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.newId
@@ -111,6 +112,7 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val useManualTimeSlots: StateFlow<Boolean>
     val availableRentalResources: StateFlow<List<RentalResourceOption>>
     val selectedRentalResourceIds: StateFlow<Set<String>>
+    val isRentalResourceSelectionLocked: Boolean
     val leagueScoringConfig: StateFlow<LeagueScoringConfigDTO>
     val suggestedUsers: StateFlow<List<UserData>>
     val pendingStaffInvites: StateFlow<List<PendingStaffInviteDraft>>
@@ -196,6 +198,8 @@ class DefaultCreateEventComponent(
     private val billingRepository: IBillingRepository,
     private val imageRepository: IImagesRepository,
     private val initialSeed: SeededEventTemplateDraft? = null,
+    initialRentalBookingId: String? = null,
+    private val initialRentalBookingItems: List<RentalBookingItemManifest> = emptyList(),
     val onEventCreated: (Event) -> Unit
 ) : CreateEventComponent, PaymentProcessor(), ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
@@ -270,6 +274,11 @@ class DefaultCreateEventComponent(
     override val availableRentalResources = _availableRentalResources.asStateFlow()
     private val _selectedRentalResourceIds = MutableStateFlow<Set<String>>(emptySet())
     override val selectedRentalResourceIds = _selectedRentalResourceIds.asStateFlow()
+    private val rentalBookingId = initialRentalBookingId
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+    private val rentalBookingItems = initialRentalBookingItems
+    override val isRentalResourceSelectionLocked: Boolean = rentalBookingId != null
     private val _leagueScoringConfig = MutableStateFlow(initialSeed?.leagueScoringConfig ?: LeagueScoringConfigDTO())
     override val leagueScoringConfig = _leagueScoringConfig.asStateFlow()
     private val _fieldCount = MutableStateFlow(initialSeed?.fields?.size ?: 0)
@@ -348,6 +357,10 @@ class DefaultCreateEventComponent(
 
     override fun createEvent() {
         scope.launch {
+            validateCompletedRentalContext()?.let { error ->
+                _errorState.value = ErrorMessage(error)
+                return@launch
+            }
             val currentUserId = resolveCurrentUserId()
             if (currentUserId.isBlank()) {
                 _errorState.value = ErrorMessage("Unable to create event until your user profile is ready.")
@@ -976,6 +989,7 @@ class DefaultCreateEventComponent(
     }
 
     override fun setRentalResourceSelected(optionId: String, selected: Boolean) {
+        if (isRentalResourceSelectionLocked) return
         val normalizedOptionId = optionId.trim()
         if (normalizedOptionId.isEmpty()) return
         _availableRentalResources.value.firstOrNull { candidate -> candidate.id == normalizedOptionId } ?: return
@@ -995,8 +1009,33 @@ class DefaultCreateEventComponent(
         scope.launch {
             billingRepository.listRentalResourceOptions()
                 .onSuccess { options ->
-                    _availableRentalResources.value = options
-                    val availableIds = options.map { option -> option.id }.toSet()
+                    // Navigation retains the stable booking/item manifest. Mutable presentation
+                    // details still come from the current canonical booking response, but every
+                    // paid item must survive decoding and match before creation can continue.
+                    val availableOptions = if (rentalBookingId != null) {
+                        resolveCompletedRentalOptions(
+                            options.filter { option -> option.bookingId.trim() == rentalBookingId },
+                        )
+                    } else {
+                        options
+                    }
+                    if (availableOptions == null) {
+                        _availableRentalResources.value = emptyList()
+                        _selectedRentalResourceIds.value = emptySet()
+                        syncSelectedRentalResourcesIntoDraft()
+                        _errorState.value = ErrorMessage(completedRentalContextError())
+                        return@onSuccess
+                    }
+                    _availableRentalResources.value = availableOptions
+                    val availableIds = availableOptions.map { option -> option.id }.toSet()
+                    if (rentalBookingId != null) {
+                        _selectedRentalResourceIds.value = availableIds
+                        syncSelectedRentalResourcesIntoDraft()
+                        if (availableIds.isEmpty()) {
+                            _errorState.value = ErrorMessage(completedRentalContextError())
+                        }
+                        return@onSuccess
+                    }
                     val normalizedSelection = _selectedRentalResourceIds.value.filter(availableIds::contains).toSet()
                     if (normalizedSelection != _selectedRentalResourceIds.value) {
                         _selectedRentalResourceIds.value = normalizedSelection
@@ -1006,7 +1045,13 @@ class DefaultCreateEventComponent(
                     }
                 }
                 .onFailure { error ->
-                    _errorState.value = ErrorMessage(error.userMessage("Unable to load your rented resources."))
+                    _errorState.value = ErrorMessage(
+                        if (rentalBookingId != null) {
+                            error.userMessage("Unable to load the resources for this reservation.")
+                        } else {
+                            error.userMessage("Unable to load your rented resources.")
+                        },
+                    )
                 }
         }
     }
@@ -1338,6 +1383,8 @@ class DefaultCreateEventComponent(
             preparedEvent = preparedEvent.copy(timeSlotIds = preparedTimeSlots.map { it.id })
         }
 
+        requireCompletedRentalSlots(preparedTimeSlots)
+
         PreparedEventForCreation(
             event = preparedEvent,
             fields = preparedFields,
@@ -1359,6 +1406,96 @@ class DefaultCreateEventComponent(
         }
         return null
     }
+
+    private fun validateCompletedRentalContext(): String? {
+        rentalBookingId ?: return null
+        val canonicalOptions = resolveCompletedRentalOptions(_availableRentalResources.value)
+            ?: return completedRentalContextError()
+        val selectedOptions = selectedRentalResourceOptions()
+        if (selectedOptions.map(RentalResourceOption::id).toSet() != canonicalOptions.map(RentalResourceOption::id).toSet()) {
+            return completedRentalContextError()
+        }
+        if (newEventState.value.eventType == EventType.WEEKLY_EVENT) {
+            return "A completed one-time reservation can't be attached to a weekly event. Choose Event, League, or Tournament."
+        }
+        val rentalSlots = _leagueSlots.value.filter { slot -> slot.isRentalBacked() }
+        if (!completedRentalSlotsMatchManifest(rentalSlots)) {
+            return "The reserved resources are no longer fully attached. Return to the organization and try again."
+        }
+        return null
+    }
+
+    private fun requireCompletedRentalSlots(preparedTimeSlots: List<TimeSlot>) {
+        rentalBookingId ?: return
+        val preparedRentalSlots = preparedTimeSlots.filter { slot -> slot.isRentalBacked() }
+        check(completedRentalSlotsMatchManifest(preparedRentalSlots)) {
+            "The reserved resources are no longer fully attached. Return to the organization and try again."
+        }
+    }
+
+    private fun resolveCompletedRentalOptions(
+        options: List<RentalResourceOption>,
+    ): List<RentalResourceOption>? {
+        val bookingId = rentalBookingId ?: return options
+        val manifest = normalizedRentalBookingManifestOrNull() ?: return null
+        if (options.size != manifest.size || options.any { option -> option.bookingId.trim() != bookingId }) {
+            return null
+        }
+        val optionsByItemId = options.groupBy { option -> option.bookingItemId.trim() }
+        if (optionsByItemId.size != manifest.size || optionsByItemId.values.any { matches -> matches.size != 1 }) {
+            return null
+        }
+        return manifest.map { expected ->
+            val option = optionsByItemId[expected.id]?.singleOrNull() ?: return null
+            if (
+                option.field.id.trim() != expected.fieldId ||
+                option.start.toString() != expected.start ||
+                option.end.toString() != expected.end
+            ) {
+                return null
+            }
+            option
+        }
+    }
+
+    private fun normalizedRentalBookingManifestOrNull(): List<RentalBookingItemManifest>? {
+        if (rentalBookingItems.isEmpty()) return null
+        val normalized = rentalBookingItems.map { item ->
+            val id = item.id.trim().takeIf(String::isNotBlank) ?: return null
+            val fieldId = item.fieldId.trim().takeIf(String::isNotBlank) ?: return null
+            val start = runCatching { kotlin.time.Instant.parse(item.start.trim()) }.getOrNull() ?: return null
+            val end = runCatching { kotlin.time.Instant.parse(item.end.trim()) }.getOrNull() ?: return null
+            if (end <= start) return null
+            RentalBookingItemManifest(
+                id = id,
+                fieldId = fieldId,
+                start = start.toString(),
+                end = end.toString(),
+            )
+        }
+        if (normalized.map(RentalBookingItemManifest::id).distinct().size != normalized.size) return null
+        return normalized
+    }
+
+    private fun completedRentalSlotsMatchManifest(slots: List<TimeSlot>): Boolean {
+        val bookingId = rentalBookingId ?: return true
+        val manifest = normalizedRentalBookingManifestOrNull() ?: return false
+        if (slots.size != manifest.size) return false
+        val slotsByItemId = slots.groupBy { slot -> slot.rentalBookingItemId?.trim().orEmpty() }
+        if (slotsByItemId.size != manifest.size || slotsByItemId.values.any { matches -> matches.size != 1 }) {
+            return false
+        }
+        return manifest.all { expected ->
+            val slot = slotsByItemId[expected.id]?.singleOrNull() ?: return@all false
+            slot.rentalBookingId?.trim() == bookingId &&
+                slot.normalizedScheduledFieldIds() == listOf(expected.fieldId) &&
+                slot.startDate.toString() == expected.start &&
+                slot.endDate?.toString() == expected.end
+        }
+    }
+
+    private fun completedRentalContextError(): String =
+        "We couldn't verify every resource in this reservation. Return to the organization and try again."
 
     private fun validateConfiguredLeagueSlots(event: Event): String? {
         if (!shouldUseConfiguredLeagueSlots(event)) {

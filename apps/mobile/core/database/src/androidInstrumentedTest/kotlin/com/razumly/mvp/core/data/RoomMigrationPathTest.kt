@@ -5,6 +5,8 @@ import androidx.room.testing.MigrationTestHelper
 import androidx.test.platform.app.InstrumentationRegistry
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
+import com.razumly.mvp.core.data.dataTypes.MATCH_OPERATION_STATUS_ACKED
+import com.razumly.mvp.core.data.dataTypes.MatchOperationOutboxEntry
 import com.razumly.mvp.core.data.dataTypes.PENDING_RENTAL_ORDER_LEGACY_UNKNOWN_PAYER_ID
 import com.razumly.mvp.core.data.dataTypes.PENDING_RENTAL_ORDER_STATUS_REJECTED
 import com.razumly.mvp.core.db.MVP_DATABASE_VERSION
@@ -174,6 +176,44 @@ class RoomMigrationPathTest {
 
             val cached = database.getFieldDao.getFieldsByIds(listOf("field-1")).single()
             assertEquals("facility-1", cached.facilityId)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun matchOperationOutboxDao_prunes_old_acknowledgements_but_retains_the_sequence_sentinel() = runBlocking {
+        val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(
+            InstrumentationRegistry.getInstrumentation().targetContext,
+        ).allowMainThreadQueries().build()
+
+        try {
+            val acknowledged = (1L..3L).map { sequence ->
+                MatchOperationOutboxEntry(
+                    id = "device-1:match-1:$sequence",
+                    eventId = "event-1",
+                    matchId = "match-1",
+                    operationKind = "SCORE_SET",
+                    payloadJson = "{}",
+                    status = MATCH_OPERATION_STATUS_ACKED,
+                    sourceDevice = "PHONE",
+                    clientDeviceId = "device-1",
+                    clientSequence = sequence,
+                    clientCreatedAt = "2026-01-0${sequence}T00:00:00Z",
+                    ackedAt = "2026-01-0${sequence}T00:01:00Z",
+                )
+            }
+            database.getMatchOperationOutboxDao.upsertOperations(acknowledged)
+
+            database.getMatchOperationOutboxDao.deleteAckedOlderThan("2026-02-01T00:00:00Z")
+
+            assertEquals(
+                listOf(3L),
+                database.getMatchOperationOutboxDao
+                    .getOperationsByIds(acknowledged.map(MatchOperationOutboxEntry::id))
+                    .map(MatchOperationOutboxEntry::clientSequence),
+            )
+            assertEquals(3L, database.getMatchOperationOutboxDao.maxClientSequence())
         } finally {
             database.close()
         }

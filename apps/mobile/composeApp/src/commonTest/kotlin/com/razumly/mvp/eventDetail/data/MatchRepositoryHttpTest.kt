@@ -40,6 +40,7 @@ import io.ktor.http.headersOf
 import io.ktor.http.content.OutgoingContent
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancelAndJoin
@@ -53,6 +54,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 private class MatchRepositoryHttp_InMemoryAuthTokenStore(
@@ -145,9 +147,12 @@ private class MatchRepositoryHttp_FakeDatabaseService(
     override val getRefundRequestDao: RefundRequestDao get() = error("unused")
 }
 
-private class MatchRepositoryHttp_FakeOutboxDao : MatchOperationOutboxDao {
+private class MatchRepositoryHttp_FakeOutboxDao(
+    private val pruneFailure: Throwable? = null,
+) : MatchOperationOutboxDao {
     private val operationsById = linkedMapOf<String, MatchOperationOutboxEntry>()
     val operations: List<MatchOperationOutboxEntry> get() = operationsById.values.toList()
+    val acknowledgedPruneCutoffs = mutableListOf<String>()
 
     override suspend fun upsertOperation(operation: MatchOperationOutboxEntry) {
         operationsById[operation.id] = operation
@@ -214,8 +219,15 @@ private class MatchRepositoryHttp_FakeOutboxDao : MatchOperationOutboxDao {
     }
 
     override suspend fun deleteAckedOlderThan(olderThan: String, status: String) {
+        pruneFailure?.let { throw it }
+        acknowledgedPruneCutoffs += olderThan
+        val maximumSequence = operationsById.values.maxOfOrNull(MatchOperationOutboxEntry::clientSequence) ?: 0L
         operationsById.values
-            .filter { operation -> operation.status == status && operation.ackedAt.orEmpty() < olderThan }
+            .filter { operation ->
+                operation.status == status &&
+                    operation.ackedAt.orEmpty() < olderThan &&
+                    operation.clientSequence < maximumSequence
+            }
             .map { operation -> operation.id }
             .forEach(operationsById::remove)
     }
@@ -262,6 +274,104 @@ private class MatchRepositoryHttp_FakeFieldDao : FieldDao {
 }
 
 class MatchRepositoryHttpTest {
+
+    @Test
+    fun acknowledgedOperationCleanupPropagatesCancellation() = runTest {
+        val repository = MatchRepository(
+            api = MvpApiClient(
+                HttpClient(MockEngine { error("No network call is expected.") }),
+                "http://example.test",
+                MatchRepositoryHttp_InMemoryAuthTokenStore(),
+            ),
+            databaseService = MatchRepositoryHttp_FakeDatabaseService(
+                getMatchDao = MatchRepositoryHttp_FakeMatchDao(emptyList()),
+                getMatchOperationOutboxDao = MatchRepositoryHttp_FakeOutboxDao(
+                    pruneFailure = CancellationException("cleanup canceled"),
+                ),
+            ),
+            autoSyncOperations = false,
+        )
+
+        assertFailsWith<CancellationException> {
+            repository.syncPendingMatchOperations()
+        }
+    }
+
+    @Test
+    fun acknowledgedOperationCleanupFailureRemainsBestEffort() = runTest {
+        val repository = MatchRepository(
+            api = MvpApiClient(
+                HttpClient(MockEngine { error("No network call is expected.") }),
+                "http://example.test",
+                MatchRepositoryHttp_InMemoryAuthTokenStore(),
+            ),
+            databaseService = MatchRepositoryHttp_FakeDatabaseService(
+                getMatchDao = MatchRepositoryHttp_FakeMatchDao(emptyList()),
+                getMatchOperationOutboxDao = MatchRepositoryHttp_FakeOutboxDao(
+                    pruneFailure = IllegalStateException("cleanup unavailable"),
+                ),
+            ),
+            autoSyncOperations = false,
+        )
+
+        assertEquals(0, repository.syncPendingMatchOperations().getOrThrow())
+    }
+
+    @Test
+    fun acknowledgedOperationsAreCompactedWithoutResettingTheClientSequence() = runTest {
+        val localMatch = MatchMVP(
+            id = "match_1",
+            matchId = 1,
+            eventId = "event_1",
+            team1Id = "team_1",
+            team2Id = "team_2",
+        )
+        val outboxDao = MatchRepositoryHttp_FakeOutboxDao()
+        outboxDao.upsertOperations(
+            (1L..3L).map { sequence ->
+                MatchOperationOutboxEntry(
+                    id = "device_1:match_1:$sequence",
+                    eventId = "event_1",
+                    matchId = "match_1",
+                    operationKind = "SCORE_SET",
+                    payloadJson = "{}",
+                    status = MATCH_OPERATION_STATUS_ACKED,
+                    sourceDevice = "PHONE",
+                    clientDeviceId = "device_1",
+                    clientSequence = sequence,
+                    clientCreatedAt = "2020-01-0${sequence}T00:00:00Z",
+                    ackedAt = "2020-01-0${sequence}T00:01:00Z",
+                )
+            },
+        )
+        val repository = MatchRepository(
+            api = MvpApiClient(
+                HttpClient(MockEngine { error("No network call is expected.") }),
+                "http://example.test",
+                MatchRepositoryHttp_InMemoryAuthTokenStore(),
+            ),
+            databaseService = MatchRepositoryHttp_FakeDatabaseService(
+                getMatchDao = MatchRepositoryHttp_FakeMatchDao(listOf(localMatch)),
+                getMatchOperationOutboxDao = outboxDao,
+            ),
+            autoSyncOperations = false,
+        )
+
+        assertEquals(0, repository.syncPendingMatchOperations().getOrThrow())
+
+        assertEquals(1, outboxDao.acknowledgedPruneCutoffs.size)
+        assertEquals(listOf(3L), outboxDao.operations.map(MatchOperationOutboxEntry::clientSequence))
+
+        repository.setMatchScore(
+            match = localMatch,
+            segmentId = "segment_1",
+            sequence = 1,
+            eventTeamId = "team_1",
+            points = 1,
+        ).getOrThrow()
+
+        assertEquals(listOf(3L, 4L), outboxDao.operations.map(MatchOperationOutboxEntry::clientSequence))
+    }
     @Test
     fun getMatchRefreshesFromDetailEndpointAndSavesIncidents() = runTest {
         val requestedPaths = mutableListOf<String>()

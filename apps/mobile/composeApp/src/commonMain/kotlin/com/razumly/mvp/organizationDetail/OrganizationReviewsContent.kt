@@ -192,10 +192,13 @@ private fun ReviewPreviewCard(
 internal fun OrganizationReviewsTabContent(
     payload: OrganizationReviewsPayload?,
     isLoading: Boolean,
+    canLoadMore: Boolean,
+    isLoadingMore: Boolean,
     isMutating: Boolean,
     reviewSaveStatus: OrganizationReviewSaveStatus,
     bottomPadding: Dp,
     onRefresh: () -> Unit,
+    onLoadMore: () -> Unit,
     onSave: (Int, String?) -> Unit,
     onDelete: (String) -> Unit,
     onReport: (String) -> Unit,
@@ -316,6 +319,22 @@ internal fun OrganizationReviewsTabContent(
                         onEdit = ::openEditor,
                         onReport = { pendingReport = review },
                     )
+                }
+                if (canLoadMore || isLoadingMore) {
+                    item {
+                        TextButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !isLoadingMore,
+                            onClick = onLoadMore,
+                        ) {
+                            if (isLoadingMore) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                Text("Loading older reviews...", modifier = Modifier.padding(start = 8.dp))
+                            } else {
+                                Text("Load more reviews")
+                            }
+                        }
+                    }
                 }
             }
         }

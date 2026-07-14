@@ -66,6 +66,7 @@ private class InvitePushTestInviteDao(
     val upserted = mutableListOf<Invite>()
     val deletedInviteIds = mutableListOf<String>()
     var replaceDeleteCount = 0
+    var replaceInvocationCount = 0
 
     override suspend fun upsertInvite(invite: Invite) {
         upserted += invite
@@ -92,14 +93,16 @@ private class InvitePushTestInviteDao(
         stored.remove(inviteId)
     }
 
-    override suspend fun updateInviteStatus(inviteId: String, status: String) {
-        stored[inviteId]?.let { invite -> stored[inviteId] = invite.copy(status = status) }
-    }
-
     override suspend fun deleteInvitesForUser(userId: String, type: String?) {
         replaceDeleteCount += 1
         stored.entries.removeAll { (_, invite) ->
             invite.userId == userId && (type == null || invite.type.equals(type, ignoreCase = true))
+        }
+    }
+
+    override suspend fun deleteDelegatedInvites(type: String?) {
+        stored.entries.removeAll { (_, invite) ->
+            invite.viewerCanAcceptForChild && (type == null || invite.type.equals(type, ignoreCase = true))
         }
     }
 
@@ -108,6 +111,27 @@ private class InvitePushTestInviteDao(
             invite.userId == userId &&
                 (type == null || invite.type.equals(type, ignoreCase = true)) &&
                 id !in ids
+        }
+    }
+
+    override suspend fun deleteMissingDelegatedInvites(type: String?, ids: List<String>) {
+        stored.entries.removeAll { (id, invite) ->
+            invite.viewerCanAcceptForChild &&
+                (type == null || invite.type.equals(type, ignoreCase = true)) &&
+                id !in ids
+        }
+    }
+
+    override suspend fun replaceInvitesForUser(userId: String, type: String?, invites: List<Invite>) {
+        replaceInvocationCount += 1
+        val ids = invites.map { it.id.trim() }.filter(String::isNotBlank)
+        if (ids.isEmpty()) {
+            deleteInvitesForUser(userId, type)
+            deleteDelegatedInvites(type)
+        } else {
+            deleteMissingInvitesForUser(userId, type, ids)
+            deleteMissingDelegatedInvites(type, ids)
+            upsertInvites(invites)
         }
     }
 }
@@ -263,24 +287,98 @@ class InvitePushInvalidationRefresherTest {
     }
 
     @Test
-    fun idless_invitation_hint_replaces_current_user_cache_with_authorized_list() = runTest {
+    fun canonical_terminal_invite_from_push_is_removed_instead_of_cached() = runTest {
+        val dao = InvitePushTestInviteDao(
+            invites = listOf(
+                Invite(
+                    id = "invite_1",
+                    type = "TEAM",
+                    email = "player@example.test",
+                    status = "PENDING",
+                    userId = "viewer_1",
+                ),
+            ),
+        )
+        val dataSource = CurrentUserDataSource(InvitePushTestPreferencesDataStore())
+        dataSource.saveUserId("viewer_1")
+        val api = invitePushTestApi(MockEngine {
+            invitePushJsonResponse(
+                """
+                {
+                  "invite": {
+                    "id": "invite_1",
+                    "type": "TEAM",
+                    "email": "player@example.test",
+                    "status": "DECLINED",
+                    "userId": "viewer_1"
+                  }
+                }
+                """.trimIndent(),
+            )
+        })
+        val refresher = InvitePushInvalidationRefresher(
+            userDataSource = dataSource,
+            api = api,
+            databaseService = InvitePushTestDatabaseService(dao),
+            ensureAuthenticated = { true },
+        )
+
+        refresher.refreshFromPayload(mapOf("inviteId" to "invite_1"))
+
+        assertTrue(dao.stored.isEmpty())
+        assertTrue(dao.upserted.isEmpty())
+        assertEquals(listOf("invite_1"), dao.deletedInviteIds)
+    }
+
+    @Test
+    fun idless_invitation_hint_pages_all_pending_invites_before_replacing_current_user_cache() = runTest {
         val dao = InvitePushTestInviteDao(
             invites = listOf(
                 Invite(
                     id = "historical_payload_row",
                     type = "TEAM",
                     email = "forged@example.test",
-                    userId = "viewer_1",
+                    userId = "child_1",
                     teamId = "forged_team",
+                    childUserId = "child_1",
+                    viewerCanAcceptForChild = true,
                 ),
             ),
         )
         val dataSource = CurrentUserDataSource(InvitePushTestPreferencesDataStore())
         dataSource.saveUserId("viewer_1")
+        val requestedCursors = mutableListOf<String?>()
         val api = invitePushTestApi(MockEngine { request ->
             assertEquals("/api/invites", request.url.encodedPath)
             assertEquals("viewer_1", request.url.parameters["userId"])
-            invitePushJsonResponse("{\"invites\":[]}")
+            assertEquals("PENDING", request.url.parameters["status"])
+            assertEquals("100", request.url.parameters["limit"])
+            val cursor = request.url.parameters["cursor"]
+            requestedCursors += cursor
+            if (cursor == null) {
+                invitePushJsonResponse(
+                    """
+                    {
+                      "invites":[
+                        {"id":"invite_1","type":"TEAM","email":"one@example.test","status":"PENDING","userId":"viewer_1"}
+                      ],
+                      "nextCursor":"push_page_2"
+                    }
+                    """.trimIndent(),
+                )
+            } else {
+                assertEquals("push_page_2", cursor)
+                invitePushJsonResponse(
+                    """
+                    {
+                      "invites":[
+                        {"id":"invite_2","type":"STAFF","email":"two@example.test","status":"PENDING","userId":"viewer_1"}
+                      ],
+                      "nextCursor":null
+                    }
+                    """.trimIndent(),
+                )
+            }
         })
         val refresher = InvitePushInvalidationRefresher(
             userDataSource = dataSource,
@@ -291,8 +389,10 @@ class InvitePushInvalidationRefresherTest {
 
         refresher.refreshFromPayload(mapOf("notificationType" to "invitations"))
 
-        assertTrue(dao.stored.isEmpty())
-        assertEquals(1, dao.replaceDeleteCount)
+        assertEquals(listOf(null, "push_page_2"), requestedCursors)
+        assertEquals(setOf("invite_1", "invite_2"), dao.stored.keys)
+        assertEquals(1, dao.replaceInvocationCount)
+        assertEquals(0, dao.replaceDeleteCount)
     }
 
     @Test

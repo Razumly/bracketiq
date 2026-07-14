@@ -64,6 +64,7 @@ internal data class EventDetailsScheduleState(
     val leagueTimeSlots: List<TimeSlot>,
     val availableRentalResources: List<RentalResourceOption>,
     val selectedRentalResourceIds: Set<String>,
+    val rentalResourceSelectionLocked: Boolean,
     val eventTimeZone: TimeZone,
     val slotErrors: Map<Int, String>,
     val slotEditorEnabled: Boolean,
@@ -183,6 +184,7 @@ internal fun LazyListScope.eventDetailsScheduleSection(
                 slots = state.leagueTimeSlots,
                 availableRentalResources = state.availableRentalResources,
                 selectedRentalResourceIds = state.selectedRentalResourceIds,
+                rentalResourceSelectionLocked = state.rentalResourceSelectionLocked,
                 onRentalResourceSelectionChange = actions.onRentalResourceSelectionChange,
                 eventStart = state.editEvent.start,
                 eventEnd = if (state.editEvent.noFixedEndDateTime) {

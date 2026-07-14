@@ -84,6 +84,7 @@ import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.core.network.dto.TeamCheckInDto
 import com.razumly.mvp.core.network.dto.TeamCheckInsResponseDto
 import com.razumly.mvp.core.network.MvpUploadFile
+import com.razumly.mvp.core.presentation.RentalBookingItemManifest
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.LoadingHandlerImpl
 import com.razumly.mvp.core.util.LoadingOperation
@@ -129,6 +130,8 @@ internal class CreateEventHarness(
     existingOrganizationEvents: List<Event> = emptyList(),
     rentalResourceOptions: List<RentalResourceOption> = emptyList(),
     initialSeed: SeededEventTemplateDraft? = null,
+    initialRentalBookingId: String? = null,
+    initialRentalBookingItems: List<RentalBookingItemManifest> = emptyList(),
 ) {
     val userRepository = CreateEvent_FakeUserRepository()
     val eventRepository = CreateEvent_FakeEventRepository(existingOrganizationEvents)
@@ -151,6 +154,8 @@ internal class CreateEventHarness(
         billingRepository = billingRepository,
         imageRepository = imageRepository,
         initialSeed = initialSeed,
+        initialRentalBookingId = initialRentalBookingId,
+        initialRentalBookingItems = initialRentalBookingItems,
         onEventCreated = { onEventCreatedCount += 1 }
     ).also { component ->
         component.setLoadingHandler(loadingHandler)

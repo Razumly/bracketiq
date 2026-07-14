@@ -54,6 +54,8 @@ sealed class AppConfig {
     @Serializable
     data class Create(
         val seed: SeededEventTemplateDraft? = null,
+        val rentalBookingId: String? = null,
+        val rentalBookingItems: List<RentalBookingItemManifest> = emptyList(),
     ) : AppConfig()
 
     @Serializable

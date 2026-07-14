@@ -114,7 +114,14 @@ interface MatchOperationOutboxDao {
         status: String = MATCH_OPERATION_STATUS_FAILED,
     )
 
-    @Query("DELETE FROM MatchOperationOutboxEntry WHERE status = :status AND ackedAt < :olderThan")
+    @Query(
+        """
+        DELETE FROM MatchOperationOutboxEntry
+        WHERE status = :status
+          AND ackedAt < :olderThan
+          AND clientSequence < (SELECT COALESCE(MAX(clientSequence), 0) FROM MatchOperationOutboxEntry)
+        """,
+    )
     suspend fun deleteAckedOlderThan(
         olderThan: String,
         status: String = MATCH_OPERATION_STATUS_ACKED,

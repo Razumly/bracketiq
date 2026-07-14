@@ -28,6 +28,17 @@ class AppConfigSerializationTest {
             eventId = "event_1",
             selectedFreeAgentId = "user_2",
         )
+        val createFromRental = AppConfig.Create(
+            rentalBookingId = "booking_1",
+            rentalBookingItems = listOf(
+                RentalBookingItemManifest(
+                    id = "item_1",
+                    fieldId = "field_1",
+                    start = "2026-07-13T10:00:00Z",
+                    end = "2026-07-13T11:00:00Z",
+                ),
+            ),
+        )
 
         assertIdOnlyRoundTrip(eventDetail) { encoded ->
             assertTrue(encoded.contains("\"eventId\":\"event_1\""))
@@ -49,6 +60,12 @@ class AppConfigSerializationTest {
             assertTrue(encoded.contains("\"freeAgentIds\":[\"user_2\"]"))
             assertTrue(encoded.contains("\"eventId\":\"event_1\""))
             assertFalse(encoded.contains("\"event\":"))
+        }
+        assertIdOnlyRoundTrip(createFromRental) { encoded ->
+            assertTrue(encoded.contains("\"rentalBookingId\":\"booking_1\""))
+            assertTrue(encoded.contains("\"id\":\"item_1\""))
+            assertTrue(encoded.contains("\"fieldId\":\"field_1\""))
+            assertFalse(encoded.contains("\"rentalContext\":"))
         }
     }
 

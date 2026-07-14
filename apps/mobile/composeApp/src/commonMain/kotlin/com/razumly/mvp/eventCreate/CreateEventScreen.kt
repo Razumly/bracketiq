@@ -461,6 +461,7 @@ fun CreateEventScreen(
                             leagueTimeSlots = leagueSlots,
                             availableRentalResources = availableRentalResources,
                             selectedRentalResourceIds = selectedRentalResourceIds,
+                            rentalResourceSelectionLocked = component.isRentalResourceSelectionLocked,
                             onRentalResourceSelectionChange = component::setRentalResourceSelected,
                             leagueScoringConfig = leagueScoringConfig,
                             onHostCreateAccount = component::createAccount,

@@ -12,7 +12,6 @@ import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.AuthResponseDto
 import com.razumly.mvp.core.network.dto.InviteResponseDto
-import com.razumly.mvp.core.network.dto.InvitesResponseDto
 import com.razumly.mvp.core.network.dto.MessagingTopicMessageRequestDto
 import com.razumly.mvp.core.network.dto.MessagingTopicSubscriptionDebugResponseDto
 import com.razumly.mvp.core.network.dto.MessagingTopicSubscriptionRequestDto
@@ -758,7 +757,7 @@ internal class InvitePushInvalidationRefresher(
             api.get<InviteResponseDto>("api/invites/${inviteId.encodeURLPathPart()}").invite
         } catch (throwable: ApiException) {
             if (throwable.statusCode == 404) {
-                deleteCachedInviteAfterCanonicalNotFound(inviteId)
+                deleteCachedInvite(inviteId)
             }
             Napier.w(
                 tag = "PushNotificationsRepository",
@@ -782,6 +781,12 @@ internal class InvitePushInvalidationRefresher(
             return
         }
 
+        val canonicalStatus = canonicalInvite.status?.trim()?.uppercase() ?: "PENDING"
+        if (canonicalStatus !in setOf("PENDING", "SENT")) {
+            deleteCachedInvite(canonicalInvite.id)
+            return
+        }
+
         try {
             databaseService.getInviteDao.upsertInvite(canonicalInvite)
         } catch (throwable: Throwable) {
@@ -793,26 +798,23 @@ internal class InvitePushInvalidationRefresher(
         }
     }
 
-    private suspend fun deleteCachedInviteAfterCanonicalNotFound(inviteId: String) {
+    private suspend fun deleteCachedInvite(inviteId: String) {
         try {
-            // A verified 404 is the server's canonical answer for both a
-            // deleted invite and an invite that this session may not see. It
-            // is safe to remove an older cache row, but never do this for a
-            // transient or authentication failure.
+            // A verified 404 or a canonical terminal status means this row is
+            // no longer actionable. Never remove it for transient/auth errors.
             databaseService.getInviteDao.deleteInviteById(inviteId)
         } catch (throwable: Throwable) {
             if (throwable is CancellationException) throw throwable
             Napier.w(
                 tag = "PushNotificationsRepository",
-                message = "Failed to remove canonical-missing invite $inviteId: ${throwable.message}",
+                message = "Failed to remove non-actionable invite $inviteId: ${throwable.message}",
             )
         }
     }
 
     private suspend fun refreshCurrentUserInvites(userId: String) {
         val canonicalInvites = try {
-            val params = "userId=${userId.encodeURLQueryComponent()}"
-            api.get<InvitesResponseDto>("api/invites?$params").invites
+            fetchAllPendingInvitePages(api = api, userId = userId)
         } catch (throwable: Throwable) {
             if (throwable is CancellationException) throw throwable
             Napier.w(

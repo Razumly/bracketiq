@@ -33,6 +33,7 @@ import com.razumly.mvp.core.presentation.CenterNavAction
 import com.razumly.mvp.core.presentation.EventDetailInitialTab
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
+import com.razumly.mvp.core.presentation.RentalBookingItemManifest
 import com.razumly.mvp.core.presentation.toCenterNavAction
 import com.razumly.mvp.eventCreate.CreateEventComponent
 import com.razumly.mvp.eventDetail.EventDetailComponent
@@ -864,11 +865,32 @@ class RootComponent(
         openCreate(seed = seed)
     }
 
-    private fun openCreate(seed: SeededEventTemplateDraft?) {
+    override fun navigateToCreateFromRental(
+        rentalBookingId: String,
+        rentalBookingItems: List<RentalBookingItemManifest>,
+    ) {
+        val normalizedBookingId = rentalBookingId.trim()
+        if (normalizedBookingId.isEmpty()) return
+        openCreate(
+            seed = null,
+            rentalBookingId = normalizedBookingId,
+            rentalBookingItems = rentalBookingItems,
+        )
+    }
+
+    private fun openCreate(
+        seed: SeededEventTemplateDraft?,
+        rentalBookingId: String? = null,
+        rentalBookingItems: List<RentalBookingItemManifest> = emptyList(),
+    ) {
         setDefaultNavigationDirection()
         pendingCreateSeed = seed
-        navigation.pushNew(AppConfig.Create())
-        _selectedPage.value = AppConfig.Create()
+        val config = AppConfig.Create(
+            rentalBookingId = rentalBookingId,
+            rentalBookingItems = rentalBookingItems,
+        )
+        navigation.pushNew(config)
+        _selectedPage.value = config
     }
 
     override fun navigateToEvent(eventId: String) {
@@ -994,7 +1016,15 @@ class RootComponent(
             val createSeed = config.seed ?: pendingCreateSeed
             pendingCreateSeed = null
             Child.Create(
-                _koin.get { parametersOf(componentContext, ::onEventCreated, createSeed) },
+                _koin.get {
+                    parametersOf(
+                        componentContext,
+                        ::onEventCreated,
+                        createSeed,
+                        config.rentalBookingId,
+                        config.rentalBookingItems,
+                    )
+                },
                 _koin.get { parametersOf(componentContext) }
             )
         }

@@ -751,7 +751,11 @@ interface IBillingRepository : IMVPRepository {
     suspend fun getOrganizationTags(query: String? = null, filterOnly: Boolean = false): Result<List<EventTag>> =
         Result.success(emptyList())
     suspend fun getOrganizationsByIds(organizationIds: List<String>): Result<List<Organization>>
-    suspend fun getOrganizationReviews(organizationId: String): Result<OrganizationReviewsPayload> =
+    suspend fun getOrganizationReviews(
+        organizationId: String,
+        cursor: String? = null,
+        limit: Int = 20,
+    ): Result<OrganizationReviewsPayload> =
         Result.failure(UnsupportedOperationException("Organization reviews are not available."))
     suspend fun saveOrganizationReview(
         organizationId: String,
@@ -1387,7 +1391,7 @@ class BillingRepository(
             ),
         )
         response.error?.trim()?.takeIf(String::isNotBlank)?.let(::error)
-        return response.toRentalOrderResultOrNull() ?: error("Unable to create rental order.")
+        return response.toRentalOrderResultOrNull(selections) ?: error("Unable to create rental order.")
     }
 
     override suspend fun listRentalResourceOptions(
@@ -2416,10 +2420,22 @@ class BillingRepository(
         ids.mapNotNull(organizationsById::get)
     }
 
-    override suspend fun getOrganizationReviews(organizationId: String): Result<OrganizationReviewsPayload> = runCatching {
+    override suspend fun getOrganizationReviews(
+        organizationId: String,
+        cursor: String?,
+        limit: Int,
+    ): Result<OrganizationReviewsPayload> = runCatching {
         val encodedId = organizationId.trim().encodeURLQueryComponent()
         require(encodedId.isNotBlank()) { "Organization id is required." }
-        api.get<OrganizationReviewsPayload>(path = "api/organizations/$encodedId/reviews")
+        val normalizedLimit = limit.coerceIn(1, 100)
+        val normalizedCursor = cursor
+            ?.takeIf(String::isNotBlank)
+            ?.encodeURLQueryComponent(encodeFull = true)
+        val path = buildString {
+            append("api/organizations/$encodedId/reviews?limit=$normalizedLimit")
+            normalizedCursor?.let { encodedCursor -> append("&cursor=$encodedCursor") }
+        }
+        api.get<OrganizationReviewsPayload>(path = path)
     }
 
     override suspend fun saveOrganizationReview(
@@ -3414,14 +3430,59 @@ private fun EventTeamPaymentCheckoutResponseDto.toPaymentCheckoutOrNull(): Event
     )
 }
 
-private fun RentalOrderResponseDto.toRentalOrderResultOrNull(): RentalOrderResult? {
+private data class RentalFieldWindow(
+    val fieldId: String,
+    val start: String,
+    val end: String,
+)
+
+private fun List<RentalOrderSelectionRequest>.toExpectedRentalFieldWindowsOrNull(): Set<RentalFieldWindow>? {
+    val expectedWindows = linkedSetOf<RentalFieldWindow>()
+    for (selection in this) {
+        val parsedStart = runCatching { Instant.parse(selection.startDate.trim()) }.getOrNull() ?: return null
+        val parsedEnd = runCatching { Instant.parse(selection.endDate.trim()) }.getOrNull() ?: return null
+        if (parsedEnd <= parsedStart) return null
+        val fieldIds = selection.scheduledFieldIds
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+        if (fieldIds.isEmpty()) return null
+        fieldIds.forEach { fieldId ->
+            expectedWindows += RentalFieldWindow(
+                fieldId = fieldId,
+                start = parsedStart.toString(),
+                end = parsedEnd.toString(),
+            )
+        }
+    }
+    return expectedWindows.takeIf { it.isNotEmpty() }
+}
+
+private fun RentalOrderResponseDto.toRentalOrderResultOrNull(
+    expectedSelections: List<RentalOrderSelectionRequest>,
+): RentalOrderResult? {
     val resolvedBookingId = bookingId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedItems = items.map { item -> item.toRentalOrderItemOrNull() ?: return null }
+    if (resolvedItems.isEmpty() || resolvedItems.map(RentalOrderItem::id).distinct().size != resolvedItems.size) {
+        return null
+    }
+    val expectedWindows = expectedSelections.toExpectedRentalFieldWindowsOrNull() ?: return null
+    val returnedWindows = resolvedItems.map { item ->
+        RentalFieldWindow(
+            fieldId = item.fieldId,
+            start = item.start,
+            end = item.end,
+        )
+    }.toSet()
+    if (returnedWindows.size != resolvedItems.size || returnedWindows != expectedWindows) {
+        return null
+    }
     return RentalOrderResult(
         bookingId = resolvedBookingId,
         billId = billId?.trim()?.takeIf(String::isNotBlank),
         eventId = eventId?.trim()?.takeIf(String::isNotBlank),
         totalCents = totalCents ?: 0,
-        items = items.mapNotNull { item -> item.toRentalOrderItemOrNull() },
+        items = resolvedItems,
         createEventUrl = createEventUrl?.trim()?.takeIf(String::isNotBlank),
     )
 }
@@ -3431,11 +3492,14 @@ private fun RentalOrderItemDto.toRentalOrderItemOrNull(): RentalOrderItem? {
     val resolvedFieldId = fieldId?.trim()?.takeIf(String::isNotBlank) ?: return null
     val resolvedStart = start?.trim()?.takeIf(String::isNotBlank) ?: return null
     val resolvedEnd = end?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val parsedStart = runCatching { Instant.parse(resolvedStart) }.getOrNull() ?: return null
+    val parsedEnd = runCatching { Instant.parse(resolvedEnd) }.getOrNull() ?: return null
+    if (parsedEnd <= parsedStart) return null
     return RentalOrderItem(
         id = resolvedId,
         fieldId = resolvedFieldId,
-        start = resolvedStart,
-        end = resolvedEnd,
+        start = parsedStart.toString(),
+        end = parsedEnd.toString(),
         eventId = eventId?.trim()?.takeIf(String::isNotBlank),
         eventTimeSlotId = eventTimeSlotId?.trim()?.takeIf(String::isNotBlank),
     )

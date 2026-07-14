@@ -37,6 +37,7 @@ import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
 import com.razumly.mvp.core.presentation.PaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentResult
+import com.razumly.mvp.core.presentation.RentalBookingItemManifest
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
@@ -76,6 +77,7 @@ private fun Product.isSinglePurchase(): Boolean =
     period.trim().equals("SINGLE", ignoreCase = true)
 
 private const val ORGANIZATION_CATALOG_PAGE_SIZE = 50
+private const val ORGANIZATION_REVIEWS_PAGE_SIZE = 20
 
 private fun <T> mergeOrganizationCatalogItems(
     existing: List<T>,
@@ -134,6 +136,7 @@ data class RentalReservationComplete(
     val bookingId: String,
     val billId: String? = null,
     val totalCents: Int,
+    val items: List<RentalBookingItemManifest>,
 )
 
 enum class OrganizationReviewSaveStatus {
@@ -196,6 +199,8 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     val isLoadingMoreTeams: StateFlow<Boolean>
     val isLoadingProducts: StateFlow<Boolean>
     val isLoadingReviews: StateFlow<Boolean>
+    val canLoadMoreReviews: StateFlow<Boolean>
+    val isLoadingMoreReviews: StateFlow<Boolean>
     val isMutatingReview: StateFlow<Boolean>
     val reviewSaveStatus: StateFlow<OrganizationReviewSaveStatus>
     val isLoadingRentals: StateFlow<Boolean>
@@ -220,6 +225,7 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     fun loadMoreTeams()
     fun refreshProducts(force: Boolean = false)
     fun refreshReviews(force: Boolean = false)
+    fun loadMoreReviews()
     fun saveReview(rating: Int, body: String?)
     fun deleteReview(reviewId: String)
     fun reportReview(reviewId: String)
@@ -328,6 +334,12 @@ class DefaultOrganizationDetailComponent(
     private val _isLoadingReviews = MutableStateFlow(false)
     override val isLoadingReviews: StateFlow<Boolean> = _isLoadingReviews.asStateFlow()
 
+    private val _canLoadMoreReviews = MutableStateFlow(false)
+    override val canLoadMoreReviews: StateFlow<Boolean> = _canLoadMoreReviews.asStateFlow()
+
+    private val _isLoadingMoreReviews = MutableStateFlow(false)
+    override val isLoadingMoreReviews: StateFlow<Boolean> = _isLoadingMoreReviews.asStateFlow()
+
     private val _isMutatingReview = MutableStateFlow(false)
     override val isMutatingReview: StateFlow<Boolean> = _isMutatingReview.asStateFlow()
 
@@ -374,6 +386,7 @@ class DefaultOrganizationDetailComponent(
     private var teamsCatalogGeneration = 0L
     private var productsLoaded = false
     private var reviewsLoaded = false
+    private var reviewsGeneration = 0L
     private var rentalsLoaded = false
     private var rentalAvailabilityGeneration = 0L
     private var rentalAvailabilityJob: Job? = null
@@ -798,31 +811,81 @@ class DefaultOrganizationDetailComponent(
     }
 
     override fun refreshReviews(force: Boolean) {
-        scope.launch {
-            if (_isLoadingReviews.value) return@launch
-            if (reviewsLoaded && !force) return@launch
+        if (_isLoadingReviews.value && !force) return
+        if (reviewsLoaded && !force) return
 
-            _isLoadingReviews.value = true
-            billingRepository.getOrganizationReviews(organizationId)
+        val generation = ++reviewsGeneration
+        _isLoadingReviews.value = true
+        _isLoadingMoreReviews.value = false
+        scope.launch {
+            billingRepository.getOrganizationReviews(
+                organizationId = organizationId,
+                limit = ORGANIZATION_REVIEWS_PAGE_SIZE,
+            )
                 .onSuccess { payload ->
+                    if (generation != reviewsGeneration) return@onSuccess
                     _reviews.value = payload
+                    _canLoadMoreReviews.value = !payload.nextCursor.isNullOrBlank()
                 }
                 .onFailure { error ->
+                    if (generation != reviewsGeneration) return@onFailure
                     _errorState.value = ErrorMessage(error.userMessage("Failed to load organization reviews."))
                 }
+            if (generation != reviewsGeneration) return@launch
             _isLoadingReviews.value = false
             reviewsLoaded = true
         }
     }
 
+    override fun loadMoreReviews() {
+        if (!_canLoadMoreReviews.value || _isLoadingReviews.value || _isLoadingMoreReviews.value) return
+        val cursor = _reviews.value?.nextCursor?.takeIf(String::isNotBlank) ?: return
+        val generation = reviewsGeneration
+        _isLoadingMoreReviews.value = true
+        scope.launch {
+            billingRepository.getOrganizationReviews(
+                organizationId = organizationId,
+                cursor = cursor,
+                limit = ORGANIZATION_REVIEWS_PAGE_SIZE,
+            )
+                .onSuccess { page ->
+                    if (generation != reviewsGeneration) return@onSuccess
+                    val current = _reviews.value ?: return@onSuccess
+                    val mergedReviews = mergeOrganizationCatalogItems(
+                        existing = current.reviews,
+                        incoming = page.reviews,
+                        id = { review -> review.id },
+                    )
+                    val nextCursor = page.nextCursor?.takeIf { next ->
+                        next.isNotBlank() && next != cursor
+                    }
+                    _reviews.value = page.copy(
+                        reviews = mergedReviews,
+                        nextCursor = nextCursor,
+                    )
+                    _canLoadMoreReviews.value = nextCursor != null
+                }
+                .onFailure {
+                    if (generation != reviewsGeneration) return@onFailure
+                    _errorState.value = ErrorMessage("Failed to load more organization reviews. Try again.")
+                }
+            if (generation != reviewsGeneration) return@launch
+            _isLoadingMoreReviews.value = false
+        }
+    }
+
     override fun saveReview(rating: Int, body: String?) {
         if (_isMutatingReview.value) return
+        reviewsGeneration += 1
+        _isLoadingReviews.value = false
+        _isLoadingMoreReviews.value = false
         _isMutatingReview.value = true
         _reviewSaveStatus.value = OrganizationReviewSaveStatus.SAVING
         scope.launch {
             billingRepository.saveOrganizationReview(organizationId, rating, body)
                 .onSuccess { payload ->
                     _reviews.value = payload
+                    _canLoadMoreReviews.value = !payload.nextCursor.isNullOrBlank()
                     reviewsLoaded = true
                     _message.value = "Your review has been published."
                     _reviewSaveStatus.value = OrganizationReviewSaveStatus.SUCCEEDED
@@ -837,11 +900,15 @@ class DefaultOrganizationDetailComponent(
 
     override fun deleteReview(reviewId: String) {
         if (_isMutatingReview.value) return
+        reviewsGeneration += 1
+        _isLoadingReviews.value = false
+        _isLoadingMoreReviews.value = false
         scope.launch {
             _isMutatingReview.value = true
             billingRepository.deleteOrganizationReview(organizationId, reviewId)
                 .onSuccess { payload ->
                     _reviews.value = payload
+                    _canLoadMoreReviews.value = !payload.nextCursor.isNullOrBlank()
                     reviewsLoaded = true
                     _message.value = "Your review has been deleted."
                 }
@@ -1126,9 +1193,12 @@ class DefaultOrganizationDetailComponent(
     }
 
     override fun createEventFromCompletedRentalReservation() {
-        _completedRentalReservation.value ?: return
+        val completedReservation = _completedRentalReservation.value ?: return
         _completedRentalReservation.value = null
-        navigationHandler.navigateToCreate()
+        navigationHandler.navigateToCreateFromRental(
+            rentalBookingId = completedReservation.bookingId,
+            rentalBookingItems = completedReservation.items,
+        )
     }
 
     override fun dismissCompletedRentalReservation() {
@@ -1443,10 +1513,19 @@ class DefaultOrganizationDetailComponent(
                 paymentIntentId = pending.paymentIntentId,
                 payerUserId = pending.payerUserId,
             ).onSuccess { result ->
+                val itemManifest = result.items.toRentalBookingItemManifestOrNull()
+                if (itemManifest == null) {
+                    _errorState.value = ErrorMessage(
+                        "Payment was recorded, but the reserved-resource details were incomplete. " +
+                            "Do not submit another payment; contact the organization for assistance.",
+                    )
+                    return@onSuccess
+                }
                 _completedRentalReservation.value = RentalReservationComplete(
                     bookingId = result.bookingId,
                     billId = result.billId,
                     totalCents = result.totalCents,
+                    items = itemManifest,
                 )
                 _message.value = "Resources reserved."
                 activeRentalAvailabilityWindow?.let { window ->
@@ -1530,26 +1609,23 @@ class DefaultOrganizationDetailComponent(
         )
     }
 
-    private fun RentalCreateContext.withRentalOrderResult(
-        bookingId: String,
-        items: List<RentalOrderItem>,
-    ): RentalCreateContext {
-        return copy(
-            rentalBookingId = bookingId,
-            lockedSelections = lockedSelections.map { selection ->
-                val item = items.firstOrNull { candidate -> candidate.matchesLockedSelection(selection) }
-                selection.copy(rentalBookingItemId = item?.id)
-            },
-        )
-    }
-
-    private fun RentalOrderItem.matchesLockedSelection(selection: com.razumly.mvp.core.presentation.LockedRentalSelection): Boolean {
-        if (fieldId.trim() != selection.fieldId.trim()) {
-            return false
+    private fun List<RentalOrderItem>.toRentalBookingItemManifestOrNull(): List<RentalBookingItemManifest>? {
+        if (isEmpty()) return null
+        val manifest = map { item ->
+            val id = item.id.trim().takeIf(String::isNotBlank) ?: return null
+            val fieldId = item.fieldId.trim().takeIf(String::isNotBlank) ?: return null
+            val start = runCatching { Instant.parse(item.start.trim()) }.getOrNull() ?: return null
+            val end = runCatching { Instant.parse(item.end.trim()) }.getOrNull() ?: return null
+            if (end <= start) return null
+            RentalBookingItemManifest(
+                id = id,
+                fieldId = fieldId,
+                start = start.toString(),
+                end = end.toString(),
+            )
         }
-        val itemStart = runCatching { Instant.parse(start).toEpochMilliseconds() }.getOrNull()
-        val itemEnd = runCatching { Instant.parse(end).toEpochMilliseconds() }.getOrNull()
-        return itemStart == selection.startEpochMillis && itemEnd == selection.endEpochMillis
+        if (manifest.map(RentalBookingItemManifest::id).distinct().size != manifest.size) return null
+        return manifest
     }
 
     private fun String?.toPaymentIntentId(): String? {

@@ -295,6 +295,7 @@ fun LeagueScheduleFields(
     slots: List<TimeSlot>,
     availableRentalResources: List<RentalResourceOption> = emptyList(),
     selectedRentalResourceIds: Set<String> = emptySet(),
+    rentalResourceSelectionLocked: Boolean = false,
     onRentalResourceSelectionChange: (String, Boolean) -> Unit = { _, _ -> },
     eventStart: Instant,
     eventEnd: Instant? = null,
@@ -403,7 +404,7 @@ fun LeagueScheduleFields(
                     expandedRentalResourceGroupKeys + groupKey
                 }
             },
-            enabled = !readOnly,
+            enabled = !readOnly && !rentalResourceSelectionLocked,
             onSelectionChange = onRentalResourceSelectionChange,
         )
     }

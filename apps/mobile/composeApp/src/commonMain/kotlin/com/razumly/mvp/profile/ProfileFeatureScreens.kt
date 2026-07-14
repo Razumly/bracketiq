@@ -884,6 +884,22 @@ fun ProfilePaymentPlansScreen(component: ProfileComponent) {
             )
         }
 
+        plansState.warning?.let { message ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                ),
+            ) {
+                Text(
+                    modifier = Modifier.padding(16.dp),
+                    text = message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+            }
+        }
+
         when {
             plansState.isLoading -> {
                 Text(

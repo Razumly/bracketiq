@@ -1089,15 +1089,11 @@ class UserRepository(
         val normalizedType = type?.trim()?.takeIf(String::isNotBlank)
 
         return runCatching {
-            val params = buildList {
-                add("userId=${normalizedUserId.encodeURLQueryComponent()}")
-                normalizedType?.let { inviteType ->
-                    add("type=${inviteType.encodeURLQueryComponent()}")
-                }
-            }.joinToString("&")
-
-            val invites = api.get<InvitesResponseDto>("api/invites?$params")
-                .invites
+            val invites = fetchAllPendingInvitePages(
+                api = api,
+                userId = normalizedUserId,
+                type = normalizedType,
+            )
                 .map { invite -> invite.withFallbackInviteUserId(normalizedUserId) }
             cacheInvitesForUser(
                 userId = normalizedUserId,
@@ -1123,7 +1119,7 @@ class UserRepository(
     override suspend fun declineInvite(inviteId: String): Result<Unit> = runCatching {
         val normalizedInviteId = inviteId.trim().takeIf(String::isNotBlank) ?: error("Invite id is required")
         api.postNoResponse("api/invites/${normalizedInviteId.encodeURLQueryComponent()}/decline")
-        updateCachedInviteStatus(normalizedInviteId, "DECLINED")
+        deleteCachedInvite(normalizedInviteId)
     }
 
     override suspend fun isCurrentUserChild(minorAgeThreshold: Int): Result<Boolean> = runCatching {
@@ -1713,13 +1709,6 @@ class UserRepository(
         }
     }
 
-    private suspend fun updateCachedInviteStatus(inviteId: String, status: String) {
-        runCatching {
-            databaseService.getInviteDao.updateInviteStatus(inviteId, status)
-        }.onFailure { throwable ->
-            Napier.w("Failed to update cached invite $inviteId: ${throwable.message}")
-        }
-    }
 }
 
 private fun Invite.withFallbackInviteUserId(userId: String): Invite =

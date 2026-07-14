@@ -86,6 +86,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 import kotlin.time.Clock
+import kotlin.time.Duration.Companion.days
 
 data class StagedMatchCreate(
     val clientId: String,
@@ -183,6 +184,7 @@ class MatchRepository(
         const val CLIENT_MATCH_PREFIX = "client:"
         const val LOCAL_PLACEHOLDER_PREFIX = "placeholder-local:"
         const val LOCAL_OPERATION_SOURCE_DEVICE = "PHONE"
+        val ACKED_OPERATION_RETENTION = 7.days
         val processOutboxEnqueueMutex = Mutex()
     }
 
@@ -783,6 +785,21 @@ class MatchRepository(
         Napier.w("Failed to sync match operation ${operation.id}: $message")
     }
 
+    private suspend fun pruneAcknowledgedOperations(
+        dao: com.razumly.mvp.core.data.dataTypes.daos.MatchOperationOutboxDao,
+    ) {
+        val cutoff = (Clock.System.now() - ACKED_OPERATION_RETENTION).toString()
+        try {
+            dao.deleteAckedOlderThan(cutoff)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            // Retention is best-effort maintenance. A cleanup failure must not turn already
+            // acknowledged match writes into a visible synchronization failure.
+            Napier.w("Unable to compact acknowledged match operations: ${error.message}")
+        }
+    }
+
     private fun isTerminalMatchActionConflict(
         operation: MatchOperationOutboxEntry,
         error: ApiException,
@@ -1081,24 +1098,31 @@ class MatchRepository(
             incidentOperations = listOf(operation.copy(action = "CREATE")),
         )
 
-    override suspend fun syncPendingMatchOperations(matchId: String?): Result<Int> = runCatching {
-        outboxSyncMutex.withLock {
-        val dao = databaseService.getMatchOperationOutboxDao
-        val pendingOperations = if (matchId == null) {
-            dao.getPendingOperations()
-        } else {
-            dao.getPendingOperationsForMatch(matchId)
-        }
-        var syncedCount = 0
-        for (operation in pendingOperations) {
-            val didSync = syncOutboxOperation(operation)
-            if (!didSync) {
-                scheduleMatchOperationRetry()
-                break
-            }
-            syncedCount += 1
-        }
-        syncedCount
+    override suspend fun syncPendingMatchOperations(matchId: String?): Result<Int> {
+        return try {
+            Result.success(outboxSyncMutex.withLock {
+                val dao = databaseService.getMatchOperationOutboxDao
+                val pendingOperations = if (matchId == null) {
+                    dao.getPendingOperations()
+                } else {
+                    dao.getPendingOperationsForMatch(matchId)
+                }
+                var syncedCount = 0
+                for (operation in pendingOperations) {
+                    val didSync = syncOutboxOperation(operation)
+                    if (!didSync) {
+                        scheduleMatchOperationRetry()
+                        break
+                    }
+                    syncedCount += 1
+                }
+                pruneAcknowledgedOperations(dao)
+                syncedCount
+            })
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            Result.failure(error)
         }
     }
 

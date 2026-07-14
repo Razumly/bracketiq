@@ -32,6 +32,7 @@ import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.OrganizationEventPage
 import com.razumly.mvp.core.data.repositories.OrganizationTeamPage
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
+import com.razumly.mvp.core.data.repositories.RentalOrderItem
 import com.razumly.mvp.core.data.repositories.RentalOrderResult
 import com.razumly.mvp.core.data.repositories.RentalOrderSelectionRequest
 import com.razumly.mvp.core.data.repositories.SignStep
@@ -39,6 +40,7 @@ import com.razumly.mvp.core.data.repositories.TeamRegistrationConsent
 import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
+import com.razumly.mvp.core.presentation.RentalBookingItemManifest
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.eventCreate.CreateEvent_FakeBillingRepository
 import com.razumly.mvp.eventCreate.CreateEvent_FakeEventRepository
@@ -115,6 +117,112 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
         assertEquals(1, harness.component.reviews.value?.summary?.reviewCount)
         assertEquals(OrganizationReviewSaveStatus.SUCCEEDED, harness.component.reviewSaveStatus.value)
     }
+
+    @Test
+    fun given_older_review_page_when_load_more_is_tapped_twice_then_one_page_is_deduplicated_and_appended() =
+        runTest(testDispatcher) {
+            val latestReview = organizationReview(id = "review-1", body = "Original")
+            val updatedLatestReview = latestReview.copy(body = "Updated by the current source")
+            val olderReview = organizationReview(id = "review-2", body = "Older feedback")
+            val harness = OrganizationDetailHarness(product = createProduct(period = "SINGLE"))
+            harness.billingRepository.reviewPageResults[null] = Result.success(
+                organizationReviewsPayload(reviews = listOf(latestReview), nextCursor = "older cursor/+"),
+            )
+            harness.billingRepository.reviewPageResults["older cursor/+"] = Result.success(
+                organizationReviewsPayload(reviews = listOf(updatedLatestReview, olderReview)),
+            )
+            advance()
+
+            harness.component.loadMoreReviews()
+            harness.component.loadMoreReviews()
+            advance()
+
+            assertEquals(
+                listOf(null to 20, "older cursor/+" to 20),
+                harness.billingRepository.reviewPageCalls,
+            )
+            assertEquals(
+                listOf("review-1", "review-2"),
+                harness.component.reviews.value?.reviews?.map(OrganizationReview::id),
+            )
+            assertEquals("Updated by the current source", harness.component.reviews.value?.reviews?.first()?.body)
+            assertFalse(harness.component.canLoadMoreReviews.value)
+            assertFalse(harness.component.isLoadingMoreReviews.value)
+        }
+
+    @Test
+    fun given_load_more_failure_when_retried_then_existing_reviews_and_cursor_are_preserved() = runTest(testDispatcher) {
+        val latestReview = organizationReview(id = "review-1", body = "Newest feedback")
+        val olderReview = organizationReview(id = "review-2", body = "Older feedback")
+        val harness = OrganizationDetailHarness(product = createProduct(period = "SINGLE"))
+        harness.billingRepository.reviewPageResults[null] = Result.success(
+            organizationReviewsPayload(reviews = listOf(latestReview), nextCursor = "cursor-2"),
+        )
+        harness.billingRepository.reviewPageResults["cursor-2"] = Result.failure(IllegalStateException("offline"))
+        advance()
+
+        harness.component.loadMoreReviews()
+        advance()
+
+        assertEquals(listOf("review-1"), harness.component.reviews.value?.reviews?.map(OrganizationReview::id))
+        assertEquals("cursor-2", harness.component.reviews.value?.nextCursor)
+        assertTrue(harness.component.canLoadMoreReviews.value)
+        assertFalse(harness.component.isLoadingMoreReviews.value)
+        assertEquals("Failed to load more organization reviews. Try again.", harness.component.errorState.value?.message)
+
+        harness.billingRepository.reviewPageResults["cursor-2"] = Result.success(
+            organizationReviewsPayload(reviews = listOf(olderReview)),
+        )
+        harness.component.loadMoreReviews()
+        advance()
+
+        assertEquals(
+            listOf("review-1", "review-2"),
+            harness.component.reviews.value?.reviews?.map(OrganizationReview::id),
+        )
+        assertEquals(listOf(null, "cursor-2", "cursor-2"), harness.billingRepository.reviewPageCalls.map { it.first })
+    }
+
+    @Test
+    fun given_older_review_page_in_flight_when_refreshed_then_the_late_page_cannot_replace_current_source() =
+        runTest(testDispatcher) {
+            val harness = OrganizationDetailHarness(product = createProduct(period = "SINGLE"))
+            harness.billingRepository.reviewPageResults[null] = Result.success(
+                organizationReviewsPayload(
+                    reviews = listOf(organizationReview(id = "review-2", body = "Previous newest")),
+                    nextCursor = "cursor-2",
+                ),
+            )
+            advance()
+
+            val lateOlderPage = CompletableDeferred<Result<OrganizationReviewsPayload>>()
+            harness.billingRepository.deferredReviewPageResults["cursor-2"] = lateOlderPage
+            harness.component.loadMoreReviews()
+            advance()
+            assertTrue(harness.component.isLoadingMoreReviews.value)
+
+            harness.billingRepository.reviewPageResults[null] = Result.success(
+                organizationReviewsPayload(
+                    reviews = listOf(organizationReview(id = "review-3", body = "Current newest")),
+                    nextCursor = "current-cursor",
+                ),
+            )
+            harness.component.refreshReviews(force = true)
+            advance()
+            lateOlderPage.complete(
+                Result.success(
+                    organizationReviewsPayload(
+                        reviews = listOf(organizationReview(id = "review-1", body = "Stale older feedback")),
+                    ),
+                ),
+            )
+            advance()
+
+            assertEquals(listOf("review-3"), harness.component.reviews.value?.reviews?.map(OrganizationReview::id))
+            assertEquals("current-cursor", harness.component.reviews.value?.nextCursor)
+            assertTrue(harness.component.canLoadMoreReviews.value)
+            assertFalse(harness.component.isLoadingMoreReviews.value)
+        }
 
     @Test
     fun given_single_purchase_checkout_in_flight_when_same_product_tapped_again_then_duplicate_purchase_intent_is_ignored() =
@@ -497,6 +605,48 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
         }
 
     @Test
+    fun given_completed_rental_when_create_event_now_is_selected_then_canonical_booking_id_reaches_navigation() =
+        runTest(testDispatcher) {
+            val navigationHandler = RecordingNavigationHandler()
+            val harness = OrganizationDetailHarness(
+                product = createProduct(period = "SINGLE"),
+                navigationHandler = navigationHandler,
+            )
+            advance()
+            harness.billingRepository.rentalOrderResult = Result.success(
+                RentalOrderResult(
+                    bookingId = "booking-canonical-1",
+                    billId = "bill-1",
+                    totalCents = 2_500,
+                    items = listOf(
+                        RentalOrderItem(
+                            id = "item-1",
+                            fieldId = "field-1",
+                            start = "2026-07-13T10:00:00Z",
+                            end = "2026-07-13T11:00:00Z",
+                        ),
+                    ),
+                ),
+            )
+
+            harness.component.completePendingRentalReservation(paidRentalReservation())
+
+            assertEquals(
+                "booking-canonical-1",
+                harness.component.completedRentalReservation.value?.bookingId,
+            )
+
+            harness.component.createEventFromCompletedRentalReservation()
+
+            assertEquals(listOf("booking-canonical-1"), navigationHandler.rentalBookingIds)
+            assertEquals(
+                listOf("item-1"),
+                navigationHandler.rentalBookingItems.single().map(RentalBookingItemManifest::id),
+            )
+            assertNull(harness.component.completedRentalReservation.value)
+        }
+
+    @Test
     fun paidRental_uses_the_same_exact_selections_for_payment_and_final_order() = runTest(testDispatcher) {
         val harness = OrganizationDetailHarness(
             product = createProduct(period = "SINGLE"),
@@ -755,6 +905,7 @@ private class OrganizationDetailHarness(
     private val teamRepository: ITeamRepository = NoopTeamRepository,
     private val fieldRepository: IFieldRepository = CreateEvent_FakeFieldRepository(),
     rentalCheckoutEnabled: Boolean = false,
+    navigationHandler: INavigationHandler = NoopNavigationHandler,
 ) {
     private val organization = Organization(
         id = "org-1",
@@ -788,9 +939,35 @@ private class OrganizationDetailHarness(
         fieldRepository = fieldRepository,
         matchRepository = NoopMatchRepository,
         userRepository = CreateEvent_FakeUserRepository(),
-        navigationHandler = NoopNavigationHandler,
+        navigationHandler = navigationHandler,
     )
 }
+
+private fun organizationReview(id: String, body: String): OrganizationReview = OrganizationReview(
+    id = id,
+    organizationId = "org-1",
+    reviewerUserId = "user-$id",
+    rating = 5,
+    body = body,
+    createdAt = "2026-07-09T20:00:00.000Z",
+    updatedAt = "2026-07-09T20:00:00.000Z",
+    reviewer = OrganizationReviewReviewer(id = "user-$id", displayName = "Test User $id"),
+)
+
+private fun organizationReviewsPayload(
+    reviews: List<OrganizationReview>,
+    nextCursor: String? = null,
+): OrganizationReviewsPayload = OrganizationReviewsPayload(
+    summary = OrganizationReviewSummary(
+        averageRating = if (reviews.isEmpty()) null else reviews.map(OrganizationReview::rating).average(),
+        reviewCount = reviews.size,
+        ratingCounts = listOf(0, 0, 0, 0, reviews.size),
+    ),
+    reviews = reviews,
+    nextCursor = nextCursor,
+    viewerIsAuthenticated = true,
+    canReview = true,
+)
 
 private data class RentalOrderCall(
     val publicSlug: String,
@@ -820,6 +997,9 @@ private class OrganizationDetailTestBillingRepository(
     var lastSavedBody: String? = null
         private set
     var reviewSaveFailure: Throwable? = null
+    val reviewPageCalls = mutableListOf<Pair<String?, Int>>()
+    val reviewPageResults = mutableMapOf<String?, Result<OrganizationReviewsPayload>>()
+    val deferredReviewPageResults = mutableMapOf<String?, CompletableDeferred<Result<OrganizationReviewsPayload>>>()
     val rentalOrderCalls = mutableListOf<RentalOrderCall>()
     val preparedRentalOrderCalls = mutableListOf<RentalOrderCall>()
     var rentalOrderResult: Result<RentalOrderResult> = Result.failure(
@@ -842,8 +1022,15 @@ private class OrganizationDetailTestBillingRepository(
     override suspend fun listProductsByOrganization(organizationId: String): Result<List<Product>> =
         Result.success(if (organizationId.trim() == organization.id) products else emptyList())
 
-    override suspend fun getOrganizationReviews(organizationId: String): Result<OrganizationReviewsPayload> =
-        Result.success(reviewPayload)
+    override suspend fun getOrganizationReviews(
+        organizationId: String,
+        cursor: String?,
+        limit: Int,
+    ): Result<OrganizationReviewsPayload> {
+        reviewPageCalls += cursor to limit
+        deferredReviewPageResults[cursor]?.let { deferred -> return deferred.await() }
+        return reviewPageResults[cursor] ?: Result.success(reviewPayload)
+    }
 
     override suspend fun createRentalOrder(
         publicSlug: String,
@@ -1313,6 +1500,19 @@ private object NoopNavigationHandler : INavigationHandler {
     override fun navigateToRefunds() = Unit
     override fun navigateToLogin() = Unit
     override fun navigateBack() = Unit
+}
+
+private class RecordingNavigationHandler : INavigationHandler by NoopNavigationHandler {
+    val rentalBookingIds = mutableListOf<String>()
+    val rentalBookingItems = mutableListOf<List<RentalBookingItemManifest>>()
+
+    override fun navigateToCreateFromRental(
+        rentalBookingId: String,
+        rentalBookingItems: List<RentalBookingItemManifest>,
+    ) {
+        rentalBookingIds += rentalBookingId
+        this.rentalBookingItems += rentalBookingItems
+    }
 }
 
 private fun createTestComponentContext(): DefaultComponentContext {

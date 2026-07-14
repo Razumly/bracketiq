@@ -13,6 +13,7 @@ import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft
+import com.razumly.mvp.core.presentation.RentalBookingItemManifest
 import com.razumly.mvp.eventDetail.EventStaffRole
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
@@ -715,6 +716,250 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(listOf("participant-template"), payloadSlot.requiredTemplateIds)
         assertEquals(listOf("host-template"), payloadSlot.hostRequiredTemplateIds)
     }
+
+    @Test
+    fun given_completed_rental_booking_when_create_opens_then_exact_canonical_items_are_preselected_and_locked() =
+        runTest(testDispatcher) {
+            val firstItem = RentalResourceOption(
+                id = "booking-completed:item-1",
+                bookingId = "booking-completed",
+                bookingItemId = "item-1",
+                organizationId = "owner-org",
+                organizationName = "Summit Sports",
+                field = Field(
+                    fieldNumber = 1,
+                    organizationId = "owner-org",
+                    id = "field-1",
+                    name = "Court 1",
+                ),
+                start = instant(1_700_000_000_000),
+                end = instant(1_700_003_600_000),
+                timeZone = "UTC",
+                priceCents = 2_500,
+                requiredTemplateIds = listOf("participant-template"),
+            )
+            val secondItem = RentalResourceOption(
+                id = "booking-completed:item-2",
+                bookingId = "booking-completed",
+                bookingItemId = "item-2",
+                organizationId = "owner-org",
+                organizationName = "Summit Sports",
+                field = Field(
+                    fieldNumber = 2,
+                    organizationId = "owner-org",
+                    id = "field-2",
+                    name = "Court 2",
+                ),
+                start = instant(1_700_086_400_000),
+                end = instant(1_700_090_000_000),
+                timeZone = "UTC",
+                priceCents = 3_000,
+                hostRequiredTemplateIds = listOf("host-template"),
+            )
+            val unrelatedItem = RentalResourceOption(
+                id = "booking-other:item-3",
+                bookingId = "booking-other",
+                bookingItemId = "item-3",
+                organizationId = "other-org",
+                field = Field(
+                    fieldNumber = 1,
+                    organizationId = "other-org",
+                    id = "field-3",
+                    name = "Other court",
+                ),
+                start = instant(1_700_172_800_000),
+                end = instant(1_700_176_400_000),
+                timeZone = "UTC",
+                priceCents = 4_000,
+            )
+            val harness = CreateEventHarness(
+                rentalResourceOptions = listOf(firstItem, unrelatedItem, secondItem),
+                initialRentalBookingId = " booking-completed ",
+                initialRentalBookingItems = listOf(firstItem.toManifest(), secondItem.toManifest()),
+            )
+            advance()
+
+            assertTrue(harness.component.isRentalResourceSelectionLocked)
+            assertEquals(
+                listOf(firstItem.id, secondItem.id),
+                harness.component.availableRentalResources.value.map(RentalResourceOption::id),
+            )
+            assertEquals(
+                setOf(firstItem.id, secondItem.id),
+                harness.component.selectedRentalResourceIds.value,
+            )
+            assertEquals(
+                setOf("item-1", "item-2"),
+                harness.component.leagueSlots.value.mapNotNull(TimeSlot::rentalBookingItemId).toSet(),
+            )
+
+            harness.component.setRentalResourceSelected(firstItem.id, selected = false)
+            harness.component.setRentalResourceSelected(unrelatedItem.id, selected = true)
+            advance()
+
+            assertEquals(
+                setOf(firstItem.id, secondItem.id),
+                harness.component.selectedRentalResourceIds.value,
+            )
+
+            harness.component.createEvent()
+            advance()
+
+            val createCall = harness.eventRepository.createEventCalls.single()
+            assertEquals(
+                setOf("booking-completed"),
+                createCall.timeSlots.orEmpty().mapNotNull(TimeSlot::rentalBookingId).toSet(),
+            )
+            assertEquals(
+                setOf("item-1", "item-2"),
+                createCall.timeSlots.orEmpty().mapNotNull(TimeSlot::rentalBookingItemId).toSet(),
+            )
+            assertTrue(createCall.timeSlots.orEmpty().all { slot -> slot.rentalLocked == true })
+            val createdSlotsByItemId = createCall.timeSlots.orEmpty().associateBy(TimeSlot::rentalBookingItemId)
+            assertEquals(listOf("field-1"), createdSlotsByItemId["item-1"]?.scheduledFieldIds)
+            assertEquals(firstItem.start, createdSlotsByItemId["item-1"]?.startDate)
+            assertEquals(firstItem.end, createdSlotsByItemId["item-1"]?.endDate)
+            assertEquals(
+                firstItem.requiredTemplateIds,
+                createdSlotsByItemId["item-1"]?.requiredTemplateIds,
+            )
+            assertEquals(
+                secondItem.hostRequiredTemplateIds,
+                createdSlotsByItemId["item-2"]?.hostRequiredTemplateIds,
+            )
+        }
+
+    @Test
+    fun given_completed_rental_booking_when_canonical_items_are_missing_then_create_fails_closed() =
+        runTest(testDispatcher) {
+            val unrelatedItem = RentalResourceOption(
+                id = "booking-other:item-1",
+                bookingId = "booking-other",
+                bookingItemId = "item-1",
+                organizationId = "owner-org",
+                field = Field(
+                    fieldNumber = 1,
+                    organizationId = "owner-org",
+                    id = "field-1",
+                    name = "Court 1",
+                ),
+                start = instant(1_700_000_000_000),
+                end = instant(1_700_003_600_000),
+                timeZone = "UTC",
+                priceCents = 2_500,
+            )
+            val harness = CreateEventHarness(
+                rentalResourceOptions = listOf(unrelatedItem),
+                initialRentalBookingId = "booking-completed",
+                initialRentalBookingItems = listOf(
+                    RentalBookingItemManifest(
+                        id = "item-1",
+                        fieldId = "field-1",
+                        start = instant(1_700_000_000_000).toString(),
+                        end = instant(1_700_003_600_000).toString(),
+                    ),
+                ),
+            )
+            advance()
+
+            assertEquals(emptyList(), harness.component.availableRentalResources.value)
+            assertEquals(emptySet(), harness.component.selectedRentalResourceIds.value)
+
+            harness.component.createEvent()
+            advance()
+
+            assertEquals(0, harness.eventRepository.createEventCalls.size)
+            assertEquals(
+                "We couldn't verify every resource in this reservation. Return to the organization and try again.",
+                harness.component.errorState.value?.message,
+            )
+        }
+
+    @Test
+    fun given_completed_rental_booking_when_one_of_two_items_is_omitted_then_create_fails_closed() =
+        runTest(testDispatcher) {
+            val firstItem = completedRentalOption(
+                itemId = "item-1",
+                fieldId = "field-1",
+                start = instant(1_700_000_000_000),
+                end = instant(1_700_003_600_000),
+            )
+            val secondItem = completedRentalOption(
+                itemId = "item-2",
+                fieldId = "field-2",
+                start = instant(1_700_086_400_000),
+                end = instant(1_700_090_000_000),
+            )
+            val harness = CreateEventHarness(
+                rentalResourceOptions = listOf(firstItem),
+                initialRentalBookingId = "booking-completed",
+                initialRentalBookingItems = listOf(firstItem.toManifest(), secondItem.toManifest()),
+            )
+            advance()
+
+            assertEquals(emptyList(), harness.component.availableRentalResources.value)
+            harness.component.createEvent()
+            advance()
+
+            assertTrue(harness.eventRepository.createEventCalls.isEmpty())
+            assertEquals(
+                "We couldn't verify every resource in this reservation. Return to the organization and try again.",
+                harness.component.errorState.value?.message,
+            )
+        }
+
+    @Test
+    fun given_completed_rental_booking_when_canonical_field_or_time_changes_then_create_fails_closed() =
+        runTest(testDispatcher) {
+            val expected = completedRentalOption(
+                itemId = "item-1",
+                fieldId = "field-1",
+                start = instant(1_700_000_000_000),
+                end = instant(1_700_003_600_000),
+            )
+            val changedField = expected.copy(
+                field = expected.field.copy(id = "field-replaced"),
+            )
+            val changedTime = expected.copy(
+                start = instant(1_700_000_060_000),
+            )
+
+            listOf(changedField, changedTime).forEach { changedOption ->
+                val harness = CreateEventHarness(
+                    rentalResourceOptions = listOf(changedOption),
+                    initialRentalBookingId = "booking-completed",
+                    initialRentalBookingItems = listOf(expected.toManifest()),
+                )
+                advance()
+
+                assertEquals(emptyList(), harness.component.availableRentalResources.value)
+                harness.component.createEvent()
+                advance()
+                assertTrue(harness.eventRepository.createEventCalls.isEmpty())
+            }
+        }
+
+    @Test
+    fun given_completed_rental_booking_when_expected_item_ids_are_duplicated_then_create_fails_closed() =
+        runTest(testDispatcher) {
+            val item = completedRentalOption(
+                itemId = "item-1",
+                fieldId = "field-1",
+                start = instant(1_700_000_000_000),
+                end = instant(1_700_003_600_000),
+            )
+            val harness = CreateEventHarness(
+                rentalResourceOptions = listOf(item),
+                initialRentalBookingId = "booking-completed",
+                initialRentalBookingItems = listOf(item.toManifest(), item.toManifest()),
+            )
+            advance()
+
+            assertEquals(emptyList(), harness.component.availableRentalResources.value)
+            harness.component.createEvent()
+            advance()
+            assertTrue(harness.eventRepository.createEventCalls.isEmpty())
+        }
 
     @Test
     fun given_loaded_rental_resource_for_league_when_field_count_changes_then_local_resources_are_created() = runTest(testDispatcher) {
@@ -1661,3 +1906,33 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertNull(createCall.leagueScoringConfig)
     }
 }
+
+private fun completedRentalOption(
+    itemId: String,
+    fieldId: String,
+    start: Instant,
+    end: Instant,
+): RentalResourceOption = RentalResourceOption(
+    id = "booking-completed:$itemId",
+    bookingId = "booking-completed",
+    bookingItemId = itemId,
+    organizationId = "owner-org",
+    organizationName = "Summit Sports",
+    field = Field(
+        fieldNumber = 1,
+        organizationId = "owner-org",
+        id = fieldId,
+        name = "Court $fieldId",
+    ),
+    start = start,
+    end = end,
+    timeZone = "UTC",
+    priceCents = 2_500,
+)
+
+private fun RentalResourceOption.toManifest(): RentalBookingItemManifest = RentalBookingItemManifest(
+    id = bookingItemId,
+    fieldId = field.id,
+    start = start.toString(),
+    end = end.toString(),
+)

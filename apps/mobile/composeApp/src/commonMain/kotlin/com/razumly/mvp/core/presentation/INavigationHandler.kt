@@ -18,6 +18,12 @@ interface INavigationHandler {
     fun navigateToCreate(seed: SeededEventTemplateDraft) {
         navigateToCreate()
     }
+    fun navigateToCreateFromRental(
+        rentalBookingId: String,
+        rentalBookingItems: List<RentalBookingItemManifest>,
+    ) {
+        navigateToCreate()
+    }
     fun navigateToSearch()
     fun navigateToEvent(eventId: String)
     fun navigateToOrganization(organizationId: String, initialTab: OrganizationDetailTab = OrganizationDetailTab.OVERVIEW)

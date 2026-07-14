@@ -133,6 +133,8 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val isLoadingMoreTeams by component.isLoadingMoreTeams.collectAsState()
     val isLoadingProducts by component.isLoadingProducts.collectAsState()
     val isLoadingReviews by component.isLoadingReviews.collectAsState()
+    val canLoadMoreReviews by component.canLoadMoreReviews.collectAsState()
+    val isLoadingMoreReviews by component.isLoadingMoreReviews.collectAsState()
     val isMutatingReview by component.isMutatingReview.collectAsState()
     val reviewSaveStatus by component.reviewSaveStatus.collectAsState()
     val isLoadingRentals by component.isLoadingRentals.collectAsState()
@@ -505,10 +507,13 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                     OrganizationReviewsTabContent(
                         payload = reviews,
                         isLoading = isLoadingReviews,
+                        canLoadMore = canLoadMoreReviews,
+                        isLoadingMore = isLoadingMoreReviews,
                         isMutating = isMutatingReview,
                         reviewSaveStatus = reviewSaveStatus,
                         bottomPadding = bottomPadding,
                         onRefresh = { component.refreshReviews(force = true) },
+                        onLoadMore = component::loadMoreReviews,
                         onSave = component::saveReview,
                         onDelete = component::deleteReview,
                         onReport = component::reportReview,

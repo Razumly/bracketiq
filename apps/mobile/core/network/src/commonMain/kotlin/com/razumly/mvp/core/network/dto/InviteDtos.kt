@@ -6,6 +6,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class InvitesResponseDto(
     val invites: List<Invite> = emptyList(),
+    val nextCursor: String? = null,
 )
 
 @Serializable

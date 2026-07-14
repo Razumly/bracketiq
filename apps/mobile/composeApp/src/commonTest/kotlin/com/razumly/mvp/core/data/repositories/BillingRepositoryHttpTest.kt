@@ -2022,6 +2022,126 @@ class BillingRepositoryHttpTest {
     }
 
     @Test
+    fun createRentalOrder_rejects_the_entire_booking_when_any_returned_item_is_malformed() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val pendingDao = BillingRepositoryHttp_FakePendingRentalOrderDao()
+        val db = BillingRepositoryHttp_FakeDatabaseService(pendingRentalOrderDao = pendingDao)
+        val engine = MockEngine {
+            respond(
+                content = """
+                    {
+                      "bookingId": "booking_1",
+                      "totalCents": 5000,
+                      "items": [
+                        {
+                          "id": "item_1",
+                          "fieldId": "field_1",
+                          "start": "2026-06-22T12:00:00Z",
+                          "end": "2026-06-22T13:00:00Z"
+                        },
+                        {
+                          "id": "item_2",
+                          "fieldId": "field_2",
+                          "start": "not-an-instant",
+                          "end": "2026-06-22T14:00:00Z"
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.Created,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repo = BillingRepository(
+            MvpApiClient(
+                HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+                "http://example.test",
+                tokenStore,
+            ),
+            userRepo,
+            BillingRepositoryHttp_UnusedEventRepository,
+            db,
+        )
+
+        val result = repo.createRentalOrder(
+            publicSlug = "summit-sports",
+            eventId = "booking_1",
+            selections = listOf(
+                RentalOrderSelectionRequest(
+                    scheduledFieldIds = listOf("field_1", "field_2"),
+                    startDate = "2026-06-22T12:00:00Z",
+                    endDate = "2026-06-22T14:00:00Z",
+                ),
+            ),
+        )
+
+        assertTrue(result.isFailure)
+        assertEquals("Unable to create rental order.", result.exceptionOrNull()?.message)
+        assertEquals(1, pendingDao.storedOrders.size)
+    }
+
+    @Test
+    fun createRentalOrder_retains_the_pending_order_when_the_response_omits_a_requested_item() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val pendingDao = BillingRepositoryHttp_FakePendingRentalOrderDao()
+        val db = BillingRepositoryHttp_FakeDatabaseService(pendingRentalOrderDao = pendingDao)
+        val engine = MockEngine {
+            respond(
+                content = """
+                    {
+                      "bookingId": "booking_partial",
+                      "totalCents": 2500,
+                      "items": [
+                        {
+                          "id": "item_1",
+                          "fieldId": "field_1",
+                          "start": "2026-06-22T12:00:00Z",
+                          "end": "2026-06-22T13:00:00Z"
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.Created,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repo = BillingRepository(
+            MvpApiClient(
+                HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+                "http://example.test",
+                tokenStore,
+            ),
+            userRepo,
+            BillingRepositoryHttp_UnusedEventRepository,
+            db,
+        )
+
+        val result = repo.createRentalOrder(
+            publicSlug = "summit-sports",
+            eventId = "booking_partial",
+            selections = listOf(
+                RentalOrderSelectionRequest(
+                    scheduledFieldIds = listOf("field_1", "field_2"),
+                    startDate = "2026-06-22T12:00:00Z",
+                    endDate = "2026-06-22T13:00:00Z",
+                ),
+            ),
+        )
+
+        assertTrue(result.isFailure)
+        assertEquals("Unable to create rental order.", result.exceptionOrNull()?.message)
+        assertEquals(1, pendingDao.storedOrders.size)
+    }
+
+    @Test
     fun createRentalOrder_keeps_paid_booking_for_retry_after_server_failure() = runTest {
         val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
         val pendingDao = BillingRepositoryHttp_FakePendingRentalOrderDao()
@@ -2041,7 +2161,18 @@ class BillingRepositoryHttpTest {
                 )
             } else {
                 respond(
-                    content = "{\"bookingId\":\"booking_retry\",\"totalCents\":1200}",
+                    content = """
+                        {
+                          "bookingId": "booking_retry",
+                          "totalCents": 1200,
+                          "items": [{
+                            "id": "booking_retry__item_1",
+                            "fieldId": "field_1",
+                            "start": "2026-06-22T12:00:00Z",
+                            "end": "2026-06-22T13:00:00Z"
+                          }]
+                        }
+                    """.trimIndent(),
                     status = HttpStatusCode.Created,
                     headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
                 )
@@ -2098,7 +2229,18 @@ class BillingRepositoryHttpTest {
                 )
             } else {
                 respond(
-                    content = "{\"bookingId\":\"booking_crash\",\"totalCents\":1200}",
+                    content = """
+                        {
+                          "bookingId": "booking_crash",
+                          "totalCents": 1200,
+                          "items": [{
+                            "id": "booking_crash__item_1",
+                            "fieldId": "field_1",
+                            "start": "2026-06-22T12:00:00Z",
+                            "end": "2026-06-22T13:00:00Z"
+                          }]
+                        }
+                    """.trimIndent(),
                     status = HttpStatusCode.Created,
                     headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
                 )
@@ -2146,7 +2288,18 @@ class BillingRepositoryHttpTest {
         val engine = MockEngine { _ ->
             requests += 1
             respond(
-                content = "{\"bookingId\":\"booking_owner\",\"totalCents\":1200}",
+                content = """
+                    {
+                      "bookingId": "booking_owner",
+                      "totalCents": 1200,
+                      "items": [{
+                        "id": "booking_owner__item_1",
+                        "fieldId": "field_1",
+                        "start": "2026-06-22T12:00:00Z",
+                        "end": "2026-06-22T13:00:00Z"
+                      }]
+                    }
+                """.trimIndent(),
                 status = HttpStatusCode.Created,
                 headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
             )
@@ -2881,6 +3034,8 @@ class BillingRepositoryHttpTest {
         val db = BillingRepositoryHttp_FakeDatabaseService()
         val engine = MockEngine { request ->
             assertEquals("/api/organizations/org_1/reviews", request.url.encodedPath)
+            assertEquals("20", request.url.parameters["limit"])
+            assertEquals(null, request.url.parameters["cursor"])
             assertEquals(HttpMethod.Get, request.method)
             respond(
                 content = """
@@ -2897,6 +3052,7 @@ class BillingRepositoryHttpTest {
                         "updatedAt": "2026-07-09T20:00:00.000Z",
                         "reviewer": {"id": "u2", "displayName": "Taylor Reed", "profileImageUrl": null}
                       }],
+                      "nextCursor": "older cursor/+",
                       "viewerReview": null,
                       "viewerIsAuthenticated": true,
                       "canReview": true,
@@ -2921,7 +3077,55 @@ class BillingRepositoryHttpTest {
         assertEquals(2, payload.summary.reviewCount)
         assertEquals(1, payload.summary.countFor(5))
         assertEquals("Taylor Reed", payload.reviews.single().reviewer.displayName)
+        assertEquals("older cursor/+", payload.nextCursor)
         assertTrue(payload.canReview)
+    }
+
+    @Test
+    fun getOrganizationReviews_sends_an_opaque_cursor_with_a_bounded_limit() = runTest {
+        val engine = MockEngine { request ->
+            assertEquals("/api/organizations/org_1/reviews", request.url.encodedPath)
+            assertEquals("opaque cursor/+", request.url.parameters["cursor"])
+            assertEquals("100", request.url.parameters["limit"])
+            assertEquals(HttpMethod.Get, request.method)
+            respond(
+                content = """
+                    {
+                      "summary": {"averageRating": null, "reviewCount": 0, "ratingCounts": [0, 0, 0, 0, 0]},
+                      "reviews": [],
+                      "nextCursor": null,
+                      "viewerReview": null,
+                      "viewerIsAuthenticated": false,
+                      "canReview": false,
+                      "cannotReviewReason": "Sign in to write a review."
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repo = BillingRepository(
+            MvpApiClient(
+                HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+                "http://example.test",
+                BillingRepositoryHttp_InMemoryAuthTokenStore(),
+            ),
+            BillingRepositoryHttp_FakeUserRepository(
+                currentUser = billingMakeUser("u1"),
+                currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+            ),
+            BillingRepositoryHttp_UnusedEventRepository,
+            BillingRepositoryHttp_FakeDatabaseService(),
+        )
+
+        val payload = repo.getOrganizationReviews(
+            organizationId = "org_1",
+            cursor = "opaque cursor/+",
+            limit = Int.MAX_VALUE,
+        ).getOrThrow()
+
+        assertTrue(payload.reviews.isEmpty())
+        assertEquals(null, payload.nextCursor)
     }
 
     @Test
