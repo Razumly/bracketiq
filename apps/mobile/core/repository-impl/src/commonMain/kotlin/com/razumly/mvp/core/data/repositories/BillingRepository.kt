@@ -588,6 +588,30 @@ interface IBillingRepository : IMVPRepository {
     suspend fun createAccount(): Result<String>
     suspend fun getOnboardingLink(): Result<String>
     suspend fun listBills(ownerType: String, ownerId: String, limit: Int = 100): Result<List<Bill>>
+    suspend fun listBillsPage(
+        ownerType: String,
+        ownerId: String,
+        limit: Int = 100,
+        offset: Int = 0,
+    ): Result<RepositoryPage<Bill>> {
+        val normalizedLimit = limit.coerceAtLeast(1)
+        val normalizedOffset = offset.coerceAtLeast(0)
+        val prefixLimit = (normalizedOffset.toLong() + normalizedLimit.toLong())
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
+        return listBills(ownerType = ownerType, ownerId = ownerId, limit = prefixLimit).map { prefix ->
+            val items = prefix.drop(normalizedOffset).take(normalizedLimit)
+            RepositoryPage(
+                items = items,
+                pagination = RepositoryPagination(
+                    limit = normalizedLimit,
+                    offset = normalizedOffset,
+                    nextOffset = normalizedOffset + items.size,
+                    hasMore = prefix.size >= prefixLimit,
+                ),
+            )
+        }
+    }
     suspend fun createBill(request: CreateBillRequest): Result<Bill>
     suspend fun getBillPayments(billId: String): Result<List<BillPayment>>
     suspend fun getEventTeamBillingSnapshot(eventId: String, teamId: String): Result<EventTeamBillingSnapshot>
@@ -1510,6 +1534,55 @@ class BillingRepository(
             )
             response.bills.mapNotNull { it.toBillOrNull() }
         }
+
+    override suspend fun listBillsPage(
+        ownerType: String,
+        ownerId: String,
+        limit: Int,
+        offset: Int,
+    ): Result<RepositoryPage<Bill>> = runCatching {
+        val normalizedLimit = limit.coerceIn(1, 200)
+        val normalizedOffset = offset.coerceAtLeast(0)
+        val encodedOwnerType = ownerType.encodeURLQueryComponent()
+        val encodedOwnerId = ownerId.encodeURLQueryComponent()
+        val response = api.get<BillsResponseDto>(
+            path = "api/billing/bills?ownerType=$encodedOwnerType&ownerId=$encodedOwnerId" +
+                "&limit=$normalizedLimit&offset=$normalizedOffset",
+        )
+
+        if (response.pagination != null || normalizedOffset == 0) {
+            val bills = response.bills.mapNotNull { it.toBillOrNull() }
+            return@runCatching RepositoryPage(
+                items = bills,
+                pagination = response.pagination.toRepositoryPagination(
+                    fallbackLimit = normalizedLimit,
+                    fallbackOffset = normalizedOffset,
+                    fallbackItemCount = bills.size,
+                ),
+            )
+        }
+
+        // Older servers ignore `offset` and omit pagination metadata. During a
+        // rolling deploy, expand the requested prefix and slice it locally so
+        // older unpaid bills are still reachable instead of repeating page one.
+        val prefixLimit = (normalizedOffset.toLong() + normalizedLimit.toLong())
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
+        val legacyResponse = api.get<BillsResponseDto>(
+            path = "api/billing/bills?ownerType=$encodedOwnerType&ownerId=$encodedOwnerId&limit=$prefixLimit",
+        )
+        val prefix = legacyResponse.bills.mapNotNull { it.toBillOrNull() }
+        val bills = prefix.drop(normalizedOffset).take(normalizedLimit)
+        RepositoryPage(
+            items = bills,
+            pagination = RepositoryPagination(
+                limit = normalizedLimit,
+                offset = normalizedOffset,
+                nextOffset = normalizedOffset + bills.size,
+                hasMore = prefix.size >= prefixLimit,
+            ),
+        )
+    }
 
     override suspend fun createBill(request: CreateBillRequest): Result<Bill> = runCatching {
         val ownerType = request.ownerType.trim().uppercase()
@@ -2755,6 +2828,7 @@ private data class UpdateDiscountCodeRequestDto(
 @Serializable
 private data class BillsResponseDto(
     val bills: List<BillApiDto> = emptyList(),
+    val pagination: PaginationResponseDto? = null,
 )
 
 @Serializable

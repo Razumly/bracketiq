@@ -1,277 +1,102 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.Invite
-import com.razumly.mvp.core.data.dataTypes.addOfficialUser
-import com.razumly.mvp.core.data.dataTypes.removeOfficialUser
-import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
-import com.razumly.mvp.core.data.repositories.IUserRepository
-import com.razumly.mvp.core.network.dto.InviteCreateDto
+import com.razumly.mvp.core.data.repositories.EventStaffAssignmentRole
+import com.razumly.mvp.core.data.repositories.EventStaffInviteInput
+import com.razumly.mvp.core.data.repositories.EventStaffState
+import com.razumly.mvp.core.data.repositories.IEventRepository
+import com.razumly.mvp.core.util.emailAddressRegex
 
 private fun PendingStaffInviteDraft.validationErrorOrNull(): String? {
     val normalized = normalized()
     if (normalized.firstName.isBlank()) return "Staff invite first name is required."
     if (normalized.lastName.isBlank()) return "Staff invite last name is required."
     if (normalized.email.isBlank()) return "Staff invite email is required."
+    if (!normalized.email.matches(emailAddressRegex)) return "Enter a valid staff invite email address."
     if (normalized.roles.isEmpty()) return "Select at least one role for ${normalized.email}."
     return null
 }
 
-private fun validatePendingStaffInviteDrafts(drafts: List<PendingStaffInviteDraft>) {
-    drafts.forEach { draft ->
-        val error = draft.validationErrorOrNull()
-        if (error != null) {
-            error(error)
-        }
-    }
-}
+private data class EventOfficialStaffFingerprint(
+    val userId: String,
+    val positionIds: List<String>,
+    val fieldIds: List<String>,
+    val isActive: Boolean,
+)
 
-private suspend fun validatePendingStaffEmailMembership(
-    userRepository: IUserRepository,
-    event: Event,
-    drafts: List<PendingStaffInviteDraft>,
-) {
-    val assignedUserIds = drafts
-        .flatMap { draft -> draft.roles.map { role -> event.assignedUserIdsForRole(role) } }
-        .flatten()
-        .distinct()
-    if (assignedUserIds.isEmpty()) {
-        return
-    }
+private fun List<String>.normalizedStaffIds(): List<String> =
+    map(String::trim).filter(String::isNotBlank).distinct().sorted()
 
-    val matches = userRepository.findEmailMembership(
-        emails = drafts.map(PendingStaffInviteDraft::email),
-        userIds = assignedUserIds,
-    ).getOrThrow()
-    val matchedUserIdsByEmail = matches.groupBy(
-        keySelector = { match -> normalizeStaffInviteEmail(match.email) },
-        valueTransform = { match -> match.userId.trim() },
+private fun Event.officialStaffFingerprint(): List<EventOfficialStaffFingerprint> =
+    eventOfficials.mapNotNull { official ->
+        val userId = official.userId.trim().takeIf(String::isNotBlank) ?: return@mapNotNull null
+        EventOfficialStaffFingerprint(
+            userId = userId,
+            positionIds = official.positionIds.normalizedStaffIds(),
+            fieldIds = official.fieldIds.normalizedStaffIds(),
+            isActive = official.isActive,
+        )
+    }.sortedWith(
+        compareBy<EventOfficialStaffFingerprint>(EventOfficialStaffFingerprint::userId)
+            .thenBy { fingerprint -> fingerprint.positionIds.joinToString("\u0000") }
+            .thenBy { fingerprint -> fingerprint.fieldIds.joinToString("\u0000") }
+            .thenBy(EventOfficialStaffFingerprint::isActive),
     )
 
-    drafts.forEach { draft ->
-        val normalizedDraft = draft.normalized()
-        val matchedUserIds = matchedUserIdsByEmail[normalizedDraft.email].orEmpty().toSet()
-        normalizedDraft.roles.forEach { role ->
-            if (matchedUserIds.any { userId -> event.assignedUserIdsForRole(role).contains(userId) }) {
-                error("${normalizedDraft.email} is already added in the ${role.conflictListLabel()}.")
-            }
-        }
+internal fun requireNoUnsavedEventStaffChanges(
+    persistedEvent: Event,
+    preparedEvent: Event,
+    pendingStaffInvites: List<PendingStaffInviteDraft>,
+) {
+    val hasUnsavedChanges = pendingStaffInvites.isNotEmpty()
+        || persistedEvent.assistantHostIds.normalizedStaffIds() != preparedEvent.assistantHostIds.normalizedStaffIds()
+        || persistedEvent.officialIds.normalizedStaffIds() != preparedEvent.officialIds.normalizedStaffIds()
+        || persistedEvent.officialStaffFingerprint() != preparedEvent.officialStaffFingerprint()
+    check(!hasUnsavedChanges) {
+        "Save staff changes with Confirm before rescheduling or rebuilding the schedule."
     }
 }
 
-private fun buildTargetStaffRoles(event: Event): MutableMap<String, MutableSet<EventStaffRole>> {
-    val rolesByUserId = linkedMapOf<String, MutableSet<EventStaffRole>>()
-    event.officialIds
-        .map { userId -> userId.trim() }
-        .filter(String::isNotBlank)
-        .forEach { userId ->
-            rolesByUserId.getOrPut(userId) { linkedSetOf() }.add(EventStaffRole.OFFICIAL)
-        }
-    event.assistantHostIds
-        .map { userId -> userId.trim() }
-        .filter(String::isNotBlank)
-        .filterNot { userId -> userId == event.hostId.trim() }
-        .forEach { userId ->
-            rolesByUserId.getOrPut(userId) { linkedSetOf() }.add(EventStaffRole.ASSISTANT_HOST)
-        }
-    return rolesByUserId
+private fun PendingStaffInviteDraft.toRepositoryInput(): EventStaffInviteInput {
+    val normalized = normalized()
+    validationErrorOrNull()?.let(::error)
+    return EventStaffInviteInput(
+        email = normalized.email,
+        firstName = normalized.firstName,
+        lastName = normalized.lastName,
+        roles = normalized.roles
+            .map { role -> EventStaffAssignmentRole.valueOf(role.name) }
+            .toSet(),
+        resolvedUserId = normalized.resolvedUserId,
+    )
 }
 
-private fun Invite.normalizedStaffTypes(): Set<String> = staffTypes
-    .map(String::trim)
-    .filter(String::isNotBlank)
-    .map(String::uppercase)
-    .toSet()
-
-private fun Invite.isReinvitableStatus(): Boolean = when (status?.trim()?.uppercase()) {
-    "PENDING", "DECLINED", "FAILED", "EMAIL_INVITE" -> true
-    else -> false
+internal fun validatePendingStaffInviteDrafts(
+    pendingStaffInvites: List<PendingStaffInviteDraft>,
+): Result<Unit> = runCatching {
+    pendingStaffInvites.forEach { draft ->
+        draft.validationErrorOrNull()?.let(::error)
+    }
 }
 
-private fun mergeReturnedStaffInvites(
-    existing: List<Invite>,
-    deletedInviteIds: Set<String>,
-    returned: List<Invite>,
-    eventId: String,
-): List<Invite> {
-    val scopedExisting = existing.filter { invite ->
-        invite.type.equals("STAFF", ignoreCase = true) &&
-            invite.eventId?.trim() == eventId
-    }
-    val mergedByKey = linkedMapOf<String, Invite>()
-
-    scopedExisting.forEach { invite ->
-        if (invite.id !in deletedInviteIds) {
-            val key = invite.userId?.trim()?.takeIf(String::isNotBlank)
-                ?: normalizeStaffInviteEmail(invite.email)
-            if (key.isNotBlank()) {
-                mergedByKey[key] = invite
-            }
-        }
-    }
-
-    returned.forEach { invite ->
-        val key = invite.userId?.trim()?.takeIf(String::isNotBlank)
-            ?: normalizeStaffInviteEmail(invite.email)
-        if (key.isNotBlank()) {
-            mergedByKey[key] = invite
-        }
-    }
-
-    return mergedByKey.values.toList()
-}
-
-suspend fun reconcileEventStaffInvites(
-    userRepository: IUserRepository,
+suspend fun reconcileEventStaffState(
+    eventRepository: IEventRepository,
     event: Event,
     pendingStaffInvites: List<PendingStaffInviteDraft>,
-    existingStaffInvites: List<Invite>,
-    previouslyAssignedUserIds: Set<String> = emptySet(),
-    createdByUserId: String? = null,
-): Result<EventStaffSaveOutcome> = runCatching {
-    val normalizedDrafts = pendingStaffInvites
+    expectedRevision: String,
+): Result<EventStaffState> = runCatching {
+    val revision = expectedRevision.trim()
+    require(revision.isNotEmpty()) {
+        "Reload the event before saving staff changes."
+    }
+    validatePendingStaffInviteDrafts(pendingStaffInvites).getOrThrow()
+    val pendingInputs = pendingStaffInvites
         .map(PendingStaffInviteDraft::normalized)
-        .filter { draft -> draft.email.isNotBlank() }
+        .map(PendingStaffInviteDraft::toRepositoryInput)
 
-    validatePendingStaffInviteDrafts(normalizedDrafts)
-    validatePendingStaffEmailMembership(
-        userRepository = userRepository,
+    eventRepository.reconcileEventStaff(
         event = event,
-        drafts = normalizedDrafts,
-    )
-
-    val targetRolesByUserId = buildTargetStaffRoles(event)
-    val normalizedPreviouslyAssignedUserIds = previouslyAssignedUserIds
-        .map(String::trim)
-        .filter(String::isNotBlank)
-        .toSet()
-    val scopedExistingInvites = existingStaffInvites.filter { invite ->
-        invite.type.equals("STAFF", ignoreCase = true) &&
-            invite.eventId?.trim() == event.id
-    }
-    val scopedExistingInviteByUserId = scopedExistingInvites
-        .mapNotNull { invite ->
-            val userId = invite.userId?.trim()?.takeIf(String::isNotBlank) ?: return@mapNotNull null
-            userId to invite
-        }
-        .toMap()
-    val targetInviteRequests = mutableListOf<InviteCreateDto>()
-
-    targetRolesByUserId.forEach { (userId, roles) ->
-        val inviteStaffTypes = roles.map(EventStaffRole::toInviteStaffType).sorted()
-        val existingInvite = scopedExistingInviteByUserId[userId]
-        val shouldCreateOrUpdateInvite = when {
-            existingInvite == null -> userId !in normalizedPreviouslyAssignedUserIds
-            !existingInvite.isReinvitableStatus() -> false
-            else -> existingInvite.normalizedStaffTypes() != inviteStaffTypes.map(String::uppercase).toSet()
-        }
-        if (shouldCreateOrUpdateInvite) {
-            targetInviteRequests += InviteCreateDto(
-                type = "STAFF",
-                eventId = event.id,
-                userId = userId,
-                createdBy = createdByUserId,
-                staffTypes = inviteStaffTypes,
-                replaceStaffTypes = true,
-            )
-        }
-    }
-
-    normalizedDrafts.forEach { draft ->
-        val resolvedUserId = draft.resolvedUserId?.trim()?.takeIf(String::isNotBlank)
-        if (resolvedUserId != null) {
-            targetRolesByUserId.getOrPut(resolvedUserId) { linkedSetOf() }.addAll(draft.roles)
-        } else {
-            targetInviteRequests += InviteCreateDto(
-                type = "STAFF",
-                eventId = event.id,
-                email = draft.email,
-                firstName = draft.firstName,
-                lastName = draft.lastName,
-                createdBy = createdByUserId,
-                staffTypes = draft.roles.map(EventStaffRole::toInviteStaffType).sorted(),
-                replaceStaffTypes = true,
-            )
-        }
-    }
-
-    val activeUserIds = targetRolesByUserId.keys
-    val deletedInviteIds = scopedExistingInvites
-        .filter { invite ->
-            val inviteUserId = invite.userId?.trim()
-            !inviteUserId.isNullOrBlank() &&
-                inviteUserId in normalizedPreviouslyAssignedUserIds &&
-                inviteUserId !in activeUserIds
-        }
-        .map { invite -> invite.id }
-        .filter(String::isNotBlank)
-        .toSet()
-
-    deletedInviteIds.forEach { inviteId ->
-        userRepository.deleteInvite(inviteId).getOrThrow()
-    }
-
-    val returnedInvites = userRepository.createInvites(targetInviteRequests).getOrThrow()
-    val draftRolesByEmail = normalizedDrafts.associateBy(
-        keySelector = PendingStaffInviteDraft::email,
-        valueTransform = PendingStaffInviteDraft::roles,
-    )
-
-    val resolvedAssistantHostIds = buildSet {
-        addAll(event.assistantHostIds.map(String::trim).filter(String::isNotBlank))
-        returnedInvites.forEach { invite ->
-            val userId = invite.userId?.trim().takeIf { !it.isNullOrBlank() } ?: return@forEach
-            val roles = targetRolesByUserId[userId]
-                ?: draftRolesByEmail[normalizeStaffInviteEmail(invite.email)]
-                ?: emptySet()
-            if (roles.contains(EventStaffRole.ASSISTANT_HOST) && userId != event.hostId.trim()) {
-                add(userId)
-            }
-        }
-    }.toList()
-
-    val resolvedAssignedOfficialIds = buildSet {
-        addAll(event.officialIds.map(String::trim).filter(String::isNotBlank))
-        returnedInvites.forEach { invite ->
-            val userId = invite.userId?.trim().takeIf { !it.isNullOrBlank() } ?: return@forEach
-            val roles = targetRolesByUserId[userId]
-                ?: draftRolesByEmail[normalizeStaffInviteEmail(invite.email)]
-                ?: emptySet()
-            if (roles.contains(EventStaffRole.OFFICIAL)) {
-                add(userId)
-            }
-        }
-    }.toList()
-
-    val updatedEvent = resolvedAssignedOfficialIds.fold(
-        event.copy(
-            assistantHostIds = resolvedAssistantHostIds,
-            officialIds = emptyList(),
-            eventOfficials = event.eventOfficials.filterNot { official ->
-                official.userId.trim().isNotBlank()
-            },
-        ),
-    ) { currentEvent, userId ->
-        currentEvent.addOfficialUser(userId)
-    }.copy(
-        assistantHostIds = resolvedAssistantHostIds,
-    ).let { currentEvent ->
-        currentEvent.eventOfficials
-            .map { official -> official.userId.trim() }
-            .filter(String::isNotBlank)
-            .filterNot { userId -> resolvedAssignedOfficialIds.contains(userId) }
-            .fold(currentEvent) { eventState, userId ->
-                eventState.removeOfficialUser(userId)
-            }
-    }.syncOfficialStaffing()
-
-    EventStaffSaveOutcome(
-        event = updatedEvent,
-        staffInvites = mergeReturnedStaffInvites(
-            existing = existingStaffInvites,
-            deletedInviteIds = deletedInviteIds,
-            returned = returnedInvites,
-            eventId = event.id,
-        ),
-    )
+        pendingInvites = pendingInputs,
+        expectedRevision = revision,
+    ).getOrThrow()
 }

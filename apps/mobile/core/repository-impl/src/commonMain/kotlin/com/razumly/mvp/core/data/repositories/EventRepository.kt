@@ -60,6 +60,9 @@ import com.razumly.mvp.core.network.dto.EventResponseDto
 import com.razumly.mvp.core.network.dto.EventSearchFiltersDto
 import com.razumly.mvp.core.network.dto.EventSearchRequestDto
 import com.razumly.mvp.core.network.dto.EventSearchUserLocationDto
+import com.razumly.mvp.core.network.dto.EventStaffPendingInviteDto
+import com.razumly.mvp.core.network.dto.EventStaffPutRequestDto
+import com.razumly.mvp.core.network.dto.EventStaffStateResponseDto
 import com.razumly.mvp.core.network.dto.EventTagsResponseDto
 import com.razumly.mvp.core.network.dto.EventTeamComplianceResponseDto
 import com.razumly.mvp.core.network.dto.EventTeamComplianceSummaryDto
@@ -69,6 +72,7 @@ import com.razumly.mvp.core.network.dto.EventTemplatesResponseDto
 import com.razumly.mvp.core.network.dto.EventUserComplianceResponseDto
 import com.razumly.mvp.core.network.dto.EventsResponseDto
 import com.razumly.mvp.core.network.dto.ProfileScheduleResponseDto
+import com.razumly.mvp.core.network.dto.ProfileScheduleNextActionResponseDto
 import com.razumly.mvp.core.network.dto.RegistrationQuestionAnswerDto
 import com.razumly.mvp.core.network.dto.RegistrationQuestionAnswerSnapshotDto
 import com.razumly.mvp.core.network.dto.ScheduleEventRequestDto
@@ -81,6 +85,7 @@ import com.razumly.mvp.core.network.dto.StandingsResponseDto
 import com.razumly.mvp.core.network.dto.UpdateEventRequestDto
 import com.razumly.mvp.core.network.dto.toUserDataOrNull
 import com.razumly.mvp.core.network.dto.toUpdateDto
+import io.github.aakira.napier.Napier
 import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -89,6 +94,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.coroutines.cancel
@@ -105,6 +111,7 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.Serializable
 import kotlin.time.Clock
+import kotlin.time.Duration.Companion.days
 import kotlin.time.Instant
 
 data class OrganizationEventPage(
@@ -128,6 +135,14 @@ interface IEventRepository : IMVPRepository {
     suspend fun getEvent(eventId: String): Result<Event>
     suspend fun getLeagueScoringConfig(eventId: String): Result<LeagueScoringConfig?> = Result.success(null)
     suspend fun getEventStaffInvites(eventId: String): Result<List<Invite>>
+    suspend fun getEventStaffState(event: Event): Result<EventStaffState> =
+        Result.failure(UnsupportedOperationException("Atomic event staff loading is not supported."))
+    suspend fun reconcileEventStaff(
+        event: Event,
+        pendingInvites: List<EventStaffInviteInput>,
+        expectedRevision: String,
+    ): Result<EventStaffState> =
+        Result.failure(UnsupportedOperationException("Atomic event staff reconciliation is not supported."))
     suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>>
     suspend fun getEventsByOrganization(organizationId: String, limit: Int = 200): Result<List<Event>>
     suspend fun getOrganizationEventsPage(
@@ -163,6 +178,18 @@ interface IEventRepository : IMVPRepository {
         timeSlots: List<TimeSlot>? = null,
         leagueScoringConfig: LeagueScoringConfigDTO? = null,
     ): Result<Event>
+    suspend fun updateEventPreservingStaff(
+        newEvent: Event,
+        fields: List<Field>? = null,
+        timeSlots: List<TimeSlot>? = null,
+        leagueScoringConfig: LeagueScoringConfigDTO? = null,
+        expectedStaffRevision: String,
+    ): Result<Event> = updateEvent(
+        newEvent = newEvent,
+        fields = fields,
+        timeSlots = timeSlots,
+        leagueScoringConfig = leagueScoringConfig,
+    )
     suspend fun updateLocalEvent(newEvent: Event): Result<Event>
     fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<Event>>>
     suspend fun getEventsInBounds(bounds: Bounds): Result<Pair<List<Event>, Boolean>>
@@ -333,6 +360,8 @@ interface IEventRepository : IMVPRepository {
         occurrence: EventOccurrenceSelection? = null,
     ): Result<Unit>
     suspend fun getMySchedule(): Result<UserScheduleSnapshot> = Result.success(UserScheduleSnapshot())
+    suspend fun getMyScheduleNextAction(): Result<UserScheduleNextAction> =
+        Result.success(UserScheduleNextAction.CreateEvent)
     suspend fun syncCurrentUserRegistrationCache(): Result<Unit> = Result.success(Unit)
     suspend fun syncCurrentUserRegistrationCacheForEvent(eventId: String): Result<Unit> = Result.success(Unit)
     fun observeCurrentUserRegistrationsForEvent(eventId: String): Flow<List<EventRegistrationCacheEntry>> =
@@ -436,6 +465,7 @@ data class EventDetailSyncResult(
     val timeSlots: List<TimeSlot> = emptyList(),
     val leagueScoringConfig: LeagueScoringConfig? = null,
     val staffInvites: List<Invite> = emptyList(),
+    val staffRevision: String? = null,
 ) {
     val event: Event get() = participants.event
 }
@@ -585,6 +615,23 @@ data class UserScheduleSnapshot(
     val fields: List<Field> = emptyList(),
 )
 
+sealed interface UserScheduleNextAction {
+    data object CreateEvent : UserScheduleNextAction
+
+    data class EventShortcut(
+        val eventId: String,
+        val eventName: String,
+        val eventImageId: String,
+    ) : UserScheduleNextAction
+
+    data class MatchShortcut(
+        val eventId: String,
+        val matchId: String,
+        val eventName: String,
+        val eventImageId: String,
+    ) : UserScheduleNextAction
+}
+
 private data class RegistrationDivisionPayload(
     val divisionId: String? = null,
     val divisionTypeId: String? = null,
@@ -634,6 +681,10 @@ private const val MANAGEMENT_SECTION_WAITLIST = "WAITLIST"
 private const val MANAGEMENT_SECTION_FREE_AGENT = "FREE_AGENT"
 private const val STANDALONE_COMPLIANCE_PARENT_TEAM_ID = ""
 private const val KILOMETERS_PER_MILE = 1.60934
+private const val MY_SCHEDULE_PAGE_SIZE = 200
+private const val MY_SCHEDULE_MAX_PAGE_COUNT = 100
+private const val MY_SCHEDULE_PAST_DAYS = 90
+private const val MY_SCHEDULE_FUTURE_DAYS = 366
 
 private fun milesToKilometers(value: Double): Double = value * KILOMETERS_PER_MILE
 
@@ -1737,6 +1788,7 @@ class EventRepository(
             timeSlots = bootstrap.timeSlots,
             leagueScoringConfig = leagueScoringConfig,
             staffInvites = bootstrap.staffInvites,
+            staffRevision = bootstrap.staffRevision?.trim()?.takeIf(String::isNotBlank),
         )
     }
 
@@ -1965,6 +2017,46 @@ class EventRepository(
         fetchRemoteEventDto(normalizedEventId).staffInvites.orEmpty()
     }
 
+    override suspend fun getEventStaffState(event: Event): Result<EventStaffState> = runCatching {
+        val eventId = event.id.trim().takeIf(String::isNotBlank)
+            ?: error("Event id is required.")
+        val response = api.get<EventStaffStateResponseDto>("api/events/$eventId/staff")
+        response.toEventStaffState(event).also { state ->
+            cacheEventStaffStateBestEffort(state)
+        }
+    }
+
+    override suspend fun reconcileEventStaff(
+        event: Event,
+        pendingInvites: List<EventStaffInviteInput>,
+        expectedRevision: String,
+    ): Result<EventStaffState> = runCatching {
+        val eventId = event.id.trim().takeIf(String::isNotBlank)
+            ?: error("Event id is required.")
+        val revision = expectedRevision.trim().takeIf(String::isNotBlank)
+            ?: error("Event staff revision is required.")
+        val response = api.put<EventStaffPutRequestDto, EventStaffStateResponseDto>(
+            path = "api/events/$eventId/staff",
+            body = EventStaffPutRequestDto(
+                expectedRevision = revision,
+                assistantHostIds = event.assistantHostIds,
+                eventOfficials = event.eventOfficials,
+                pendingInvites = pendingInvites.map { invite ->
+                    EventStaffPendingInviteDto(
+                        email = invite.email.trim().lowercase(),
+                        firstName = invite.firstName.trim(),
+                        lastName = invite.lastName.trim(),
+                        roles = invite.roles.map(EventStaffAssignmentRole::name).sorted(),
+                        resolvedUserId = invite.resolvedUserId?.trim()?.takeIf(String::isNotBlank),
+                    )
+                },
+            ),
+        )
+        response.toEventStaffState(event).also { state ->
+            cacheEventStaffStateBestEffort(state)
+        }
+    }
+
     override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> = runCatching {
         val ids = eventIds.map(String::trim).filter(String::isNotBlank).distinct()
         if (ids.isEmpty()) return@runCatching emptyList()
@@ -2146,6 +2238,40 @@ class EventRepository(
         fields: List<Field>?,
         timeSlots: List<TimeSlot>?,
         leagueScoringConfig: LeagueScoringConfigDTO?,
+    ): Result<Event> = updateEventInternal(
+        newEvent = newEvent,
+        fields = fields,
+        timeSlots = timeSlots,
+        leagueScoringConfig = leagueScoringConfig,
+        expectedStaffRevision = null,
+    )
+
+    override suspend fun updateEventPreservingStaff(
+        newEvent: Event,
+        fields: List<Field>?,
+        timeSlots: List<TimeSlot>?,
+        leagueScoringConfig: LeagueScoringConfigDTO?,
+        expectedStaffRevision: String,
+    ): Result<Event> {
+        val revision = expectedStaffRevision.trim()
+        if (revision.isEmpty()) {
+            return Result.failure(IllegalArgumentException("Event staff revision is required."))
+        }
+        return updateEventInternal(
+            newEvent = newEvent,
+            fields = fields,
+            timeSlots = timeSlots,
+            leagueScoringConfig = leagueScoringConfig,
+            expectedStaffRevision = revision,
+        )
+    }
+
+    private suspend fun updateEventInternal(
+        newEvent: Event,
+        fields: List<Field>?,
+        timeSlots: List<TimeSlot>?,
+        leagueScoringConfig: LeagueScoringConfigDTO?,
+        expectedStaffRevision: String?,
     ): Result<Event> =
         singleResponse(networkCall = {
             val eventDto = newEvent.toUpdateDto(
@@ -2157,7 +2283,13 @@ class EventRepository(
                 includeTimeSlotObjects = timeSlots != null,
             )
             val encoded = jsonMVP.encodeToJsonElement(UpdateEventRequestDto(eventDto)).jsonObject
-            val encodedEvent = (encoded["event"] as? JsonObject).orEmpty()
+            val encodedEvent = JsonObject(
+                (encoded["event"] as? JsonObject)
+                    .orEmpty()
+                    .filterKeys { field ->
+                        field !in setOf("assistantHostIds", "eventOfficials", "officialIds")
+                    },
+            )
             val cachedEvent = databaseService.getEventDao.getEventById(newEvent.id)
             val clearableFields = cachedEvent
                 ?.let { existing -> newEvent.explicitlyClearedEventPatchFields(existing) }
@@ -2167,17 +2299,46 @@ class EventRepository(
                     .filterNot(encodedEvent::containsKey)
                     .associateWith { JsonNull },
             )
+            val requestBody = buildMap {
+                put("event", eventPatch)
+                expectedStaffRevision?.let { revision ->
+                    put("preserveStaffAssignments", JsonPrimitive(true))
+                    put("expectedStaffRevision", JsonPrimitive(revision))
+                }
+            }
             val updated = api.patch<JsonObject, EventApiDto>(
                 path = "api/events/${newEvent.id}",
-                body = JsonObject(mapOf("event" to eventPatch)),
+                body = JsonObject(requestBody),
             ).toEventOrNull() ?: error("Update event response missing event")
             updated
         }, saveCall = { event ->
-            databaseService.getEventDao.upsertEvent(event)
-            persistEventRelations(event)
+            if (expectedStaffRevision == null) {
+                databaseService.getEventDao.upsertEvent(event)
+                persistEventRelations(event)
+            } else {
+                cacheUpdatedEventBestEffort(event)
+            }
         }, onReturn = { event ->
             event
         })
+
+    private suspend fun cacheEventStaffStateBestEffort(state: EventStaffState) {
+        runCatching {
+            databaseService.getEventDao.upsertEvent(state.event)
+            persistEventRelations(state.event)
+        }.onFailure { error ->
+            Napier.w("Failed to cache event staff state for ${state.event.id}.", error)
+        }
+    }
+
+    private suspend fun cacheUpdatedEventBestEffort(event: Event) {
+        runCatching {
+            databaseService.getEventDao.upsertEvent(event)
+            persistEventRelations(event)
+        }.onFailure { error ->
+            Napier.w("Failed to cache staff-preserving event update for ${event.id}.", error)
+        }
+    }
 
     override suspend fun updateLocalEvent(newEvent: Event): Result<Event> {
         databaseService.getEventDao.upsertEvent(newEvent)
@@ -2894,11 +3055,92 @@ class EventRepository(
     }
 
     override suspend fun getMySchedule(): Result<UserScheduleSnapshot> = runCatching {
-        val response = api.get<ProfileScheduleResponseDto>("api/profile/schedule")
-        val events = response.events.mapNotNull { it.toEventOrNull() }
-        val matches = response.matches.mapNotNull { it.toMatchOrNull() }
-        val teams = response.teams.mapNotNull { it.toTeamOrNull() }
-        val fields = response.fields
+        val requestedAt = Instant.fromEpochMilliseconds(Clock.System.now().toEpochMilliseconds())
+        val windowFrom = requestedAt.minus(MY_SCHEDULE_PAST_DAYS.days)
+        val windowTo = requestedAt.plus(MY_SCHEDULE_FUTURE_DAYS.days)
+        val encodedWindow = "from=${windowFrom.toString().encodeURLQueryComponent()}" +
+            "&to=${windowTo.toString().encodeURLQueryComponent()}"
+        val eventsById = linkedMapOf<String, Event>()
+        val matchesById = linkedMapOf<String, MatchMVP>()
+        val teamsById = linkedMapOf<String, Team>()
+        val fieldsById = linkedMapOf<String, Field>()
+        val seenCursors = mutableSetOf<String>()
+        var cursor: String? = null
+        var pageCount = 0
+
+        do {
+            pageCount += 1
+            check(pageCount <= MY_SCHEDULE_MAX_PAGE_COUNT) {
+                "Schedule endpoint exceeded the safe pagination limit"
+            }
+            val cursorQuery = cursor?.let { value ->
+                "&cursor=${value.encodeURLQueryComponent(encodeFull = true)}"
+            }.orEmpty()
+            val response = api.get<ProfileScheduleResponseDto>(
+                "api/profile/schedule?$encodedWindow&limit=$MY_SCHEDULE_PAGE_SIZE$cursorQuery",
+            )
+
+            response.events.mapNotNull { it.toEventOrNull() }
+                .forEach { event -> eventsById[event.id] = event }
+            response.matches.mapNotNull { it.toMatchOrNull() }
+                .forEach { match -> matchesById[match.id] = match }
+            response.teams.mapNotNull { it.toTeamOrNull() }
+                .forEach { team -> teamsById[team.id] = team }
+            response.fields.forEach { field -> fieldsById[field.id] = field }
+
+            val pagination = response.pagination
+            if (pagination == null) {
+                check(pageCount == 1) {
+                    "Schedule response dropped pagination metadata during continuation"
+                }
+                check(response.events.size < MY_SCHEDULE_PAGE_SIZE) {
+                    "Schedule response reached the legacy server cap without completeness metadata"
+                }
+                cursor = null
+            } else if (!pagination.hasMore) {
+                check(pagination.isComplete != false) {
+                    "Schedule response declared an incomplete final page"
+                }
+                pagination.windowFrom?.let { returnedFrom ->
+                    check(Instant.parse(returnedFrom) == windowFrom) {
+                        "Schedule response window changed while paging"
+                    }
+                }
+                pagination.windowTo?.let { returnedTo ->
+                    check(Instant.parse(returnedTo) == windowTo) {
+                        "Schedule response window changed while paging"
+                    }
+                }
+                cursor = null
+            } else {
+                check(pagination.isComplete != true) {
+                    "Schedule response marked a page complete while also returning a continuation"
+                }
+                pagination.windowFrom?.let { returnedFrom ->
+                    check(Instant.parse(returnedFrom) == windowFrom) {
+                        "Schedule response window changed while paging"
+                    }
+                }
+                pagination.windowTo?.let { returnedTo ->
+                    check(Instant.parse(returnedTo) == windowTo) {
+                        "Schedule response window changed while paging"
+                    }
+                }
+                val nextCursor = pagination.nextCursor
+                    ?.trim()
+                    ?.takeIf(String::isNotBlank)
+                    ?: error("Schedule page is incomplete but did not provide a continuation cursor")
+                check(seenCursors.add(nextCursor)) {
+                    "Schedule pagination returned the same continuation cursor more than once"
+                }
+                cursor = nextCursor
+            }
+        } while (cursor != null)
+
+        val events = eventsById.values.toList()
+        val matches = matchesById.values.toList()
+        val teams = teamsById.values.toList()
+        val fields = fieldsById.values.toList()
 
         if (events.isNotEmpty()) {
             databaseService.getEventDao.upsertEvents(events)
@@ -2919,6 +3161,36 @@ class EventRepository(
             teams = teams,
             fields = fields,
         )
+    }
+
+    override suspend fun getMyScheduleNextAction(): Result<UserScheduleNextAction> = runCatching {
+        val response = api.get<ProfileScheduleNextActionResponseDto>(
+            "api/profile/schedule/next-action",
+        )
+        check(response.contractVersion == 1) {
+            "Unsupported schedule next-action contract version ${response.contractVersion}"
+        }
+
+        val action = response.action
+        fun requiredValue(value: String?, label: String): String =
+            value?.trim()?.takeIf(String::isNotBlank)
+                ?: error("Schedule next-action response is missing $label")
+
+        when (action.type.trim().uppercase()) {
+            "CREATE_EVENT" -> UserScheduleNextAction.CreateEvent
+            "EVENT" -> UserScheduleNextAction.EventShortcut(
+                eventId = requiredValue(action.eventId, "eventId"),
+                eventName = requiredValue(action.eventName, "eventName"),
+                eventImageId = action.eventImageId.orEmpty(),
+            )
+            "MATCH" -> UserScheduleNextAction.MatchShortcut(
+                eventId = requiredValue(action.eventId, "eventId"),
+                matchId = requiredValue(action.matchId, "matchId"),
+                eventName = requiredValue(action.eventName, "eventName"),
+                eventImageId = action.eventImageId.orEmpty(),
+            )
+            else -> error("Unsupported schedule next-action type ${action.type}")
+        }
     }
 
     override suspend fun deleteEvent(eventId: String): Result<Unit> = runCatching {

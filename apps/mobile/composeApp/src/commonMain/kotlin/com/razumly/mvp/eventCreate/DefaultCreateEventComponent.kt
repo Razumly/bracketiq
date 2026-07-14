@@ -63,8 +63,9 @@ import com.razumly.mvp.eventDetail.EventStaffRole
 import com.razumly.mvp.eventDetail.PendingStaffInviteDraft
 import com.razumly.mvp.eventDetail.mergePendingStaffInviteDraft
 import com.razumly.mvp.eventDetail.normalizeStaffInviteEmail
-import com.razumly.mvp.eventDetail.reconcileEventStaffInvites
+import com.razumly.mvp.eventDetail.reconcileEventStaffState
 import com.razumly.mvp.eventDetail.resolveEffectiveLeagueSlotDivisionIds
+import com.razumly.mvp.eventDetail.validatePendingStaffInviteDrafts
 import com.razumly.mvp.eventDetail.eventImageFailureMessage
 import com.razumly.mvp.eventDetail.eventImageRetryError
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
@@ -1174,14 +1175,25 @@ class DefaultCreateEventComponent(
             loadingHandler.hideLoading()
             return
         }
+        validatePendingStaffInviteDrafts(_pendingStaffInvites.value).getOrElse { error ->
+            _errorState.value = ErrorMessage(error.userMessage("Fix the pending staff invites before creating the event."))
+            loadingHandler.hideLoading()
+            return
+        }
 
         val requiredTemplateIds = preparedEvent.event.requiredTemplateIds
             .map(String::trim)
             .filter(String::isNotBlank)
             .distinct()
 
+        val desiredStaffEvent = preparedEvent.event
+        val assignmentFreeEvent = desiredStaffEvent.copy(
+            assistantHostIds = emptyList(),
+            officialIds = emptyList(),
+            eventOfficials = emptyList(),
+        )
         eventRepository.createEvent(
-            preparedEvent.event,
+            assignmentFreeEvent,
             requiredTemplateIds = requiredTemplateIds,
             leagueScoringConfig = _leagueScoringConfig.value
                 .takeIf { preparedEvent.event.eventType == EventType.LEAGUE },
@@ -1189,15 +1201,21 @@ class DefaultCreateEventComponent(
             timeSlots = preparedEvent.timeSlots,
         )
             .onSuccess { createdEvent ->
-                val syncedEvent = syncEventStaffAssignments(createdEvent)
+                syncEventStaffAssignments(
+                    createdEvent = createdEvent,
+                    desiredStaffEvent = desiredStaffEvent,
+                )
+                    .onSuccess { syncedEvent ->
+                        loadingHandler.hideLoading()
+                        onEventCreated(syncedEvent)
+                    }
                     .onFailure { error ->
                         _errorState.value = ErrorMessage(
-                            error.userMessage("Event created, but staff invites failed to sync."),
+                            "Event was created without the requested staff changes. " +
+                                "Staff sync failed: ${error.userMessage()}",
                         )
+                        loadingHandler.hideLoading()
                     }
-                    .getOrDefault(createdEvent)
-                loadingHandler.hideLoading()
-                onEventCreated(syncedEvent)
             }
             .onFailure {
                 _errorState.value = ErrorMessage(it.userMessage())
@@ -1205,29 +1223,32 @@ class DefaultCreateEventComponent(
             }
     }
 
-    private suspend fun syncEventStaffAssignments(createdEvent: Event): Result<Event> = runCatching {
-        val shouldSyncStaff = createdEvent.assistantHostIds.isNotEmpty() ||
-            createdEvent.officialIds.isNotEmpty() ||
+    private suspend fun syncEventStaffAssignments(
+        createdEvent: Event,
+        desiredStaffEvent: Event,
+    ): Result<Event> = runCatching {
+        val shouldSyncStaff = desiredStaffEvent.assistantHostIds.isNotEmpty() ||
+            desiredStaffEvent.eventOfficials.isNotEmpty() ||
             _pendingStaffInvites.value.isNotEmpty()
         if (!shouldSyncStaff) {
             return@runCatching createdEvent
         }
 
-        val saveOutcome = reconcileEventStaffInvites(
-            userRepository = userRepository,
-            event = createdEvent,
+        val currentStaffState = eventRepository.getEventStaffState(createdEvent).getOrThrow()
+        val desiredEvent = currentStaffState.event.copy(
+            assistantHostIds = desiredStaffEvent.assistantHostIds,
+            eventOfficials = desiredStaffEvent.eventOfficials,
+            officialIds = desiredStaffEvent.eventOfficials.map { official -> official.userId },
+        )
+        val saveOutcome = reconcileEventStaffState(
+            eventRepository = eventRepository,
+            event = desiredEvent,
             pendingStaffInvites = _pendingStaffInvites.value,
-            existingStaffInvites = emptyList(),
-            createdByUserId = currentUser.value?.id,
+            expectedRevision = currentStaffState.revision,
         ).getOrThrow()
 
         _pendingStaffInvites.value = emptyList()
-
-        if (saveOutcome.event == createdEvent) {
-            saveOutcome.event
-        } else {
-            eventRepository.updateEvent(saveOutcome.event).getOrThrow()
-        }
+        saveOutcome.event
     }
 
     private data class PreparedEventForCreation(

@@ -49,6 +49,7 @@ import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.PushDeviceTargetDebugStatus
 import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
 import com.razumly.mvp.core.data.repositories.ProfileDocumentType
+import com.razumly.mvp.core.data.repositories.RepositoryPage
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.IUserRepository
@@ -148,6 +149,49 @@ data class ProfilePaymentPlansState(
     val plans: List<ProfilePaymentPlan> = emptyList(),
     val error: String? = null,
 )
+
+private const val PROFILE_BILLS_PAGE_SIZE = 100
+private const val PROFILE_BILLS_MAX_PAGES = 100
+
+internal suspend fun loadAllProfileBills(
+    loadPage: suspend (limit: Int, offset: Int) -> Result<RepositoryPage<Bill>>,
+    isCurrent: () -> Boolean,
+    pageSize: Int = PROFILE_BILLS_PAGE_SIZE,
+    maxPages: Int = PROFILE_BILLS_MAX_PAGES,
+): Result<List<Bill>?> {
+    val normalizedPageSize = pageSize.coerceAtLeast(1)
+    val normalizedMaxPages = maxPages.coerceAtLeast(1)
+    val billsById = linkedMapOf<String, Bill>()
+    var offset = 0
+    var pageCount = 0
+
+    while (isCurrent()) {
+        if (pageCount >= normalizedMaxPages) {
+            return Result.failure(
+                IllegalStateException("Bill pagination exceeded the safe page limit."),
+            )
+        }
+        pageCount += 1
+        val pageResult = loadPage(normalizedPageSize, offset)
+        if (!isCurrent()) return Result.success(null)
+        val page = pageResult.getOrElse { return Result.failure(it) }
+        page.items.forEach { bill -> billsById[bill.id] = bill }
+
+        if (!page.pagination.hasMore) {
+            return Result.success(billsById.values.toList())
+        }
+
+        val nextOffset = page.pagination.nextOffset
+        if (nextOffset <= offset) {
+            return Result.failure(
+                IllegalStateException("Bill pagination did not advance beyond offset $offset."),
+            )
+        }
+        offset = nextOffset
+    }
+
+    return Result.success(null)
+}
 
 private data class ActiveBillPaymentAttempt(
     val checkoutOperationId: String,
@@ -282,6 +326,17 @@ internal data class ConnectionSearchRequest(
 )
 
 internal class ConnectionRefreshRequestTracker {
+    private var latestRequestId = 0L
+
+    fun begin(): Long {
+        latestRequestId += 1
+        return latestRequestId
+    }
+
+    fun isCurrent(requestId: Long): Boolean = requestId == latestRequestId
+}
+
+internal class MyScheduleRefreshRequestTracker {
     private var latestRequestId = 0L
 
     fun begin(): Long {
@@ -792,8 +847,11 @@ class DefaultProfileComponent(
     private var discountTargetsJob: Job? = null
     private var connectionsRefreshJob: Job? = null
     private var connectionSearchJob: Job? = null
+    private var paymentPlansGeneration = 0L
     private val connectionsRefreshRequests = ConnectionRefreshRequestTracker()
     private val connectionSearchRequests = ConnectionSearchRequestTracker()
+    private var myScheduleRefreshJob: Job? = null
+    private val myScheduleRefreshRequests = MyScheduleRefreshRequestTracker()
     private var childrenTabVisibilityUserId: String? = null
     private var pendingDocumentSyncJob: Job? = null
     private var pendingBillingAddressAction: (() -> Unit)? = null
@@ -1229,7 +1287,10 @@ class DefaultProfileComponent(
     }
 
     override fun refreshMySchedule() {
-        scope.launch {
+        myScheduleRefreshJob?.cancel()
+        val refreshRequestId = myScheduleRefreshRequests.begin()
+        myScheduleRefreshJob = scope.launch {
+            if (!myScheduleRefreshRequests.isCurrent(refreshRequestId)) return@launch
             _myScheduleState.value = _myScheduleState.value.copy(
                 isLoading = true,
                 error = null,
@@ -1237,6 +1298,7 @@ class DefaultProfileComponent(
 
             eventRepository.getMySchedule()
                 .onSuccess { snapshot ->
+                    if (!myScheduleRefreshRequests.isCurrent(refreshRequestId)) return@onSuccess
                     _myScheduleState.value = ProfileMyScheduleState(
                         isLoading = false,
                         events = snapshot.events,
@@ -1247,6 +1309,7 @@ class DefaultProfileComponent(
                     )
                 }
                 .onFailure { throwable ->
+                    if (!myScheduleRefreshRequests.isCurrent(refreshRequestId)) return@onFailure
                     _myScheduleState.value = _myScheduleState.value.copy(
                         isLoading = false,
                         error = throwable.userMessage("Failed to load schedule."),
@@ -1567,7 +1630,9 @@ class DefaultProfileComponent(
     }
 
     override fun refreshPaymentPlans() {
+        val generation = ++paymentPlansGeneration
         scope.launch {
+            if (generation != paymentPlansGeneration) return@launch
             _paymentPlansState.value = _paymentPlansState.value.copy(
                 isLoading = true,
                 error = null,
@@ -1575,25 +1640,47 @@ class DefaultProfileComponent(
 
             val currentUser = userRepository.currentUser.value.getOrNull()
             if (currentUser == null) {
-                _paymentPlansState.value = ProfilePaymentPlansState(
-                    isLoading = false,
-                    plans = emptyList(),
-                    error = "Unable to load payment plans for the current user.",
-                )
+                if (generation == paymentPlansGeneration) {
+                    _paymentPlansState.value = ProfilePaymentPlansState(
+                        isLoading = false,
+                        plans = emptyList(),
+                        error = "Unable to load payment plans for the current user.",
+                    )
+                }
                 return@launch
             }
 
             val plans = mutableListOf<ProfilePaymentPlan>()
-            val userBills = billingRepository.listBills(ownerType = "USER", ownerId = currentUser.id)
-                .getOrElse {
-                    _paymentPlansState.value = ProfilePaymentPlansState(
-                        isLoading = false,
-                        plans = emptyList(),
-                        error = it.userMessage("Failed to load bills."),
+            val userBills = loadAllProfileBills(
+                loadPage = { limit, offset ->
+                    billingRepository.listBillsPage(
+                        ownerType = "USER",
+                        ownerId = currentUser.id,
+                        limit = limit,
+                        offset = offset,
                     )
+                },
+                isCurrent = { generation == paymentPlansGeneration },
+            )
+                .getOrElse {
+                    if (generation == paymentPlansGeneration) {
+                        _paymentPlansState.value = ProfilePaymentPlansState(
+                            isLoading = false,
+                            plans = emptyList(),
+                            error = it.userMessage("Failed to load bills."),
+                        )
+                    }
                     return@launch
-                }
-            plans.addAll(buildPaymentPlans(bills = userBills, ownerLabel = currentUser.fullName))
+                } ?: return@launch
+            plans.addAll(
+                buildPaymentPlans(
+                    bills = userBills,
+                    ownerLabel = currentUser.fullName,
+                    isCurrent = { generation == paymentPlansGeneration },
+                ) ?: return@launch,
+            )
+
+            if (generation != paymentPlansGeneration) return@launch
 
             val teams = teamRepository.getTeamsForUser(currentUser.id)
                 .getOrElse { throwable ->
@@ -1601,52 +1688,86 @@ class DefaultProfileComponent(
                     teamRepository.getTeams(currentUser.teamIds).getOrElse { emptyList() }
                 }
                 .distinctBy { it.id }
-            teams.forEach { team ->
+            if (generation != paymentPlansGeneration) return@launch
+
+            for (team in teams) {
                 val ownerLabel = team.name.takeIf { it.isNotBlank() } ?: "Team"
-                val teamBills = billingRepository.listBills(ownerType = "TEAM", ownerId = team.id)
+                val teamBills = loadAllProfileBills(
+                    loadPage = { limit, offset ->
+                        billingRepository.listBillsPage(
+                            ownerType = "TEAM",
+                            ownerId = team.id,
+                            limit = limit,
+                            offset = offset,
+                        )
+                    },
+                    isCurrent = { generation == paymentPlansGeneration },
+                )
                     .getOrElse { throwable ->
-                        Napier.w("Unable to load team bills for team ${team.id}", throwable)
-                        return@forEach
-                    }
-                plans.addAll(buildPaymentPlans(bills = teamBills, ownerLabel = ownerLabel))
+                        if (generation == paymentPlansGeneration) {
+                            _paymentPlansState.value = ProfilePaymentPlansState(
+                                isLoading = false,
+                                plans = emptyList(),
+                                error = throwable.userMessage("Failed to load bills."),
+                            )
+                        }
+                        return@launch
+                    } ?: return@launch
+                plans.addAll(
+                    buildPaymentPlans(
+                        bills = teamBills,
+                        ownerLabel = ownerLabel,
+                        isCurrent = { generation == paymentPlansGeneration },
+                    ) ?: return@launch,
+                )
             }
 
-            _paymentPlansState.value = ProfilePaymentPlansState(
-                isLoading = false,
-                plans = plans
-                    .distinctBy { it.bill.id }
-                    .sortedByDescending { it.nextPaymentDue ?: "" },
-            )
+            if (generation == paymentPlansGeneration) {
+                _paymentPlansState.value = ProfilePaymentPlansState(
+                    isLoading = false,
+                    plans = plans
+                        .distinctBy { it.bill.id }
+                        .sortedByDescending { it.nextPaymentDue ?: "" },
+                )
+            }
         }
     }
 
     private suspend fun buildPaymentPlans(
         bills: List<Bill>,
         ownerLabel: String,
-    ): List<ProfilePaymentPlan> {
-        return bills.map { bill ->
+        isCurrent: () -> Boolean,
+    ): List<ProfilePaymentPlan>? {
+        val plans = mutableListOf<ProfilePaymentPlan>()
+        for (bill in bills) {
+            if (!isCurrent()) return null
             val payments = billingRepository.getBillPayments(bill.id)
                 .onFailure { throwable ->
                     Napier.w("Unable to load payments for bill ${bill.id}", throwable)
                 }
                 .getOrElse { emptyList() }
+            if (!isCurrent()) return null
 
-            ProfilePaymentPlan(
+            val event = bill.eventId
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+                ?.let { eventId ->
+                    eventRepository.getEvent(eventId)
+                        .onFailure { throwable ->
+                            Napier.w("Unable to load event $eventId for bill ${bill.id}", throwable)
+                        }
+                        .getOrNull()
+                }
+            if (!isCurrent()) return null
+
+            plans += ProfilePaymentPlan(
                 bill = bill,
                 ownerLabel = ownerLabel,
                 payments = payments,
-                event = bill.eventId
-                    ?.trim()
-                    ?.takeIf(String::isNotBlank)
-                    ?.let { eventId ->
-                        eventRepository.getEvent(eventId)
-                            .onFailure { throwable ->
-                                Napier.w("Unable to load event $eventId for bill ${bill.id}", throwable)
-                            }
-                            .getOrNull()
-                    },
+                event = event,
             )
         }
+        return plans
     }
 
     override fun payNextInstallment(paymentPlan: ProfilePaymentPlan) {

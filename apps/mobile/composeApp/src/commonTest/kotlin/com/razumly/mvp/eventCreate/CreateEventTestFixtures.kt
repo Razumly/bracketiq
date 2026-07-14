@@ -63,6 +63,8 @@ import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckoutRequest
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
+import com.razumly.mvp.core.data.repositories.EventStaffInviteInput
+import com.razumly.mvp.core.data.repositories.EventStaffState
 import com.razumly.mvp.core.data.repositories.EventParticipantRefundMode
 import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
 import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
@@ -360,11 +362,20 @@ internal data class CreateEventCall(
     val timeSlots: List<TimeSlot>?,
 )
 
+internal data class ReconcileEventStaffCall(
+    val event: Event,
+    val pendingInvites: List<EventStaffInviteInput>,
+    val expectedRevision: String,
+)
+
 internal class CreateEvent_FakeEventRepository(
     private val organizationEvents: List<Event> = emptyList(),
 ) : IEventRepository {
     val createEventCalls = mutableListOf<CreateEventCall>()
     val updateEventCalls = mutableListOf<Event>()
+    val getEventStaffStateCalls = mutableListOf<Event>()
+    val reconcileEventStaffCalls = mutableListOf<ReconcileEventStaffCall>()
+    var reconcileEventStaffFailure: Throwable? = null
 
     override fun getCachedEventsFlow(): Flow<Result<List<Event>>> =
         flowOf(Result.success(emptyList()))
@@ -376,6 +387,31 @@ internal class CreateEvent_FakeEventRepository(
     override suspend fun getEvent(eventId: String): Result<Event> = Result.failure(IllegalStateException("unused"))
     override suspend fun getEventStaffInvites(eventId: String): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> =
         Result.success(emptyList())
+    override suspend fun getEventStaffState(event: Event): Result<EventStaffState> {
+        getEventStaffStateCalls += event
+        return Result.success(
+            EventStaffState(
+                event = event,
+                staffInvites = emptyList(),
+                revision = "staff-revision-created",
+            ),
+        )
+    }
+    override suspend fun reconcileEventStaff(
+        event: Event,
+        pendingInvites: List<EventStaffInviteInput>,
+        expectedRevision: String,
+    ): Result<EventStaffState> {
+        reconcileEventStaffCalls += ReconcileEventStaffCall(event, pendingInvites, expectedRevision)
+        reconcileEventStaffFailure?.let { failure -> return Result.failure(failure) }
+        return Result.success(
+            EventStaffState(
+                event = event,
+                staffInvites = emptyList(),
+                revision = "staff-revision-reconciled",
+            ),
+        )
+    }
     override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> = Result.success(emptyList())
 
     override suspend fun getEventsByOrganization(

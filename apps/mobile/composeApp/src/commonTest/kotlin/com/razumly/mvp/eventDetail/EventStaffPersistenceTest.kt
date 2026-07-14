@@ -2,186 +2,185 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Invite
-import com.razumly.mvp.eventCreate.CreateEvent_FakeUserRepository
+import com.razumly.mvp.core.data.repositories.EventStaffAssignmentRole
+import com.razumly.mvp.core.data.repositories.EventStaffInviteInput
+import com.razumly.mvp.core.data.repositories.EventStaffState
+import com.razumly.mvp.core.data.repositories.IEventRepository
+import com.razumly.mvp.eventCreate.CreateEvent_FakeEventRepository
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class EventStaffPersistenceTest {
-
     @Test
-    fun previouslyAssignedUsers_withoutExistingInvites_areNotReinvited() = runTest {
-        val userRepository = CreateEvent_FakeUserRepository()
-        val event = Event(
+    fun reconciliation_normalizes_complete_desired_state_into_one_repository_call() = runTest {
+        val calls = mutableListOf<ReconcileCall>()
+        val canonicalInvite = Invite(
+            id = "invite_1",
+            type = "STAFF",
+            eventId = "event_1",
+            email = "staff@example.com",
+        )
+        val repository = object : IEventRepository by CreateEvent_FakeEventRepository() {
+            override suspend fun reconcileEventStaff(
+                event: Event,
+                pendingInvites: List<EventStaffInviteInput>,
+                expectedRevision: String,
+            ): Result<EventStaffState> {
+                calls += ReconcileCall(event, pendingInvites, expectedRevision)
+                return Result.success(
+                    EventStaffState(
+                        event = event.copy(assistantHostIds = listOf("resolved_staff")),
+                        staffInvites = listOf(canonicalInvite),
+                        revision = "revision_2",
+                    ),
+                )
+            }
+        }
+        val desired = Event(
             id = "event_1",
             hostId = "host_1",
-            officialIds = listOf("official_1"),
             assistantHostIds = listOf("assistant_1"),
-        )
-
-        val result = reconcileEventStaffInvites(
-            userRepository = userRepository,
-            event = event,
-            pendingStaffInvites = emptyList(),
-            existingStaffInvites = emptyList(),
-            previouslyAssignedUserIds = setOf("official_1", "assistant_1"),
-            createdByUserId = "host_1",
-        )
-
-        result.getOrThrow()
-        assertEquals(1, userRepository.createInviteCalls.size)
-        assertEquals(emptyList(), userRepository.createInviteCalls.single())
-    }
-
-    @Test
-    fun newlyAssignedUser_withoutExistingInvite_createsInvite() = runTest {
-        val userRepository = CreateEvent_FakeUserRepository()
-        val event = Event(
-            id = "event_1",
-            hostId = "host_1",
-            officialIds = listOf("official_1", "official_2"),
-        )
-
-        val result = reconcileEventStaffInvites(
-            userRepository = userRepository,
-            event = event,
-            pendingStaffInvites = emptyList(),
-            existingStaffInvites = emptyList(),
-            previouslyAssignedUserIds = setOf("official_1"),
-            createdByUserId = "host_1",
-        )
-
-        result.getOrThrow()
-        assertEquals(1, userRepository.createInviteCalls.size)
-        assertEquals(listOf("official_2"), userRepository.createInviteCalls.single().mapNotNull { it.userId })
-    }
-
-    @Test
-    fun existingPendingInvite_withSameRoles_isNotResent() = runTest {
-        val userRepository = CreateEvent_FakeUserRepository()
-        val event = Event(
-            id = "event_1",
-            hostId = "host_1",
             officialIds = listOf("official_1"),
         )
-        val existingInvite = Invite(
-            id = "invite_1",
-            type = "STAFF",
-            eventId = "event_1",
-            userId = "official_1",
-            email = "official1@example.com",
-            status = "PENDING",
-            staffTypes = listOf("OFFICIAL"),
-        )
 
-        val result = reconcileEventStaffInvites(
-            userRepository = userRepository,
-            event = event,
-            pendingStaffInvites = emptyList(),
-            existingStaffInvites = listOf(existingInvite),
-            previouslyAssignedUserIds = setOf("official_1"),
-            createdByUserId = "host_1",
-        )
-
-        result.getOrThrow()
-        assertEquals(1, userRepository.createInviteCalls.size)
-        assertEquals(emptyList(), userRepository.createInviteCalls.single())
-    }
-
-    @Test
-    fun existingPendingInvite_withChangedRoles_isUpdated() = runTest {
-        val userRepository = CreateEvent_FakeUserRepository()
-        val event = Event(
-            id = "event_1",
-            hostId = "host_1",
-            officialIds = listOf("official_1"),
-            assistantHostIds = listOf("official_1"),
-        )
-        val existingInvite = Invite(
-            id = "invite_1",
-            type = "STAFF",
-            eventId = "event_1",
-            userId = "official_1",
-            email = "official1@example.com",
-            status = "PENDING",
-            staffTypes = listOf("OFFICIAL"),
-        )
-
-        val result = reconcileEventStaffInvites(
-            userRepository = userRepository,
-            event = event,
-            pendingStaffInvites = emptyList(),
-            existingStaffInvites = listOf(existingInvite),
-            previouslyAssignedUserIds = setOf("official_1"),
-            createdByUserId = "host_1",
-        )
-
-        result.getOrThrow()
-        assertEquals(1, userRepository.createInviteCalls.size)
-        val request = userRepository.createInviteCalls.single().single()
-        assertEquals("official_1", request.userId)
-        assertEquals(listOf("HOST", "OFFICIAL"), request.staffTypes.sorted())
-    }
-
-    @Test
-    fun unassignedExistingPendingInvite_isPreservedOnUnrelatedSave() = runTest {
-        val userRepository = CreateEvent_FakeUserRepository()
-        val event = Event(
-            id = "event_1",
-            hostId = "host_1",
-            officialIds = listOf("official_1"),
-        )
-        val existingInvite = Invite(
-            id = "invite_pending_1",
-            type = "STAFF",
-            eventId = "event_1",
-            userId = "official_2",
-            email = "official2@example.com",
-            status = "PENDING",
-            staffTypes = listOf("OFFICIAL"),
-        )
-
-        val result = reconcileEventStaffInvites(
-            userRepository = userRepository,
-            event = event,
-            pendingStaffInvites = emptyList(),
-            existingStaffInvites = listOf(existingInvite),
-            previouslyAssignedUserIds = setOf("official_1"),
-            createdByUserId = "host_1",
+        val result = reconcileEventStaffState(
+            eventRepository = repository,
+            event = desired,
+            pendingStaffInvites = listOf(
+                PendingStaffInviteDraft(
+                    firstName = "  Parker ",
+                    lastName = " Pending  ",
+                    email = " Staff@Example.com ",
+                    roles = setOf(EventStaffRole.OFFICIAL, EventStaffRole.ASSISTANT_HOST),
+                    resolvedUserId = " resolved_staff ",
+                ),
+            ),
+            expectedRevision = " revision_1 ",
         ).getOrThrow()
 
-        assertTrue(userRepository.deleteInviteCalls.isEmpty())
-        assertEquals(listOf(existingInvite), result.staffInvites)
+        assertEquals("revision_2", result.revision)
+        assertEquals(listOf(canonicalInvite), result.staffInvites)
+        assertEquals(1, calls.size)
+        assertEquals(desired, calls.single().event)
+        assertEquals("revision_1", calls.single().expectedRevision)
+        assertEquals(
+            listOf(
+                EventStaffInviteInput(
+                    email = "staff@example.com",
+                    firstName = "Parker",
+                    lastName = "Pending",
+                    roles = setOf(
+                        EventStaffAssignmentRole.OFFICIAL,
+                        EventStaffAssignmentRole.ASSISTANT_HOST,
+                    ),
+                    resolvedUserId = "resolved_staff",
+                ),
+            ),
+            calls.single().pendingInvites,
+        )
     }
 
     @Test
-    fun removedPreviouslyAssignedInvite_isDeleted() = runTest {
-        val userRepository = CreateEvent_FakeUserRepository()
-        val event = Event(
-            id = "event_1",
-            hostId = "host_1",
-            officialIds = emptyList(),
-        )
-        val existingInvite = Invite(
-            id = "invite_removed_1",
-            type = "STAFF",
-            eventId = "event_1",
-            userId = "official_1",
-            email = "official1@example.com",
-            status = "PENDING",
-            staffTypes = listOf("OFFICIAL"),
-        )
+    fun reconciliation_fails_before_network_when_revision_is_missing() = runTest {
+        var repositoryCalled = false
+        val repository = object : IEventRepository by CreateEvent_FakeEventRepository() {
+            override suspend fun reconcileEventStaff(
+                event: Event,
+                pendingInvites: List<EventStaffInviteInput>,
+                expectedRevision: String,
+            ): Result<EventStaffState> {
+                repositoryCalled = true
+                return Result.failure(AssertionError("must not be called"))
+            }
+        }
 
-        reconcileEventStaffInvites(
-            userRepository = userRepository,
-            event = event,
-            pendingStaffInvites = emptyList(),
-            existingStaffInvites = listOf(existingInvite),
-            previouslyAssignedUserIds = setOf("official_1"),
-            createdByUserId = "host_1",
-        ).getOrThrow()
+        val failure = assertFailsWith<IllegalArgumentException> {
+            reconcileEventStaffState(
+                eventRepository = repository,
+                event = Event(id = "event_1"),
+                pendingStaffInvites = emptyList(),
+                expectedRevision = " ",
+            ).getOrThrow()
+        }
 
-        assertEquals(listOf("invite_removed_1"), userRepository.deleteInviteCalls)
+        assertTrue(failure.message.orEmpty().contains("Reload"))
+        assertTrue(!repositoryCalled)
     }
+
+    @Test
+    fun reconciliation_rejects_an_incomplete_pending_invite_before_network() = runTest {
+        var repositoryCalled = false
+        val repository = object : IEventRepository by CreateEvent_FakeEventRepository() {
+            override suspend fun reconcileEventStaff(
+                event: Event,
+                pendingInvites: List<EventStaffInviteInput>,
+                expectedRevision: String,
+            ): Result<EventStaffState> {
+                repositoryCalled = true
+                return Result.failure(AssertionError("must not be called"))
+            }
+        }
+
+        val failure = assertFailsWith<IllegalStateException> {
+            reconcileEventStaffState(
+                eventRepository = repository,
+                event = Event(id = "event_1"),
+                pendingStaffInvites = listOf(
+                    PendingStaffInviteDraft(
+                        firstName = "",
+                        lastName = "Person",
+                        email = "staff@example.com",
+                        roles = setOf(EventStaffRole.OFFICIAL),
+                    ),
+                ),
+                expectedRevision = "revision_1",
+            ).getOrThrow()
+        }
+
+        assertTrue(failure.message.orEmpty().contains("first name"))
+        assertTrue(!repositoryCalled)
+    }
+
+    @Test
+    fun reconciliation_rejects_a_malformed_pending_email_before_network() = runTest {
+        var repositoryCalled = false
+        val repository = object : IEventRepository by CreateEvent_FakeEventRepository() {
+            override suspend fun reconcileEventStaff(
+                event: Event,
+                pendingInvites: List<EventStaffInviteInput>,
+                expectedRevision: String,
+            ): Result<EventStaffState> {
+                repositoryCalled = true
+                return Result.failure(AssertionError("must not be called"))
+            }
+        }
+
+        val failure = assertFailsWith<IllegalStateException> {
+            reconcileEventStaffState(
+                eventRepository = repository,
+                event = Event(id = "event_1"),
+                pendingStaffInvites = listOf(
+                    PendingStaffInviteDraft(
+                        firstName = "Invalid",
+                        lastName = "Email",
+                        email = "not-an-email",
+                        roles = setOf(EventStaffRole.OFFICIAL),
+                    ),
+                ),
+                expectedRevision = "revision_1",
+            ).getOrThrow()
+        }
+
+        assertTrue(failure.message.orEmpty().contains("valid staff invite email"))
+        assertTrue(!repositoryCalled)
+    }
+
+    private data class ReconcileCall(
+        val event: Event,
+        val pendingInvites: List<EventStaffInviteInput>,
+        val expectedRevision: String,
+    )
 }

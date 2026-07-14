@@ -9,7 +9,10 @@ import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.router.stack.replaceAll
 import com.arkivanov.decompose.value.Value
+import com.arkivanov.essenty.lifecycle.Lifecycle
+import com.arkivanov.essenty.lifecycle.LifecycleOwner
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
+import com.arkivanov.essenty.lifecycle.coroutines.repeatOnLifecycle
 import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.chat.ChatGroupComponent
 import com.razumly.mvp.chat.ChatListComponent
@@ -24,14 +27,13 @@ import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.StartupAuthState
 import com.razumly.mvp.core.data.repositories.IEventRepository
-import com.razumly.mvp.core.data.repositories.UserScheduleSnapshot
 import com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft
 import com.razumly.mvp.core.presentation.AppConfig
 import com.razumly.mvp.core.presentation.CenterNavAction
 import com.razumly.mvp.core.presentation.EventDetailInitialTab
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
-import com.razumly.mvp.core.presentation.resolveCenterNavAction
+import com.razumly.mvp.core.presentation.toCenterNavAction
 import com.razumly.mvp.eventCreate.CreateEventComponent
 import com.razumly.mvp.eventDetail.EventDetailComponent
 import com.razumly.mvp.eventDetail.data.IMatchRepository
@@ -67,7 +69,44 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
-import kotlin.time.Clock
+import kotlin.coroutines.CoroutineContext
+
+internal class CenterActionRefreshRequestTracker {
+    private var latestRequestId = 0L
+
+    fun begin(): Long {
+        latestRequestId += 1
+        return latestRequestId
+    }
+
+    fun invalidate() {
+        latestRequestId += 1
+    }
+
+    fun isCurrent(requestId: Long): Boolean = requestId == latestRequestId
+}
+
+internal suspend fun LifecycleOwner.repeatCenterActionRefreshWhileStarted(
+    isActiveUser: () -> Boolean,
+    refresh: suspend () -> Unit,
+    onInactive: () -> Unit = {},
+    refreshIntervalMillis: Long,
+    context: CoroutineContext = Dispatchers.Main,
+) {
+    repeatOnLifecycle(
+        minActiveState = Lifecycle.State.STARTED,
+        context = context,
+    ) {
+        try {
+            while (isActive && isActiveUser()) {
+                refresh()
+                delay(refreshIntervalMillis)
+            }
+        } finally {
+            onInactive()
+        }
+    }
+}
 
 class RootComponent(
     componentContext: ComponentContext,
@@ -89,8 +128,7 @@ class RootComponent(
         private const val PUSH_TARGET_REGISTRATION_ATTEMPTS = 3
         private const val PUSH_TARGET_REGISTRATION_RETRY_DELAY_MS = 2_000L
         private const val CHAT_REFRESH_INTERVAL_MS = 30_000L
-        private const val CENTER_ACTION_SCHEDULE_REFRESH_INTERVAL_MS = 5 * 60_000L
-        private const val CENTER_ACTION_RECOMPUTE_INTERVAL_MS = 60_000L
+        private const val CENTER_ACTION_SCHEDULE_REFRESH_INTERVAL_MS = 60_000L
     }
 
     private val navigation = StackNavigation<AppConfig>()
@@ -128,10 +166,10 @@ class RootComponent(
     private var chatRefreshJob: Job? = null
     private var registrationSyncJob: Job? = null
     private var centerActionRefreshJob: Job? = null
+    private val centerActionRefreshRequests = CenterActionRefreshRequestTracker()
     private var activeChatRefreshUserId: String? = null
     private var activeRegistrationSyncUserId: String? = null
     private var activeCenterActionUserId: String? = null
-    private var centerActionScheduleSnapshot = UserScheduleSnapshot()
 
     private val _selectedPage = MutableStateFlow<AppConfig>(AppConfig.Search())
     val selectedPage: StateFlow<AppConfig> = _selectedPage.asStateFlow()
@@ -565,7 +603,7 @@ class RootComponent(
                     if (match == null) {
                         Napier.w("Center match shortcut $normalizedMatchId was not found for event $normalizedEventId")
                         _startupNotice.value = "Couldn't open that match."
-                        recomputeCenterNavAction()
+                        requestCenterNavActionRefresh()
                         return@onSuccess
                     }
 
@@ -576,7 +614,7 @@ class RootComponent(
                 .onFailure { throwable ->
                     Napier.w("Failed to open center match shortcut $normalizedEventId/$normalizedMatchId: ${throwable.message}")
                     _startupNotice.value = throwable.userMessage("Couldn't open that match.")
-                    recomputeCenterNavAction()
+                    requestCenterNavActionRefresh()
                 }
         }
     }
@@ -687,49 +725,49 @@ class RootComponent(
         if (activeCenterActionUserId == userId && centerActionRefreshJob?.isActive == true) return
 
         centerActionRefreshJob?.cancel()
+        centerActionRefreshRequests.invalidate()
         activeCenterActionUserId = userId
-        centerActionRefreshJob = scope.launch(Dispatchers.Default) {
-            while (isActive && activeCenterActionUserId == userId) {
-                refreshCenterActionScheduleSnapshot()
-
-                var elapsedMillis = 0L
-                while (
-                    isActive &&
-                    activeCenterActionUserId == userId &&
-                    elapsedMillis < CENTER_ACTION_SCHEDULE_REFRESH_INTERVAL_MS
-                ) {
-                    delay(CENTER_ACTION_RECOMPUTE_INTERVAL_MS)
-                    elapsedMillis += CENTER_ACTION_RECOMPUTE_INTERVAL_MS
-                    recomputeCenterNavAction()
-                }
-            }
+        centerActionRefreshJob = scope.launch {
+            repeatCenterActionRefreshWhileStarted(
+                isActiveUser = { activeCenterActionUserId == userId },
+                refresh = { refreshCenterNavAction(userId) },
+                onInactive = centerActionRefreshRequests::invalidate,
+                refreshIntervalMillis = CENTER_ACTION_SCHEDULE_REFRESH_INTERVAL_MS,
+            )
         }
     }
 
-    private suspend fun refreshCenterActionScheduleSnapshot() {
-        eventRepository.getMySchedule()
-            .onSuccess { snapshot ->
-                centerActionScheduleSnapshot = snapshot
-                recomputeCenterNavAction()
+    private suspend fun refreshCenterNavAction(userId: String) {
+        val refreshRequestId = centerActionRefreshRequests.begin()
+        eventRepository.getMyScheduleNextAction()
+            .onSuccess { action ->
+                if (
+                    activeCenterActionUserId == userId
+                    && lifecycle.state >= Lifecycle.State.STARTED
+                    && centerActionRefreshRequests.isCurrent(refreshRequestId)
+                ) {
+                    _centerNavAction.value = action.toCenterNavAction()
+                }
             }
             .onFailure { throwable ->
-                Napier.w("Failed to refresh center nav schedule shortcut: ${throwable.message}")
-                recomputeCenterNavAction()
+                if (centerActionRefreshRequests.isCurrent(refreshRequestId)) {
+                    Napier.w("Failed to refresh center nav shortcut: ${throwable.message}")
+                }
             }
     }
 
-    private fun recomputeCenterNavAction() {
-        _centerNavAction.value = resolveCenterNavAction(
-            snapshot = centerActionScheduleSnapshot,
-            now = Clock.System.now(),
-        )
+    private fun requestCenterNavActionRefresh() {
+        val userId = activeCenterActionUserId ?: return
+        scope.launch {
+            refreshCenterNavAction(userId)
+        }
     }
 
     private fun clearCenterActionRefreshLoop() {
         activeCenterActionUserId = null
+        centerActionRefreshRequests.invalidate()
         centerActionRefreshJob?.cancel()
         centerActionRefreshJob = null
-        centerActionScheduleSnapshot = UserScheduleSnapshot()
         _centerNavAction.value = CenterNavAction.CreateEvent
     }
 

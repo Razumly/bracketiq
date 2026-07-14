@@ -76,11 +76,22 @@ data class WearUsersResponseDto(
 )
 
 @Serializable
+data class WearSchedulePaginationDto(
+    val limit: Int? = null,
+    val hasMore: Boolean,
+    val nextCursor: String? = null,
+    val isComplete: Boolean? = null,
+    val windowFrom: String? = null,
+    val windowTo: String? = null,
+)
+
+@Serializable
 data class WearScheduleResponseDto(
     val events: List<WearEventDto> = emptyList(),
     val matches: List<WearMatchDto> = emptyList(),
     val teams: List<WearTeamDto> = emptyList(),
     val fields: List<WearFieldDto> = emptyList(),
+    val pagination: WearSchedulePaginationDto? = null,
 )
 
 @Serializable

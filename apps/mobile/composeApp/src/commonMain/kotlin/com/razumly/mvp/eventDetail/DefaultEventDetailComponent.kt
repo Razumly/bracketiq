@@ -201,6 +201,7 @@ class DefaultEventDetailComponent(
         }
     }.stateIn(scope, SharingStarted.Eagerly, AuthAccount.empty())
     private val _eventStaffInvites = MutableStateFlow<List<Invite>>(emptyList())
+    private val _eventStaffRevision = MutableStateFlow<String?>(null)
 
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
@@ -1524,6 +1525,10 @@ class DefaultEventDetailComponent(
             applyBootstrapSyncResult = bootstrapResourcesCoordinator::applyEventDetailSyncResult,
             replaceStaffInvites = { syncResult ->
                 _eventStaffInvites.value = syncResult.staffInvites
+                syncResult.staffRevision
+                    ?.trim()
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { revision -> _eventStaffRevision.value = revision }
             },
         )
     }
@@ -2429,31 +2434,28 @@ class DefaultEventDetailComponent(
     override fun updateEvent() {
         scope.launch {
             when (val result = editActionCoordinator.runSaveEventAction(
-                selectedEvent = selectedEvent.value,
                 pendingStaffInvites = eventInviteCoordinator.pendingStaffInvites.value,
-                existingStaffInvites = _eventStaffInvites.value,
-                currentUserId = currentUser.value.id,
+                expectedStaffRevision = _eventStaffRevision.value,
                 prepareEventForUpdate = ::prepareEventForUpdate,
-                updatePreparedEvent = { prepared ->
-                    eventRepository.updateEvent(
+                updatePreparedEvent = { prepared, staffRevision ->
+                    eventRepository.updateEventPreservingStaff(
                         newEvent = prepared.event,
                         fields = prepared.fields,
                         timeSlots = prepared.timeSlots,
                         leagueScoringConfig = prepared.leagueScoringConfig,
+                        expectedStaffRevision = staffRevision,
                     ).getOrThrow()
                 },
-                reconcileStaffInvites = { event, pendingStaffInvites, existingStaffInvites, previouslyAssignedUserIds, createdByUserId ->
-                    reconcileEventStaffInvites(
-                        userRepository = userRepository,
+                refreshStaffState = { event ->
+                    eventRepository.getEventStaffState(event).getOrThrow()
+                },
+                reconcileStaffState = { event, pendingStaffInvites, revision ->
+                    reconcileEventStaffState(
+                        eventRepository = eventRepository,
                         event = event,
                         pendingStaffInvites = pendingStaffInvites,
-                        existingStaffInvites = existingStaffInvites,
-                        previouslyAssignedUserIds = previouslyAssignedUserIds,
-                        createdByUserId = createdByUserId,
+                        expectedRevision = revision,
                     ).getOrThrow()
-                },
-                updateFinalEvent = { event ->
-                    eventRepository.updateEvent(event).getOrThrow()
                 },
                 refetchMatchesOfTournament = { eventId ->
                     matchRepository.getMatchesOfTournament(eventId)
@@ -2463,12 +2465,13 @@ class DefaultEventDetailComponent(
             )) {
                 is EventSaveActionResult.Success -> {
                     _eventStaffInvites.value = result.staffInvites
+                    _eventStaffRevision.value = result.staffRevision
                     eventInviteCoordinator.clearPendingStaffInvites()
                     eventInviteCoordinator.clearSuggestedUsers()
                     cancelEditingEvent()
                 }
                 is EventSaveActionResult.Failure -> {
-                    _errorState.value = ErrorMessage(result.throwable.userMessage(result.fallbackMessage))
+                    _errorState.value = ErrorMessage(result.userFacingMessage())
                 }
             }
         }
@@ -2491,6 +2494,13 @@ class DefaultEventDetailComponent(
             when (val result = editActionCoordinator.runScheduleEditAction(
                 action = action,
                 prepareEventForUpdate = ::prepareEventForUpdate,
+                validatePreparedEvent = { prepared ->
+                    requireNoUnsavedEventStaffChanges(
+                        persistedEvent = selectedEvent.value,
+                        preparedEvent = prepared.event,
+                        pendingStaffInvites = eventInviteCoordinator.pendingStaffInvites.value,
+                    )
+                },
                 logPreparedFieldOwnership = ::logPreparedFieldOwnership,
                 updateEvent = { prepared ->
                     eventRepository.updateEvent(

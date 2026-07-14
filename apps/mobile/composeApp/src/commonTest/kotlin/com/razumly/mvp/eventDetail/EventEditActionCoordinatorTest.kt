@@ -1,8 +1,11 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventOfficial
+import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.repositories.EventStaffState
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -10,16 +13,44 @@ import kotlin.test.assertIs
 
 class EventEditActionCoordinatorTest {
     @Test
-    fun runSaveEventAction_updates_staff_reconciles_final_event_and_refetches_matches() = runTest {
+    fun runSaveEventAction_updates_general_fields_then_reconciles_staff_once() = runTest {
         val coordinator = EventEditActionCoordinator()
-        val selected = Event(
+        val preparedEvent = Event(
             id = "event-1",
-            officialIds = listOf(" official-1 "),
-            assistantHostIds = listOf("assistant-1", " "),
+            eventType = EventType.LEAGUE,
+            officialIds = listOf("official-2"),
+            assistantHostIds = listOf("assistant-2"),
+            fieldIds = listOf("field-old"),
+            officialPositions = listOf(EventOfficialPosition("position-old", "Referee")),
+            eventOfficials = listOf(
+                EventOfficial(
+                    id = "event-official-2",
+                    userId = "official-2",
+                    positionIds = listOf("position-old"),
+                    fieldIds = listOf("field-old"),
+                ),
+            ),
         )
-        val preparedEvent = Event(id = "event-1", eventType = EventType.LEAGUE)
-        val updated = preparedEvent.copy(name = "Updated")
-        val final = updated.copy(assistantHostIds = listOf("assistant-2"))
+        val updated = preparedEvent.copy(
+            name = "Updated",
+            officialIds = listOf("official-before-save"),
+            assistantHostIds = listOf("assistant-before-save"),
+            fieldIds = listOf("field-new"),
+            officialPositions = listOf(EventOfficialPosition("position-new", "Referee")),
+            eventOfficials = emptyList(),
+        )
+        val final = updated.copy(
+            officialIds = preparedEvent.officialIds,
+            assistantHostIds = preparedEvent.assistantHostIds,
+            eventOfficials = listOf(
+                EventOfficial(
+                    id = "event-official-2",
+                    userId = "official-2",
+                    positionIds = listOf("position-new"),
+                    fieldIds = emptyList(),
+                ),
+            ),
+        )
         val staffInvite = Invite(
             id = "invite-1",
             type = "STAFF",
@@ -29,28 +60,31 @@ class EventEditActionCoordinatorTest {
         val events = mutableListOf<String>()
 
         val result = coordinator.runSaveEventAction(
-            selectedEvent = selected,
             pendingStaffInvites = emptyList(),
-            existingStaffInvites = emptyList(),
-            currentUserId = "current-user",
+            expectedStaffRevision = "staff-revision-loaded",
             prepareEventForUpdate = {
                 events += "prepare"
                 PreparedEventForUpdate(event = preparedEvent)
             },
-            updatePreparedEvent = { prepared ->
-                events += "updatePrepared:${prepared.event.id}"
+            updatePreparedEvent = { prepared, staffRevision ->
+                events += "updatePrepared:${prepared.event.id}:$staffRevision"
                 updated
             },
-            reconcileStaffInvites = { event, _, _, previouslyAssignedUserIds, createdByUserId ->
-                events += "reconcile:${event.id}:${previouslyAssignedUserIds.sorted().joinToString("|")}:$createdByUserId"
-                EventStaffSaveOutcome(
-                    event = final,
-                    staffInvites = listOf(staffInvite),
+            refreshStaffState = { event ->
+                events += "refresh:${event.id}"
+                EventStaffState(
+                    event = updated,
+                    staffInvites = emptyList(),
+                    revision = "staff-revision-after-patch",
                 )
             },
-            updateFinalEvent = { event ->
-                events += "updateFinal:${event.assistantHostIds.single()}"
-                event
+            reconcileStaffState = { event, _, expectedRevision ->
+                events += "reconcile:${event.id}:${event.assistantHostIds.single()}:${event.eventOfficials.single().positionIds.single()}:$expectedRevision"
+                EventStaffState(
+                    event = final,
+                    staffInvites = listOf(staffInvite),
+                    revision = "staff-revision-2",
+                )
             },
             refetchMatchesOfTournament = { eventId ->
                 events += "refetch:$eventId"
@@ -62,18 +96,157 @@ class EventEditActionCoordinatorTest {
         val success = assertIs<EventSaveActionResult.Success>(result)
         assertEquals(final, success.finalEvent)
         assertEquals(listOf(staffInvite), success.staffInvites)
+        assertEquals("staff-revision-2", success.staffRevision)
         assertEquals(
             listOf(
                 "show:Saving event...",
                 "prepare",
-                "updatePrepared:event-1",
-                "reconcile:event-1:assistant-1|official-1:current-user",
-                "updateFinal:assistant-2",
+                "updatePrepared:event-1:staff-revision-loaded",
+                "refresh:event-1",
+                "reconcile:event-1:assistant-2:position-new:staff-revision-loaded",
                 "refetch:event-1",
                 "hide",
             ),
             events,
         )
+    }
+
+    @Test
+    fun runSaveEventAction_rejects_invalid_pending_staff_before_general_update() = runTest {
+        val events = mutableListOf<String>()
+        val result = EventEditActionCoordinator().runSaveEventAction(
+            pendingStaffInvites = listOf(
+                PendingStaffInviteDraft(
+                    firstName = "Invalid",
+                    lastName = "Staff",
+                    email = "not-an-email",
+                    roles = setOf(EventStaffRole.OFFICIAL),
+                ),
+            ),
+            expectedStaffRevision = "staff-revision-loaded",
+            prepareEventForUpdate = {
+                events += "prepare"
+                PreparedEventForUpdate(event = Event(id = "event-1"))
+            },
+            updatePreparedEvent = { _, _ ->
+                events += "update"
+                error("must not update")
+            },
+            refreshStaffState = {
+                events += "refresh"
+                error("must not refresh")
+            },
+            reconcileStaffState = { _, _, _ -> error("must not reconcile") },
+            refetchMatchesOfTournament = { error("must not refetch") },
+            showLoading = { events += "show" },
+            hideLoading = { events += "hide" },
+        )
+
+        val failure = assertIs<EventSaveActionResult.Failure>(result)
+        assertEquals("Unable to save event.", failure.fallbackMessage)
+        assertEquals(false, failure.didSaveEventDetails)
+        assertEquals(listOf("show", "prepare", "hide"), events)
+    }
+
+    @Test
+    fun runScheduleEditAction_rejects_unsaved_staff_changes_before_the_event_update() = runTest {
+        val coordinator = EventEditActionCoordinator()
+        val persisted = Event(id = "event-1", assistantHostIds = listOf("assistant-1"))
+        val prepared = persisted.copy(assistantHostIds = listOf("assistant-2"))
+        val events = mutableListOf<String>()
+
+        val result = coordinator.runScheduleEditAction(
+            action = EventScheduleEditAction.RESCHEDULE,
+            prepareEventForUpdate = {
+                events += "prepare"
+                PreparedEventForUpdate(event = prepared)
+            },
+            validatePreparedEvent = { candidate ->
+                requireNoUnsavedEventStaffChanges(
+                    persistedEvent = persisted,
+                    preparedEvent = candidate.event,
+                    pendingStaffInvites = emptyList(),
+                )
+            },
+            logPreparedFieldOwnership = { _, _ -> events += "log" },
+            updateEvent = {
+                events += "update"
+                error("must not update")
+            },
+            deleteMatchesOfTournament = { error("must not delete") },
+            scheduleEvent = { _, _ -> error("must not schedule") },
+            refetchMatchesOfTournament = { error("must not refetch") },
+            resetBracketMatchesAfterSchedule = { error("must not reset") },
+            refreshLeagueStandingsAfterSchedule = { error("must not refresh standings") },
+            showLoading = { events += "show" },
+            hideLoading = { events += "hide" },
+        )
+
+        val failure = assertIs<EventScheduleEditResult.Failure>(result)
+        assertEquals(
+            "Save staff changes with Confirm before rescheduling or rebuilding the schedule.",
+            failure.throwable.message,
+        )
+        assertEquals(listOf("show", "prepare", "hide"), events)
+    }
+
+    @Test
+    fun runSaveEventAction_rejects_a_missing_loaded_revision_before_any_write_or_refresh() = runTest {
+        val events = mutableListOf<String>()
+        val result = EventEditActionCoordinator().runSaveEventAction(
+            pendingStaffInvites = emptyList(),
+            expectedStaffRevision = null,
+            prepareEventForUpdate = {
+                events += "prepare"
+                PreparedEventForUpdate(event = Event(id = "event-1"))
+            },
+            updatePreparedEvent = { _, _ ->
+                events += "update"
+                error("must not update")
+            },
+            refreshStaffState = {
+                events += "refresh"
+                error("must not refresh")
+            },
+            reconcileStaffState = { _, _, _ -> error("must not reconcile") },
+            refetchMatchesOfTournament = { error("must not refetch") },
+            showLoading = { events += "show" },
+            hideLoading = { events += "hide" },
+        )
+
+        val failure = assertIs<EventSaveActionResult.Failure>(result)
+        assertEquals(false, failure.didSaveEventDetails)
+        assertEquals(listOf("show", "prepare", "hide"), events)
+    }
+
+    @Test
+    fun runSaveEventAction_reports_partial_success_when_staff_reconcile_fails_after_update() = runTest {
+        val updated = Event(id = "event-1", name = "Updated")
+        val result = EventEditActionCoordinator().runSaveEventAction(
+            pendingStaffInvites = emptyList(),
+            expectedStaffRevision = "staff-revision-loaded",
+            prepareEventForUpdate = { PreparedEventForUpdate(event = updated) },
+            updatePreparedEvent = { _, _ -> updated },
+            refreshStaffState = {
+                EventStaffState(
+                    event = updated,
+                    staffInvites = emptyList(),
+                    revision = "staff-revision-after-patch",
+                )
+            },
+            reconcileStaffState = { _, _, _ -> error("staff reconcile failed") },
+            refetchMatchesOfTournament = { error("must not refetch") },
+            showLoading = {},
+            hideLoading = {},
+        )
+
+        val failure = assertIs<EventSaveActionResult.Failure>(result)
+        assertEquals(
+            "Event details were saved, but staff changes were not. Review the staff entries and retry.",
+            failure.fallbackMessage,
+        )
+        assertEquals(true, failure.didSaveEventDetails)
+        assertEquals(failure.fallbackMessage, failure.userFacingMessage())
     }
 
     @Test

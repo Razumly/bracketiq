@@ -22,6 +22,107 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
+private const val WEAR_SCHEDULE_PAGE_SIZE = 200
+private const val WEAR_SCHEDULE_MAX_PAGES = 100
+private const val WEAR_SCHEDULE_PAST_DAYS = 90L
+private const val WEAR_SCHEDULE_FUTURE_DAYS = 366L
+
+internal suspend fun loadCompleteWearSchedule(
+    windowFrom: Instant,
+    windowTo: Instant,
+    loadPage: suspend (String) -> WearScheduleResponseDto,
+    pageSize: Int = WEAR_SCHEDULE_PAGE_SIZE,
+    maxPages: Int = WEAR_SCHEDULE_MAX_PAGES,
+): WearScheduleResponseDto {
+    require(pageSize > 0) { "Wear schedule page size must be positive." }
+    require(maxPages > 0) { "Wear schedule page limit must be positive." }
+
+    val encodedWindowFrom = URLEncoder.encode(windowFrom.toString(), "UTF-8")
+    val encodedWindowTo = URLEncoder.encode(windowTo.toString(), "UTF-8")
+    val basePath = "api/profile/schedule?from=$encodedWindowFrom&to=$encodedWindowTo&limit=$pageSize"
+    val eventsById = linkedMapOf<String, WearEventDto>()
+    val matchesById = linkedMapOf<String, WearMatchDto>()
+    val teamsById = linkedMapOf<String, WearTeamDto>()
+    val fieldsById = linkedMapOf<String, WearFieldDto>()
+    val seenCursors = mutableSetOf<String>()
+    var cursor: String? = null
+
+    fun mergedSchedule(pagination: WearSchedulePaginationDto?): WearScheduleResponseDto =
+        WearScheduleResponseDto(
+            events = eventsById.values.toList(),
+            matches = matchesById.values.toList(),
+            teams = teamsById.values.toList(),
+            fields = fieldsById.values.toList(),
+            pagination = pagination,
+        )
+
+    fun validateWindow(pagination: WearSchedulePaginationDto) {
+        pagination.windowFrom?.let { returnedFrom ->
+            check(Instant.parse(returnedFrom) == windowFrom) {
+                "Wear schedule response window changed while paging."
+            }
+        }
+        pagination.windowTo?.let { returnedTo ->
+            check(Instant.parse(returnedTo) == windowTo) {
+                "Wear schedule response window changed while paging."
+            }
+        }
+    }
+
+    repeat(maxPages) { pageIndex ->
+        val pagePath = cursor?.let { value ->
+            "$basePath&cursor=${URLEncoder.encode(value, "UTF-8")}"
+        } ?: basePath
+        val page = loadPage(pagePath)
+
+        page.events.forEachIndexed { index, event ->
+            eventsById[event.resolvedId() ?: "$pageIndex:event:$index"] = event
+        }
+        page.matches.forEachIndexed { index, match ->
+            matchesById[match.resolvedId() ?: "$pageIndex:match:$index"] = match
+        }
+        page.teams.forEachIndexed { index, team ->
+            teamsById[team.resolvedId() ?: "$pageIndex:team:$index"] = team
+        }
+        page.fields.forEachIndexed { index, field ->
+            fieldsById[field.resolvedId() ?: "$pageIndex:field:$index"] = field
+        }
+
+        val pagination = page.pagination
+        if (pagination == null) {
+            check(pageIndex == 0) {
+                "Wear schedule response dropped pagination metadata during continuation."
+            }
+            check(page.events.size < pageSize) {
+                "Wear schedule response reached the legacy server cap without completeness metadata."
+            }
+            return mergedSchedule(pagination = null)
+        }
+
+        validateWindow(pagination)
+        if (!pagination.hasMore) {
+            check(pagination.isComplete != false) {
+                "Wear schedule response declared an incomplete final page."
+            }
+            return mergedSchedule(pagination)
+        }
+
+        check(pagination.isComplete != true) {
+            "Wear schedule response marked a page complete while returning a continuation."
+        }
+        val nextCursor = pagination.nextCursor
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: error("Wear schedule page is incomplete but did not provide a continuation cursor.")
+        check(seenCursors.add(nextCursor)) {
+            "Wear schedule pagination repeated a continuation cursor."
+        }
+        cursor = nextCursor
+    }
+
+    error("Wear schedule endpoint exceeded the safe pagination limit.")
+}
+
 class WearMatchRepository(
     private val api: WearApiClient,
     private val tokenStore: WearAuthTokenStore,
@@ -549,11 +650,13 @@ class WearMatchRepository(
     }
 
     private suspend fun refreshRemoteSchedule(sessionUserId: String): WearScheduleResponseDto {
-        val schedule = api.get<WearScheduleResponseDto>("api/profile/schedule")
-        val detailMatches = fetchOfficialEventDetailMatches(schedule.events, sessionUserId)
-        val mergedAndTrimmedSchedule = schedule
-            .copy(matches = (detailMatches + schedule.matches).distinctBy { it.resolvedId() })
-            .trimForOfficial(sessionUserId)
+        val requestedAt = Instant.ofEpochMilli(Instant.now().toEpochMilli())
+        val schedule = loadCompleteWearSchedule(
+            windowFrom = requestedAt.minus(Duration.ofDays(WEAR_SCHEDULE_PAST_DAYS)),
+            windowTo = requestedAt.plus(Duration.ofDays(WEAR_SCHEDULE_FUTURE_DAYS)),
+            loadPage = { path -> api.get<WearScheduleResponseDto>(path) },
+        )
+        val mergedAndTrimmedSchedule = schedule.trimForOfficial(sessionUserId)
         val remoteSchedule = reconcileAuthoritativeWearSchedule(
             remoteSchedule = mergedAndTrimmedSchedule,
             operationStore = operationStore,
@@ -972,21 +1075,6 @@ class WearMatchRepository(
         }.getOrDefault(emptyMap())
     }
 
-    private suspend fun fetchOfficialEventDetailMatches(
-        events: List<WearEventDto>,
-        sessionUserId: String,
-    ): List<WearMatchDto> {
-        val eventIds = events
-            .filter { event -> event.isOfficialOrHostEventFor(sessionUserId) }
-            .mapNotNull(WearEventDto::resolvedId)
-            .distinct()
-        if (eventIds.isEmpty()) return emptyList()
-        return eventIds.flatMap { eventId ->
-            runCatching {
-                api.get<WearEventDetailResponseDto>("api/events/$eventId/detail").matches
-            }.getOrDefault(emptyList())
-        }
-    }
 }
 
 data class WearSession(
@@ -1118,13 +1206,6 @@ private fun WearScheduleResponseDto.trimForOfficial(userId: String): WearSchedul
         teams = teams.filter { team -> team.resolvedId() in teamIds },
         fields = fields.filter { field -> field.resolvedId() in fieldIds },
     )
-}
-
-private fun WearEventDto.isOfficialOrHostEventFor(userId: String): Boolean {
-    val normalizedUserId = userId.normalizedId() ?: return false
-    return hostId.normalizedId() == normalizedUserId ||
-        assistantHostIds.orEmpty().any { it.normalizedId() == normalizedUserId } ||
-        officialIds.orEmpty().any { it.normalizedId() == normalizedUserId }
 }
 
 fun WearMatchDto.orderedSegments(): List<WearMatchSegmentDto> =

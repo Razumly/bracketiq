@@ -807,11 +807,38 @@ data class CurrentUserEventRegistrationsResponseDto(
 )
 
 @Serializable
+data class ProfileSchedulePaginationDto(
+    val limit: Int,
+    val hasMore: Boolean,
+    val nextCursor: String? = null,
+    val isComplete: Boolean? = null,
+    val windowFrom: String? = null,
+    val windowTo: String? = null,
+)
+
+@Serializable
 data class ProfileScheduleResponseDto(
     val events: List<EventApiDto> = emptyList(),
     val matches: List<MatchApiDto> = emptyList(),
     val teams: List<TeamApiDto> = emptyList(),
     val fields: List<Field> = emptyList(),
+    val pagination: ProfileSchedulePaginationDto? = null,
+)
+
+@Serializable
+data class ProfileScheduleNextActionDto(
+    val type: String,
+    val eventId: String? = null,
+    val matchId: String? = null,
+    val eventName: String? = null,
+    val eventImageId: String? = null,
+)
+
+@Serializable
+data class ProfileScheduleNextActionResponseDto(
+    val contractVersion: Int,
+    val generatedAt: String,
+    val action: ProfileScheduleNextActionDto,
 )
 
 @Serializable
@@ -823,6 +850,7 @@ data class EventDetailBootstrapResponseDto(
     val timeSlots: List<TimeSlot> = emptyList(),
     val leagueScoringConfig: LeagueScoringConfigDTO? = null,
     val staffInvites: List<Invite> = emptyList(),
+    val staffRevision: String? = null,
     val teamCompliance: EventTeamComplianceResponseDto? = null,
     val userCompliance: EventUserComplianceResponseDto? = null,
 )

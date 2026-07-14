@@ -3,6 +3,8 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.repositories.EventStaffState
+import com.razumly.mvp.core.network.userMessage
 
 internal enum class EventScheduleEditAction(
     val loadingMessage: String,
@@ -54,12 +56,20 @@ internal sealed class EventSaveActionResult {
     data class Success(
         val finalEvent: Event,
         val staffInvites: List<Invite>,
+        val staffRevision: String,
     ) : EventSaveActionResult()
 
     data class Failure(
         val throwable: Throwable,
         val fallbackMessage: String,
+        val didSaveEventDetails: Boolean,
     ) : EventSaveActionResult()
+}
+
+internal fun EventSaveActionResult.Failure.userFacingMessage(): String = if (didSaveEventDetails) {
+    fallbackMessage
+} else {
+    throwable.userMessage(fallbackMessage)
 }
 
 internal sealed class EventTemplateCreateResult {
@@ -83,41 +93,71 @@ internal sealed class EventPublishResult {
 
 internal class EventEditActionCoordinator {
     suspend fun runSaveEventAction(
-        selectedEvent: Event,
         pendingStaffInvites: List<PendingStaffInviteDraft>,
-        existingStaffInvites: List<Invite>,
-        currentUserId: String?,
+        expectedStaffRevision: String?,
         prepareEventForUpdate: () -> PreparedEventForUpdate,
-        updatePreparedEvent: suspend (PreparedEventForUpdate) -> Event,
-        reconcileStaffInvites: suspend (
+        updatePreparedEvent: suspend (PreparedEventForUpdate, String) -> Event,
+        refreshStaffState: suspend (Event) -> EventStaffState,
+        reconcileStaffState: suspend (
             Event,
             List<PendingStaffInviteDraft>,
-            List<Invite>,
-            Set<String>,
-            String?,
-        ) -> EventStaffSaveOutcome,
-        updateFinalEvent: suspend (Event) -> Event,
+            String,
+        ) -> EventStaffState,
         refetchMatchesOfTournament: suspend (String) -> Unit,
         showLoading: (String) -> Unit,
         hideLoading: () -> Unit,
     ): EventSaveActionResult {
         showLoading("Saving event...")
+        var generalUpdateCommitted = false
         return try {
-            val previouslyAssignedStaffUserIds = selectedEvent.assignedStaffUserIds()
             val prepared = prepareEventForUpdate()
-            val updated = updatePreparedEvent(prepared)
-            val saveOutcome = reconcileStaffInvites(
-                updated,
-                pendingStaffInvites,
-                existingStaffInvites,
-                previouslyAssignedStaffUserIds,
-                currentUserId,
-            )
-            val finalEvent = if (saveOutcome.event == updated) {
-                updated
-            } else {
-                updateFinalEvent(saveOutcome.event)
+            validatePendingStaffInviteDrafts(pendingStaffInvites).getOrThrow()
+            val staffRevisionSeed = expectedStaffRevision
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+                ?: error("Reload the event before saving staff changes.")
+            val updated = updatePreparedEvent(prepared, staffRevisionSeed)
+            generalUpdateCommitted = true
+            val currentStaffState = refreshStaffState(updated)
+            val validPositionIds = currentStaffState.event.officialPositions
+                .map { position -> position.id }
+                .toSet()
+            val preparedPositionNameById = prepared.event.officialPositions.associate { position ->
+                position.id to position.name.trim().lowercase()
             }
+            val currentPositionIdByName = currentStaffState.event.officialPositions.associate { position ->
+                position.name.trim().lowercase() to position.id
+            }
+            val validFieldIds = currentStaffState.event.fieldIds.toSet()
+            val fallbackPositionId = currentStaffState.event.officialPositions.firstOrNull()?.id
+            val desiredOfficials = prepared.event.eventOfficials.mapNotNull { official ->
+                val positionIds = official.positionIds.mapNotNull { positionId ->
+                    when {
+                        positionId in validPositionIds -> positionId
+                        else -> preparedPositionNameById[positionId]?.let(currentPositionIdByName::get)
+                    }
+                }.distinct()
+                    .ifEmpty { fallbackPositionId?.let(::listOf).orEmpty() }
+                if (positionIds.isEmpty()) {
+                    null
+                } else {
+                    official.copy(
+                        positionIds = positionIds,
+                        fieldIds = official.fieldIds.filter(validFieldIds::contains),
+                    )
+                }
+            }
+            val desiredStaffEvent = currentStaffState.event.copy(
+                assistantHostIds = prepared.event.assistantHostIds,
+                eventOfficials = desiredOfficials,
+                officialIds = desiredOfficials.map { official -> official.userId },
+            )
+            val staffState = reconcileStaffState(
+                desiredStaffEvent,
+                pendingStaffInvites,
+                staffRevisionSeed,
+            )
+            val finalEvent = staffState.event
 
             if (finalEvent.eventType == EventType.LEAGUE || finalEvent.eventType == EventType.TOURNAMENT) {
                 refetchMatchesOfTournament(finalEvent.id)
@@ -125,12 +165,18 @@ internal class EventEditActionCoordinator {
 
             EventSaveActionResult.Success(
                 finalEvent = finalEvent,
-                staffInvites = saveOutcome.staffInvites,
+                staffInvites = staffState.staffInvites,
+                staffRevision = staffState.revision,
             )
         } catch (throwable: Throwable) {
             EventSaveActionResult.Failure(
                 throwable = throwable,
-                fallbackMessage = "Unable to save event.",
+                fallbackMessage = if (generalUpdateCommitted) {
+                    "Event details were saved, but staff changes were not. Review the staff entries and retry."
+                } else {
+                    "Unable to save event."
+                },
+                didSaveEventDetails = generalUpdateCommitted,
             )
         } finally {
             hideLoading()
@@ -140,6 +186,7 @@ internal class EventEditActionCoordinator {
     suspend fun runScheduleEditAction(
         action: EventScheduleEditAction,
         prepareEventForUpdate: () -> PreparedEventForUpdate,
+        validatePreparedEvent: (PreparedEventForUpdate) -> Unit = {},
         logPreparedFieldOwnership: (String, PreparedEventForUpdate) -> Unit,
         updateEvent: suspend (PreparedEventForUpdate) -> Event,
         deleteMatchesOfTournament: suspend (String) -> Unit,
@@ -153,6 +200,7 @@ internal class EventEditActionCoordinator {
         showLoading(action.loadingMessage)
         return try {
             val prepared = prepareEventForUpdate()
+            validatePreparedEvent(prepared)
             logPreparedFieldOwnership(action.logAction, prepared)
             val updated = updateEvent(prepared)
 
@@ -245,9 +293,4 @@ internal class EventEditActionCoordinator {
             hideLoading()
         }
     }
-}
-
-private fun Event.assignedStaffUserIds(): Set<String> = buildSet {
-    addAll(officialIds.map(String::trim).filter(String::isNotBlank))
-    addAll(assistantHostIds.map(String::trim).filter(String::isNotBlank))
 }

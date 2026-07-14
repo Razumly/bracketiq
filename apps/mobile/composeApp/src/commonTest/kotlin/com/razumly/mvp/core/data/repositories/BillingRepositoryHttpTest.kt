@@ -613,6 +613,130 @@ class BillingRepositoryHttpTest {
     }
 
     @Test
+    fun listBillsPage_sends_server_offset_and_maps_continuation_metadata() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/billing/bills", request.url.encodedPath)
+            assertEquals("ownerType=TEAM&ownerId=team-1&limit=2&offset=100", request.url.encodedQuery)
+            assertEquals(HttpMethod.Get, request.method)
+
+            respond(
+                content = """
+                    {
+                      "bills": [
+                        {
+                          "id": "bill_older_unpaid",
+                          "ownerType": "TEAM",
+                          "ownerId": "team-1",
+                          "totalAmountCents": 9000,
+                          "paidAmountCents": 1000,
+                          "status": "OPEN"
+                        }
+                      ],
+                      "pagination": {
+                        "limit": 2,
+                        "offset": 100,
+                        "nextOffset": 101,
+                        "hasMore": false
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val page = repo.listBillsPage(
+            ownerType = "TEAM",
+            ownerId = "team-1",
+            limit = 2,
+            offset = 100,
+        ).getOrThrow()
+
+        assertEquals(listOf("bill_older_unpaid"), page.items.map { it.id })
+        assertEquals(2, page.pagination.limit)
+        assertEquals(100, page.pagination.offset)
+        assertEquals(101, page.pagination.nextOffset)
+        assertFalse(page.pagination.hasMore)
+    }
+
+    @Test
+    fun listBillsPage_slices_an_expanded_prefix_when_a_legacy_server_ignores_offset() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        val requestedQueries = mutableListOf<String>()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/billing/bills", request.url.encodedPath)
+            requestedQueries += request.url.encodedQuery
+            assertEquals(HttpMethod.Get, request.method)
+
+            val bills = if (request.url.parameters["offset"] != null) {
+                """
+                    {
+                      "bills": [
+                        {"id":"bill-new","ownerType":"USER","ownerId":"u1","totalAmountCents":1000,"paidAmountCents":0,"status":"OPEN"},
+                        {"id":"bill-overlap","ownerType":"USER","ownerId":"u1","totalAmountCents":2000,"paidAmountCents":0,"status":"OPEN"}
+                      ]
+                    }
+                """.trimIndent()
+            } else {
+                """
+                    {
+                      "bills": [
+                        {"id":"bill-new","ownerType":"USER","ownerId":"u1","totalAmountCents":1000,"paidAmountCents":0,"status":"OPEN"},
+                        {"id":"bill-overlap","ownerType":"USER","ownerId":"u1","totalAmountCents":2000,"paidAmountCents":0,"status":"OPEN"},
+                        {"id":"bill-older-unpaid","ownerType":"USER","ownerId":"u1","totalAmountCents":3000,"paidAmountCents":0,"status":"OPEN"}
+                      ]
+                    }
+                """.trimIndent()
+            }
+
+            respond(
+                content = bills,
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val page = repo.listBillsPage(
+            ownerType = "USER",
+            ownerId = "u1",
+            limit = 2,
+            offset = 2,
+        ).getOrThrow()
+
+        assertEquals(
+            listOf(
+                "ownerType=USER&ownerId=u1&limit=2&offset=2",
+                "ownerType=USER&ownerId=u1&limit=4",
+            ),
+            requestedQueries,
+        )
+        assertEquals(listOf("bill-older-unpaid"), page.items.map { it.id })
+        assertEquals(3, page.pagination.nextOffset)
+        assertFalse(page.pagination.hasMore)
+    }
+
+    @Test
     fun listOrganizationTemplates_gets_and_maps_response() = runTest {
         val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
         val userRepo = BillingRepositoryHttp_FakeUserRepository(

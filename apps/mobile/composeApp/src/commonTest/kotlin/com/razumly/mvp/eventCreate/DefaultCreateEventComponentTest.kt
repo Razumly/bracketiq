@@ -375,7 +375,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun create_event_syncs_staff_invites_with_replace_staff_types() = runTest(testDispatcher) {
+    fun create_event_persists_empty_staff_then_reconciles_the_desired_state_once() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 
@@ -384,34 +384,74 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.updateAssistantHostIds(listOf("assistant-1"))
         harness.component.addOfficialId("official-1")
         advance()
-        harness.userRepository.createdInvitesResult = listOf(
-            Invite(
-                type = "STAFF",
-                email = "assistant@example.com",
-                eventId = harness.component.newEventState.value.id,
-                userId = "assistant-1",
-                staffTypes = listOf("HOST"),
-                id = "invite-assistant",
-            ),
-            Invite(
-                type = "STAFF",
-                email = "official@example.com",
-                eventId = harness.component.newEventState.value.id,
-                userId = "official-1",
-                staffTypes = listOf("OFFICIAL"),
-                id = "invite-official",
-            ),
-        )
+        harness.component.createEvent()
+        advance()
+
+        val createPayload = harness.eventRepository.createEventCalls.single().event
+        assertTrue(createPayload.assistantHostIds.isEmpty())
+        assertTrue(createPayload.officialIds.isEmpty())
+        assertTrue(createPayload.eventOfficials.isEmpty())
+        assertEquals(1, harness.eventRepository.getEventStaffStateCalls.size)
+        val reconcile = harness.eventRepository.reconcileEventStaffCalls.single()
+        assertEquals(listOf("assistant-1"), reconcile.event.assistantHostIds)
+        assertEquals(listOf("official-1"), reconcile.event.eventOfficials.map { official -> official.userId })
+        assertEquals("staff-revision-created", reconcile.expectedRevision)
+        assertTrue(reconcile.pendingInvites.isEmpty())
+        assertTrue(harness.userRepository.createInviteCalls.isEmpty())
+    }
+
+    @Test
+    fun create_event_rejects_invalid_pending_staff_before_the_event_post() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+        harness.component.updateEventField { copy(divisions = listOf("Open")) }
+        advance()
+        harness.component.addPendingStaffInvite(
+            firstName = "Invalid",
+            lastName = "Staff",
+            email = "not-an-email",
+            roles = setOf(EventStaffRole.OFFICIAL),
+        ).getOrThrow()
 
         harness.component.createEvent()
         advance()
 
-        assertEquals(1, harness.userRepository.createInviteCalls.size)
-        val invitePayloads = harness.userRepository.createInviteCalls.single()
-        assertEquals(2, invitePayloads.size)
-        assertTrue(invitePayloads.all { it.replaceStaffTypes == true })
-        assertTrue(invitePayloads.any { it.userId == "assistant-1" && it.staffTypes == listOf("HOST") })
-        assertTrue(invitePayloads.any { it.userId == "official-1" && it.staffTypes == listOf("OFFICIAL") })
+        assertTrue(harness.eventRepository.createEventCalls.isEmpty())
+        assertEquals(0, harness.onEventCreatedCount)
+        assertTrue(
+            harness.component.errorState.value?.message
+                ?.contains("valid staff invite email", ignoreCase = true) == true,
+        )
+    }
+
+    @Test
+    fun create_event_staff_failure_leaves_the_created_event_assignment_free() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+        harness.component.updateEventField { copy(divisions = listOf("Open")) }
+        advance()
+        harness.component.updateAssistantHostIds(listOf("assistant-1"))
+        harness.component.addPendingStaffInvite(
+            firstName = "Taylor",
+            lastName = "Staff",
+            email = "taylor@example.com",
+            roles = setOf(EventStaffRole.OFFICIAL),
+        ).getOrThrow()
+        harness.eventRepository.reconcileEventStaffFailure = IllegalStateException("injected staff failure")
+
+        harness.component.createEvent()
+        advance()
+
+        val createPayload = harness.eventRepository.createEventCalls.single().event
+        assertTrue(createPayload.assistantHostIds.isEmpty())
+        assertTrue(createPayload.eventOfficials.isEmpty())
+        assertEquals(1, harness.eventRepository.reconcileEventStaffCalls.size)
+        assertEquals(0, harness.onEventCreatedCount)
+        assertEquals(listOf("taylor@example.com"), harness.component.pendingStaffInvites.value.map { it.email })
+        assertTrue(
+            harness.component.errorState.value?.message
+                ?.contains("created without the requested staff changes", ignoreCase = true) == true,
+        )
     }
 
     @Test
