@@ -16,12 +16,9 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.dataTypes.normalizedEventTags
-import com.razumly.mvp.core.data.dataTypes.usableLatitudeLongitude
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.analytics.AnalyticsEvent
 import com.razumly.mvp.core.analytics.AnalyticsTracker
-import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.jsonMVP
 import dev.icerock.moko.geo.LatLng
 import com.razumly.mvp.core.network.ApiException
@@ -31,16 +28,10 @@ import com.razumly.mvp.core.network.dto.CreateEventTemplateRequestDto
 import com.razumly.mvp.core.network.dto.EventApiDto
 import com.razumly.mvp.core.network.dto.EventParticipantsSnapshotResponseDto
 import com.razumly.mvp.core.network.dto.EventResponseDto
-import com.razumly.mvp.core.network.dto.EventSearchFiltersDto
-import com.razumly.mvp.core.network.dto.EventSearchRequestDto
-import com.razumly.mvp.core.network.dto.EventSearchUserLocationDto
 import com.razumly.mvp.core.network.dto.EventStaffPendingInviteDto
 import com.razumly.mvp.core.network.dto.EventStaffPutRequestDto
 import com.razumly.mvp.core.network.dto.EventStaffStateResponseDto
-import com.razumly.mvp.core.network.dto.EventTagsResponseDto
 import com.razumly.mvp.core.network.dto.EventTemplateResponseDto
-import com.razumly.mvp.core.network.dto.EventTemplatesResponseDto
-import com.razumly.mvp.core.network.dto.EventsResponseDto
 import com.razumly.mvp.core.network.dto.ProfileScheduleResponseDto
 import com.razumly.mvp.core.network.dto.ProfileScheduleNextActionResponseDto
 import com.razumly.mvp.core.network.dto.ScheduleEventRequestDto
@@ -50,8 +41,6 @@ import com.razumly.mvp.core.network.dto.StandingsConfirmRequestDto
 import com.razumly.mvp.core.network.dto.StandingsConfirmResponseDto
 import com.razumly.mvp.core.network.dto.StandingsResponseDto
 import com.razumly.mvp.core.network.dto.UpdateEventRequestDto
-import com.razumly.mvp.core.network.dto.hasMoreEventRows
-import com.razumly.mvp.core.network.dto.pageContinuationOrThrow
 import com.razumly.mvp.core.network.dto.toEventsOrThrow
 import com.razumly.mvp.core.network.dto.toUpdateDto
 import io.github.aakira.napier.Napier
@@ -67,9 +56,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -79,13 +65,10 @@ import kotlin.time.Instant
 
 
 
-private const val KILOMETERS_PER_MILE = 1.60934
 private const val MY_SCHEDULE_PAGE_SIZE = 200
 private const val MY_SCHEDULE_MAX_PAGE_COUNT = 100
 private const val MY_SCHEDULE_PAST_DAYS = 90
 private const val MY_SCHEDULE_FUTURE_DAYS = 366
-
-private fun milesToKilometers(value: Double): Double = value * KILOMETERS_PER_MILE
 
 private fun Event.analyticsProperties(): Map<String, String> = buildMap {
     put("event_id", id)
@@ -130,7 +113,12 @@ class EventRepository(
         userRepository = userRepository,
         coroutineDispatcher = coroutineDispatcher,
     )
-    private val eventPageSize = 50
+    private val catalogCoordinator = EventCatalogCoordinator(
+        databaseService = databaseService,
+        api = api,
+        userRepository = userRepository,
+        sessionCacheCoordinator = sessionCacheCoordinator,
+    )
 
     fun close() {
         sessionCacheCoordinator.close()
@@ -143,21 +131,7 @@ class EventRepository(
     override suspend fun getRegistrationQuestions(
         scopeType: String,
         scopeId: String,
-    ): Result<List<TeamJoinQuestion>> = runCatching {
-        val normalizedScopeType = scopeType.trim().uppercase().takeIf(String::isNotBlank)
-            ?: error("Question scope type is required.")
-        val normalizedScopeId = scopeId.trim().takeIf(String::isNotBlank)
-            ?: error("Question scope id is required.")
-        val response = api.get<RegistrationQuestionsResponseDto>(
-            path = "api/registration-questions?scopeType=${normalizedScopeType.encodeURLQueryComponent()}&scopeId=${normalizedScopeId.encodeURLQueryComponent()}",
-        )
-        if (!response.error.isNullOrBlank()) {
-            error(response.error)
-        }
-        response.questions
-            .mapNotNull(RegistrationQuestionDto::toTeamJoinQuestionOrNull)
-            .sortedWith(compareBy<TeamJoinQuestion> { it.sortOrder }.thenBy { it.prompt })
-    }
+    ): Result<List<TeamJoinQuestion>> = catalogCoordinator.getRegistrationQuestions(scopeType, scopeId)
 
     override fun getCachedEventsFlow(): Flow<Result<List<Event>>> =
         sessionCacheCoordinator.observeCachedEvents()
@@ -204,85 +178,6 @@ class EventRepository(
                     Result.failure(NoSuchElementException("Event $normalizedEventId not found in local cache"))
                 }
             }
-    }
-
-    private suspend fun fetchRemoteEventsByHost(hostId: String): List<Event> {
-        val encodedHostId = hostId.encodeURLQueryComponent()
-        val res = api.get<EventsResponseDto>("api/events?hostId=$encodedHostId&limit=200")
-        return res.events.toEventsOrThrow("Hosted events response")
-    }
-
-    private suspend fun fetchRemoteEventsPageByHost(
-        hostId: String,
-        limit: Int,
-        offset: Int,
-    ): HostEventPage {
-        val encodedHostId = hostId.encodeURLQueryComponent()
-        val safeLimit = limit.coerceIn(1, 500)
-        val safeOffset = offset.coerceAtLeast(0)
-        val response = api.get<EventsResponseDto>(
-            "api/events?hostId=$encodedHostId&limit=$safeLimit&offset=$safeOffset",
-        )
-        val events = response.events.toEventsOrThrow("Hosted events page")
-        val continuation = response.pageContinuationOrThrow("Hosted events page", safeOffset)
-        return HostEventPage(
-            events = events,
-            nextOffset = continuation.nextOffset,
-            hasMore = continuation.hasMore,
-        )
-    }
-
-    private suspend fun fetchRemoteEventTemplatesByHost(hostId: String): List<EventTemplateSummary> {
-        val encodedHostId = hostId.encodeURLQueryComponent()
-        val res = api.get<EventTemplatesResponseDto>(
-            "api/event-templates?hostId=$encodedHostId&limit=200"
-        )
-        return res.templates.mapNotNull { it.toEventTemplateSummaryOrNull() }
-    }
-
-    private suspend fun fetchRemoteEventsByOrganization(organizationId: String, limit: Int): List<Event> {
-        val encodedOrganizationId = organizationId.encodeURLQueryComponent()
-        val safeLimit = limit.coerceIn(1, 500)
-        val res = api.get<EventsResponseDto>(
-            "api/events?organizationId=$encodedOrganizationId&limit=$safeLimit"
-        )
-        return res.events.toEventsOrThrow("Organization events response")
-    }
-
-    private suspend fun fetchRemoteEventsPageByOrganization(
-        organizationId: String,
-        limit: Int,
-        offset: Int,
-    ): OrganizationEventPage {
-        val encodedOrganizationId = organizationId.encodeURLQueryComponent()
-        val safeLimit = limit.coerceIn(1, 500)
-        val safeOffset = offset.coerceAtLeast(0)
-        val response = api.get<EventsResponseDto>(
-            "api/events?organizationId=$encodedOrganizationId&limit=$safeLimit&offset=$safeOffset",
-        )
-        val events = response.events.toEventsOrThrow("Organization events page")
-        val continuation = response.pageContinuationOrThrow("Organization events page", safeOffset)
-        return OrganizationEventPage(
-            events = events,
-            nextOffset = continuation.nextOffset,
-            hasMore = continuation.hasMore,
-        )
-    }
-
-    private suspend fun fetchRemoteEventsByIds(eventIds: List<String>): List<Event> {
-        val idChunks = collectionIdChunks(eventIds)
-        val ids = idChunks.flatten()
-        if (ids.isEmpty()) return emptyList()
-
-        val eventsById = LinkedHashMap<String, Event>()
-        for (idChunk in idChunks) {
-            val encodedIds = idChunk.joinToString(",").encodeURLQueryComponent()
-            val res = api.get<EventsResponseDto>("api/events?ids=$encodedIds&limit=${idChunk.size}")
-            res.events.toEventsOrThrow("Event id batch response").forEach { event ->
-                eventsById[event.id] = event
-            }
-        }
-        return ids.mapNotNull(eventsById::get)
     }
 
     private suspend fun persistBootstrapMatches(
@@ -505,69 +400,20 @@ class EventRepository(
         }
     }
 
-    override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> = runCatching {
-        val ids = eventIds.map(String::trim).filter(String::isNotBlank).distinct()
-        if (ids.isEmpty()) return@runCatching emptyList()
-
-        val events = fetchRemoteEventsByIds(ids)
-        if (events.isNotEmpty()) {
-            databaseService.getEventDao.upsertEvents(events)
-        }
-        val staleIds = ids.toSet() - events.map { event -> event.id }.toSet()
-        if (staleIds.isNotEmpty()) {
-            databaseService.getEventDao.deleteEventsWithCrossRefs(staleIds.toList())
-        }
-
-        val cachedById = databaseService.getEventDao.getEventsByIds(ids).associateBy { it.id }
-        ids.mapNotNull { cachedById[it] }
-    }
+    override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> =
+        catalogCoordinator.getEventsByIds(eventIds)
 
     override suspend fun getEventsByOrganization(
         organizationId: String,
         limit: Int,
-    ): Result<List<Event>> {
-        val normalizedOrganizationId = organizationId.trim()
-        if (normalizedOrganizationId.isEmpty()) {
-            return Result.success(emptyList())
-        }
-
-        return runCatching {
-            val events = fetchRemoteEventsByOrganization(normalizedOrganizationId, limit)
-            if (events.isNotEmpty()) {
-                databaseService.getEventDao.upsertEvents(events)
-            }
-            events
-        }
-    }
+    ): Result<List<Event>> = catalogCoordinator.getEventsByOrganization(organizationId, limit)
 
     override suspend fun getOrganizationEventsPage(
         organizationId: String,
         limit: Int,
         offset: Int,
-    ): Result<OrganizationEventPage> {
-        val normalizedOrganizationId = organizationId.trim()
-        if (normalizedOrganizationId.isEmpty()) {
-            return Result.success(
-                OrganizationEventPage(
-                    events = emptyList(),
-                    nextOffset = 0,
-                    hasMore = false,
-                ),
-            )
-        }
-
-        return runCatching {
-            val page = fetchRemoteEventsPageByOrganization(
-                organizationId = normalizedOrganizationId,
-                limit = limit,
-                offset = offset,
-            )
-            if (page.events.isNotEmpty()) {
-                databaseService.getEventDao.upsertEvents(page.events)
-            }
-            page
-        }
-    }
+    ): Result<OrganizationEventPage> =
+        catalogCoordinator.getOrganizationEventsPage(organizationId, limit, offset)
 
     override suspend fun createEvent(
         newEvent: Event,
@@ -793,34 +639,11 @@ class EventRepository(
         return Result.success(newEvent)
     }
 
-    override fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<Event>>> {
-        return combine(
-            databaseService.getEventDao.getAllCachedEvents(),
-            userRepository.currentUser,
-        ) { cached, currentUserResult ->
-            val visibleEvents = sessionCacheCoordinator.filterHiddenEvents(
-                events = cached,
-                currentUser = currentUserResult.getOrNull(),
-            )
-            val inBounds = visibleEvents.filter { event ->
-                calcDistance(bounds.center, LatLng(event.lat, event.long)) <= bounds.radiusMiles
-            }
-            Result.success(inBounds.sortedBy { calcDistance(bounds.center, LatLng(it.lat, it.long)) })
-        }
-    }
+    override fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<Event>>> =
+        catalogCoordinator.getEventsInBoundsFlow(bounds)
 
-    override suspend fun getEventsInBounds(bounds: Bounds): Result<Pair<List<Event>, Boolean>> {
-        return getEventsInBounds(
-            bounds = bounds,
-            dateFrom = null,
-            dateTo = null,
-            sports = emptyList(),
-            tags = emptyList(),
-            limit = eventPageSize,
-            offset = 0,
-            includeDistanceFilter = true,
-        )
-    }
+    override suspend fun getEventsInBounds(bounds: Bounds): Result<Pair<List<Event>, Boolean>> =
+        catalogCoordinator.getEventsInBounds(bounds)
 
     override suspend fun getEventsInBounds(
         bounds: Bounds,
@@ -831,125 +654,27 @@ class EventRepository(
         limit: Int,
         offset: Int,
         includeDistanceFilter: Boolean,
-    ): Result<Pair<List<Event>, Boolean>> {
-        return runCatching {
-            val normalizedLimit = limit.coerceIn(1, 500)
-            val normalizedOffset = offset.coerceAtLeast(0)
-            val filters = EventSearchFiltersDto(
-                maxDistance = bounds.radiusMiles.takeIf { includeDistanceFilter }?.let(::milesToKilometers),
-                userLocation = if (includeDistanceFilter) {
-                    EventSearchUserLocationDto(
-                        lat = bounds.center.latitude,
-                        long = bounds.center.longitude,
-                    )
-                } else {
-                    null
-                },
-                dateFrom = dateFrom?.toString(),
-                dateTo = dateTo?.toString(),
-                sports = sports
-                    .mapNotNull { sport -> sport.trim().takeIf(String::isNotBlank) }
-                    .takeIf { it.isNotEmpty() },
-                tags = tags
-                    .mapNotNull { tag -> tag.trim().takeIf(String::isNotBlank) }
-                    .takeIf { it.isNotEmpty() },
-            )
-            val res = api.post<EventSearchRequestDto, EventsResponseDto>(
-                path = "api/events/search",
-                body = EventSearchRequestDto(
-                    filters = filters,
-                    limit = normalizedLimit,
-                    offset = normalizedOffset,
-                ),
-            )
-
-            val events = sessionCacheCoordinator.filterHiddenEvents(
-                res.events.toEventsOrThrow("Event bounds search response"),
-                userRepository.currentUser.value.getOrNull(),
-            )
-            databaseService.getEventDao.upsertEvents(events)
-            val orderedEvents = if (includeDistanceFilter) {
-                events.sortedBy { event ->
-                    event.usableLatitudeLongitude()
-                        ?.let { (latitude, longitude) -> calcDistance(bounds.center, LatLng(latitude, longitude)) }
-                        ?: Double.MAX_VALUE
-                }
-            } else {
-                events
-            }
-
-            Pair(
-                orderedEvents,
-                res.hasMoreEventRows(normalizedLimit),
-            )
-        }
-    }
+    ): Result<Pair<List<Event>, Boolean>> = catalogCoordinator.getEventsInBounds(
+        bounds = bounds,
+        dateFrom = dateFrom,
+        dateTo = dateTo,
+        sports = sports,
+        tags = tags,
+        limit = limit,
+        offset = offset,
+        includeDistanceFilter = includeDistanceFilter,
+    )
 
     override suspend fun searchEvents(
         searchQuery: String,
         userLocation: LatLng?,
         limit: Int,
         offset: Int,
-    ): Result<Pair<List<Event>, Boolean>> {
-        return runCatching {
-            val normalizedLimit = limit.coerceIn(1, 500)
-            val normalizedOffset = offset.coerceAtLeast(0)
-            val res = api.post<EventSearchRequestDto, EventsResponseDto>(
-                path = "api/events/search",
-                body = EventSearchRequestDto(
-                    filters = EventSearchFiltersDto(query = searchQuery),
-                    limit = normalizedLimit,
-                    offset = normalizedOffset,
-                ),
-            )
+    ): Result<Pair<List<Event>, Boolean>> =
+        catalogCoordinator.searchEvents(searchQuery, userLocation, limit, offset)
 
-            val events = sessionCacheCoordinator.filterHiddenEvents(
-                res.events.toEventsOrThrow("Event search response"),
-                userRepository.currentUser.value.getOrNull(),
-            )
-            databaseService.getEventDao.upsertEvents(events)
-
-            val orderedEvents = userLocation
-                ?.let { location ->
-                    events.sortedBy { event ->
-                        event.usableLatitudeLongitude()
-                            ?.let { (latitude, longitude) -> calcDistance(location, LatLng(latitude, longitude)) }
-                            ?: Double.MAX_VALUE
-                    }
-                }
-                ?: events
-
-            Pair(
-                orderedEvents,
-                res.hasMoreEventRows(normalizedLimit),
-            )
-        }
-    }
-
-    override suspend fun getEventTags(query: String?, filterOnly: Boolean): Result<List<EventTag>> = runCatching {
-        val normalizedQuery = query?.trim().orEmpty()
-        val path = buildString {
-            append("api/event-tags")
-            val params = buildList {
-                if (normalizedQuery.isNotEmpty()) {
-                    add("query=${normalizedQuery.encodeURLQueryComponent()}")
-                }
-                if (filterOnly) {
-                    add("filterOnly=true")
-                }
-            }
-            if (params.isNotEmpty()) {
-                append("?")
-                append(params.joinToString("&"))
-            }
-        }
-        api.get<EventTagsResponseDto>(path).tags
-            .normalizedEventTags()
-            .sortedWith(
-                compareByDescending<EventTag> { tag -> tag.eventCount }
-                    .thenBy { tag -> tag.name.lowercase() },
-            )
-    }
+    override suspend fun getEventTags(query: String?, filterOnly: Boolean): Result<List<EventTag>> =
+        catalogCoordinator.getEventTags(query, filterOnly)
 
     override suspend fun reportEvent(eventId: String, notes: String?): Result<Unit> = runCatching {
         val normalizedEventId = eventId.trim().takeIf(String::isNotBlank) ?: error("Event id is required.")
@@ -985,67 +710,16 @@ class EventRepository(
     }
 
     override fun getEventsByHostFlow(hostId: String): Flow<Result<List<Event>>> =
-        callbackFlow {
-            val localJob = launch {
-                databaseService.getEventDao.getAllCachedEvents().collect { cached ->
-                    trySend(Result.success(cached.filter { it.hostId == hostId }))
-                }
-            }
-
-            val remoteJob = launch {
-                runCatching {
-                    val remote = fetchRemoteEventsByHost(hostId)
-
-                    val localHostEvents = databaseService.getEventDao.getAllCachedEvents().first()
-                        .filter { it.hostId == hostId }
-                    val staleIds = localHostEvents.map { it.id }.toSet() - remote.map { it.id }.toSet()
-                    if (staleIds.isNotEmpty()) {
-                        databaseService.getEventDao.deleteEventsWithCrossRefs(staleIds.toList())
-                    }
-
-                    databaseService.getEventDao.upsertEvents(remote)
-                }.onFailure { error -> trySend(Result.failure(error)) }
-            }
-
-            awaitClose {
-                localJob.cancel()
-                remoteJob.cancel()
-            }
-        }
+        catalogCoordinator.getEventsByHostFlow(hostId)
 
     override suspend fun getHostEventsPage(
         hostId: String,
         limit: Int,
         offset: Int,
-    ): Result<HostEventPage> {
-        val normalizedHostId = hostId.trim()
-        if (normalizedHostId.isEmpty()) {
-            return Result.success(
-                HostEventPage(
-                    events = emptyList(),
-                    nextOffset = 0,
-                    hasMore = false,
-                ),
-            )
-        }
-
-        return runCatching {
-            val page = fetchRemoteEventsPageByHost(
-                hostId = normalizedHostId,
-                limit = limit,
-                offset = offset,
-            )
-            if (page.events.isNotEmpty()) {
-                databaseService.getEventDao.upsertEvents(page.events)
-            }
-            page
-        }
-    }
+    ): Result<HostEventPage> = catalogCoordinator.getHostEventsPage(hostId, limit, offset)
 
     override fun getEventTemplatesByHostFlow(hostId: String): Flow<Result<List<EventTemplateSummary>>> =
-        flow {
-            emit(runCatching { fetchRemoteEventTemplatesByHost(hostId) })
-        }
+        catalogCoordinator.getEventTemplatesByHostFlow(hostId)
 
     override suspend fun addCurrentUserToEvent(
         event: Event,
