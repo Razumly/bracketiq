@@ -38,6 +38,8 @@ enum class EventCreateSetupPageId(val label: String) {
     RESOURCES("Resources"),
     TIMESLOTS("Timeslots"),
     COMPETITION_RULES("Competition Rules"),
+    WINNER_BRACKET_RULES("Winner Bracket"),
+    LOSER_BRACKET_RULES("Loser Bracket"),
     REGISTRATION_PLAN("Registration Plan"),
     PRICING_REGISTRATION("Pricing & Registration"),
     QUESTIONS("Registration Questions"),
@@ -172,10 +174,25 @@ private fun resolvePageUsage(
     choices: EventCreateSetupChoices,
 ): Pair<Boolean, String?> = when (pageId) {
     EventCreateSetupPageId.RESOURCES,
-    EventCreateSetupPageId.TIMESLOTS,
-    EventCreateSetupPageId.COMPETITION_RULES -> {
+    EventCreateSetupPageId.TIMESLOTS -> {
         val used = event.eventType == EventType.LEAGUE || event.eventType == EventType.TOURNAMENT
         used to if (used) null else "Competition scheduling is used by leagues and tournaments."
+    }
+
+    EventCreateSetupPageId.COMPETITION_RULES -> {
+        val used = event.eventType == EventType.LEAGUE ||
+            (event.eventType == EventType.TOURNAMENT && event.includePlayoffs)
+        used to if (used) null else "Pool or league match rules are not used for this format."
+    }
+
+    EventCreateSetupPageId.WINNER_BRACKET_RULES -> {
+        val used = event.eventType == EventType.TOURNAMENT
+        used to if (used) null else "Bracket rules are used by tournaments."
+    }
+
+    EventCreateSetupPageId.LOSER_BRACKET_RULES -> {
+        val used = event.eventType == EventType.TOURNAMENT && event.doubleElimination && event.usesSets
+        used to if (used) null else "Separate loser-bracket set rules are used by set-based double elimination."
     }
 
     EventCreateSetupPageId.QUESTIONS -> {
@@ -239,6 +256,10 @@ fun isSimpleSetupPageComplete(
             (event.playoffTeamCount ?: 0) >= 2
         else -> true
     }
+    EventCreateSetupPageId.WINNER_BRACKET_RULES ->
+        simpleTournamentWinnerBracketValidationErrors(event).isEmpty()
+    EventCreateSetupPageId.LOSER_BRACKET_RULES ->
+        simpleTournamentLoserBracketValidationErrors(event).isEmpty()
     EventCreateSetupPageId.PRICING_REGISTRATION -> event.maxParticipants >= 2 &&
         (!choices.paidRegistration || (event.priceCents > 0 && priceQuoteConfirmed))
     EventCreateSetupPageId.QUESTIONS -> !choices.useRegistrationQuestions ||
@@ -411,8 +432,16 @@ fun Event.withSimpleTournamentPoolConfiguration(
 
 fun Event.withSimpleTournamentDoubleElimination(enabled: Boolean): Event {
     if (eventType != EventType.TOURNAMENT) return this
+    val nextLoserSetCount = if (enabled) loserSetCount.takeIf { it in setOf(1, 3, 5) } ?: 1 else 1
+    val nextLoserTargets = if (enabled) {
+        resizeSimpleSetPointTargets(loserBracketPointsToVictory, nextLoserSetCount)
+    } else {
+        listOf(21)
+    }
     return copy(
         doubleElimination = enabled,
+        loserSetCount = nextLoserSetCount,
+        loserBracketPointsToVictory = nextLoserTargets,
         divisionDetails = divisionDetails.map { detail ->
             val bracketConfig = detail.playoffConfig ?: TournamentConfig(
                 winnerSetCount = winnerSetCount.coerceAtLeast(1),
@@ -421,9 +450,154 @@ fun Event.withSimpleTournamentDoubleElimination(enabled: Boolean): Event {
                 loserBracketPointsToVictory = loserBracketPointsToVictory.ifEmpty { listOf(21) },
                 restTimeMinutes = restTimeMinutes ?: 0,
             )
-            detail.copy(playoffConfig = bracketConfig.copy(doubleElimination = enabled))
+            detail.copy(
+                playoffConfig = bracketConfig.copy(
+                    doubleElimination = enabled,
+                    loserSetCount = nextLoserSetCount,
+                    loserBracketPointsToVictory = nextLoserTargets,
+                ),
+            )
         },
     )
+}
+
+fun Event.withSimpleSetDurationMinutes(minutes: Int?): Event {
+    val normalizedDuration = minutes?.takeIf { value -> value >= 1 }
+    return copy(
+        usesSets = true,
+        matchDurationMinutes = null,
+        setDurationMinutes = normalizedDuration,
+        divisionDetails = divisionDetails.map { detail ->
+            detail.copy(
+                usesSets = true,
+                matchDurationMinutes = null,
+                setDurationMinutes = normalizedDuration,
+            )
+        },
+    )
+}
+
+fun Event.withSimpleTournamentBracketDuration(minutes: Int?): Event {
+    if (eventType != EventType.TOURNAMENT) return this
+    val normalizedDuration = minutes?.takeIf { value -> value >= 1 }
+    val setBased = usesSets
+    return copy(
+        matchDurationMinutes = if (!includePlayoffs && !setBased) normalizedDuration else matchDurationMinutes,
+        setDurationMinutes = if (!includePlayoffs && setBased) normalizedDuration else setDurationMinutes,
+        divisionDetails = divisionDetails.map { detail ->
+            val bracketConfig = detail.playoffConfig ?: TournamentConfig(
+                doubleElimination = doubleElimination,
+                winnerSetCount = winnerSetCount.coerceAtLeast(1),
+                loserSetCount = loserSetCount.coerceAtLeast(1),
+                winnerBracketPointsToVictory = winnerBracketPointsToVictory.ifEmpty { listOf(21) },
+                loserBracketPointsToVictory = loserBracketPointsToVictory.ifEmpty { listOf(21) },
+                restTimeMinutes = restTimeMinutes ?: 0,
+            )
+            detail.copy(
+                playoffConfig = bracketConfig.copy(
+                    usesSets = setBased,
+                    matchDurationMinutes = normalizedDuration.takeUnless { setBased },
+                    setDurationMinutes = normalizedDuration.takeIf { setBased },
+                ),
+            )
+        },
+    )
+}
+
+fun Event.withSimpleTournamentBracketTargets(
+    losersBracket: Boolean,
+    targets: List<Int>,
+): Event {
+    if (eventType != EventType.TOURNAMENT) return this
+    val normalizedTargets = targets.map { value -> value.coerceAtLeast(1) }.ifEmpty { listOf(21) }
+    val setCount = normalizedTargets.size
+    return copy(
+        usesSets = true,
+        matchDurationMinutes = null,
+        winnerSetCount = if (losersBracket) winnerSetCount else setCount,
+        loserSetCount = if (losersBracket) setCount else loserSetCount,
+        winnerBracketPointsToVictory = if (losersBracket) winnerBracketPointsToVictory else normalizedTargets,
+        loserBracketPointsToVictory = if (losersBracket) normalizedTargets else loserBracketPointsToVictory,
+        divisionDetails = divisionDetails.map { detail ->
+            val bracketConfig = detail.playoffConfig ?: TournamentConfig(
+                doubleElimination = doubleElimination,
+                winnerSetCount = winnerSetCount.coerceAtLeast(1),
+                loserSetCount = loserSetCount.coerceAtLeast(1),
+                winnerBracketPointsToVictory = winnerBracketPointsToVictory.ifEmpty { listOf(21) },
+                loserBracketPointsToVictory = loserBracketPointsToVictory.ifEmpty { listOf(21) },
+                restTimeMinutes = restTimeMinutes ?: 0,
+            )
+            detail.copy(
+                playoffConfig = bracketConfig.copy(
+                    usesSets = true,
+                    matchDurationMinutes = null,
+                    winnerSetCount = if (losersBracket) bracketConfig.winnerSetCount else setCount,
+                    loserSetCount = if (losersBracket) setCount else bracketConfig.loserSetCount,
+                    winnerBracketPointsToVictory = if (losersBracket) {
+                        bracketConfig.winnerBracketPointsToVictory
+                    } else {
+                        normalizedTargets
+                    },
+                    loserBracketPointsToVictory = if (losersBracket) {
+                        normalizedTargets
+                    } else {
+                        bracketConfig.loserBracketPointsToVictory
+                    },
+                ),
+            )
+        },
+    )
+}
+
+private fun Event.simpleTournamentBracketConfig(): TournamentConfig {
+    return divisionDetails.firstNotNullOfOrNull(DivisionDetail::playoffConfig) ?: TournamentConfig(
+        doubleElimination = doubleElimination,
+        winnerSetCount = winnerSetCount,
+        loserSetCount = loserSetCount,
+        winnerBracketPointsToVictory = winnerBracketPointsToVictory.ifEmpty { listOf(21) },
+        loserBracketPointsToVictory = loserBracketPointsToVictory.ifEmpty { listOf(21) },
+        restTimeMinutes = restTimeMinutes ?: 0,
+        usesSets = usesSets,
+        matchDurationMinutes = matchDurationMinutes,
+        setDurationMinutes = setDurationMinutes,
+    )
+}
+
+fun simpleTournamentWinnerBracketValidationErrors(event: Event): List<String> {
+    if (event.eventType != EventType.TOURNAMENT) return emptyList()
+    val config = event.simpleTournamentBracketConfig()
+    return buildList {
+        if (event.usesSets) {
+            val duration = config.setDurationMinutes ?: event.setDurationMinutes ?: 20
+            if (duration < 1) add("Set duration must be at least one minute.")
+            if (config.winnerSetCount !in setOf(1, 3, 5)) add("Choose 1, 3, or 5 winner-bracket sets.")
+            if (
+                config.winnerBracketPointsToVictory.size < config.winnerSetCount ||
+                config.winnerBracketPointsToVictory.take(config.winnerSetCount).any { target -> target < 1 }
+            ) {
+                add("Enter a target score for every winner-bracket set.")
+            }
+        } else {
+            val duration = config.matchDurationMinutes ?: event.matchDurationMinutes ?: 60
+            if (duration < 1) add("Bracket match duration must be at least one minute.")
+        }
+    }
+}
+
+fun simpleTournamentLoserBracketValidationErrors(event: Event): List<String> {
+    if (event.eventType != EventType.TOURNAMENT || !event.doubleElimination || !event.usesSets) {
+        return emptyList()
+    }
+    val config = event.simpleTournamentBracketConfig()
+    return buildList {
+        if (config.loserSetCount !in setOf(1, 3, 5)) add("Choose 1, 3, or 5 loser-bracket sets.")
+        if (
+            config.loserBracketPointsToVictory.size < config.loserSetCount ||
+            config.loserBracketPointsToVictory.take(config.loserSetCount).any { target -> target < 1 }
+        ) {
+            add("Enter a target score for every loser-bracket set.")
+        }
+    }
 }
 
 fun simpleTournamentPoolValidationErrors(
@@ -569,7 +743,7 @@ fun resolveSimpleCompetitionSegmentCount(
 
     val configuredCount = when (event.eventType) {
         EventType.LEAGUE -> event.setsPerMatch
-        EventType.TOURNAMENT -> event.winnerSetCount
+        EventType.TOURNAMENT -> event.setsPerMatch
         EventType.EVENT, EventType.TRYOUT, EventType.WEEKLY_EVENT -> null
     }
     return configuredCount?.takeIf { count -> count in setOf(1, 3, 5) }
@@ -588,15 +762,16 @@ fun Event.withSimpleSetPointTargets(targets: List<Int>): Event {
         loserBracketPointsToVictory = normalizedTargets,
     )
 
+    val updatesTournamentBracket = eventType != EventType.TOURNAMENT
     return copy(
         usesSets = true,
         matchDurationMinutes = null,
         setsPerMatch = setCount,
         pointsToVictory = normalizedTargets,
-        winnerSetCount = setCount,
-        loserSetCount = setCount,
-        winnerBracketPointsToVictory = normalizedTargets,
-        loserBracketPointsToVictory = normalizedTargets,
+        winnerSetCount = if (updatesTournamentBracket) setCount else winnerSetCount,
+        loserSetCount = if (updatesTournamentBracket) setCount else loserSetCount,
+        winnerBracketPointsToVictory = if (updatesTournamentBracket) normalizedTargets else winnerBracketPointsToVictory,
+        loserBracketPointsToVictory = if (updatesTournamentBracket) normalizedTargets else loserBracketPointsToVictory,
         matchRulesOverride = matchRulesOverride?.copy(
             scoringModel = null,
             segmentCount = null,
@@ -613,7 +788,7 @@ fun Event.withSimpleSetPointTargets(targets: List<Int>): Event {
                 matchDurationMinutes = null,
                 setsPerMatch = setCount,
                 pointsToVictory = normalizedTargets,
-                playoffConfig = playoff.withTargets(),
+                playoffConfig = if (updatesTournamentBracket) playoff.withTargets() else detail.playoffConfig,
             )
         },
     )
@@ -638,6 +813,10 @@ fun simpleSetupValidationErrors(
         addAll(simpleTournamentPoolValidationErrors(event))
     } else if (event.eventType == EventType.LEAGUE && event.includePlayoffs && (event.playoffTeamCount ?: 0) < 2) {
         add("Choose at least two playoff teams.")
+    }
+    if (event.eventType == EventType.TOURNAMENT) {
+        addAll(simpleTournamentWinnerBracketValidationErrors(event))
+        addAll(simpleTournamentLoserBracketValidationErrors(event))
     }
     if (event.maxParticipants < 2) add("Capacity must be at least 2.")
     if (choices.paidRegistration && event.priceCents <= 0) add("Enter a registration price.")

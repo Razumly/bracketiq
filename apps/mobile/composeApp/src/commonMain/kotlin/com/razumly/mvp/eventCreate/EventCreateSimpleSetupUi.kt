@@ -261,6 +261,8 @@ fun EventCreateSimpleSetupPage(
             EventCreateSetupPageId.RESOURCES -> SimpleResourcesPage(state, actions)
             EventCreateSetupPageId.TIMESLOTS -> SimpleTimeslotsPage(state, actions)
             EventCreateSetupPageId.COMPETITION_RULES -> SimpleCompetitionRulesPage(state, actions)
+            EventCreateSetupPageId.WINNER_BRACKET_RULES -> SimpleWinnerBracketRulesPage(state, actions)
+            EventCreateSetupPageId.LOSER_BRACKET_RULES -> SimpleLoserBracketRulesPage(state, actions)
             EventCreateSetupPageId.REGISTRATION_PLAN -> SimpleRegistrationPlanPage(state, actions)
             EventCreateSetupPageId.PRICING_REGISTRATION -> SimplePricingPage(state, actions)
             EventCreateSetupPageId.QUESTIONS -> SimpleQuestionsPage(state, actions)
@@ -955,7 +957,7 @@ private fun SimpleCompetitionRulesPage(
         ?: 60
     val setTargets = when (event.eventType) {
         EventType.LEAGUE -> event.pointsToVictory
-        EventType.TOURNAMENT -> event.winnerBracketPointsToVictory
+        EventType.TOURNAMENT -> event.pointsToVictory
         else -> emptyList()
     }.takeIf { values -> values.size >= segmentCount && values.take(segmentCount).all { it > 0 } }
         ?.take(segmentCount)
@@ -1009,13 +1011,9 @@ private fun SimpleCompetitionRulesPage(
                             actions.onEditEvent { withSimpleTimedMatchDuration(minutes, segmentCount) }
                         },
                     )
-                    if (event.includePlayoffs) {
+                    if (event.eventType == EventType.LEAGUE && event.includePlayoffs) {
                         SimpleNumberField(
-                            label = if (event.eventType == EventType.TOURNAMENT) {
-                                "Bracket match (min)"
-                            } else {
-                                "Playoff length (min)"
-                            },
+                            label = "Playoff length (min)",
                             value = playoffMinutes,
                             onChange = { minutes ->
                                 actions.onEditEvent { withSimplePlayoffMatchDuration(minutes) }
@@ -1028,6 +1026,14 @@ private fun SimpleCompetitionRulesPage(
             }
 
             "SETS" -> {
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    SimpleNumberField(
+                        label = "Set duration (min)",
+                        value = event.setDurationMinutes ?: 20,
+                        onChange = { minutes -> actions.onEditEvent { withSimpleSetDurationMinutes(minutes) } },
+                    )
+                    Spacer(Modifier.weight(1f))
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1140,29 +1146,6 @@ private fun SimpleCompetitionRulesPage(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        if (event.eventType == EventType.TOURNAMENT) {
-            Text(
-                text = if (tournamentPoolPlayEnabled) "Playoff bracket" else "Bracket format",
-                style = MaterialTheme.typography.labelLarge,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                FilterChip(
-                    selected = !event.doubleElimination,
-                    onClick = { actions.onEditEvent { withSimpleTournamentDoubleElimination(false) } },
-                    label = { Text("Single elimination") },
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-                )
-                FilterChip(
-                    selected = event.doubleElimination,
-                    onClick = { actions.onEditEvent { withSimpleTournamentDoubleElimination(true) } },
-                    label = { Text("Double elimination") },
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-                )
-            }
-        }
         if (showStandings) {
             Text(
                 text = "Standings points awarded after each completed match",
@@ -1185,6 +1168,178 @@ private fun SimpleCompetitionRulesPage(
                     actions.onLeagueScoringConfigChange(state.leagueScoringConfig.copy(pointsForLoss = value))
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SimpleWinnerBracketRulesPage(
+    state: EventCreateSimpleSetupUiState,
+    actions: EventCreateSimpleSetupUiActions,
+) {
+    val event = state.event
+    val sport = state.sports.firstOrNull { candidate -> candidate.id == event.sportId }
+    val rules = remember(event, sport) { resolveEventMatchRules(event, sport) }
+    val setBased = rules.scoringModel == "SETS"
+    val config = event.divisionDetails.firstNotNullOfOrNull(DivisionDetail::playoffConfig)
+    val winnerSetCount = (config?.winnerSetCount ?: event.winnerSetCount).takeIf { it in setOf(1, 3, 5) }
+        ?: rules.segmentCount.takeIf { it in setOf(1, 3, 5) }
+        ?: 1
+    val winnerTargets = (config?.winnerBracketPointsToVictory ?: event.winnerBracketPointsToVictory)
+        .takeIf { values -> values.size >= winnerSetCount }
+        ?.take(winnerSetCount)
+        ?: resizeSimpleSetPointTargets(
+            currentTargets = event.winnerBracketPointsToVictory,
+            setCount = winnerSetCount,
+            sportDefaults = rules.setPointTargets,
+        )
+    val bracketDuration = if (setBased) {
+        config?.setDurationMinutes ?: event.setDurationMinutes ?: 20
+    } else {
+        config?.matchDurationMinutes ?: event.matchDurationMinutes ?: 60
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = "${sport?.name ?: "Selected sport"} • ${if (setBased) "Set based" else "Timed"}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text("Bracket format", style = MaterialTheme.typography.labelLarge)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FilterChip(
+                selected = !event.doubleElimination,
+                onClick = { actions.onEditEvent { withSimpleTournamentDoubleElimination(false) } },
+                label = { Text("Single elimination") },
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+            )
+            FilterChip(
+                selected = event.doubleElimination,
+                onClick = { actions.onEditEvent { withSimpleTournamentDoubleElimination(true) } },
+                label = { Text("Double elimination") },
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SimpleNumberField(
+                label = if (setBased) "Minutes per set" else "Match duration (min)",
+                value = bracketDuration,
+                onChange = { minutes -> actions.onEditEvent { withSimpleTournamentBracketDuration(minutes) } },
+            )
+            SimplePoolValueCard(
+                label = if (setBased) "Winner match max" else "Both brackets",
+                value = if (setBased) "${bracketDuration * winnerSetCount} min" else "$bracketDuration min",
+                modifier = Modifier.weight(1f),
+            )
+        }
+        if (setBased) {
+            SimpleSetCountSelector(
+                label = "Winner bracket sets",
+                selectedCount = winnerSetCount,
+                onCountSelected = { count ->
+                    val targets = resizeSimpleSetPointTargets(winnerTargets, count, rules.setPointTargets)
+                    actions.onEditEvent { withSimpleTournamentBracketTargets(false, targets) }
+                },
+            )
+            Text("Winner bracket set scores", style = MaterialTheme.typography.labelLarge)
+            SimpleSetScoreFields(
+                targets = winnerTargets,
+                onTargetChange = { index, value ->
+                    val updated = winnerTargets.toMutableList().also { targets -> targets[index] = value }
+                    actions.onEditEvent { withSimpleTournamentBracketTargets(false, updated) }
+                },
+            )
+        } else if (event.doubleElimination) {
+            Text(
+                text = "Timed winner- and loser-bracket matches use the same duration.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SimpleLoserBracketRulesPage(
+    state: EventCreateSimpleSetupUiState,
+    actions: EventCreateSimpleSetupUiActions,
+) {
+    val event = state.event
+    val sport = state.sports.firstOrNull { candidate -> candidate.id == event.sportId }
+    val rules = remember(event, sport) { resolveEventMatchRules(event, sport) }
+    val config = event.divisionDetails.firstNotNullOfOrNull(DivisionDetail::playoffConfig)
+    val loserSetCount = (config?.loserSetCount ?: event.loserSetCount).takeIf { it in setOf(1, 3, 5) } ?: 1
+    val loserTargets = (config?.loserBracketPointsToVictory ?: event.loserBracketPointsToVictory)
+        .takeIf { values -> values.size >= loserSetCount }
+        ?.take(loserSetCount)
+        ?: resizeSimpleSetPointTargets(
+            currentTargets = event.loserBracketPointsToVictory,
+            setCount = loserSetCount,
+            sportDefaults = rules.setPointTargets,
+        )
+    val setDuration = config?.setDurationMinutes ?: event.setDurationMinutes ?: 20
+
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = "Loser bracket • $setDuration minutes per set",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        SimplePoolValueCard(
+            label = "Scheduled match length",
+            value = "Up to ${setDuration * loserSetCount} minutes",
+            modifier = Modifier.fillMaxWidth(),
+        )
+        SimpleSetCountSelector(
+            label = "Loser bracket sets",
+            selectedCount = loserSetCount,
+            onCountSelected = { count ->
+                val targets = resizeSimpleSetPointTargets(loserTargets, count, rules.setPointTargets)
+                actions.onEditEvent { withSimpleTournamentBracketTargets(true, targets) }
+            },
+        )
+        Text("Loser bracket set scores", style = MaterialTheme.typography.labelLarge)
+        SimpleSetScoreFields(
+            targets = loserTargets,
+            onTargetChange = { index, value ->
+                val updated = loserTargets.toMutableList().also { targets -> targets[index] = value }
+                actions.onEditEvent { withSimpleTournamentBracketTargets(true, updated) }
+            },
+        )
+    }
+}
+
+@Composable
+private fun SimpleSetCountSelector(
+    label: String,
+    selectedCount: Int,
+    onCountSelected: (Int) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+        listOf(1, 3, 5).forEach { count ->
+            FilterChip(
+                selected = selectedCount == count,
+                onClick = { onCountSelected(count) },
+                label = { Text(count.toString()) },
+                modifier = Modifier.heightIn(min = 48.dp),
+            )
         }
     }
 }
@@ -2033,6 +2188,8 @@ private fun simpleSetupPageDescription(pageId: EventCreateSetupPageId): String =
     EventCreateSetupPageId.RESOURCES -> "Choose how many playing areas are available and give each one a clear label."
     EventCreateSetupPageId.TIMESLOTS -> "Use the default event window or add custom windows for resources and divisions."
     EventCreateSetupPageId.COMPETITION_RULES -> ""
+    EventCreateSetupPageId.WINNER_BRACKET_RULES -> ""
+    EventCreateSetupPageId.LOSER_BRACKET_RULES -> ""
     EventCreateSetupPageId.REGISTRATION_PLAN -> "Choose payments and registration requirements."
     EventCreateSetupPageId.PRICING_REGISTRATION -> "Set capacity, price, and registration cutoffs."
     EventCreateSetupPageId.QUESTIONS -> "Add the questions players answer before registration is complete."

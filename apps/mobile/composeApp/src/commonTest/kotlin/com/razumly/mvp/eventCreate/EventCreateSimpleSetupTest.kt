@@ -20,7 +20,7 @@ class EventCreateSimpleSetupTest {
 
     @Test
     fun redundant_schedule_and_competition_planning_pages_are_not_part_of_simple_setup() {
-        assertEquals(14, EventCreateSetupPageId.entries.size)
+        assertEquals(16, EventCreateSetupPageId.entries.size)
         assertFalse(EventCreateSetupPageId.entries.any { page -> page.label == "Schedule Plan" })
         assertFalse(EventCreateSetupPageId.entries.any { page -> page.label == "Competition Plan" })
     }
@@ -67,6 +67,36 @@ class EventCreateSimpleSetupTest {
             EventCreateSetupPageStatus.AVAILABLE,
             pages.first { it.id == EventCreateSetupPageId.BASICS }.status,
         )
+    }
+
+    @Test
+    fun tournament_path_separates_pool_winner_and_loser_bracket_rule_pages() {
+        val bracketOnly = resolveEventCreateSetupPages(
+            event = Event(eventType = EventType.TOURNAMENT, usesSets = true),
+            choices = EventCreateSetupChoices(),
+            currentPageId = EventCreateSetupPageId.FORMAT,
+            completedPageIds = emptySet(),
+        )
+
+        assertFalse(bracketOnly.first { it.id == EventCreateSetupPageId.COMPETITION_RULES }.used)
+        assertTrue(bracketOnly.first { it.id == EventCreateSetupPageId.WINNER_BRACKET_RULES }.used)
+        assertFalse(bracketOnly.first { it.id == EventCreateSetupPageId.LOSER_BRACKET_RULES }.used)
+
+        val poolDoubleElimination = resolveEventCreateSetupPages(
+            event = Event(
+                eventType = EventType.TOURNAMENT,
+                includePlayoffs = true,
+                doubleElimination = true,
+                usesSets = true,
+            ),
+            choices = EventCreateSetupChoices(),
+            currentPageId = EventCreateSetupPageId.FORMAT,
+            completedPageIds = emptySet(),
+        )
+
+        assertTrue(poolDoubleElimination.first { it.id == EventCreateSetupPageId.COMPETITION_RULES }.used)
+        assertTrue(poolDoubleElimination.first { it.id == EventCreateSetupPageId.WINNER_BRACKET_RULES }.used)
+        assertTrue(poolDoubleElimination.first { it.id == EventCreateSetupPageId.LOSER_BRACKET_RULES }.used)
     }
 
     @Test
@@ -369,6 +399,106 @@ class EventCreateSimpleSetupTest {
     }
 
     @Test
+    fun tournament_pool_and_bracket_set_durations_persist_separately_for_scheduling() {
+        val configured = Event(
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            doubleElimination = true,
+            usesSets = true,
+            divisionDetails = listOf(DivisionDetail(id = "open")),
+        )
+            .withSimpleSetDurationMinutes(15)
+            .withSimpleTournamentBracketDuration(20)
+            .withSimpleTournamentBracketTargets(false, listOf(21, 21, 15))
+            .withSimpleTournamentBracketTargets(true, listOf(21))
+
+        val detail = configured.divisionDetails.single()
+        val bracket = detail.playoffConfig
+        assertEquals(15, configured.setDurationMinutes)
+        assertEquals(15, detail.setDurationMinutes)
+        assertEquals(20, bracket?.setDurationMinutes)
+        assertEquals(3, configured.winnerSetCount)
+        assertEquals(1, configured.loserSetCount)
+        assertEquals(listOf(21, 21, 15), bracket?.winnerBracketPointsToVictory)
+        assertEquals(listOf(21), bracket?.loserBracketPointsToVictory)
+        assertEquals(60, bracket?.setDurationMinutes?.times(bracket.winnerSetCount))
+        assertEquals(20, bracket?.setDurationMinutes?.times(bracket.loserSetCount))
+        assertTrue(simpleTournamentWinnerBracketValidationErrors(configured).isEmpty())
+        assertTrue(simpleTournamentLoserBracketValidationErrors(configured).isEmpty())
+
+        val payloadBracket = configured.toUpdateDto().playoffDivisionDetails.single().playoffConfig
+        assertEquals(20, payloadBracket?.setDurationMinutes)
+        assertEquals(3, payloadBracket?.winnerSetCount)
+        assertEquals(1, payloadBracket?.loserSetCount)
+    }
+
+    @Test
+    fun timed_tournament_bracket_duration_updates_event_and_division_config() {
+        val configured = Event(
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = false,
+            usesSets = false,
+            divisionDetails = listOf(DivisionDetail(id = "open")),
+        ).withSimpleTournamentBracketDuration(45)
+
+        assertEquals(45, configured.matchDurationMinutes)
+        assertEquals(45, configured.divisionDetails.single().playoffConfig?.matchDurationMinutes)
+        assertTrue(simpleTournamentWinnerBracketValidationErrors(configured).isEmpty())
+    }
+
+    @Test
+    fun timed_tournament_pool_and_bracket_match_durations_persist_separately() {
+        val configured = Event(
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            usesSets = false,
+            divisionDetails = listOf(DivisionDetail(id = "open")),
+        )
+            .withSimpleTimedMatchDuration(totalMinutes = 30, segmentCount = 2)
+            .withSimpleTournamentBracketDuration(45)
+
+        val detail = configured.divisionDetails.single()
+        assertEquals(30, configured.matchDurationMinutes)
+        assertEquals(30, detail.matchDurationMinutes)
+        assertEquals(45, detail.playoffConfig?.matchDurationMinutes)
+        assertTrue(simpleTournamentWinnerBracketValidationErrors(configured).isEmpty())
+    }
+
+    @Test
+    fun tournament_pool_set_rules_do_not_overwrite_winner_or_loser_bracket_rules() {
+        val configured = Event(
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            usesSets = true,
+            winnerSetCount = 3,
+            loserSetCount = 1,
+            winnerBracketPointsToVictory = listOf(21, 21, 15),
+            loserBracketPointsToVictory = listOf(15),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "open",
+                    playoffConfig = TournamentConfig(
+                        doubleElimination = true,
+                        usesSets = true,
+                        winnerSetCount = 3,
+                        loserSetCount = 1,
+                        winnerBracketPointsToVictory = listOf(21, 21, 15),
+                        loserBracketPointsToVictory = listOf(15),
+                    ),
+                ),
+            ),
+        ).withSimpleSetPointTargets(listOf(25, 25, 15))
+
+        assertEquals(listOf(25, 25, 15), configured.pointsToVictory)
+        assertEquals(listOf(21, 21, 15), configured.winnerBracketPointsToVictory)
+        assertEquals(listOf(15), configured.loserBracketPointsToVictory)
+        assertEquals(
+            listOf(21, 21, 15),
+            configured.divisionDetails.single().playoffConfig?.winnerBracketPointsToVictory,
+        )
+    }
+
+    @Test
     fun custom_set_count_overrides_the_sport_default_on_the_simple_rules_page() {
         assertEquals(
             5,
@@ -390,6 +520,14 @@ class EventCreateSimpleSetupTest {
                 ),
                 scoringModel = "PERIODS",
                 sportSegmentCount = 2,
+            ),
+        )
+        assertEquals(
+            5,
+            resolveSimpleCompetitionSegmentCount(
+                event = Event(eventType = EventType.TOURNAMENT, setsPerMatch = 5, winnerSetCount = 1),
+                scoringModel = "SETS",
+                sportSegmentCount = 3,
             ),
         )
     }

@@ -28,6 +28,8 @@ Mobile event creation currently opens one long advanced event-details form. Afte
 - [x] (2026-07-15) Replaced the official scheduling dropdown with explained single-select priority cards.
 - [x] (2026-07-15) Completed the tournament Simple Setup branches with explicit pool count, bracket-team advancement, derived pool summaries, and single/double-elimination selection.
 - [x] (2026-07-15) Added tournament payload and validation regressions and compacted the complete pool-play rules page to fit a 360 x 800 dp viewport.
+- [x] (2026-07-15) Split tournament scheduling rules into pool/regular matches, Winner Bracket, and conditional Loser Bracket pages.
+- [x] (2026-07-15) Added editable pool set duration, bracket set/match duration, and independent winner/loser set counts and target scores.
 
 ## Surprises & Discoveries
 
@@ -81,6 +83,12 @@ Mobile event creation currently opens one long advanced event-details form. Afte
 
 - Observation: Tournament capacity is entered after Competition Rules, and the draft may still contain the placeholder capacity of two teams at that point.
   Evidence: Emulator QA initially blocked a 2-pool, 4-team bracket with `Bracket teams cannot exceed maximum teams` before the organizer had reached Pricing & Registration.
+
+- Observation: The scheduler has one duration per set for a set-based playoff config, then calculates each bracket match from its role-specific set count.
+  Evidence: `EventBuilder.scheduleLeaguePlayoffBracket` multiplies `setDurationMinutes` by `winnerSetCount` or `loserSetCount`; its regression fixture schedules winner best-of-3 at 60 minutes and loser best-of-1 at 20 minutes when sets are 20 minutes.
+
+- Observation: Pool and playoff match rules can persist separately on the same division.
+  Evidence: regular `DivisionDetail` fields hold pool set count, targets, and duration, while `DivisionDetail.playoffConfig` holds the bracket duration and independent winner/loser rules used by the scheduler.
 
 ## Decision Log
 
@@ -156,6 +164,10 @@ Mobile event creation currently opens one long advanced event-details form. Afte
   Rationale: Competition Rules precedes capacity entry. The page can validate pool and bracket divisibility immediately, then recompute and validate teams per pool once the organizer enters maximum teams.
   Date/Author: 2026-07-15 / Codex
 
+- Decision: Put winner- and loser-bracket rules on separate Simple Setup pages.
+  Rationale: Winner and loser set counts and target scores are independent scheduling inputs, and splitting them keeps best-of-five configurations editable without scrolling at the standard viewport. Loser Bracket is used only for set-based double elimination; timed double elimination uses the one bracket match duration supported by the established model.
+  Date/Author: 2026-07-15 / Codex
+
 ## Outcomes & Retrospective
 
 The mobile create screen now starts in a purpose-built Simple Setup instead of embedding the advanced editor. Each used page presents only the controls needed for that decision, has no collapsible container, and writes into the same `Event` draft used by Advanced Setup and final creation. Fixed-content pages fit the standard viewport; resource, timeslot, question, and staff collections use a single vertical scroll region while the inset-aware Back/Continue bar remains fixed above the app navigation and system gesture area.
@@ -164,9 +176,11 @@ The complete base path and the tallest conditional paths were inspected on an An
 
 Tournament creation now distinguishes bracket-only competition from pool play that advances into a bracket. The pool path persists pool count, bracket teams, derived pool size, and bracket format through each division's established payload fields. The complete volleyball pool page, including single/double elimination, was verified at 360 x 800 dp without scrolling.
 
+Scheduling inputs now follow the same separation. Competition Rules owns pool or league duration and scoring. Winner Bracket owns bracket format, minutes per set or timed match duration, winner set count, and winner targets. A set-based double-elimination tournament adds Loser Bracket for its independent set count and targets, while showing the resulting scheduled match length. All three layouts fit at 360 x 800 dp without scrolling.
+
 Android debug Kotlin compilation and debug APK assembly pass. The earlier scoring/layout pass ran 27 focused tests; the latest scheduling/question pass ran 18 focused tests across `EventCreateSimpleSetupTest`, the post-create question persistence regression, and the registration-question HTTP contract. The iOS simulator compile remains blocked by the unrelated existing `PaymentProcessor.ios.kt` expect/actual mismatch described above.
 
-The final tournament pass runs all 21 `EventCreateSimpleSetupTest` cases with zero failures and assembles the debug APK. A broader `DefaultCreateEventComponentTest` run still has seven schedule-slot assertions failing outside the files changed for the tournament branch; those failures are recorded separately from this focused green result.
+The final tournament bracket-duration pass runs all 26 `EventCreateSimpleSetupTest` cases with zero failures and assembles the debug APK. A broader `DefaultCreateEventComponentTest` run still has seven schedule-slot assertions failing outside the files changed for the tournament branch; those failures are recorded separately from this focused green result.
 
 ## Context and Orientation
 

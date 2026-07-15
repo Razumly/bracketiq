@@ -754,6 +754,10 @@ private fun simpleSetupPageError(
     } else {
         "Choose at least two playoff teams before continuing."
     }
+    EventCreateSetupPageId.WINNER_BRACKET_RULES ->
+        buildValidationPopupMessage(simpleTournamentWinnerBracketValidationErrors(event))
+    EventCreateSetupPageId.LOSER_BRACKET_RULES ->
+        buildValidationPopupMessage(simpleTournamentLoserBracketValidationErrors(event))
     EventCreateSetupPageId.PRICING_REGISTRATION -> when {
         event.maxParticipants < 2 -> "Capacity must be at least 2."
         choices.paidRegistration && event.priceCents <= 0 -> "Enter a registration price."
