@@ -26,6 +26,8 @@ import com.razumly.mvp.core.data.repositories.TeamRegistrationConsent
 import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
+import com.razumly.mvp.core.presentation.PaymentProcessor
+import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.eventCreate.CreateEvent_FakeBillingRepository
 import com.razumly.mvp.eventCreate.CreateEvent_FakeEventRepository
@@ -83,6 +85,8 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
 
             harness.component.startProductPurchase(harness.product)
             advance()
+            harness.component.dismissDiscountCodePrompt()
+            advance()
 
             assertEquals(harness.product.id, harness.component.startingProductCheckoutId.value)
             assertEquals(1, harness.billingRepository.productPurchaseIntentCallCount)
@@ -97,6 +101,13 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
             harness.billingRepository.releasePurchaseCheckout()
             advance()
 
+            harness.component.startProductPurchase(harness.product)
+            advance()
+
+            assertEquals(1, harness.billingRepository.productPurchaseIntentCallCount)
+            (harness.component as PaymentProcessor).emitPaymentResult(PaymentResult.Canceled)
+            advance()
+
             assertNull(harness.component.startingProductCheckoutId.value)
         }
 
@@ -107,6 +118,8 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
             advance()
 
             harness.component.startProductPurchase(harness.product)
+            advance()
+            harness.component.dismissDiscountCodePrompt()
             advance()
 
             assertEquals(harness.product.id, harness.component.startingProductCheckoutId.value)
@@ -120,6 +133,13 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
             assertEquals(1, harness.billingRepository.productSubscriptionIntentCallCount)
 
             harness.billingRepository.releaseSubscriptionCheckout()
+            advance()
+
+            harness.component.startProductPurchase(harness.product)
+            advance()
+
+            assertEquals(1, harness.billingRepository.productSubscriptionIntentCallCount)
+            (harness.component as PaymentProcessor).emitPaymentResult(PaymentResult.Canceled)
             advance()
 
             assertNull(harness.component.startingProductCheckoutId.value)
@@ -328,6 +348,8 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
                 )
             )
             advance()
+            component.dismissDiscountCodePrompt()
+            advance()
 
             assertEquals(listOf(team.id), billingRepository.testState.teamRegistrationPurchaseIntentCalls)
             assertEquals(currentUser.id, billingRepository.testState.teamRegistrationPurchaseTargets.single()?.registrantId)
@@ -452,11 +474,21 @@ private class OrganizationDetailTestBillingRepository(
         return Result.success(testPurchaseIntent())
     }
 
+    override suspend fun createProductPurchaseIntent(
+        productId: String,
+        discountCode: String?,
+    ): Result<PurchaseIntent> = createProductPurchaseIntent(productId)
+
     override suspend fun createProductSubscriptionIntent(productId: String): Result<PurchaseIntent> {
         productSubscriptionIntentCallCount += 1
         productSubscriptionGate.await()
         return Result.success(testPurchaseIntent())
     }
+
+    override suspend fun createProductSubscriptionIntent(
+        productId: String,
+        discountCode: String?,
+    ): Result<PurchaseIntent> = createProductSubscriptionIntent(productId)
 
     fun releasePurchaseCheckout() {
         productPurchaseGate.complete(Unit)
@@ -538,6 +570,7 @@ private object NoopMatchRepository : IMatchRepository {
         segmentOperations: List<com.razumly.mvp.core.network.dto.MatchSegmentOperationDto>?,
         incidentOperations: List<com.razumly.mvp.core.network.dto.MatchIncidentOperationDto>?,
         officialCheckIn: com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto?,
+        matchAction: com.razumly.mvp.core.network.dto.MatchActionOperationDto?,
         finalize: Boolean,
         time: kotlin.time.Instant?,
     ): Result<com.razumly.mvp.core.data.dataTypes.MatchMVP> = Result.success(match)
@@ -580,6 +613,63 @@ private object NoopMatchRepository : IMatchRepository {
         rangeStart: kotlin.time.Instant?,
         rangeEnd: kotlin.time.Instant?,
     ): Result<List<com.razumly.mvp.core.data.dataTypes.MatchMVP>> = Result.success(emptyList())
+
+    override suspend fun getEventTeamCheckIns(
+        eventId: String,
+    ): Result<com.razumly.mvp.core.network.dto.TeamCheckInsResponseDto> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun checkInEventTeam(
+        eventId: String,
+        eventTeamId: String,
+    ): Result<com.razumly.mvp.core.network.dto.TeamCheckInDto> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun getMatchTeamCheckIns(
+        eventId: String,
+        matchId: String,
+    ): Result<com.razumly.mvp.core.network.dto.TeamCheckInsResponseDto> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun checkInMatchTeam(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+    ): Result<com.razumly.mvp.core.network.dto.TeamCheckInDto> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun getMatchRosters(
+        eventId: String,
+        matchId: String,
+    ): Result<com.razumly.mvp.core.network.dto.MatchRostersResponseDto> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun removeMatchRosterPlayer(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+        userId: String,
+    ): Result<com.razumly.mvp.core.network.dto.MatchRosterDto> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun restoreMatchRosterPlayer(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+        userId: String,
+    ): Result<com.razumly.mvp.core.network.dto.MatchRosterDto> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun addTemporaryMatchRosterPlayer(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+        firstName: String?,
+        lastName: String?,
+        email: String?,
+        entryId: String?,
+    ): Result<com.razumly.mvp.core.network.dto.MatchRosterDto> =
+        Result.failure(IllegalStateException("unused"))
 
     override suspend fun deleteMatchesOfTournament(tournamentId: String): Result<Unit> = Result.success(Unit)
 

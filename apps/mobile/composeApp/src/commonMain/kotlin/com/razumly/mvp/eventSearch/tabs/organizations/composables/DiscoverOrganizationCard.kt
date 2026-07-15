@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.OrganizationDivisionSummary
 import com.razumly.mvp.core.data.dataTypes.resolvedLogoRef
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.OrganizationVerificationBadge
@@ -106,13 +107,49 @@ internal fun DiscoverOrganizationCard(
                     "$fieldCount rentable fields"
                 }
 
-                Text(
-                    text = detailsText,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = detailsText,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = formatOrganizationDivisionSummary(organization.divisionSummary),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
+    }
+}
+
+internal fun formatOrganizationDivisionSummary(summary: OrganizationDivisionSummary): String {
+    val divisionLabel = if (summary.count == 1) "1 division" else "${summary.count} divisions"
+    val priceLabel = when {
+        summary.minPrice == null || summary.maxPrice == null -> "Price not specified"
+        summary.minPrice == summary.maxPrice -> formatOrganizationPrice(summary.minPrice)
+        else -> "${formatOrganizationPrice(summary.minPrice)}–${formatOrganizationPrice(summary.maxPrice)}"
+    }
+    return "$divisionLabel · $priceLabel"
+}
+
+private fun formatOrganizationPrice(priceCents: Int): String {
+    val normalized = priceCents.coerceAtLeast(0)
+    val dollars = normalized / 100
+    val cents = normalized % 100
+    return if (cents == 0) {
+        "\$$dollars"
+    } else {
+        "\$$dollars.${cents.toString().padStart(2, '0')}"
     }
 }

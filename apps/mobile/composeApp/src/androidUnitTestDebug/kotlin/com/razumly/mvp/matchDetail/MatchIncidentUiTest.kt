@@ -2,6 +2,8 @@ package com.razumly.mvp.matchDetail
 
 import android.app.Application
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -12,7 +14,11 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipeUp
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -28,17 +34,16 @@ class MatchIncidentUiTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun player_required_scoring_hides_plus_minus_and_shows_incident_button() {
+    fun given_player_required_scoring_when_rendered_then_plus_minus_are_absent_and_incident_button_is_visible() {
         composeRule.setContent {
             MaterialTheme {
                 ScoreCard(
                     title = "Red Wolves",
                     score = "0",
-                    decrease = {},
-                    increase = {},
+                    onTap = {},
+                    onSwipeDecrease = {},
                     enabled = true,
                     showControls = true,
-                    showAdjustControls = false,
                     addIncidentLabel = "Add Incident",
                     onAddIncident = {},
                 )
@@ -51,17 +56,18 @@ class MatchIncidentUiTest {
     }
 
     @Test
-    fun scoring_without_player_requirement_keeps_plus_minus_and_shows_non_scoring_incident_button() {
+    fun given_score_surface_when_tapped_or_swiped_then_callbacks_match_gesture() {
+        var tapCount = 0
+        var swipeCount = 0
         composeRule.setContent {
             MaterialTheme {
                 ScoreCard(
                     title = "Red Wolves",
                     score = "2",
-                    decrease = {},
-                    increase = {},
+                    onTap = { tapCount += 1 },
+                    onSwipeDecrease = { swipeCount += 1 },
                     enabled = true,
                     showControls = true,
-                    showAdjustControls = true,
                     addIncidentLabel = "Add Incident",
                     onAddIncident = {},
                 )
@@ -69,8 +75,39 @@ class MatchIncidentUiTest {
         }
 
         composeRule.onNodeWithText("Add Incident").assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("Increase score").assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("Decrease score").assertIsDisplayed()
+        composeRule.onAllNodesWithContentDescription("Increase score").assertCountEquals(0)
+        composeRule.onAllNodesWithContentDescription("Decrease score").assertCountEquals(0)
+        composeRule
+            .onNodeWithContentDescription("Red Wolves score 2. Tap to increase. Swipe to decrease.")
+            .performTouchInput { click() }
+        composeRule
+            .onNodeWithContentDescription("Red Wolves score 2. Tap to increase. Swipe to decrease.")
+            .performTouchInput { swipeUp() }
+        composeRule
+            .onNodeWithContentDescription("Red Wolves score 2. Tap to increase. Swipe to decrease.")
+            .performTouchInput { swipeDown() }
+
+        assertEquals(1, tapCount)
+        assertEquals(2, swipeCount)
+    }
+
+    @Test
+    fun given_gesture_instruction_overlay_when_clicked_then_it_dismisses() {
+        var dismissed = false
+        composeRule.setContent {
+            MaterialTheme {
+                ScoreGestureInstructionOverlay(
+                    onDismiss = { dismissed = true },
+                    modifier = Modifier.size(240.dp),
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Click to increase").assertIsDisplayed()
+        composeRule.onNodeWithText("Swipe to decrease").assertIsDisplayed()
+        composeRule.onNodeWithText("Click to increase").performTouchInput { click() }
+
+        assertTrue(dismissed)
     }
 
     @Test

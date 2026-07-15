@@ -5,31 +5,21 @@ package com.razumly.mvp.matchDetail
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,7 +27,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -174,6 +163,8 @@ internal fun ExpandedMatchDetailsPanel(
                         team2Id = match.team2Id,
                         team1Scores = match.team1Points,
                         team2Scores = match.team2Points,
+                        team1Name = team1Name,
+                        team2Name = team2Name,
                         onSegmentSelected = onSegmentSelected,
                     )
                 }
@@ -554,133 +545,128 @@ private fun MatchActualTimeField(
 }
 
 @Composable
-private fun MatchSegmentTable(
+internal fun MatchSegmentTable(
     segments: List<MatchSegmentMVP>,
     segmentLabel: String,
     team1Id: String?,
     team2Id: String?,
     team1Scores: List<Int>,
     team2Scores: List<Int>,
+    team1Name: String,
+    team2Name: String,
     onSegmentSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (segments.isEmpty()) return
 
-    val scrollState = rememberScrollState()
-    val dividerColor = MaterialTheme.colorScheme.outlineVariant
-
     Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .horizontalScroll(scrollState),
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        MatchSegmentTableRow(
-            label = segmentLabel,
-            values = segments.map { segment -> segment.sequence.toString() },
-            highlightedColumns = segments.map { segment -> segment.isStarted },
-            dividerColor = dividerColor,
-            valueFontWeight = FontWeight.SemiBold,
-            onSegmentSelected = onSegmentSelected,
-        )
-        HorizontalDivider(color = dividerColor)
-        MatchSegmentTableRow(
-            label = "Home",
-            values = segments.mapIndexed { index, segment ->
-                segmentScore(
-                    segment = segment,
-                    teamId = team1Id,
-                    fallbackScores = team1Scores,
-                    index = index,
-                ).toString()
-            },
-            highlightedColumns = segments.map { segment -> segment.isStarted },
-            dividerColor = dividerColor,
-            onSegmentSelected = onSegmentSelected,
-        )
-        HorizontalDivider(color = dividerColor)
-        MatchSegmentTableRow(
-            label = "Away",
-            values = segments.mapIndexed { index, segment ->
-                segmentScore(
-                    segment = segment,
-                    teamId = team2Id,
-                    fallbackScores = team2Scores,
-                    index = index,
-                ).toString()
-            },
-            highlightedColumns = segments.map { segment -> segment.isStarted },
-            dividerColor = dividerColor,
-            onSegmentSelected = onSegmentSelected,
-        )
-    }
-}
-
-@Composable
-private fun MatchSegmentTableRow(
-    label: String,
-    values: List<String>,
-    highlightedColumns: List<Boolean>,
-    dividerColor: Color,
-    valueFontWeight: FontWeight = FontWeight.Normal,
-    onSegmentSelected: (Int) -> Unit,
-) {
-    Row(modifier = Modifier.height(IntrinsicSize.Min)) {
-        MatchSegmentCell(
-            text = label,
-            modifier = Modifier.width(88.dp),
-            textAlign = TextAlign.Start,
-            fontWeight = FontWeight.SemiBold,
-        )
-        values.forEachIndexed { index, value ->
-            VerticalDivider(
-                modifier = Modifier.fillMaxHeight(),
-                color = dividerColor,
-            )
-            MatchSegmentCell(
-                text = value,
+        segments.forEachIndexed { index, segment ->
+            val isActive = segment.isStarted
+            val isComplete = segment.status.equals("COMPLETE", ignoreCase = true)
+            val containerColor = when {
+                isActive -> MaterialTheme.colorScheme.primaryContainer
+                isComplete -> MaterialTheme.colorScheme.secondaryContainer
+                else -> MaterialTheme.colorScheme.surfaceVariant
+            }
+            val contentColor = when {
+                isActive -> MaterialTheme.colorScheme.onPrimaryContainer
+                isComplete -> MaterialTheme.colorScheme.onSecondaryContainer
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            Surface(
                 modifier = Modifier
-                    .width(72.dp)
+                    .fillMaxWidth()
+                    .heightIn(min = 116.dp)
                     .clickable { onSegmentSelected(index) },
-                highlighted = highlightedColumns.getOrElse(index) { false },
-                textAlign = TextAlign.Center,
-                fontWeight = valueFontWeight,
-            )
+                shape = RoundedCornerShape(14.dp),
+                color = containerColor,
+                contentColor = contentColor,
+                tonalElevation = if (isActive) 2.dp else 0.dp,
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "$segmentLabel ${segment.sequence}",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        when {
+                            isActive -> Text(
+                                text = "In progress",
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                            isComplete -> Text(
+                                text = "Complete",
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+                    }
+                    MatchSegmentTeamScoreRow(
+                        roleLabel = "Home",
+                        teamName = team1Name,
+                        score = segmentScore(
+                            segment = segment,
+                            teamId = team1Id,
+                            fallbackScores = team1Scores,
+                            index = index,
+                        ),
+                    )
+                    MatchSegmentTeamScoreRow(
+                        roleLabel = "Away",
+                        teamName = team2Name,
+                        score = segmentScore(
+                            segment = segment,
+                            teamId = team2Id,
+                            fallbackScores = team2Scores,
+                            index = index,
+                        ),
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun MatchSegmentCell(
-    text: String,
-    modifier: Modifier,
-    highlighted: Boolean = false,
-    textAlign: TextAlign = TextAlign.Start,
-    fontWeight: FontWeight = FontWeight.Normal,
+private fun MatchSegmentTeamScoreRow(
+    roleLabel: String,
+    teamName: String,
+    score: Int,
 ) {
-    val backgroundColor = if (highlighted) {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-    } else {
-        Color.Transparent
-    }
-    val textColor = if (highlighted) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
-
-    Box(
-        modifier = modifier
-            .background(backgroundColor)
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-        contentAlignment = if (textAlign == TextAlign.Start) Alignment.CenterStart else Alignment.Center,
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = roleLabel,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = teamName,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
-            color = textColor,
-            fontWeight = fontWeight,
-            textAlign = textAlign,
-            modifier = Modifier.fillMaxWidth(),
+            text = score.toString(),
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.End,
         )
     }
 }

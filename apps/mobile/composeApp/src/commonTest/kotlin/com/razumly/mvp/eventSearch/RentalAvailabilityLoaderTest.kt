@@ -16,6 +16,7 @@ import kotlinx.datetime.TimeZone
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Instant
 
@@ -48,6 +49,62 @@ class RentalAvailabilityLoaderTest {
                 now = now,
             )
         )
+    }
+
+    @Test
+    fun resolveRentalRange_requiresOneAvailabilitySlotToCoverTheWholeSelection() {
+        val date = LocalDate(2026, 6, 18)
+        val firstHalfHour = TimeSlot(
+            id = "slot_first_half",
+            dayOfWeek = 3,
+            daysOfWeek = listOf(3),
+            startTimeMinutes = 10 * 60,
+            endTimeMinutes = 10 * 60 + SLOT_INTERVAL_MINUTES,
+            startDate = Instant.parse("2026-06-18T00:00:00Z"),
+            timeZone = "UTC",
+            repeating = false,
+            endDate = Instant.parse("2026-06-18T10:30:00Z"),
+            scheduledFieldId = "field_1",
+            scheduledFieldIds = listOf("field_1"),
+            price = 2400,
+        )
+        val secondHalfHour = firstHalfHour.copy(
+            id = "slot_second_half",
+            startTimeMinutes = 10 * 60 + SLOT_INTERVAL_MINUTES,
+            endTimeMinutes = 11 * 60,
+            startDate = Instant.parse("2026-06-18T10:30:00Z"),
+            endDate = Instant.parse("2026-06-18T11:00:00Z"),
+        )
+        val option = RentalFieldOption(
+            field = Field(id = "field_1", fieldNumber = 1, name = "Court 1"),
+            rentalSlots = listOf(firstHalfHour, secondHalfHour),
+        )
+
+        assertNull(
+            resolveRentalRange(
+                option = option,
+                date = date,
+                startMinutes = 10 * 60,
+                endMinutes = 11 * 60,
+                timeZone = TimeZone.UTC,
+            ),
+        )
+
+        val completeSlot = firstHalfHour.copy(
+            id = "slot_complete",
+            endTimeMinutes = 11 * 60,
+            endDate = Instant.parse("2026-06-18T11:00:00Z"),
+        )
+        val resolved = resolveRentalRange(
+            option = option.copy(rentalSlots = listOf(completeSlot, secondHalfHour)),
+            date = date,
+            startMinutes = 10 * 60,
+            endMinutes = 11 * 60,
+            timeZone = TimeZone.UTC,
+        )
+
+        assertEquals(listOf("slot_complete"), resolved?.slots?.map(TimeSlot::id))
+        assertEquals(2400, resolved?.totalPriceCents)
     }
 
     @Test

@@ -151,7 +151,6 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
             memberCompliance = teamMemberCompliance[selectedTeamId],
             memberComplianceLoading = loadingTeamMemberComplianceId == selectedTeamId,
             staffUsersById = staffUsersById,
-            onEnsureUserByEmail = { email -> component.ensureUserByEmail(email) },
             onInviteTeamRole = { teamId, userId, inviteType, email ->
                 component.inviteUserToRole(teamId, userId, inviteType, email)
             },

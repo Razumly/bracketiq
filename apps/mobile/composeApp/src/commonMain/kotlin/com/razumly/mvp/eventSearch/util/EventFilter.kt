@@ -13,6 +13,11 @@ data class EventFilter(
     val date: Pair<Instant, Instant?> = Pair(Clock.System.now(), null),
     val sportIds: Set<String> = emptySet(),
     val tagSlugs: Set<String> = emptySet(),
+    val divisionGenders: Set<String> = emptySet(),
+    val skillDivisionTypeIds: Set<String> = emptySet(),
+    val ageDivisionTypeIds: Set<String> = emptySet(),
+    val divisionPriceMin: Double? = null,
+    val divisionPriceMax: Double? = null,
 ) {
     fun filter(event: Event, includePastEvents: Boolean = false): Boolean {
         if (sportIds.isNotEmpty()) {

@@ -36,6 +36,7 @@ import com.razumly.mvp.core.network.dto.MatchActionOperationDto
 import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
 import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.eventDetail.resolveEventMatchRules
+import io.github.aakira.napier.Napier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -85,6 +86,15 @@ internal fun isTeamCheckInWindowOpen(match: MatchMVP, event: Event, now: Instant
     val openMinutes = event.teamCheckInOpenMinutesBefore.coerceAtLeast(0)
     return now >= start - openMinutes.minutes
 }
+
+internal fun resolveMatchCompletionTime(
+    actualEnd: String?,
+    completionInstant: Instant,
+): Instant = actualEnd
+    ?.trim()
+    ?.takeIf(String::isNotBlank)
+    ?.let { value -> runCatching { Instant.parse(value) }.getOrNull() }
+    ?: completionInstant
 
 interface MatchContentComponent {
     val matchWithTeams: StateFlow<MatchWithTeams>
@@ -441,6 +451,17 @@ class DefaultMatchContentComponent(
                     matchRepository.setRealtimePaused(realtimePauseReason, false)
                 }
             }
+        }
+        scope.launch {
+            combine(_isOfficial, _officialCheckedIn) { ownsMatchEditing, checkedIn ->
+                ownsMatchEditing && checkedIn
+            }
+                .distinctUntilChanged()
+                .collect { scoringOpen ->
+                    if (scoringOpen) {
+                        resumePersistedIncidentWork()
+                    }
+                }
         }
         scope.launch {
             event.collect {
@@ -1632,8 +1653,12 @@ class DefaultMatchContentComponent(
                 val updatedScoringMatch = scoringMatch.copy(segments = updatedSegments)
                     .syncLegacyScoresFromSegments(maxSets)
 
-                val success = if (isMatchOver(updatedScoringMatch)) {
-                    val endTime = updatedScoringMatch.end ?: updatedScoringMatch.start ?: Clock.System.now()
+                val finalizing = isMatchOver(updatedScoringMatch)
+                val syncedMatch = if (finalizing) {
+                    val endTime = resolveMatchCompletionTime(
+                        actualEnd = updatedScoringMatch.actualEnd,
+                        completionInstant = Clock.System.now(),
+                    )
                     syncMatchImmediatelyBlocking(
                         match = updatedScoringMatch,
                         finalize = true,
@@ -1646,9 +1671,9 @@ class DefaultMatchContentComponent(
                         saveLocallyBeforeRemote = false,
                     )
                 }
-                if (!success) return@launch
-                applyConfirmedMatchState(updatedScoringMatch)
-                persistMatchLocally(updatedScoringMatch, clearOptimisticOnSuccess = true)
+                if (syncedMatch == null) return@launch
+                applyConfirmedMatchState(syncedMatch)
+                persistMatchLocally(syncedMatch, clearOptimisticOnSuccess = true)
             } finally {
                 _segmentConfirmSaving.value = false
             }
@@ -1734,11 +1759,11 @@ class DefaultMatchContentComponent(
         finalize: Boolean = false,
         time: Instant? = null,
         saveLocallyBeforeRemote: Boolean = true,
-    ): Boolean {
+    ): MatchMVP? {
             cancelPendingDirectScoreSync()
             if (saveLocallyBeforeRemote) {
                 if (!persistMatchLocally(match, clearOptimisticOnSuccess = true)) {
-                    return false
+                    return null
                 }
             }
 
@@ -1760,7 +1785,7 @@ class DefaultMatchContentComponent(
                     } else {
                         "Failed to sync match: ${error.userMessage()}"
                     }
-                }.isSuccess
+                }.getOrNull()
             } else {
                 matchRepository.updateMatch(match).onSuccess {
                     // Clear optimistic state since database is now up to date
@@ -1770,11 +1795,14 @@ class DefaultMatchContentComponent(
                     if (!saveLocallyBeforeRemote) {
                         _optimisticMatch.value = null
                     }
-                }.isSuccess
+                }.map { match }.getOrNull()
             }
     }
 
-    private suspend fun processIncidentQueueUntilBlocked(initialMatch: MatchMVP? = null) {
+    private suspend fun processIncidentQueueUntilBlocked(
+        initialMatch: MatchMVP? = null,
+        scheduleRetryOnFailure: Boolean = true,
+    ) {
         incidentQueueMutex.withLock {
             var queuedMatch = initialMatch
             while (true) {
@@ -1787,11 +1815,29 @@ class DefaultMatchContentComponent(
                 val updatedMatch = executeIncidentAction(currentMatch, action)
                 queuedMatch = updatedMatch
                 if (updatedMatch == null) {
-                    scheduleIncidentQueueRetry()
+                    if (scheduleRetryOnFailure) {
+                        scheduleIncidentQueueRetry()
+                    }
                     return@withLock
                 }
             }
         }
+    }
+
+    /**
+     * Current incident changes are persisted in the match-operation outbox. Older installs can
+     * still have a MatchMVP incident marked PENDING/FAILED without a corresponding outbox row;
+     * the component queue converts those rows once, then the serialized outbox drain owns all
+     * retry classification. In particular, TERMINAL rows remain excluded from this path.
+     */
+    private suspend fun resumePersistedIncidentWork() {
+        processIncidentQueueUntilBlocked(scheduleRetryOnFailure = false)
+        matchRepository.syncPendingMatchOperations(selectedMatchForRealtime.id)
+            .onFailure { error ->
+                Napier.w(
+                    "Unable to resume pending match operations for ${selectedMatchForRealtime.id}: ${error.message}",
+                )
+            }
     }
 
     private suspend fun drainIncidentQueueForConfirmation(): Boolean {
@@ -2477,7 +2523,7 @@ internal fun canIncrementCurrentSegment(
     val pointsToVictory = resolvePointsToVictory(match, currentEvent, setIndex) ?: return true
     val team1Score = match.team1Points.getOrElse(setIndex) { 0 }
     val team2Score = match.team2Points.getOrElse(setIndex) { 0 }
-    return team1Score < pointsToVictory && team2Score < pointsToVictory
+    return !isValidFinalSetScore(team1Score, team2Score, pointsToVictory)
 }
 
 internal fun canConfirmCurrentSegment(
@@ -2494,7 +2540,7 @@ internal fun canConfirmCurrentSegment(
                 false
             } else {
                 resolvePointsToVictory(match, currentEvent, setIndex)?.let { pointsToVictory ->
-                    team1Score >= pointsToVictory || team2Score >= pointsToVictory
+                    isValidFinalSetScore(team1Score, team2Score, pointsToVictory)
                 } ?: true
             }
         }
@@ -2502,6 +2548,13 @@ internal fun canConfirmCurrentSegment(
         "POINTS_ONLY" -> rules.supportsDraw || team1Score != team2Score
         else -> true
     }
+}
+
+private fun isValidFinalSetScore(team1Score: Int, team2Score: Int, target: Int): Boolean {
+    val leaderScore = maxOf(team1Score.coerceAtLeast(0), team2Score.coerceAtLeast(0))
+    val trailingScore = minOf(team1Score.coerceAtLeast(0), team2Score.coerceAtLeast(0))
+    val requiredWinningScore = maxOf(target, trailingScore + 2)
+    return leaderScore == requiredWinningScore
 }
 
 internal fun resolvePointsToVictory(match: MatchMVP, currentEvent: Event?, setIndex: Int): Int? {

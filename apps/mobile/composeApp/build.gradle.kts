@@ -5,6 +5,7 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 import org.gradle.api.tasks.bundling.Zip
 import java.io.ByteArrayOutputStream
+import java.util.Properties
 import java.util.concurrent.TimeUnit
 
 plugins {
@@ -30,6 +31,23 @@ compose.resources {
 
 val mvpVersion = "1.6.14"
 val mvpVersionCode = 67
+
+private fun loadProperties(path: String): Properties =
+    Properties().apply {
+        val propertiesFile = rootProject.file(path)
+        if (propertiesFile.isFile) {
+            propertiesFile.inputStream().use(::load)
+        }
+    }
+
+private val secretProperties = loadProperties("secrets.properties")
+private val defaultProperties = loadProperties("local.defaults.properties")
+
+private fun configProperty(name: String, fallback: String = ""): String =
+    secretProperties.getProperty(name)
+        ?: defaultProperties.getProperty(name)
+        ?: fallback
+
 kotlin {
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
@@ -251,6 +269,11 @@ android {
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = mvpVersionCode
         versionName = mvpVersion
+        // The Secrets Gradle plugin supplies application variants, while the
+        // generated Android unit-test manifest is merged independently. Read
+        // the same secret/default chain here so test variants have a harmless
+        // placeholder without replacing a configured production key.
+        manifestPlaceholders["MAPS_API_KEY"] = configProperty("MAPS_API_KEY")
     }
     buildTypes {
         release {

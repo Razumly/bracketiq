@@ -77,7 +77,6 @@ interface TeamManagementComponent {
         roleInviteType: String,
         email: String? = null,
     )
-    suspend fun ensureUserByEmail(email: String): Result<UserData>
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -468,10 +467,6 @@ class DefaultTeamManagementComponent(
                 return@launch
             }
         }
-    }
-
-    override suspend fun ensureUserByEmail(email: String): Result<UserData> {
-        return userRepository.ensureUserByEmail(email)
     }
 
     private fun refreshSelectedTeamStaffUsers(team: TeamWithPlayers?) {

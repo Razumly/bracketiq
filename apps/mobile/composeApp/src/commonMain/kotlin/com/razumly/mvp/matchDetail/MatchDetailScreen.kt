@@ -9,6 +9,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,14 +25,12 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Warning
@@ -49,10 +48,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,10 +61,13 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -479,6 +481,7 @@ fun MatchDetailScreen(
     val useNativeMapOverlayTransition = Platform.isIOS && !isWebLayout
     val showScoreControls = !isWebLayout
     val showOfficialScoreControls = showScoreControls && isOfficial
+    var showScoreGestureHint by rememberSaveable(match.match.id) { mutableStateOf(true) }
     val navBottomPadding = LocalNavBarPadding.current.calculateBottomPadding()
     val density = LocalDensity.current
     val safeBottomPadding = with(density) { WindowInsets.safeDrawing.getBottom(this).toDp() }
@@ -795,7 +798,6 @@ fun MatchDetailScreen(
         activeSegment?.status != "COMPLETE" &&
         activeSegmentStartedAt != null
     val promptScoringIncident = shouldRequireScoringIncident(rules, event)
-    val showScoreAdjustButtons = !promptScoringIncident
     val teamIncidentTypes = remember(rules) {
         incidentDialogTypes(rules = rules, teamScoped = true)
     }
@@ -868,31 +870,8 @@ fun MatchDetailScreen(
         }
     }
 
-    val team1Text = remember(team1) {
-        derivedStateOf {
-            when {
-                team1?.team?.name != null -> team1.team.name
-                team1?.players != null -> team1.players.joinToString(" & ") {
-                    "${it.firstName}.${it.lastName.first()}"
-                }
-
-                else -> "Team 1"
-            }
-        }
-    }.value
-
-    val team2Text = remember(team2) {
-        derivedStateOf {
-            when {
-                team2?.team?.name != null -> team2.team.name
-                team2?.players != null -> team2.players.joinToString(" & ") {
-                    "${it.firstName}.${it.lastName.first()}"
-                }
-
-                else -> "Team 2"
-            }
-        }
-    }.value
+    val team1Text = remember(team1) { matchTeamDisplayLabel(team1, fallback = "Team 1") }
+    val team2Text = remember(team2) { matchTeamDisplayLabel(team2, fallback = "Team 2") }
 
     val canUseMatchStatusActions = (canManageMatchActions || (isOfficial && officialCheckedIn && officialMatchWindowOpen)) &&
         !matchFinished
@@ -1282,6 +1261,7 @@ fun MatchDetailScreen(
                             }
                         )
                 ) {
+                Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -1292,21 +1272,20 @@ fun MatchDetailScreen(
                 ScoreCard(
                     title = team1Text,
                     score = team1Score.toString(),
-                increase = {
+                    onTap = {
                     if (promptScoringIncident) {
                         openIncidentDialog(match.match.team1Id)
                     } else {
                         component.updateScore(isTeam1 = true, increment = true)
                     }
                 },
-                decrease = {
+                    onSwipeDecrease = {
                     component.updateScore(isTeam1 = true, increment = false)
                 },
                 enabled = canAdjustScore,
-                decreaseEnabled = canAdjustScore,
-                increaseEnabled = canIncrementScore,
+                tapEnabled = canIncrementScore,
+                swipeEnabled = canAdjustScore,
                 showControls = showOfficialScoreControls,
-                showAdjustControls = showScoreAdjustButtons,
                 addIncidentLabel = if (showTeamIncidentButtons) {
                     "Add Incident"
                 } else {
@@ -1516,21 +1495,20 @@ fun MatchDetailScreen(
                 score = team2Score.toString(),
                 modifier = Modifier
                     .weight(1f),
-                increase = {
+                onTap = {
                     if (promptScoringIncident) {
                         openIncidentDialog(match.match.team2Id)
                     } else {
                         component.updateScore(isTeam1 = false, increment = true)
                     }
                 },
-                decrease = {
+                onSwipeDecrease = {
                     component.updateScore(isTeam1 = false, increment = false)
                 },
                 enabled = canAdjustScore,
-                decreaseEnabled = canAdjustScore,
-                increaseEnabled = canIncrementScore,
+                tapEnabled = canIncrementScore,
+                swipeEnabled = canAdjustScore,
                 showControls = showOfficialScoreControls,
-                showAdjustControls = showScoreAdjustButtons,
                 addIncidentLabel = if (showTeamIncidentButtons) {
                     "Add Incident"
                 } else {
@@ -1539,6 +1517,14 @@ fun MatchDetailScreen(
                 onAddIncident = { openIncidentDialog(match.match.team2Id) },
             )
         }
+
+                    if (showScoreGestureHint && showOfficialScoreControls && canAdjustScore) {
+                        ScoreGestureInstructionOverlay(
+                            onDismiss = { showScoreGestureHint = false },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
 
         if (!showMap) {
             Box(
@@ -1703,6 +1689,25 @@ fun MatchDetailScreen(
     }
 }
 
+internal fun matchTeamDisplayLabel(team: TeamWithRelations?, fallback: String): String {
+    val teamName = team?.team?.name?.trim()?.takeIf(String::isNotBlank)
+    if (teamName != null) {
+        return teamName
+    }
+
+    val playerLabels = team?.players.orEmpty().mapNotNull { player ->
+        val firstName = player.firstName.trim()
+        val lastInitial = player.lastName.trim().firstOrNull()
+        when {
+            firstName.isNotBlank() && lastInitial != null -> "$firstName.$lastInitial"
+            firstName.isNotBlank() -> firstName
+            lastInitial != null -> lastInitial.toString()
+            else -> null
+        }
+    }
+    return playerLabels.joinToString(" & ").takeIf(String::isNotBlank) ?: fallback
+}
+
 @Composable
 private fun MatchDetailBottomActions(
     fieldLocationLabel: String,
@@ -1833,17 +1838,37 @@ private fun NativeMapRevealOverlay(
 fun ScoreCard(
     title: String,
     score: String,
-    decrease: () -> Unit,
-    increase: () -> Unit,
+    onTap: () -> Unit,
+    onSwipeDecrease: () -> Unit,
     enabled: Boolean,
-    decreaseEnabled: Boolean = enabled,
-    increaseEnabled: Boolean = enabled,
+    tapEnabled: Boolean = enabled,
+    swipeEnabled: Boolean = enabled,
     showControls: Boolean,
-    showAdjustControls: Boolean = true,
     addIncidentLabel: String? = null,
     onAddIncident: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
+    val interactionModifier = if (showControls) {
+        Modifier
+            .semantics(mergeDescendants = true) {
+                contentDescription = "$title score $score. Tap to increase. Swipe to decrease."
+            }
+            .pointerInput(swipeEnabled, onSwipeDecrease) {
+                if (swipeEnabled) {
+                    detectDragGestures(
+                        onDrag = { change, _ -> change.consume() },
+                        onDragEnd = onSwipeDecrease,
+                    )
+                }
+            }
+            .clickable(
+                enabled = tapEnabled,
+                onClick = onTap,
+            )
+    } else {
+        Modifier
+    }
+
     if (!showControls) {
         Column(
             modifier = modifier
@@ -1868,81 +1893,57 @@ fun ScoreCard(
         return
     }
 
-    Row(
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(horizontal = 16.dp)
+            .then(interactionModifier),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
-        if (showAdjustControls) {
-            Box(
-                modifier = Modifier
-                .wrapContentSize()
-                .clickable(
-                    enabled = decreaseEnabled,
-                    onClick = decrease,
-                )
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+
+        Text(
+            text = score,
+            style = MaterialTheme.typography.displayLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontSize = 64.sp,
+        )
+        if (addIncidentLabel != null && onAddIncident != null) {
+            Button(
+                onClick = onAddIncident,
+                enabled = enabled,
             ) {
-                Icon(
-                    imageVector = MVPIcons.Remove24Px,
-                    contentDescription = "Decrease score",
-                    modifier = Modifier
-                        .size(48.dp),
-                    tint = MaterialTheme.colorScheme.onSurface.copy(
-                        alpha = if (decreaseEnabled) 1f else 0.38f,
-                    ),
-                )
-            }
-        } else {
-            Box(modifier = Modifier.size(48.dp))
-        }
-
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            Text(
-                text = score,
-                style = MaterialTheme.typography.displayLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-                fontSize = 64.sp
-            )
-            if (addIncidentLabel != null && onAddIncident != null) {
-                Button(
-                    onClick = onAddIncident,
-                    enabled = enabled,
-                ) {
-                    Text(addIncidentLabel)
-                }
+                Text(addIncidentLabel)
             }
         }
+    }
+}
 
-        if (showAdjustControls) {
-            Box(
-                modifier = Modifier
-                .wrapContentSize()
-                .clickable(enabled = increaseEnabled, onClick = increase)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Increase score",
-                    modifier = Modifier
-                        .size(48.dp),
-                    tint = MaterialTheme.colorScheme.onSurface.copy(
-                        alpha = if (increaseEnabled) 1f else 0.38f,
-                    ),
-                )
-            }
-        } else {
-            Box(modifier = Modifier.size(48.dp))
-        }
+@Composable
+internal fun ScoreGestureInstructionOverlay(
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.65f))
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "Click to increase\nSwipe to decrease",
+            color = Color.White,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
     }
 }
 

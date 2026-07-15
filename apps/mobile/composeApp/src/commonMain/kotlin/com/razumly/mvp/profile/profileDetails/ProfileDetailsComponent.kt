@@ -5,6 +5,9 @@ import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.repositories.AccountDeletionMfaChallenge
+import com.razumly.mvp.core.data.repositories.AccountDeletionMfaRequiredException
+import com.razumly.mvp.core.data.repositories.AccountDeletionRequest
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.INavigationHandler
@@ -30,13 +33,16 @@ interface ProfileDetailsComponent : IPaymentProcessor {
     val currentUser: StateFlow<UserData>
     val currentAccount: StateFlow<AuthAccount>
     val lastUploadedImageId: StateFlow<String?>
+    val accountDeletionMfaChallenge: StateFlow<AccountDeletionMfaChallenge?>
+    val accountDeletionError: StateFlow<String?>
 
     fun onBackClicked()
     fun setLoadingHandler(loadingHandler: LoadingHandler)
     fun onUploadSelected(photo: GalleryPhotoResult)
     fun consumeUploadedImageSelection()
     fun deleteImage(imageId: String)
-    fun deleteAccount(confirmationText: String)
+    fun clearAccountDeletionState()
+    fun deleteAccount(request: AccountDeletionRequest)
 
     fun updateProfile(
         firstName: String,
@@ -65,6 +71,12 @@ class DefaultProfileDetailsComponent(
 
     private val _lastUploadedImageId = MutableStateFlow<String?>(null)
     override val lastUploadedImageId = _lastUploadedImageId.asStateFlow()
+
+    private val _accountDeletionMfaChallenge = MutableStateFlow<AccountDeletionMfaChallenge?>(null)
+    override val accountDeletionMfaChallenge = _accountDeletionMfaChallenge.asStateFlow()
+
+    private val _accountDeletionError = MutableStateFlow<String?>(null)
+    override val accountDeletionError = _accountDeletionError.asStateFlow()
 
     override val currentUser = userRepository.currentUser
         .map { result -> result.getOrNull() ?: UserData() }
@@ -135,16 +147,27 @@ class DefaultProfileDetailsComponent(
         }
     }
 
-    override fun deleteAccount(confirmationText: String) {
+    override fun clearAccountDeletionState() {
+        _accountDeletionMfaChallenge.value = null
+        _accountDeletionError.value = null
+    }
+
+    override fun deleteAccount(request: AccountDeletionRequest) {
         scope.launch {
+            _accountDeletionError.value = null
             if (::loadingHandler.isInitialized) {
                 loadingHandler.showLoading("Deleting account...")
             }
-            userRepository.deleteAccount(confirmationText)
+            userRepository.deleteAccount(request)
                 .onFailure { error ->
-                    _errorState.value = ErrorMessage("Failed to delete account: ${error.userMessage()}")
+                    val mfaChallenge = (error as? AccountDeletionMfaRequiredException)?.challenge
+                    if (mfaChallenge != null) {
+                        _accountDeletionMfaChallenge.value = mfaChallenge
+                    }
+                    _accountDeletionError.value = error.userMessage("Failed to delete account.")
                 }
                 .onSuccess {
+                    clearAccountDeletionState()
                     navigationHandler.navigateToLogin()
                 }
             if (::loadingHandler.isInitialized) {

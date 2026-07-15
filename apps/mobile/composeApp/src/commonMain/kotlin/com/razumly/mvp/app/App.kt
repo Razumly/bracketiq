@@ -2,7 +2,6 @@ package com.razumly.mvp.app
 
 import androidx.collection.MutableObjectList
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -524,8 +523,9 @@ fun LoadingOverlay(
     message: String, progress: Float? = null, modifier: Modifier = Modifier
 ) {
     Box(
-        modifier = modifier.background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.42f))
-            .clickable(enabled = false) { }, // Prevent interaction
+        modifier = modifier
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.42f))
+            .consumePointerInput(),
         contentAlignment = Alignment.Center
     ) {
         Card(
@@ -558,6 +558,21 @@ fun LoadingOverlay(
                     textAlign = TextAlign.Center
                 )
             }
+        }
+    }
+}
+
+/**
+ * Makes the full-screen loading scrim modal for pointer input. A disabled clickable does not
+ * install a gesture handler, so it cannot stop taps, drags, or scrolls from reaching the
+ * content behind the overlay.
+ */
+private fun Modifier.consumePointerInput(): Modifier = pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            awaitPointerEvent(PointerEventPass.Initial)
+                .changes
+                .forEach { change -> change.consume() }
         }
     }
 }

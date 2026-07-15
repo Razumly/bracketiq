@@ -47,6 +47,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.repositories.AccountDeletionRequest
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.StandardTextField
@@ -70,6 +71,8 @@ fun ProfileDetailsScreen(
     val currentUser by component.currentUser.collectAsState()
     val currentAccount by component.currentAccount.collectAsState()
     val lastUploadedImageId by component.lastUploadedImageId.collectAsState()
+    val accountDeletionMfaChallenge by component.accountDeletionMfaChallenge.collectAsState()
+    val accountDeletionError by component.accountDeletionError.collectAsState()
 
     // Form state
     var email by remember { mutableStateOf("") }
@@ -88,6 +91,8 @@ fun ProfileDetailsScreen(
     var pendingProfileImageId by remember { mutableStateOf<String?>(null) }
     var showDeleteAccountDialog by rememberSaveable { mutableStateOf(false) }
     var deleteAccountConfirmationText by rememberSaveable { mutableStateOf("") }
+    var deleteAccountCurrentPassword by remember { mutableStateOf("") }
+    var deleteAccountMfaCode by remember { mutableStateOf("") }
 
     val uploadedImageIds = remember(currentUser.uploadedImages) {
         currentUser.uploadedImages
@@ -128,15 +133,49 @@ fun ProfileDetailsScreen(
             isEmailValid && isFirstNameValid && isLastNameValid && isPasswordValid
         }
     }
+    val hasDeleteAccountConfirmation by remember {
+        derivedStateOf {
+            deleteAccountConfirmationText.trim()
+                .equals(DELETE_ACCOUNT_CONFIRMATION_TEXT, ignoreCase = true)
+        }
+    }
+    val deleteAccountMfaCodeIsComplete by remember {
+        derivedStateOf {
+            val code = deleteAccountMfaCode.trim()
+            code.length == 6 && code.all(Char::isDigit)
+        }
+    }
     val canConfirmDeleteAccount by remember {
         derivedStateOf {
-            deleteAccountConfirmationText.trim().equals(DELETE_ACCOUNT_CONFIRMATION_TEXT, ignoreCase = true)
+            hasDeleteAccountConfirmation && (
+                accountDeletionMfaChallenge == null || deleteAccountMfaCodeIsComplete
+            )
         }
     }
     val passwordKeyboardOptions = remember {
         KeyboardOptions(
             keyboardType = KeyboardType.Password,
             autoCorrectEnabled = false,
+        )
+    }
+
+    fun resetAccountDeletionDialogState() {
+        showDeleteAccountDialog = false
+        deleteAccountConfirmationText = ""
+        deleteAccountCurrentPassword = ""
+        deleteAccountMfaCode = ""
+        component.clearAccountDeletionState()
+    }
+
+    fun submitAccountDeletion() {
+        if (!canConfirmDeleteAccount) return
+        component.deleteAccount(
+            AccountDeletionRequest(
+                confirmationText = deleteAccountConfirmationText,
+                currentPassword = deleteAccountCurrentPassword.takeIf(String::isNotBlank),
+                mfaChallengeId = accountDeletionMfaChallenge?.challengeId,
+                mfaCode = deleteAccountMfaCode.takeIf(String::isNotBlank),
+            ),
         )
     }
 
@@ -230,10 +269,7 @@ fun ProfileDetailsScreen(
 
     if (showDeleteAccountDialog) {
         AlertDialog(
-            onDismissRequest = {
-                showDeleteAccountDialog = false
-                deleteAccountConfirmationText = ""
-            },
+            onDismissRequest = ::resetAccountDeletionDialogState,
             title = { Text("Delete Account") },
             text = {
                 Column(
@@ -247,15 +283,22 @@ fun ProfileDetailsScreen(
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     StandardTextField(
+                        value = deleteAccountCurrentPassword,
+                        onValueChange = { deleteAccountCurrentPassword = it },
+                        label = "Current password",
+                        isPassword = true,
+                        keyboardType = "password",
+                        imeAction = ImeAction.Next,
+                        supportingText = "Required for password sign-ins. Google or Apple accounts must sign in again first.",
+                    )
+                    StandardTextField(
                         value = deleteAccountConfirmationText,
                         onValueChange = { deleteAccountConfirmationText = it },
                         label = "Confirmation",
                         imeAction = ImeAction.Done,
                         onImeAction = {
                             if (canConfirmDeleteAccount) {
-                                showDeleteAccountDialog = false
-                                component.deleteAccount(deleteAccountConfirmationText)
-                                deleteAccountConfirmationText = ""
+                                submitAccountDeletion()
                             }
                         },
                         supportingText = if (deleteAccountConfirmationText.isNotBlank() && !canConfirmDeleteAccount) {
@@ -263,17 +306,46 @@ fun ProfileDetailsScreen(
                         } else {
                             ""
                         },
-                        isError = deleteAccountConfirmationText.isNotBlank() && !canConfirmDeleteAccount,
+                        isError = deleteAccountConfirmationText.isNotBlank() && !hasDeleteAccountConfirmation,
                     )
+                    if (accountDeletionMfaChallenge != null) {
+                        Text(
+                            "Authenticator verification is required. Enter the six-digit code from your authenticator app to continue.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        StandardTextField(
+                            value = deleteAccountMfaCode,
+                            onValueChange = { value ->
+                                deleteAccountMfaCode = value.filter(Char::isDigit).take(6)
+                            },
+                            label = "Authenticator code",
+                            keyboardType = "number",
+                            imeAction = ImeAction.Done,
+                            onImeAction = ::submitAccountDeletion,
+                            supportingText = "The challenge expires soon. Request a new one if the code expires.",
+                            isError = deleteAccountMfaCode.isNotBlank() && !deleteAccountMfaCodeIsComplete,
+                        )
+                        TextButton(
+                            onClick = {
+                                deleteAccountMfaCode = ""
+                                component.clearAccountDeletionState()
+                            },
+                        ) {
+                            Text("Request a new code")
+                        }
+                    }
+                    accountDeletionError?.let { error ->
+                        Text(
+                            error,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
                 }
             },
             confirmButton = {
                 Button(
-                    onClick = {
-                        showDeleteAccountDialog = false
-                        component.deleteAccount(deleteAccountConfirmationText)
-                        deleteAccountConfirmationText = ""
-                    },
+                    onClick = ::submitAccountDeletion,
                     enabled = canConfirmDeleteAccount,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.error,
@@ -285,10 +357,7 @@ fun ProfileDetailsScreen(
             },
             dismissButton = {
                 TextButton(
-                    onClick = {
-                        showDeleteAccountDialog = false
-                        deleteAccountConfirmationText = ""
-                    },
+                    onClick = ::resetAccountDeletionDialogState,
                 ) {
                     Text("Cancel")
                 }
@@ -522,6 +591,9 @@ fun ProfileDetailsScreen(
                     Button(
                         onClick = {
                             deleteAccountConfirmationText = ""
+                            deleteAccountCurrentPassword = ""
+                            deleteAccountMfaCode = ""
+                            component.clearAccountDeletionState()
                             showDeleteAccountDialog = true
                         },
                         colors = ButtonDefaults.buttonColors(

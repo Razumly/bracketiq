@@ -98,6 +98,7 @@ import com.kizitonwose.calendar.core.WeekDayPosition
 import com.razumly.mvp.core.analytics.AnalyticsEvent
 import com.razumly.mvp.core.analytics.AnalyticsTracker
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Organization
@@ -109,6 +110,8 @@ import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.eventTagIdentity
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.EventTagSearchDropdown
+import com.razumly.mvp.core.presentation.composables.DropdownOption
+import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.composables.SearchBox
 import com.razumly.mvp.core.presentation.composables.SearchOverlay
@@ -416,6 +419,182 @@ private fun DiscoverFilterTagSection(
     }
 }
 
+internal fun buildOrganizationSkillFilterOptions(
+    parameters: DivisionTypeParameters,
+    sports: List<Sport>,
+    selectedSportIds: Set<String>,
+): List<DropdownOption> {
+    val sportNamesById = sports.associate { sport -> sport.id to sport.name }
+    val eligibleGroups = parameters.sportSkills
+        .filter { group -> selectedSportIds.isEmpty() || group.sportId in selectedSportIds }
+        .map { group ->
+            group to (
+                group.sportName.trim().ifBlank { sportNamesById[group.sportId].orEmpty() }
+                    .ifBlank { group.sportId }
+                )
+        }
+        .sortedBy { (_, sportName) -> sportName.lowercase() }
+    val labelSports = eligibleGroups.map { (group) -> group.sportId }.distinct().size > 1
+
+    return eligibleGroups
+        .flatMap { (group, sportName) ->
+            group.skills.map { skill -> Triple(skill.id.trim().lowercase(), skill.name, sportName) }
+        }
+        .filter { (skillId) -> skillId.isNotBlank() }
+        .groupBy { (skillId) -> skillId }
+        .map { (skillId, entries) ->
+            val skillName = entries.first().second.trim().ifBlank { skillId }
+            val sportNames = entries.map { entry -> entry.third }.filter(String::isNotBlank).distinct()
+            DropdownOption(
+                value = skillId,
+                label = if (labelSports && sportNames.isNotEmpty()) {
+                    "${sportNames.joinToString(", ")} · $skillName"
+                } else {
+                    skillName
+                },
+            )
+        }
+        .sortedWith(compareBy<DropdownOption> { option -> option.label.substringBefore(" · ").lowercase() }
+            .thenBy { option -> option.label.substringAfter(" · ", option.label).lowercase() })
+}
+
+private fun normalizeDivisionPriceInput(value: String): String {
+    var foundDecimal = false
+    var decimalDigits = 0
+    return buildString {
+        value.forEach { character ->
+            when {
+                character.isDigit() && (!foundDecimal || decimalDigits < 2) -> {
+                    append(character)
+                    if (foundDecimal) decimalDigits += 1
+                }
+                character == '.' && !foundDecimal -> {
+                    append(character)
+                    foundDecimal = true
+                }
+            }
+        }
+    }
+}
+
+private fun String.toDivisionPriceOrNull(): Double? =
+    trim().toDoubleOrNull()?.takeIf { price -> price.isFinite() && price >= 0.0 }
+
+@Composable
+private fun DiscoverOrganizationDivisionFilterSection(
+    parameters: DivisionTypeParameters,
+    sports: List<Sport>,
+    filter: EventFilter,
+    onFilterChange: (EventFilter) -> Unit,
+) {
+    val skillOptions = remember(parameters, sports, filter.sportIds) {
+        buildOrganizationSkillFilterOptions(parameters, sports, filter.sportIds)
+    }
+    val validSkillIds = remember(skillOptions) { skillOptions.map { option -> option.value }.toSet() }
+    var minPriceInput by rememberSaveable { mutableStateOf(filter.divisionPriceMin?.toString().orEmpty()) }
+    var maxPriceInput by rememberSaveable { mutableStateOf(filter.divisionPriceMax?.toString().orEmpty()) }
+
+    LaunchedEffect(validSkillIds, filter.skillDivisionTypeIds) {
+        val nextSkillIds = filter.skillDivisionTypeIds.intersect(validSkillIds)
+        if (nextSkillIds != filter.skillDivisionTypeIds) {
+            onFilterChange(filter.copy(skillDivisionTypeIds = nextSkillIds))
+        }
+    }
+    LaunchedEffect(filter.divisionPriceMin) {
+        if (minPriceInput.toDivisionPriceOrNull() != filter.divisionPriceMin) {
+            minPriceInput = filter.divisionPriceMin?.toString().orEmpty()
+        }
+    }
+    LaunchedEffect(filter.divisionPriceMax) {
+        if (maxPriceInput.toDivisionPriceOrNull() != filter.divisionPriceMax) {
+            maxPriceInput = filter.divisionPriceMax?.toString().orEmpty()
+        }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = "Division",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        PlatformDropdown(
+            selectedValue = "",
+            onSelectionChange = {},
+            options = parameters.genders.map { option -> DropdownOption(option.id, option.name) },
+            label = "Gender",
+            placeholder = "Any gender",
+            multiSelect = true,
+            selectedValues = filter.divisionGenders.toList(),
+            onMultiSelectionChange = { values ->
+                onFilterChange(filter.copy(divisionGenders = values.toSet()))
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        PlatformDropdown(
+            selectedValue = "",
+            onSelectionChange = {},
+            options = parameters.ages.map { option -> DropdownOption(option.id, option.name) },
+            label = "Age group",
+            placeholder = "Any age group",
+            multiSelect = true,
+            selectedValues = filter.ageDivisionTypeIds.toList(),
+            onMultiSelectionChange = { values ->
+                onFilterChange(filter.copy(ageDivisionTypeIds = values.toSet()))
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        PlatformDropdown(
+            selectedValue = "",
+            onSelectionChange = {},
+            options = skillOptions,
+            label = "Skill level",
+            placeholder = "Any skill level",
+            multiSelect = true,
+            selectedValues = filter.skillDivisionTypeIds.toList(),
+            onMultiSelectionChange = { values ->
+                onFilterChange(filter.copy(skillDivisionTypeIds = values.toSet()))
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            StandardTextField(
+                value = minPriceInput,
+                onValueChange = { value ->
+                    minPriceInput = normalizeDivisionPriceInput(value)
+                    onFilterChange(filter.copy(divisionPriceMin = minPriceInput.toDivisionPriceOrNull()))
+                },
+                label = "Minimum price",
+                placeholder = "\$0",
+                keyboardType = "number",
+                modifier = Modifier.weight(1f),
+            )
+            StandardTextField(
+                value = maxPriceInput,
+                onValueChange = { value ->
+                    maxPriceInput = normalizeDivisionPriceInput(value)
+                    onFilterChange(filter.copy(divisionPriceMax = maxPriceInput.toDivisionPriceOrNull()))
+                },
+                label = "Maximum price",
+                placeholder = "\$0",
+                keyboardType = "number",
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Text(
+            text = "All selected division filters must match the same division.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 @Composable
 private fun DiscoverFilterLocationSection(
     locationLabel: String,
@@ -608,6 +787,7 @@ fun EventSearchScreen(
     val currentRadius by component.currentRadius.collectAsState()
     val selectedSearchLocationLabel by component.selectedSearchLocationLabel.collectAsState()
     val sports by component.sports.collectAsState()
+    val divisionTypeParameters by component.divisionTypeParameters.collectAsState()
     val eventTagOptions by component.eventTags.collectAsState()
     val organizationTagOptions by component.organizationTags.collectAsState()
     val organizationFilter by component.organizationFilter.collectAsState()
@@ -1333,7 +1513,15 @@ fun EventSearchScreen(
                                 } else {
                                     sportIds + sport.id
                                 }
-                                copy(sportIds = nextSportIds)
+                                val validSkillIds = buildOrganizationSkillFilterOptions(
+                                    parameters = divisionTypeParameters,
+                                    sports = sports,
+                                    selectedSportIds = nextSportIds,
+                                ).map { option -> option.value }.toSet()
+                                copy(
+                                    sportIds = nextSportIds,
+                                    skillDivisionTypeIds = skillDivisionTypeIds.intersect(validSkillIds),
+                                )
                             }
                         },
                     )
@@ -1352,6 +1540,14 @@ fun EventSearchScreen(
                             }
                         },
                         expandable = false,
+                    )
+                    DiscoverOrganizationDivisionFilterSection(
+                        parameters = divisionTypeParameters,
+                        sports = sports,
+                        filter = organizationFilter,
+                        onFilterChange = { nextFilter ->
+                            component.updateOrganizationFilter { nextFilter }
+                        },
                     )
                     DiscoverFilterLocationSection(
                         locationLabel = selectedSearchLocationLabel ?: if (currentLocation != null) {

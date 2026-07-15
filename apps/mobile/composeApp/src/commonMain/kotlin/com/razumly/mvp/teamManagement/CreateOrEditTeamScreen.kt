@@ -308,7 +308,6 @@ fun CreateOrEditTeamScreen(
     memberCompliance: EventTeamComplianceSummary? = null,
     memberComplianceLoading: Boolean = false,
     staffUsersById: Map<String, UserData> = emptyMap(),
-    onEnsureUserByEmail: (suspend (email: String) -> Result<UserData>)? = null,
     onInviteTeamRole: ((
         teamId: String,
         userId: String?,
