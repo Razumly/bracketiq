@@ -147,8 +147,17 @@ internal fun LazyListScope.simpleEventDetailsStaffSection(
                 if (state.editEvent.teamCheckInMode != TeamCheckInMode.OFF) {
                     NumberInputField(
                         value = state.editEvent.teamCheckInOpenMinutesBefore.coerceAtLeast(0).toString(),
-                        label = "Opens before start (minutes)",
-                        isError = false,
+                        label = "Opens before start (minutes) *",
+                        isError = state.showValidationErrors &&
+                            state.editEvent.teamCheckInOpenMinutesBefore < 0,
+                        supportingText = if (
+                            state.showValidationErrors &&
+                            state.editEvent.teamCheckInOpenMinutesBefore < 0
+                        ) {
+                            "Enter 0 or more minutes."
+                        } else {
+                            ""
+                        },
                         onValueChange = { newValue ->
                             if (newValue.all(Char::isDigit)) {
                                 actions.onUpdateTeamCheckInOpenMinutesBefore(
@@ -269,6 +278,7 @@ private fun EventOfficialPositionsEditor(
                     OfficialPositionEditorCard(
                         position = position,
                         actions = actions,
+                        showValidationErrors = state.showValidationErrors,
                     )
                 }
         }
@@ -285,6 +295,7 @@ private fun EventOfficialPositionsEditor(
 private fun OfficialPositionEditorCard(
     position: EventOfficialPosition,
     actions: EventDetailsStaffActions,
+    showValidationErrors: Boolean,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -303,8 +314,14 @@ private fun OfficialPositionEditorCard(
                 onValueChange = { newName ->
                     actions.onUpdateOfficialPositionName(position.id, newName)
                 },
-                label = "Position name",
+                label = "Position name *",
                 modifier = Modifier.fillMaxWidth(),
+                isError = showValidationErrors && position.name.isBlank(),
+                supportingText = if (showValidationErrors && position.name.isBlank()) {
+                    "Enter a position name."
+                } else {
+                    ""
+                },
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -314,8 +331,13 @@ private fun OfficialPositionEditorCard(
                 NumberInputField(
                     modifier = Modifier.weight(1f),
                     value = position.count.toString(),
-                    label = "Slots",
-                    isError = false,
+                    label = "Slots *",
+                    isError = showValidationErrors && position.count < 1,
+                    supportingText = if (showValidationErrors && position.count < 1) {
+                        "Enter at least 1 slot."
+                    } else {
+                        ""
+                    },
                     onValueChange = { newValue ->
                         val nextCount = newValue.toIntOrNull()
                         if (newValue.isBlank()) {
@@ -387,6 +409,8 @@ private fun StaffEmailInviteEditor(
     state: EventDetailsStaffState,
     actions: EventDetailsStaffActions,
 ) {
+    val emailError = state.staffEditorError
+        ?.takeIf { error -> error.contains("email", ignoreCase = true) }
     Text(
         text = "Email invite",
         style = MaterialTheme.typography.titleSmall,
@@ -412,8 +436,10 @@ private fun StaffEmailInviteEditor(
     StandardTextField(
         value = state.staffInviteEmail,
         onValueChange = actions.onStaffInviteEmailChange,
-        label = "Email",
+        label = "Email *",
         modifier = Modifier.fillMaxWidth(),
+        isError = emailError != null,
+        supportingText = emailError.orEmpty(),
     )
     Row(
         modifier = Modifier.fillMaxWidth(),

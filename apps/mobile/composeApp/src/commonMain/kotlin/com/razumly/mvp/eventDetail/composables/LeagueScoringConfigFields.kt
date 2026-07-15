@@ -29,6 +29,7 @@ fun LeagueScoringConfigFields(
     config: LeagueScoringConfigDTO,
     sport: Sport?,
     onConfigChange: (LeagueScoringConfigDTO) -> Unit,
+    showValidationErrors: Boolean = false,
 ) {
     val visibleNumericFields = remember(sport) {
         numericScoringFields.filter { field ->
@@ -44,6 +45,7 @@ fun LeagueScoringConfigFields(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         visibleNumericFields.forEach { field ->
+            val isMissing = field.readValue(config).isBlank()
             StandardTextField(
                 value = field.readValue(config),
                 onValueChange = { updated ->
@@ -52,12 +54,28 @@ fun LeagueScoringConfigFields(
                     }
                 },
                 modifier = Modifier.fillMaxWidth(0.48f),
-                label = field.label,
+                label = "${field.label} *",
                 keyboardType = field.keyboardType,
+                isError = showValidationErrors && isMissing,
+                supportingText = if (showValidationErrors && isMissing) {
+                    "Required for the selected sport."
+                } else {
+                    ""
+                },
             )
         }
     }
 }
+
+internal fun leagueScoringValidationErrors(
+    config: LeagueScoringConfigDTO,
+    sport: Sport?,
+): List<String> = numericScoringFields
+    .filter { field -> shouldShowField(sport, field.isEnabledForSport) }
+    .mapNotNull { field ->
+        field.label.takeIf { field.readValue(config).isBlank() }
+    }
+    .map { label -> "$label is required for the selected sport." }
 
 private fun shouldShowField(
     sport: Sport?,

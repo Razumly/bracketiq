@@ -44,6 +44,8 @@ fun InclusivePriceInput(
     editorKey: Any? = Unit,
     eventType: String? = null,
     onUserEdit: () -> Unit = {},
+    isError: Boolean = false,
+    supportingText: String = "",
 ) {
     val scope = rememberCoroutineScope()
     val currentQuoteRequester by rememberUpdatedState(quoteInclusivePrice)
@@ -111,6 +113,8 @@ fun InclusivePriceInput(
                 modifier = Modifier.weight(1f),
                 label = totalLabel,
                 enabled = enabled,
+                isError = isError,
+                supportingText = supportingText,
             )
         }
 

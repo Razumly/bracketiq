@@ -103,7 +103,7 @@ internal fun LazyListScope.eventDetailsHeroSection(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            "Choose Image",
+                            "Choose Image *",
                             style = MaterialTheme.typography.labelMedium,
                             textAlign = TextAlign.Center,
                         )
@@ -178,7 +178,7 @@ internal fun LazyListScope.eventDetailsHeroSection(
                         StandardTextField(
                             value = state.eventNameInput,
                             onValueChange = actions.onEventNameInputChange,
-                            label = "Event Name",
+                            label = "Event Name *",
                             isError = hasNameError,
                             supportingText = if (hasNameError) {
                                 stringResource(Res.string.enter_value)

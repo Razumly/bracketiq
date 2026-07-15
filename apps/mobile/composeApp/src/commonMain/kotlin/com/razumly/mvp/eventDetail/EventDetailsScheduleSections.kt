@@ -36,6 +36,7 @@ internal data class EventDetailsLeagueScoringState(
     val editEvent: Event,
     val sports: List<Sport>,
     val leagueScoringConfig: LeagueScoringConfigDTO,
+    val showValidationErrors: Boolean,
 )
 
 internal data class EventDetailsLeagueScoringActions(
@@ -133,6 +134,7 @@ internal fun LazyListScope.eventDetailsLeagueScoringSection(
                 config = state.leagueScoringConfig,
                 sport = state.sports.firstOrNull { it.id == state.editEvent.sportId },
                 onConfigChange = actions.onConfigChange,
+                showValidationErrors = state.showValidationErrors,
             )
         },
     )

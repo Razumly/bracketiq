@@ -2,11 +2,53 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
+import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
+import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
+import com.razumly.mvp.eventDetail.composables.leagueScoringValidationErrors
+import io.ktor.http.Url
 import kotlinx.datetime.LocalDate
+
+internal fun eventAgeRangeErrors(event: Event): Pair<String?, String?> {
+    val minAge = event.minAge
+    val maxAge = event.maxAge
+    val minimumError = when {
+        minAge != null && minAge < 0 -> "Minimum age must be 0 or greater."
+        minAge != null && maxAge != null && minAge > maxAge ->
+            "Minimum age must not exceed maximum age."
+        else -> null
+    }
+    val maximumError = when {
+        maxAge != null && maxAge < 0 -> "Maximum age must be 0 or greater."
+        minAge != null && maxAge != null && maxAge < minAge ->
+            "Maximum age must be at least minimum age."
+        else -> null
+    }
+    return minimumError to maximumError
+}
+
+internal fun manualPaymentLinkError(link: ManualPaymentLink): String? {
+    val rawUrl = link.url.trim()
+    if (rawUrl.isBlank()) return "Enter a payment link."
+    val hasHttpScheme = rawUrl.startsWith("http://", ignoreCase = true) ||
+        rawUrl.startsWith("https://", ignoreCase = true)
+    val parsedUrl = runCatching { Url(rawUrl) }.getOrNull()
+    return if (
+        !hasHttpScheme ||
+        parsedUrl == null ||
+        parsedUrl.host.isBlank() ||
+        parsedUrl.protocol.name !in setOf("http", "https")
+    ) {
+        "Enter a valid http:// or https:// payment link."
+    } else {
+        null
+    }
+}
 internal fun validatePaymentPlans(
     event: Event,
     divisionDetails: List<DivisionDetail> = emptyList(),
@@ -135,6 +177,14 @@ internal data class EventValidationResult(
     val isSportValid: Boolean,
     val isFixedEndDateRangeValid: Boolean,
     val isPaymentPlansValid: Boolean,
+    val isImageValid: Boolean,
+    val isAgeRangeValid: Boolean,
+    val isRegistrationCutoffValid: Boolean,
+    val isRefundCutoffValid: Boolean,
+    val isManualPaymentLinksValid: Boolean,
+    val isOfficialPositionsValid: Boolean,
+    val isLeagueScoringValid: Boolean,
+    val leagueScoringValidationErrors: List<String>,
     val paymentPlanValidationErrors: List<String>,
     val validationErrors: List<String>,
     val isValid: Boolean,
@@ -151,8 +201,11 @@ internal fun computeEventValidationResult(
     isColorLoaded: Boolean,
     scheduleTimeLocked: Boolean,
     requiresPositiveRegistrationPrice: Boolean = false,
+    leagueScoringConfig: LeagueScoringConfigDTO? = null,
+    selectedSport: Sport? = null,
 ): EventValidationResult {
     val isNameValid = editEvent.name.isNotBlank()
+    val isImageValid = editEvent.imageId.isNotBlank() && isColorLoaded
     val isPriceValid = if (!requiresPositiveRegistrationPrice) {
         editEvent.priceCents >= 0
     } else if (editEvent.singleDivision) {
@@ -168,6 +221,19 @@ internal fun computeEventValidationResult(
             divisionDetailsForSettings.all { detail -> (detail.maxParticipants ?: 0) >= 2 }
     }
     val isTeamSizeValid = !editEvent.teamSignup || editEvent.teamSizeLimit >= 1
+    val ageRangeErrors = eventAgeRangeErrors(editEvent)
+    val isAgeRangeValid = ageRangeErrors.first == null && ageRangeErrors.second == null
+    val isRegistrationCutoffValid = editEvent.registrationCutoffHours >= 0
+    val isRefundCutoffValid = editEvent.cancellationRefundHours?.let { hours -> hours >= 0 } ?: true
+    val manualPaymentLinkErrors = if (editEvent.usesManualRegistrationPayments()) {
+        editEvent.manualPaymentLinks.mapNotNull(::manualPaymentLinkError)
+    } else {
+        emptyList()
+    }
+    val isManualPaymentLinksValid = manualPaymentLinkErrors.isEmpty()
+    val isOfficialPositionsValid = editEvent.officialPositions.all { position ->
+        position.id.isNotBlank() && position.name.isNotBlank() && position.count >= 1 && position.order >= 0
+    }
     val isLocationValid = editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0
     val isSkillLevelValid = editEvent.eventType == EventType.LEAGUE || editEvent.divisions.isNotEmpty()
     val duplicateDivisionNames = duplicateDivisionIdentityNames(divisionDetailsForSettings)
@@ -391,11 +457,22 @@ internal fun computeEventValidationResult(
         divisionDetails = divisionDetailsForSettings,
     )
     val isPaymentPlansValid = paymentPlanValidationErrors.isEmpty()
+    val leagueScoringErrors = if (editEvent.eventType == EventType.LEAGUE && leagueScoringConfig != null) {
+        leagueScoringValidationErrors(leagueScoringConfig, selectedSport)
+    } else {
+        emptyList()
+    }
+    val isLeagueScoringValid = leagueScoringErrors.isEmpty()
 
     val isValid = isNameValid &&
         isPriceValid &&
         isMaxParticipantsValid &&
         isTeamSizeValid &&
+        isAgeRangeValid &&
+        isRegistrationCutoffValid &&
+        isRefundCutoffValid &&
+        isManualPaymentLinksValid &&
+        isOfficialPositionsValid &&
         isWinnerSetCountValid &&
         isWinnerPointsValid &&
         isLoserSetCountValid &&
@@ -411,8 +488,9 @@ internal fun computeEventValidationResult(
         isLeagueSlotsValid &&
         isFixedEndDateRangeValid &&
         isSportValid &&
+        isLeagueScoringValid &&
         isPaymentPlansValid &&
-        isColorLoaded
+        isImageValid
 
     val validationErrors = buildList {
         if (!isNameValid) {
@@ -449,6 +527,21 @@ internal fun computeEventValidationResult(
         }
         if (!isTeamSizeValid) {
             add("Team size must be at least 1.")
+        }
+        if (!isAgeRangeValid) {
+            addAll(listOfNotNull(ageRangeErrors.first, ageRangeErrors.second).distinct())
+        }
+        if (!isRegistrationCutoffValid) {
+            add("Registration cutoff must be 0 hours or greater.")
+        }
+        if (!isRefundCutoffValid) {
+            add("Automatic refund cutoff must be 0 hours or greater.")
+        }
+        if (!isManualPaymentLinksValid) {
+            addAll(manualPaymentLinkErrors.distinct())
+        }
+        if (!isOfficialPositionsValid) {
+            add("Every official position needs a name and at least 1 slot.")
         }
         if (!isSkillLevelValid) {
             add("Add at least one division.")
@@ -512,6 +605,9 @@ internal fun computeEventValidationResult(
         if (!isPaymentPlansValid) {
             addAll(paymentPlanValidationErrors)
         }
+        if (!isLeagueScoringValid) {
+            addAll(leagueScoringErrors)
+        }
         val imageError = when {
             editEvent.imageId.isBlank() -> "Select an image for the event."
             !isColorLoaded -> "Image is still loading."
@@ -543,6 +639,14 @@ internal fun computeEventValidationResult(
         isSportValid = isSportValid,
         isFixedEndDateRangeValid = isFixedEndDateRangeValid,
         isPaymentPlansValid = isPaymentPlansValid,
+        isImageValid = isImageValid,
+        isAgeRangeValid = isAgeRangeValid,
+        isRegistrationCutoffValid = isRegistrationCutoffValid,
+        isRefundCutoffValid = isRefundCutoffValid,
+        isManualPaymentLinksValid = isManualPaymentLinksValid,
+        isOfficialPositionsValid = isOfficialPositionsValid,
+        isLeagueScoringValid = isLeagueScoringValid,
+        leagueScoringValidationErrors = leagueScoringErrors,
         paymentPlanValidationErrors = paymentPlanValidationErrors,
         validationErrors = validationErrors,
         isValid = isValid,

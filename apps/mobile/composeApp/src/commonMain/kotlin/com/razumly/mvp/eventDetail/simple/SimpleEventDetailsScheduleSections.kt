@@ -71,6 +71,7 @@ internal fun LazyListScope.simpleEventDetailsLeagueScoringSection(
                 config = state.leagueScoringConfig,
                 sport = state.sports.firstOrNull { it.id == state.editEvent.sportId },
                 onConfigChange = actions.onConfigChange,
+                showValidationErrors = state.showValidationErrors,
             )
         },
     )

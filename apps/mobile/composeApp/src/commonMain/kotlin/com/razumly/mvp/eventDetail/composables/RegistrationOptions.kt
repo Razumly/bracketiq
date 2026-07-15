@@ -11,6 +11,7 @@ fun RegistrationOptions(
     cutoffHours: Int,
     onCutoffHoursChange: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    showValidationErrors: Boolean = false,
 ) {
     Column(modifier = modifier) {
         StandardTextField(
@@ -24,8 +25,14 @@ fun RegistrationOptions(
                 onCutoffHoursChange(newValue.toIntOrNull() ?: 0)
             },
             modifier = Modifier.fillMaxWidth(),
-            label = "Reg. Cutoff (Hours)",
+            label = "Registration cutoff (hours) *",
             keyboardType = "number",
+            isError = showValidationErrors && cutoffHours < 0,
+            supportingText = if (showValidationErrors && cutoffHours < 0) {
+                "Enter 0 or more hours."
+            } else {
+                "Use 0 to keep registration open until the event starts."
+            },
         )
     }
 }

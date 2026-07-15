@@ -79,7 +79,7 @@ internal fun LazyListScope.simpleEventDetailsHeroSection(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            "Choose Image",
+                            "Choose Image *",
                             style = MaterialTheme.typography.labelMedium,
                             textAlign = TextAlign.Center,
                         )
@@ -154,7 +154,7 @@ internal fun LazyListScope.simpleEventDetailsHeroSection(
                         StandardTextField(
                             value = state.eventNameInput,
                             onValueChange = actions.onEventNameInputChange,
-                            label = "Event Name",
+                            label = "Event Name *",
                             isError = hasNameError,
                             supportingText = if (hasNameError) {
                                 stringResource(Res.string.enter_value)
@@ -173,8 +173,13 @@ internal fun LazyListScope.simpleEventDetailsHeroSection(
 
                 if (state.editView) {
                     Text(
-                        text = state.editEvent.location,
+                        text = state.editEvent.location.ifBlank { "Location *" },
                         style = MaterialTheme.typography.bodyMedium,
+                        color = if (state.showValidationErrors && !state.isLocationValid) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
                     )
                     Button(
                         onClick = {
@@ -191,11 +196,11 @@ internal fun LazyListScope.simpleEventDetailsHeroSection(
                         ),
                     ) {
                         Icon(Icons.Default.Place, contentDescription = null)
-                        Text("Edit Location")
+                        Text("Select Location *")
                     }
                     if (state.showValidationErrors && !state.isLocationValid) {
                         Text(
-                            text = "Select a Location",
+                            text = "Select a location to continue.",
                             color = MaterialTheme.colorScheme.error,
                         )
                     }

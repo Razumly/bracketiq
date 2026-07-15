@@ -135,7 +135,7 @@ internal fun LazyListScope.simpleEventDetailsRegistrationSection(
                 NumberInputField(
                     modifier = Modifier.fillMaxWidth(),
                     value = state.editEvent.teamSizeLimit.toString(),
-                    label = "Team Size Limit",
+                    label = "Team Size Limit *",
                     onValueChange = { newValue ->
                         if (newValue.all { it.isDigit() }) {
                             actions.onEditEvent {
@@ -153,6 +153,7 @@ internal fun LazyListScope.simpleEventDetailsRegistrationSection(
                 FormSectionDivider()
             }
 
+            val ageRangeErrors = eventAgeRangeErrors(state.editEvent)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -166,7 +167,8 @@ internal fun LazyListScope.simpleEventDetailsRegistrationSection(
                         if (!newValue.all { it.isDigit() }) return@NumberInputField
                         actions.onEditEvent { copy(minAge = newValue.toIntOrNull()) }
                     },
-                    isError = false,
+                    isError = state.showValidationErrors && ageRangeErrors.first != null,
+                    supportingText = if (state.showValidationErrors) ageRangeErrors.first.orEmpty() else "",
                 )
                 NumberInputField(
                     modifier = Modifier.weight(1f),
@@ -176,7 +178,8 @@ internal fun LazyListScope.simpleEventDetailsRegistrationSection(
                         if (!newValue.all { it.isDigit() }) return@NumberInputField
                         actions.onEditEvent { copy(maxAge = newValue.toIntOrNull()) }
                     },
-                    isError = false,
+                    isError = state.showValidationErrors && ageRangeErrors.second != null,
+                    supportingText = if (state.showValidationErrors) ageRangeErrors.second.orEmpty() else "",
                 )
             }
             FormSectionDivider()
@@ -187,6 +190,7 @@ internal fun LazyListScope.simpleEventDetailsRegistrationSection(
                     actions.onEditEvent { copy(registrationCutoffHours = hours) }
                 },
                 modifier = Modifier.fillMaxWidth(),
+                showValidationErrors = state.showValidationErrors,
             )
 
             if (state.editEvent.usesManualRegistrationPayments()) {
@@ -194,16 +198,14 @@ internal fun LazyListScope.simpleEventDetailsRegistrationSection(
                 ManualPaymentSettingsSection(
                     event = state.editEvent,
                     onEditEvent = actions.onEditEvent,
+                    showValidationErrors = state.showValidationErrors,
                 )
             }
 
             if (state.editEvent.cancellationRefundHours != null) {
                 FormSectionDivider()
                 StandardTextField(
-                    value = state.editEvent.cancellationRefundHours
-                        ?.coerceAtLeast(0)
-                        ?.toString()
-                        .orEmpty(),
+                    value = state.editEvent.cancellationRefundHours?.toString().orEmpty(),
                     onValueChange = { newValue ->
                         if (!newValue.all(Char::isDigit)) return@StandardTextField
                         actions.onEditEvent {
@@ -211,8 +213,18 @@ internal fun LazyListScope.simpleEventDetailsRegistrationSection(
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    label = "Automatic refund cutoff (hours)",
+                    label = "Automatic refund cutoff (hours) *",
                     keyboardType = "number",
+                    isError = state.showValidationErrors &&
+                        (state.editEvent.cancellationRefundHours ?: 0) < 0,
+                    supportingText = if (
+                        state.showValidationErrors &&
+                        (state.editEvent.cancellationRefundHours ?: 0) < 0
+                    ) {
+                        "Enter 0 or more hours."
+                    } else {
+                        "Use 0 to allow refunds until the event starts."
+                    },
                 )
             }
         },
@@ -223,6 +235,7 @@ internal fun LazyListScope.simpleEventDetailsRegistrationSection(
 private fun ManualPaymentSettingsSection(
     event: Event,
     onEditEvent: (Event.() -> Event) -> Unit,
+    showValidationErrors: Boolean,
 ) {
     val manualPaymentsEnabled = event.usesManualRegistrationPayments()
     Column(
@@ -255,6 +268,7 @@ private fun ManualPaymentSettingsSection(
                         )
                     }
                 },
+                showValidationErrors = showValidationErrors,
             )
         }
 
@@ -294,7 +308,9 @@ private fun ManualPaymentLinkEditor(
     link: ManualPaymentLink,
     onChange: (ManualPaymentLink) -> Unit,
     onRemove: () -> Unit,
+    showValidationErrors: Boolean,
 ) {
+    val linkError = manualPaymentLinkError(link)
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -351,8 +367,10 @@ private fun ManualPaymentLinkEditor(
                 value = link.url,
                 onValueChange = { value -> onChange(link.copy(url = value)) },
                 modifier = Modifier.weight(1f),
-                label = manualPaymentProviderInputLabel(link.provider),
+                label = "${manualPaymentProviderInputLabel(link.provider)} *",
                 placeholder = manualPaymentProviderInputPlaceholder(link.provider),
+                isError = showValidationErrors && linkError != null,
+                supportingText = if (showValidationErrors) linkError.orEmpty() else "",
             )
         }
     }

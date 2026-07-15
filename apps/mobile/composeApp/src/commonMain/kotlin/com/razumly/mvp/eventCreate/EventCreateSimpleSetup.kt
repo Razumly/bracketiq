@@ -2,12 +2,18 @@ package com.razumly.mvp.eventCreate
 
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
+import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.util.newId
 import com.razumly.mvp.core.util.resolvedTimeZone
 import com.razumly.mvp.eventDetail.EventDetailsSectionVisibility
+import com.razumly.mvp.eventDetail.eventAgeRangeErrors
+import com.razumly.mvp.eventDetail.manualPaymentLinkError
+import com.razumly.mvp.eventDetail.composables.leagueScoringValidationErrors
 import com.razumly.mvp.eventDetail.shouldShowMatchRulesSection
 import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.toLocalDateTime
@@ -165,9 +171,43 @@ fun previousUsedSetupPage(
 fun isSimpleSetupPageComplete(
     pageId: EventCreateSetupPageId,
     event: Event,
+    leagueScoringConfig: LeagueScoringConfigDTO? = null,
+    selectedSport: Sport? = null,
 ): Boolean = when (pageId) {
     EventCreateSetupPageId.OPTIONS -> true
-    EventCreateSetupPageId.BASIC_INFORMATION -> event.name.isNotBlank() && !event.sportId.isNullOrBlank()
+    EventCreateSetupPageId.BASIC_INFORMATION -> {
+        event.name.isNotBlank() &&
+            event.imageId.isNotBlank() &&
+            !event.sportId.isNullOrBlank() &&
+            event.location.isNotBlank() &&
+            event.lat != 0.0 &&
+            event.long != 0.0 &&
+            (event.noFixedEndDateTime || event.end > event.start)
+    }
+    EventCreateSetupPageId.EVENT_DETAILS -> {
+        val ageRangeErrors = eventAgeRangeErrors(event)
+        (!event.teamSignup || event.teamSizeLimit >= 1) &&
+            ageRangeErrors.first == null &&
+            ageRangeErrors.second == null &&
+            event.registrationCutoffHours >= 0 &&
+            (event.cancellationRefundHours ?: 0) >= 0 &&
+            (
+                !event.usesManualRegistrationPayments() ||
+                    event.manualPaymentLinks.all { link -> manualPaymentLinkError(link) == null }
+                )
+    }
+    EventCreateSetupPageId.STAFF -> event.officialPositions.all { position ->
+        position.id.isNotBlank() &&
+            position.name.isNotBlank() &&
+            position.count >= 1 &&
+            position.order >= 0
+    }
+    EventCreateSetupPageId.LEAGUE_SCORING -> {
+        event.eventType != EventType.LEAGUE ||
+            leagueScoringConfig?.let { config ->
+                leagueScoringValidationErrors(config, selectedSport).isEmpty()
+            } == true
+    }
     EventCreateSetupPageId.DIVISIONS -> event.divisions.isNotEmpty()
     EventCreateSetupPageId.SCHEDULE -> {
         event.location.isNotBlank() &&

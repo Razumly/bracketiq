@@ -1591,6 +1591,8 @@ fun EventDetails(
         isInclusivePriceQuoteConfirmed,
         useSimpleSectionContent,
         simplePaidRegistrationEnabled,
+        leagueScoringConfig,
+        sports,
     ) {
         // Coalesce rapid keystrokes so validation work does not contend with typing.
         delay(80)
@@ -1607,6 +1609,8 @@ fun EventDetails(
                 scheduleTimeLocked = scheduleTimeLocked,
                 requiresPositiveRegistrationPrice = useSimpleSectionContent &&
                     simplePaidRegistrationEnabled,
+                leagueScoringConfig = leagueScoringConfig,
+                selectedSport = sports.firstOrNull { sport -> sport.id == editEvent.sportId },
             )
         }
 
@@ -2538,6 +2542,7 @@ fun EventDetails(
                         sports = sports,
                         eventTagOptions = eventTagOptions,
                         isSportValid = isSportValid,
+                        isFixedEndDateRangeValid = isFixedEndDateRangeValid,
                         showValidationErrors = showValidationErrors,
                         scheduleTimeLocked = scheduleTimeLocked,
                         rentalTimeLocked = rentalTimeLocked,
@@ -2612,6 +2617,7 @@ fun EventDetails(
                         autoPointIncidentType = autoPointIncidentType,
                         customIncidentDraft = customIncidentDraft,
                         matchIncidentLabel = ::matchIncidentLabel,
+                        showValidationErrors = showValidationErrors,
                     ),
                     actions = EventDetailsMatchRulesActions(
                         onDisabledClick = ::showSelectSportMessage,
@@ -2655,6 +2661,7 @@ fun EventDetails(
                         editableHostStaffListHeight = editableHostStaffListHeight,
                         eventOfficialRecordsByUserId = eventOfficialRecordsByUserId,
                         officialPositionOptions = officialPositionOptions,
+                        showValidationErrors = showValidationErrors,
                     ),
                     actions = EventDetailsStaffActions(
                         onDisabledClick = ::showSelectSportMessage,
@@ -2861,6 +2868,7 @@ fun EventDetails(
                         editEvent = editEvent,
                         sports = sports,
                         leagueScoringConfig = leagueScoringConfig,
+                        showValidationErrors = showValidationErrors,
                     ),
                     actions = EventDetailsLeagueScoringActions(
                         onDisabledClick = ::showSelectSportMessage,

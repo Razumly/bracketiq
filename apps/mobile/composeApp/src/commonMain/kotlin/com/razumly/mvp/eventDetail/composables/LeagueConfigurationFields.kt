@@ -39,7 +39,7 @@ fun LeagueConfigurationFields(
             NumberInputField(
                 modifier = Modifier.fillMaxWidth(),
                 value = leagueConfig.gamesPerOpponent.toString(),
-                label = "Games per Opponent",
+                label = "Games per Opponent *",
                 onValueChange = { newValue ->
                     if (newValue.all { it.isDigit() }) {
                         onLeagueConfigChange(
@@ -56,7 +56,7 @@ fun LeagueConfigurationFields(
             NumberInputField(
                 modifier = Modifier.fillMaxWidth(),
                 value = leagueConfig.restTimeMinutes.toString(),
-                label = "Rest Time (min)",
+                label = "Rest Time (min) *",
                 onValueChange = { newValue ->
                     if (newValue.all { it.isDigit() }) {
                         onLeagueConfigChange(
@@ -85,7 +85,7 @@ fun LeagueConfigurationFields(
                         )
                     },
                     options = bestOfOptions,
-                    label = "Sets per Match",
+                    label = "Sets per Match *",
                     modifier = Modifier.fillMaxWidth(),
                 )
             },
@@ -93,7 +93,7 @@ fun LeagueConfigurationFields(
                 NumberInputField(
                     modifier = Modifier.fillMaxWidth(),
                     value = leagueConfig.setDurationMinutes?.toString().orEmpty(),
-                    label = "Set Duration (min)",
+                    label = "Set Duration (min) *",
                     onValueChange = { newValue ->
                         if (newValue.all { it.isDigit() }) {
                             onLeagueConfigChange(
@@ -114,7 +114,7 @@ fun LeagueConfigurationFields(
             NumberInputField(
                 modifier = Modifier.fillMaxWidth(),
                 value = points[index].toString(),
-                label = "Set ${index + 1}",
+                label = "Set ${index + 1} *",
                 onValueChange = { newValue ->
                     if (newValue.all { it.isDigit() }) {
                         val updated = points.toMutableList()
@@ -133,7 +133,7 @@ fun LeagueConfigurationFields(
                 NumberInputField(
                     modifier = Modifier.fillMaxWidth(),
                     value = leagueConfig.matchDurationMinutes?.toString().orEmpty(),
-                    label = "Match Duration (min)",
+                    label = "Match Duration (min) *",
                     onValueChange = { newValue ->
                         if (newValue.all { it.isDigit() }) {
                             onLeagueConfigChange(
@@ -262,7 +262,7 @@ fun TournamentConfigurationFields(
             NumberInputField(
                 modifier = Modifier.fillMaxWidth(),
                 value = playoffConfig.restTimeMinutes.toString(),
-                label = "Rest Time (min)",
+                label = "Rest Time (min) *",
                 onValueChange = { newValue ->
                     if (newValue.all { it.isDigit() }) {
                         onPlayoffConfigChange(
@@ -282,7 +282,7 @@ fun TournamentConfigurationFields(
                 NumberInputField(
                     modifier = Modifier.fillMaxWidth(),
                     value = playoffConfig.setDurationMinutes?.toString().orEmpty(),
-                    label = "Set Duration (min)",
+                    label = "Set Duration (min) *",
                     onValueChange = { newValue ->
                         if (newValue.all { it.isDigit() }) {
                             onPlayoffConfigChange(
@@ -302,7 +302,7 @@ fun TournamentConfigurationFields(
                 NumberInputField(
                     modifier = Modifier.fillMaxWidth(),
                     value = playoffConfig.matchDurationMinutes?.toString().orEmpty(),
-                    label = "Match Duration (min)",
+                    label = "Match Duration (min) *",
                     onValueChange = { newValue ->
                         if (newValue.all { it.isDigit() }) {
                             onPlayoffConfigChange(
@@ -355,7 +355,7 @@ fun TournamentConfigurationFields(
                         )
                     },
                     options = bestOfOptions,
-                    label = "Winner Set Count",
+                    label = "Winner Set Count *",
                     modifier = Modifier.fillMaxWidth(),
                 )
             },
@@ -376,7 +376,7 @@ fun TournamentConfigurationFields(
                             )
                         },
                         options = bestOfOptions,
-                        label = "Loser Set Count",
+                        label = "Loser Set Count *",
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -392,7 +392,7 @@ fun TournamentConfigurationFields(
             NumberInputField(
                 modifier = Modifier.fillMaxWidth(),
                 value = winnerPoints[index].toString(),
-                label = "Set ${index + 1}",
+                label = "Set ${index + 1} *",
                 onValueChange = { newValue ->
                     if (newValue.all { it.isDigit() }) {
                         val updated = winnerPoints.toMutableList()
@@ -418,7 +418,7 @@ fun TournamentConfigurationFields(
                 NumberInputField(
                     modifier = Modifier.fillMaxWidth(),
                     value = loserPoints[index].toString(),
-                    label = "Set ${index + 1}",
+                    label = "Set ${index + 1} *",
                     onValueChange = { newValue ->
                         if (newValue.all { it.isDigit() }) {
                             val updated = loserPoints.toMutableList()

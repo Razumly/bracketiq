@@ -86,6 +86,7 @@ internal data class EventDetailsStaffState(
     val editableHostStaffListHeight: Dp,
     val eventOfficialRecordsByUserId: Map<String, EventOfficial>,
     val officialPositionOptions: List<DropdownOption>,
+    val showValidationErrors: Boolean,
 )
 
 internal data class EventDetailsStaffActions(

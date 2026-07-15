@@ -46,6 +46,8 @@ The next simplification adds a first-page Options step. Organizers choose one of
 - [x] (2026-07-15) Hid team-size and price inputs when their parent options are off, and made validation ignore individual-event team size while requiring positive prices for paid Simple events.
 - [x] (2026-07-15) Added regression tests for option dependencies, page routing, payload normalization, and paid/team validation.
 - [x] (2026-07-15) Compiled, installed, and verified the independent Simple flow and the preserved Advanced flow in the Android emulator.
+- [x] (2026-07-15) Made image selection a Basic Information navigation requirement and added semantic inline errors plus required markers for every conditional required/ranged field in the shared create contract.
+- [x] (2026-07-15) Added regression coverage for image, age-range, payment-link, official-position, and page-gate validation and reran the focused Android JVM suite.
 
 ## Surprises & Discoveries
 
@@ -129,6 +131,9 @@ The next simplification adds a first-page Options step. Organizers choose one of
 
 - Observation: The independent Simple copies can preserve Advanced behavior without calling Advanced section composables.
   Evidence: `eventDetail/simple` contains separate hero, basic information, registration, match-rules, staff, division, league-scoring, and schedule functions; Android compilation and emulator mode switching both pass.
+
+- Observation: Image readiness and image presence were represented by separate state but only readiness participated in the aggregate validity result.
+  Evidence: a blank `imageId` produced a validation message while `isValid` could remain true whenever dominant-color loading had completed.
 
 ## Decision Log
 
@@ -240,6 +245,10 @@ The next simplification adds a first-page Options step. Organizers choose one of
   Rationale: This keeps touch targets at least 48 dp, makes disabled dependencies explicit, and uses progressive disclosure without returning to the oversized full-height format cards.
   Date/Author: 2026-07-15 / Codex
 
+- Decision: Show required markers at rest, reveal red field-level errors after Continue or publish is attempted, and gate Basic Information on the uploaded image id rather than a transient picker selection.
+  Rationale: Organizers can see requirements before submitting, errors stay adjacent to the responsible control, and navigation cannot race ahead of a failed or unfinished image upload.
+  Date/Author: 2026-07-15 / Codex
+
 ## Outcomes & Retrospective
 
 Simple Setup now has an independent presentation surface. Every page dispatches to a Simple-specific section function stored under `eventDetail/simple`; those files began as close copies of the corresponding Advanced implementations but can now be simplified without changing Advanced. The two modes still share the `Event` draft, typed section state and actions, normalization functions, validation, persistence, and Preview step, so the UI is separate without creating a second backend contract.
@@ -247,6 +256,8 @@ Simple Setup now has an independent presentation surface. Every page dispatches 
 Options is the first Simple page. Its four event types use a compact two-by-two square grid, and its categorized checkboxes own the parent choices that determine later content. Turning off team registration removes team-size and team-operation state. Turning off paid registration clears prices, manual-payment details, refunds, and installments. Manual payments disable online refunds and payment plans. Division, playoff/pool, and loser-bracket choices normalize their hidden children instead of leaving stale payload values. Advanced Setup retains the original inline controls.
 
 Android production compilation, focused JVM tests, installation, and emulator QA pass. The emulator confirmed Options as step 1, persisted an individual-event choice into later pages, showed no team-size or moved parent controls on Simple Event Details, switched to the original Advanced setup without a crash, and recorded no fatal Android runtime exception during the exercised flow.
+
+Required inputs now use explicit `*` labels and field-level error styling. Basic Information cannot advance without a successfully uploaded image, and aggregate publish validation now checks image presence and readiness together. Conditional ranges and inputs—including dates, team size, ages, registration/refund cutoffs, manual payment URLs, division identity/capacity/price, match structure, official positions, league scoring, resources, and timeslots—surface their own actionable messages instead of relying only on the final error summary.
 
 ## Context and Orientation
 

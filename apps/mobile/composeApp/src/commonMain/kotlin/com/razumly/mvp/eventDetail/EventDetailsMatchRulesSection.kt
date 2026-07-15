@@ -49,6 +49,7 @@ internal data class EventDetailsMatchRulesState(
     val autoPointIncidentType: String,
     val customIncidentDraft: String,
     val matchIncidentLabel: (String) -> String,
+    val showValidationErrors: Boolean,
 )
 
 internal data class EventDetailsMatchRulesActions(
@@ -189,13 +190,20 @@ internal fun LazyListScope.eventDetailsMatchRulesSection(
                     )
                 }
                 if (state.baseMatchRules.timekeeping.timerMode != "NONE") {
+                    val segmentDurationMissing =
+                        (state.resolvedMatchRules.timekeeping.segmentDurationMinutes ?: 0) <= 0
                     NumberInputField(
                         modifier = Modifier.fillMaxWidth(),
                         value = state.resolvedMatchRules.timekeeping.segmentDurationMinutes
                             ?.toString()
                             .orEmpty(),
-                        label = "${state.resolvedMatchRules.segmentLabel} length",
-                        isError = false,
+                        label = "${state.resolvedMatchRules.segmentLabel} length *",
+                        isError = state.showValidationErrors && segmentDurationMissing,
+                        supportingText = if (state.showValidationErrors && segmentDurationMissing) {
+                            "Enter a duration greater than 0 minutes."
+                        } else {
+                            ""
+                        },
                         onValueChange = { value ->
                             if (value.isNotEmpty() && !value.all { it.isDigit() }) {
                                 return@NumberInputField

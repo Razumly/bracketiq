@@ -372,7 +372,7 @@ fun LeagueScheduleFields(
                         pendingFieldCountInput = value
                     }
                 },
-                label = "Resource Count",
+                label = "Resource Count *",
                 placeholder = "Enter number of resources",
                 keyboardType = "number",
                 enabled = !readOnly,
@@ -906,7 +906,7 @@ private fun TimeslotCard(
                     selectedValue = "",
                     onSelectionChange = {},
                     options = fieldOptionsForSlot,
-                    label = "Resources",
+                    label = "Resources *",
                     placeholder = "Select resources",
                     multiSelect = true,
                     selectedValues = selectedFieldIds,
@@ -934,7 +934,7 @@ private fun TimeslotCard(
                         selectedValue = "",
                         onSelectionChange = {},
                         options = divisionOptionsForSlot,
-                        label = "Divisions",
+                        label = "Divisions *",
                         placeholder = "Select one or more divisions",
                         multiSelect = true,
                         selectedValues = effectiveDivisionIds,
@@ -1004,7 +1004,7 @@ private fun TimeslotCard(
                         selectedValue = "",
                         onSelectionChange = {},
                         options = dayOptions,
-                        label = "Days of Week",
+                        label = "Days of Week *",
                         placeholder = "Select days",
                         multiSelect = true,
                         selectedValues = selectedDays.map(Int::toString),
@@ -1034,7 +1034,7 @@ private fun TimeslotCard(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         TimeOfDayPickerField(
-                            label = "Start Time",
+                            label = "Start Time *",
                             minutes = slot.startTimeMinutes,
                             onMinutesSelected = { minutes ->
                                 onUpdateSlot(index, slot.copy(startTimeMinutes = minutes))
@@ -1044,7 +1044,7 @@ private fun TimeslotCard(
                             enabled = !slotTimingReadOnly,
                         )
                         TimeOfDayPickerField(
-                            label = "End Time",
+                            label = "End Time *",
                             minutes = slot.endTimeMinutes,
                             onMinutesSelected = { minutes ->
                                 onUpdateSlot(index, slot.copy(endTimeMinutes = minutes))
@@ -1064,7 +1064,7 @@ private fun TimeslotCard(
                     }
                 } else {
                     DateTimePickerField(
-                        label = "Start Date & Time",
+                        label = "Start Date & Time *",
                         value = slot.startDate.takeUnless { it == Instant.DISTANT_PAST },
                         onDateTimeSelected = { selected ->
                             onUpdateSlot(index, slot.copy(startDate = selected))
@@ -1074,7 +1074,7 @@ private fun TimeslotCard(
                         enabled = !slotTimingReadOnly,
                     )
                     DateTimePickerField(
-                        label = "End Date & Time",
+                        label = "End Date & Time *",
                         value = slot.endDate,
                         onDateTimeSelected = { selected ->
                             onUpdateSlot(index, slot.copy(endDate = selected))

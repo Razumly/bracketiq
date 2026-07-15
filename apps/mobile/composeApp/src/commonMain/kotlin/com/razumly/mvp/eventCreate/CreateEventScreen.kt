@@ -371,6 +371,8 @@ fun CreateEventScreen(
         val isComplete = isSimpleSetupPageComplete(
             pageId = currentSetupPageId,
             event = newEventState,
+            leagueScoringConfig = leagueScoringConfig,
+            selectedSport = selectedSport,
         )
         if (!isComplete) {
             hasAttemptedEventSubmit = true

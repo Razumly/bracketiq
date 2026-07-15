@@ -269,7 +269,10 @@ private fun DivisionSingleDivisionDefaults(
                         }
                     }
                 },
-                isMaxParticipantsError = editEvent.maxParticipants < 2,
+                isMaxParticipantsError = state.showValidationErrors && editEvent.maxParticipants < 2,
+                isPriceError = state.showValidationErrors &&
+                    state.paidRegistrationEnabled &&
+                    editEvent.priceCents <= 0,
             )
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
@@ -284,7 +287,7 @@ private fun DivisionSingleDivisionDefaults(
                     NumberInputField(
                         modifier = Modifier.fillMaxWidth(0.48f),
                         value = editEvent.playoffTeamCount?.toString().orEmpty(),
-                        label = "Playoff Team Count",
+                        label = "Playoff Team Count *",
                         onValueChange = { value ->
                             if (value.isNotEmpty() && !value.all { it.isDigit() }) {
                                 return@NumberInputField
@@ -326,7 +329,7 @@ private fun DivisionSingleDivisionDefaults(
                     NumberInputField(
                         modifier = Modifier.fillMaxWidth(0.48f),
                         value = editEvent.playoffTeamCount?.toString().orEmpty(),
-                        label = "Bracket Teams",
+                        label = "Bracket Teams *",
                         onValueChange = { value ->
                             if (value.isNotEmpty() && !value.all { it.isDigit() }) {
                                 return@NumberInputField
@@ -373,7 +376,7 @@ private fun DivisionSingleDivisionDefaults(
                     NumberInputField(
                         modifier = Modifier.fillMaxWidth(0.48f),
                         value = singleDivisionPoolCount?.toString().orEmpty(),
-                        label = "Pool Count",
+                        label = "Pool Count *",
                         onValueChange = { value ->
                             if (value.isNotEmpty() && !value.all { it.isDigit() }) {
                                 return@NumberInputField
@@ -459,7 +462,7 @@ private fun DivisionInfoFields(
             },
             options = state.genderOptions,
             modifier = Modifier.weight(1f),
-            label = "Gender",
+            label = "Gender *",
             placeholder = "Select gender",
             isError = state.showValidationErrors && divisionEditor.gender.isBlank(),
             supportingText = if (state.showValidationErrors && divisionEditor.gender.isBlank()) {
@@ -475,7 +478,7 @@ private fun DivisionInfoFields(
             },
             options = state.skillDivisionTypeOptions,
             modifier = Modifier.weight(1f),
-            label = "Skill Division",
+            label = "Skill Division *",
             placeholder = "Select skill division",
             isError = state.showValidationErrors && divisionEditor.skillDivisionTypeId.isBlank(),
             supportingText = if (state.showValidationErrors && divisionEditor.skillDivisionTypeId.isBlank()) {
@@ -498,7 +501,7 @@ private fun DivisionInfoFields(
             },
             options = state.ageDivisionTypeOptions,
             modifier = Modifier.weight(1f),
-            label = "Age Division",
+            label = "Age Division *",
             placeholder = "Select age division",
             isError = state.showValidationErrors && divisionEditor.ageDivisionTypeId.isBlank(),
             supportingText = if (state.showValidationErrors && divisionEditor.ageDivisionTypeId.isBlank()) {
@@ -519,8 +522,14 @@ private fun DivisionInfoFields(
                 )
             },
             modifier = Modifier.weight(1f),
-            label = "Division Name",
+            label = "Division Name *",
             enabled = state.divisionEditorReady,
+            isError = state.showValidationErrors && divisionEditor.name.isBlank(),
+            supportingText = if (state.showValidationErrors && divisionEditor.name.isBlank()) {
+                "Enter a division name."
+            } else {
+                ""
+            },
         )
     }
 
@@ -566,6 +575,9 @@ private fun DivisionInfoFields(
                 isMaxParticipantsError = divisionEditor.maxParticipants.let { maxParticipants ->
                     state.showValidationErrors && (maxParticipants == null || maxParticipants < 2)
                 },
+                isPriceError = state.showValidationErrors &&
+                    state.paidRegistrationEnabled &&
+                    divisionEditor.priceCents <= 0,
             )
         }
     }
@@ -592,6 +604,7 @@ private fun DivisionPriceAndMaxTeamsFields(
     onPriceChange: (Int) -> Unit,
     onMaxParticipantsChange: (String) -> Unit,
     isMaxParticipantsError: Boolean,
+    isPriceError: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -602,7 +615,7 @@ private fun DivisionPriceAndMaxTeamsFields(
         NumberInputField(
             modifier = Modifier.weight(1f),
             value = maxParticipants?.toString().orEmpty(),
-            label = maxParticipantsLabel,
+            label = "$maxParticipantsLabel *",
             enabled = enabled,
             onValueChange = onMaxParticipantsChange,
             isError = isMaxParticipantsError,
@@ -616,8 +629,10 @@ private fun DivisionPriceAndMaxTeamsFields(
                     onPriceChange(value.filter(Char::isDigit).toIntOrNull()?.coerceAtLeast(0) ?: 0)
                 },
                 modifier = Modifier.weight(1f),
-                label = priceLabel,
+                label = "$priceLabel *",
                 enabled = enabled,
+                isError = isPriceError,
+                supportingText = if (isPriceError) "Enter an amount greater than \$0." else "",
             )
             Spacer(modifier = Modifier.weight(1f))
         } else {
@@ -627,10 +642,12 @@ private fun DivisionPriceAndMaxTeamsFields(
                 quoteInclusivePrice = quoteInclusivePrice,
                 onQuoteConfirmationChange = onPriceQuoteConfirmationChange,
                 modifier = Modifier.weight(2f),
-                totalLabel = priceLabel,
+                totalLabel = "$priceLabel *",
                 enabled = hostHasAccount && enabled,
                 editorKey = inclusivePriceEditorKey,
                 eventType = eventType,
+                isError = isPriceError,
+                supportingText = if (isPriceError) "Enter an amount greater than \$0." else "",
             )
         }
     }
@@ -671,7 +688,7 @@ private fun DivisionTournamentPoolFields(
             NumberInputField(
                 modifier = Modifier.weight(1f),
                 value = divisionBracketTeamCount?.toString().orEmpty(),
-                label = "Bracket Teams",
+                label = "Bracket Teams *",
                 enabled = tournamentPoolPlayEnabled && state.divisionEditorReady,
                 onValueChange = { value ->
                     if (!state.divisionEditorReady || !tournamentPoolPlayEnabled) {
@@ -699,7 +716,7 @@ private fun DivisionTournamentPoolFields(
         NumberInputField(
             modifier = Modifier.weight(1f),
             value = divisionPoolCount?.toString().orEmpty(),
-            label = "Pool Count",
+            label = "Pool Count *",
             enabled = tournamentPoolPlayEnabled && state.divisionEditorReady,
             onValueChange = { value ->
                 if (!state.divisionEditorReady || !tournamentPoolPlayEnabled) {
@@ -778,7 +795,7 @@ private fun DivisionPaymentPlanFields(
         )
         NumberInputField(
             value = installmentCount.toString(),
-            label = "Installment Count",
+            label = "Installment Count *",
             onValueChange = { newValue ->
                 if (!newValue.all { it.isDigit() }) return@NumberInputField
                 val parsed = newValue.toIntOrNull() ?: 1
@@ -798,7 +815,7 @@ private fun DivisionPaymentPlanFields(
             ) {
                 MoneyInputField(
                     value = amountCents.toString(),
-                    label = "Installment ${index + 1} Amount",
+                    label = "Installment ${index + 1} Amount *",
                     onValueChange = { newValue ->
                         val parsed = newValue.filter(Char::isDigit).toIntOrNull() ?: 0
                         actions.onUpdateDivisionInstallmentAmount(index, parsed)
@@ -829,7 +846,7 @@ private fun DivisionPaymentPlanFields(
                                 ),
                             )
                         },
-                        label = "Due Offset",
+                        label = "Due Offset *",
                         placeholder = "0",
                         modifier = Modifier.weight(1f),
                     )
@@ -837,10 +854,16 @@ private fun DivisionPaymentPlanFields(
                     StandardTextField(
                         value = dueDate,
                         onValueChange = {},
-                        label = "Due Date",
+                        label = "Due Date *",
                         placeholder = "YYYY-MM-DD",
                         modifier = Modifier.weight(1f),
                         readOnly = true,
+                        isError = state.showValidationErrors && dueDate.isBlank(),
+                        supportingText = if (state.showValidationErrors && dueDate.isBlank()) {
+                            "Select an installment due date."
+                        } else {
+                            ""
+                        },
                         onTap = { actions.onSetDivisionInstallmentDueDatePickerIndex(index) },
                     )
                 }

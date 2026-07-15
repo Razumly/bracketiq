@@ -2,6 +2,9 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
+import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_MANUAL
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.buildEventDivisionId
@@ -54,6 +57,63 @@ class EventDetailsValidationTest {
         assertFalse(result.isNameValid)
         assertFalse(result.isValid)
         assertTrue("Event name is required." in result.validationErrors)
+    }
+
+    @Test
+    fun given_no_event_image_when_image_loader_is_ready_then_validation_still_fails() {
+        val result = validateEvent(baseLeagueEvent(maxParticipants = 2).copy(imageId = ""))
+
+        assertFalse(result.isImageValid)
+        assertFalse(result.isValid)
+        assertTrue("Select an image for the event." in result.validationErrors)
+    }
+
+    @Test
+    fun given_minimum_age_above_maximum_age_then_both_fields_report_the_range() {
+        val result = validateEvent(
+            baseLeagueEvent(maxParticipants = 2).copy(minAge = 18, maxAge = 12),
+        )
+
+        assertFalse(result.isAgeRangeValid)
+        assertFalse(result.isValid)
+        assertTrue(result.validationErrors.any { error -> error.contains("Minimum age") })
+        assertTrue(result.validationErrors.any { error -> error.contains("Maximum age") })
+    }
+
+    @Test
+    fun given_manual_payments_with_an_invalid_link_then_validation_fails() {
+        val result = validateEvent(
+            baseLeagueEvent(maxParticipants = 2).copy(
+                registrationPaymentMode = REGISTRATION_PAYMENT_MODE_MANUAL,
+                manualPaymentLinks = listOf(
+                    ManualPaymentLink(
+                        id = "payment-1",
+                        provider = "VENMO",
+                        label = "Venmo",
+                        url = "not-a-url",
+                    ),
+                ),
+            ),
+        )
+
+        assertFalse(result.isManualPaymentLinksValid)
+        assertFalse(result.isValid)
+        assertTrue(result.validationErrors.any { error -> error.contains("valid http") })
+    }
+
+    @Test
+    fun given_an_incomplete_official_position_then_validation_fails() {
+        val result = validateEvent(
+            baseLeagueEvent(maxParticipants = 2).copy(
+                officialPositions = listOf(
+                    EventOfficialPosition(id = "position-1", name = "", count = 0, order = 0),
+                ),
+            ),
+        )
+
+        assertFalse(result.isOfficialPositionsValid)
+        assertFalse(result.isValid)
+        assertTrue(result.validationErrors.any { error -> error.contains("official position") })
     }
 
     @Test

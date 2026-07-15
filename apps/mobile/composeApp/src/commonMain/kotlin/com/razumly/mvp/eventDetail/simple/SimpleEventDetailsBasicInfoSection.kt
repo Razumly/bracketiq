@@ -145,7 +145,7 @@ internal fun LazyListScope.simpleEventDetailsBasicInfoSection(
                     options = state.sports.map { sport ->
                         DropdownOption(value = sport.id, label = sport.name)
                     },
-                    label = "Sport",
+                    label = "Sport *",
                     placeholder = if (state.sports.isEmpty()) "No sports available" else "Select a sport",
                     isError = state.showValidationErrors && !state.isSportValid,
                     supportingText = if (state.showValidationErrors && !state.isSportValid) {
@@ -183,7 +183,7 @@ internal fun LazyListScope.simpleEventDetailsBasicInfoSection(
                             .format(dateTimeFormat),
                         onValueChange = {},
                         modifier = Modifier.weight(1f),
-                        label = "Start Date & Time",
+                        label = "Start Date & Time *",
                         readOnly = true,
                         onTap = {
                             if (!state.scheduleTimeLocked) {
@@ -196,7 +196,13 @@ internal fun LazyListScope.simpleEventDetailsBasicInfoSection(
                             .format(dateTimeFormat),
                         onValueChange = {},
                         modifier = Modifier.weight(1f),
-                        label = "End Date & Time",
+                        label = "End Date & Time *",
+                        isError = state.showValidationErrors && !state.isFixedEndDateRangeValid,
+                        supportingText = if (state.showValidationErrors && !state.isFixedEndDateRangeValid) {
+                            "End date and time must be after the start."
+                        } else {
+                            ""
+                        },
                         enabled = !state.scheduleTimeLocked &&
                             !(supportsNoFixedEndDateTime && state.editEvent.noFixedEndDateTime),
                         readOnly = true,
@@ -216,7 +222,7 @@ internal fun LazyListScope.simpleEventDetailsBasicInfoSection(
                         .format(dateTimeFormat),
                     onValueChange = {},
                     modifier = Modifier.fillMaxWidth(),
-                    label = "Start Date & Time",
+                    label = "Start Date & Time *",
                     readOnly = true,
                     onTap = {
                         if (!state.scheduleTimeLocked) {

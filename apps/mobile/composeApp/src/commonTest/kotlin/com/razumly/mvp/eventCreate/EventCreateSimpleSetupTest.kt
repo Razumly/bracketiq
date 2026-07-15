@@ -6,6 +6,8 @@ import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_MANUAL
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
+import com.razumly.mvp.core.data.dataTypes.SportDTO
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.eventDetail.EventDetailsSectionVisibility
 import kotlin.time.ExperimentalTime
@@ -140,6 +142,7 @@ class EventCreateSimpleSetupTest {
     fun basic_division_and_schedule_pages_keep_their_minimum_continue_checks() {
         val event = Event(
             name = "Summer League",
+            imageId = "image-1",
             sportId = "basketball",
             location = "Main Gym",
             coordinates = listOf(-122.6, 45.5),
@@ -149,6 +152,58 @@ class EventCreateSimpleSetupTest {
         assertTrue(isSimpleSetupPageComplete(EventCreateSetupPageId.BASIC_INFORMATION, event))
         assertTrue(isSimpleSetupPageComplete(EventCreateSetupPageId.SCHEDULE, event))
         assertFalse(isSimpleSetupPageComplete(EventCreateSetupPageId.DIVISIONS, event))
+    }
+
+    @Test
+    fun basic_information_requires_an_uploaded_event_image_before_continue() {
+        val event = Event(
+            name = "Summer League",
+            imageId = "",
+            sportId = "basketball",
+            location = "Main Gym",
+            coordinates = listOf(-122.6, 45.5),
+            noFixedEndDateTime = true,
+        )
+
+        assertFalse(isSimpleSetupPageComplete(EventCreateSetupPageId.BASIC_INFORMATION, event))
+        assertTrue(
+            isSimpleSetupPageComplete(
+                EventCreateSetupPageId.BASIC_INFORMATION,
+                event.copy(imageId = "image-1"),
+            ),
+        )
+    }
+
+    @Test
+    fun league_scoring_requires_each_enabled_sport_value_before_continue() {
+        val sport = SportDTO(
+            name = "Soccer",
+            usePointsForWin = true,
+            usePointsForDraw = true,
+            usePointsForLoss = true,
+        ).toSport(id = "soccer")
+        val event = Event(eventType = EventType.LEAGUE, sportId = sport.id)
+
+        assertFalse(
+            isSimpleSetupPageComplete(
+                EventCreateSetupPageId.LEAGUE_SCORING,
+                event,
+                leagueScoringConfig = LeagueScoringConfigDTO(pointsForWin = 3, pointsForDraw = 1),
+                selectedSport = sport,
+            ),
+        )
+        assertTrue(
+            isSimpleSetupPageComplete(
+                EventCreateSetupPageId.LEAGUE_SCORING,
+                event,
+                leagueScoringConfig = LeagueScoringConfigDTO(
+                    pointsForWin = 3,
+                    pointsForDraw = 1,
+                    pointsForLoss = 0,
+                ),
+                selectedSport = sport,
+            ),
+        )
     }
 
     @OptIn(ExperimentalTime::class)
