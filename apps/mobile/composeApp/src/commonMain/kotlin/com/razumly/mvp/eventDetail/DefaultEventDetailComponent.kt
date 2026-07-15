@@ -18,7 +18,6 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
-import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
@@ -57,7 +56,6 @@ import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
-import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
@@ -607,6 +605,29 @@ class DefaultEventDetailComponent(
         },
         setError = { error -> _errorState.value = error },
     )
+    private val eventEditActionHandler = EventEditActionHandler(
+        scope = scope,
+        editActionCoordinator = editActionCoordinator,
+        editDraftCoordinator = editDraftCoordinator,
+        rentalResourcesCoordinator = rentalResourcesCoordinator,
+        sportsCatalogCoordinator = sportsCatalogCoordinator,
+        inviteCoordinator = eventInviteCoordinator,
+        eventRepository = eventRepository,
+        billingRepository = billingRepository,
+        matchRepository = matchRepository,
+        loadingHandler = { loadingHandler },
+        selectedEvent = { selectedEvent.value },
+        eventWithRelations = { eventWithRelations.value },
+        eventFields = { eventFields.value },
+        expectedStaffRevision = { _eventStaffRevision.value },
+        setStaffState = { invites, revision ->
+            _eventStaffInvites.value = invites
+            _eventStaffRevision.value = revision
+        },
+        loadSports = ::loadSports,
+        refreshLeagueStandingsAfterSchedule = ::refreshLeagueStandingsAfterSchedule,
+        setError = { message -> _errorState.value = ErrorMessage(message) },
+    )
 
     private val userTeams = relationStateCoordinator.currentUserTeams
 
@@ -933,7 +954,7 @@ class DefaultEventDetailComponent(
                 showLoading = false,
                 reportErrors = false,
             )
-            loadAvailableRentalResources(eventId)
+            eventEditActionHandler.loadAvailableRentalResources(eventId)
         }
         lifecycleBindings.bindScheduleTrackedUser(currentUser, ::refreshScheduleTrackedUserIds)
         lifecycleBindings.bindRegistrationScope(
@@ -1623,82 +1644,17 @@ class DefaultEventDetailComponent(
         )
     }
 
-    override fun toggleEdit() {
-        setEventEditMode(enabled = !editDraftCoordinator.isEditing.value)
-    }
+    override fun toggleEdit() = eventEditActionHandler.toggleEdit()
 
-    override fun startEditingEvent() {
-        setEventEditMode(enabled = true)
-    }
+    override fun startEditingEvent() = eventEditActionHandler.startEditingEvent()
 
-    override fun cancelEditingEvent() {
-        setEventEditMode(enabled = false)
-    }
+    override fun cancelEditingEvent() = eventEditActionHandler.cancelEditingEvent()
 
-    private fun setEventEditMode(enabled: Boolean) {
-        val unsupportedFeatures = mobileEventEditUnsupportedFeatures(selectedEvent.value)
-        if (enabled && unsupportedFeatures.isNotEmpty()) {
-            _errorState.value = ErrorMessage(
-                mobileEventEditUnsupportedMessage(unsupportedFeatures)
-            )
-            return
-        }
-        if (editDraftCoordinator.isEditing.value == enabled) {
-            return
-        }
-        if (enabled && !sportsCatalogCoordinator.isCatalogLoaded()) {
-            loadSports(reportErrors = true)
-        }
-        // Initialize or reset the draft from the latest selected event when mode changes.
-        val selected = selectedEvent.value
-        val seededEvent = if (enabled && sportsCatalogCoordinator.currentSports().isNotEmpty()) {
-            sportsCatalogCoordinator.syncOfficialStaffingForSportTransition(
-                previous = selected,
-                updated = selected,
-            )
-        } else {
-            selected
-        }
-        editDraftCoordinator.seedDraftForEditing(
-            event = seededEvent,
-            sourceFields = eventFields.value.map { relation -> relation.field },
-            timeSlots = eventWithRelations.value.timeSlots,
-            leagueScoringConfig = eventWithRelations.value.leagueScoringConfig?.toDto()
-                ?: LeagueScoringConfigDTO(),
-        )
-        if (enabled) {
-            val changedRentalSelection = rentalResourcesCoordinator.setAttachedResourceSelection(
-                slots = editDraftCoordinator.editableLeagueTimeSlots.value,
-                eventId = seededEvent.id,
-            )
-            if (changedRentalSelection && rentalResourcesCoordinator.selectedResourceIds.value.isNotEmpty()) {
-                syncSelectedRentalResourcesIntoEditDraft()
-            }
-        }
-        if (!enabled) {
-            eventInviteCoordinator.clearPendingStaffInvites()
-            eventInviteCoordinator.clearSuggestedUsers()
-        }
-        editDraftCoordinator.setEditing(enabled)
-    }
+    override fun editEventField(update: Event.() -> Event) =
+        eventEditActionHandler.editEventField(update)
 
-    override fun editEventField(update: Event.() -> Event) {
-        editDraftCoordinator.updateEditedEvent { previous ->
-            sportsCatalogCoordinator.syncOfficialStaffingForSportTransition(
-                previous = previous,
-                updated = previous.update(),
-            )
-        }
-    }
-
-    override fun editTournamentField(update: Event.() -> Event) {
-        editDraftCoordinator.updateEditedEvent { previous ->
-            sportsCatalogCoordinator.syncOfficialStaffingForSportTransition(
-                previous = previous,
-                updated = previous.update(),
-            )
-        }
-    }
+    override fun editTournamentField(update: Event.() -> Event) =
+        eventEditActionHandler.editEventField(update)
 
     override fun searchUsers(query: String) = inviteActionHandler.searchUsers(query)
 
@@ -1728,186 +1684,19 @@ class DefaultEventDetailComponent(
         inviteActionHandler.removePendingStaffInvite(email, role)
     }
 
-    override fun updateEvent() {
-        scope.launch {
-            val loadingOperation = loadingHandler.newOperation()
-            when (val result = editActionCoordinator.runSaveEventAction(
-                pendingStaffInvites = eventInviteCoordinator.pendingStaffInvites.value,
-                expectedStaffRevision = _eventStaffRevision.value,
-                prepareEventForUpdate = ::prepareEventForUpdate,
-                updatePreparedEvent = { prepared, staffRevision ->
-                    eventRepository.updateEventPreservingStaff(
-                        newEvent = prepared.event,
-                        fields = prepared.fields,
-                        timeSlots = prepared.timeSlots,
-                        leagueScoringConfig = prepared.leagueScoringConfig,
-                        expectedStaffRevision = staffRevision,
-                    ).getOrThrow()
-                },
-                refreshStaffState = { event ->
-                    eventRepository.getEventStaffState(event).getOrThrow()
-                },
-                reconcileStaffState = { event, pendingStaffInvites, revision ->
-                    reconcileEventStaffState(
-                        eventRepository = eventRepository,
-                        event = event,
-                        pendingStaffInvites = pendingStaffInvites,
-                        expectedRevision = revision,
-                    ).getOrThrow()
-                },
-                refetchMatchesOfTournament = { eventId ->
-                    matchRepository.getMatchesOfTournament(eventId)
-                },
-                showLoading = loadingOperation::showLoading,
-                hideLoading = loadingOperation::hideLoading,
-            )) {
-                is EventSaveActionResult.Success -> {
-                    _eventStaffInvites.value = result.staffInvites
-                    _eventStaffRevision.value = result.staffRevision
-                    eventInviteCoordinator.clearPendingStaffInvites()
-                    eventInviteCoordinator.clearSuggestedUsers()
-                    cancelEditingEvent()
-                }
-                is EventSaveActionResult.Failure -> {
-                    _errorState.value = ErrorMessage(result.userFacingMessage())
-                }
-            }
-        }
-    }
+    override fun updateEvent() = eventEditActionHandler.updateEvent()
 
-    override fun rescheduleEvent() {
-        runScheduleEditAction(EventScheduleEditAction.RESCHEDULE)
-    }
+    override fun rescheduleEvent() = eventEditActionHandler.rescheduleEvent()
 
-    override fun buildBrackets() {
-        runScheduleEditAction(EventScheduleEditAction.BUILD_BRACKETS)
-    }
+    override fun buildBrackets() = eventEditActionHandler.buildBrackets()
 
-    override fun rebuildWithoutPlaceholderTeams() {
-        runScheduleEditAction(EventScheduleEditAction.REBUILD_WITHOUT_PLACEHOLDER_TEAMS)
-    }
+    override fun rebuildWithoutPlaceholderTeams() =
+        eventEditActionHandler.rebuildWithoutPlaceholderTeams()
 
-    private fun runScheduleEditAction(action: EventScheduleEditAction) {
-        scope.launch {
-            val loadingOperation = loadingHandler.newOperation()
-            when (val result = editActionCoordinator.runScheduleEditAction(
-                action = action,
-                prepareEventForUpdate = ::prepareEventForUpdate,
-                validatePreparedEvent = { prepared ->
-                    requireNoUnsavedEventStaffChanges(
-                        persistedEvent = selectedEvent.value,
-                        preparedEvent = prepared.event,
-                        pendingStaffInvites = eventInviteCoordinator.pendingStaffInvites.value,
-                    )
-                },
-                logPreparedFieldOwnership = ::logPreparedFieldOwnership,
-                updateEvent = { prepared ->
-                    eventRepository.updateEvent(
-                        newEvent = prepared.event,
-                        fields = prepared.fields,
-                        timeSlots = prepared.timeSlots,
-                        leagueScoringConfig = prepared.leagueScoringConfig,
-                    ).getOrThrow()
-                },
-                deleteMatchesOfTournament = { eventId ->
-                    matchRepository.deleteMatchesOfTournament(eventId).getOrThrow()
-                },
-                scheduleEvent = { scheduleAction, updated ->
-                    when (scheduleAction) {
-                        EventScheduleEditAction.RESCHEDULE -> {
-                            eventRepository.scheduleEvent(updated.id).getOrThrow()
-                        }
-                        EventScheduleEditAction.BUILD_BRACKETS -> {
-                            val participantCount = updated.maxParticipants.takeIf { maxParticipants ->
-                                maxParticipants > 0
-                            }
-                            eventRepository.scheduleEvent(updated.id, participantCount).getOrThrow()
-                        }
-                        EventScheduleEditAction.REBUILD_WITHOUT_PLACEHOLDER_TEAMS -> {
-                            eventRepository.scheduleEvent(
-                                eventId = updated.id,
-                                includePlaceholderTeams = false,
-                            ).getOrThrow()
-                        }
-                    }
-                },
-                refetchMatchesOfTournament = { eventId ->
-                    matchRepository.getMatchesOfTournament(eventId).getOrThrow()
-                },
-                resetBracketMatchesAfterSchedule = { updated ->
-                    resetBracketMatchesAfterSchedule(
-                        event = updated,
-                        getMatchesOfTournament = { eventId ->
-                            matchRepository.getMatchesOfTournament(eventId).getOrThrow()
-                        },
-                        updateMatchesBulk = { matches ->
-                            matchRepository.updateMatchesBulk(matches).getOrThrow()
-                        },
-                    )
-                },
-                refreshLeagueStandingsAfterSchedule = ::refreshLeagueStandingsAfterSchedule,
-                showLoading = loadingOperation::showLoading,
-                hideLoading = loadingOperation::hideLoading,
-            )) {
-                is EventScheduleEditResult.Success -> {
-                    cancelEditingEvent()
-                    _errorState.value = ErrorMessage(result.message)
-                }
-                is EventScheduleEditResult.Failure -> {
-                    _errorState.value = ErrorMessage(result.throwable.userMessage(result.fallbackMessage))
-                }
-            }
-        }
-    }
+    override fun createTemplateFromCurrentEvent() =
+        eventEditActionHandler.createTemplateFromCurrentEvent()
 
-    override fun createTemplateFromCurrentEvent() {
-        scope.launch {
-            val sourceEvent = if (editDraftCoordinator.isEditing.value) editDraftCoordinator.editedEvent.value else selectedEvent.value
-            val loadingOperation = loadingHandler.newOperation()
-            when (val result = editActionCoordinator.runCreateTemplateAction(
-                sourceEvent = sourceEvent,
-                createTemplate = { sourceEventId ->
-                    eventRepository.createEventTemplateFromEvent(sourceEventId).getOrThrow()
-                },
-                showLoading = loadingOperation::showLoading,
-                hideLoading = loadingOperation::hideLoading,
-            )) {
-                is EventTemplateCreateResult.AlreadyTemplate -> {
-                    _errorState.value = ErrorMessage(result.message)
-                }
-                is EventTemplateCreateResult.OrganizationManaged -> {
-                    _errorState.value = ErrorMessage(result.message)
-                }
-                is EventTemplateCreateResult.Success -> {
-                    _errorState.value = ErrorMessage(result.message)
-                }
-                is EventTemplateCreateResult.Failure -> {
-                    _errorState.value = ErrorMessage(result.throwable.userMessage(result.fallbackMessage))
-                }
-            }
-        }
-    }
-
-    override fun publishEvent() {
-        scope.launch {
-            val loadingOperation = loadingHandler.newOperation()
-            when (val result = editActionCoordinator.runPublishEventAction(
-                currentEvent = selectedEvent.value,
-                updateEvent = eventRepository::updateEvent,
-                refreshEvent = { eventId ->
-                    eventRepository.getEvent(eventId)
-                },
-                showLoading = loadingOperation::showLoading,
-                hideLoading = loadingOperation::hideLoading,
-            )) {
-                EventPublishResult.AlreadyPublished,
-                EventPublishResult.Success -> Unit
-                is EventPublishResult.Failure -> {
-                    _errorState.value = ErrorMessage(result.throwable.userMessage(result.fallbackMessage))
-                }
-            }
-        }
-    }
+    override fun publishEvent() = eventEditActionHandler.publishEvent()
 
     override fun createNewTeam() = participantActionHandler.createNewTeam()
 
@@ -1964,135 +1753,31 @@ class DefaultEventDetailComponent(
         reviewNote = reviewNote,
     )
 
-    override fun selectPlace(place: MVPPlace?) {
-        editEventField {
-            copy(
-                coordinates = place?.coordinates ?: listOf(0.0, 0.0),
-                location = place?.name ?: "",
-                address = place?.address,
-            )
-        }
-    }
+    override fun selectPlace(place: MVPPlace?) = eventEditActionHandler.selectPlace(place)
 
-    override fun onTypeSelected(type: EventType) {
-        editEventField { copy(eventType = type) }
-    }
+    override fun onTypeSelected(type: EventType) = eventEditActionHandler.onTypeSelected(type)
 
     private fun generateRounds() {
         bracketRoundsCoordinator.refreshRounds(divisionContentCoordinator.divisionMatches.value)
     }
 
-    override fun selectFieldCount(count: Int) {
-        editDraftCoordinator.selectFieldCount(count)
-    }
+    override fun selectFieldCount(count: Int) = eventEditActionHandler.selectFieldCount(count)
 
-    override fun updateLocalFieldName(index: Int, name: String) {
-        editDraftCoordinator.updateLocalFieldName(index, name)
-    }
+    override fun updateLocalFieldName(index: Int, name: String) =
+        eventEditActionHandler.updateLocalFieldName(index, name)
 
-    override fun setRentalResourceSelected(optionId: String, selected: Boolean) {
-        if (rentalResourcesCoordinator.setSelected(optionId, selected)) {
-            syncSelectedRentalResourcesIntoEditDraft()
-        }
-    }
+    override fun setRentalResourceSelected(optionId: String, selected: Boolean) =
+        eventEditActionHandler.setRentalResourceSelected(optionId, selected)
 
-    override fun updateLeagueScoringConfig(update: LeagueScoringConfigDTO.() -> LeagueScoringConfigDTO) {
-        editDraftCoordinator.updateLeagueScoringConfig(update)
-    }
+    override fun updateLeagueScoringConfig(update: LeagueScoringConfigDTO.() -> LeagueScoringConfigDTO) =
+        eventEditActionHandler.updateLeagueScoringConfig(update)
 
-    override fun addLeagueTimeSlot() {
-        editDraftCoordinator.addLeagueTimeSlot()
-    }
+    override fun addLeagueTimeSlot() = eventEditActionHandler.addLeagueTimeSlot()
 
-    override fun updateLeagueTimeSlot(index: Int, update: TimeSlot.() -> TimeSlot) {
-        editDraftCoordinator.updateLeagueTimeSlot(
-            index = index,
-            update = update,
-            normalizeSlotResourceSelection = ::normalizeRentalSlotResourceSelection,
-        )
-    }
+    override fun updateLeagueTimeSlot(index: Int, update: TimeSlot.() -> TimeSlot) =
+        eventEditActionHandler.updateLeagueTimeSlot(index, update)
 
-    override fun removeLeagueTimeSlot(index: Int) {
-        editDraftCoordinator.removeLeagueTimeSlot(index)
-    }
-
-    private fun loadAvailableRentalResources(eventId: String) {
-        scope.launch {
-            billingRepository.listRentalResourceOptions(eventId = eventId.takeIf(String::isNotBlank))
-                .onSuccess { options ->
-                    val changedSelection = rentalResourcesCoordinator.applyLoadedResources(
-                        options = options,
-                        slots = editDraftCoordinator.editableLeagueTimeSlots.value,
-                        eventId = eventId,
-                    )
-                    if (changedSelection) {
-                        if (editDraftCoordinator.isEditing.value) {
-                            syncSelectedRentalResourcesIntoEditDraft()
-                        }
-                    }
-                }
-                .onFailure { error ->
-                    Napier.w("Unable to load event rental resources: ${error.message}")
-                }
-        }
-    }
-
-    private fun normalizeRentalSlotResourceSelection(
-        slot: TimeSlot,
-        validFieldIds: Set<String> = editDraftCoordinator.editableFieldIds(),
-    ): TimeSlot = rentalResourcesCoordinator.normalizeSlotResourceSelection(slot, validFieldIds)
-
-    private fun syncSelectedRentalResourcesIntoEditDraft() {
-        val draft = rentalResourcesCoordinator.buildEditDraft(
-            event = editDraftCoordinator.editedEvent.value,
-            currentFields = editDraftCoordinator.editableFields.value,
-            currentSlots = editDraftCoordinator.editableLeagueTimeSlots.value,
-            defaultDivisionIds = defaultFieldDivisions(editDraftCoordinator.editedEvent.value),
-        )
-        editDraftCoordinator.applyRentalDraft(draft)
-    }
-
-    private fun selectedRentalResourceFields(
-        options: List<RentalResourceOption> = rentalResourcesCoordinator.selectedOptions(),
-    ): List<Field> = rentalResourcesCoordinator.selectedFields(options)
-
-    private fun prepareEventForUpdate(): PreparedEventForUpdate {
-        val result = EventEditPayloadBuilder.prepareForUpdate(
-            EventEditPayloadInput(
-                editedEvent = editDraftCoordinator.editedEvent.value.copy(
-                    matchRulesOverride = matchRulesOverrideWithoutSegmentCount(
-                        editDraftCoordinator.editedEvent.value.matchRulesOverride,
-                    ),
-                ),
-                editableFields = editDraftCoordinator.editableFields.value,
-                editableLeagueTimeSlots = editDraftCoordinator.editableLeagueTimeSlots.value,
-                selectedRentalFields = selectedRentalResourceFields(),
-                leagueScoringConfig = editDraftCoordinator.editableLeagueScoringConfig.value,
-                originalEventStart = eventWithRelations.value.event.start,
-                normalizeSlotResourceSelection = { slot, validFieldIds ->
-                    normalizeRentalSlotResourceSelection(slot, validFieldIds)
-                },
-            )
-        )
-        result.editableFields?.let { fields ->
-            editDraftCoordinator.applyPreparedEditableFields(fields)
-        }
-        return result.prepared
-    }
-
-    private fun logPreparedFieldOwnership(action: String, prepared: PreparedEventForUpdate) {
-        val eventOrgId = prepared.event.organizationId?.trim()?.takeIf(String::isNotBlank)
-        val fieldOwnership = prepared.fields
-            .orEmpty()
-            .joinToString(separator = ", ") { field ->
-                val fieldOrg = field.organizationId?.trim()?.takeIf(String::isNotBlank) ?: "null"
-                "${field.id}:$fieldOrg"
-            }
-        Napier.i(
-            "Event ownership payload [$action] eventId=${prepared.event.id} " +
-                "eventOrg=${eventOrgId ?: "null"} fieldOwnership=[$fieldOwnership]",
-        )
-    }
+    override fun removeLeagueTimeSlot(index: Int) = eventEditActionHandler.removeLeagueTimeSlot(index)
 
     override fun checkIsUserWaitListed(event: Event): Boolean {
         return membershipCoordinator.checkIsUserWaitListed(
