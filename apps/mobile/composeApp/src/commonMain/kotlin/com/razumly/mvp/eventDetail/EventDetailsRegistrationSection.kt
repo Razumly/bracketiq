@@ -130,6 +130,7 @@ private val manualPaymentProviderOptions = listOf(
 internal fun LazyListScope.eventDetailsRegistrationSection(
     state: EventDetailsRegistrationState,
     actions: EventDetailsRegistrationActions,
+    showContainer: Boolean = true,
 ) {
     animatedCardSection(
         sectionId = state.readOnlySection.sectionId,
@@ -145,6 +146,7 @@ internal fun LazyListScope.eventDetailsRegistrationSection(
         lazyListState = state.lazyListState,
         stickyHeaderTopInset = state.stickyHeaderTopInset,
         animationDelay = 200,
+        showContainer = showContainer,
         viewContent = {
             DetailKeyValueList(
                 rows = buildEventDetailsRows(

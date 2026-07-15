@@ -63,9 +63,30 @@ internal fun LazyListScope.animatedCardSection(
     lazyListState: LazyListState? = null,
     stickyHeaderTopInset: Dp = 0.dp,
     animationDelay: Int = 0,
+    showContainer: Boolean = true,
     viewContent: @Composable() (ColumnScope.() -> Unit),
     editContent: @Composable() (ColumnScope.() -> Unit)
 ) {
+    if (!showContainer) {
+        item(key = "$sectionId:content") {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                SectionCardAnimatedContent(
+                    isEditMode = isEditMode,
+                    animationDelay = animationDelay,
+                    viewContent = viewContent,
+                    editContent = editContent,
+                )
+            }
+        }
+        return
+    }
+
     val isCollapsible = if (isEditMode) collapsibleInEditMode else collapsibleInViewMode
     val shouldUseStickyHeader = isCollapsible && sectionTitle != null
     val horizontalCardPadding = if (shouldUseStickyHeader) 0.dp else 16.dp

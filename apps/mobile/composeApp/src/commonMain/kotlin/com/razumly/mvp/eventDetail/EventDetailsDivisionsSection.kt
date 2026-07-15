@@ -52,6 +52,7 @@ internal data class EventDetailsDivisionsSectionActions(
 internal fun LazyListScope.eventDetailsDivisionsSection(
     state: EventDetailsDivisionsSectionState,
     actions: EventDetailsDivisionsSectionActions,
+    showContainer: Boolean = true,
     editContent: @Composable ColumnScope.() -> Unit,
 ) {
     if (!state.editView) {
@@ -71,6 +72,7 @@ internal fun LazyListScope.eventDetailsDivisionsSection(
         lazyListState = state.lazyListState,
         stickyHeaderTopInset = state.stickyHeaderTopInset,
         animationDelay = 400,
+        showContainer = showContainer,
         requiredMissingCount = state.editSection.requiredMissingCount,
         viewContent = {
             EventDetailsDivisionsReadOnlyContent(

@@ -122,6 +122,7 @@ internal data class EventDetailsStaffActions(
 internal fun LazyListScope.eventDetailsStaffSection(
     state: EventDetailsStaffState,
     actions: EventDetailsStaffActions,
+    showContainer: Boolean = true,
 ) {
     if (!state.showOfficialsPanel) {
         return
@@ -140,6 +141,7 @@ internal fun LazyListScope.eventDetailsStaffSection(
         lazyListState = state.lazyListState,
         stickyHeaderTopInset = state.stickyHeaderTopInset,
         animationDelay = 300,
+        showContainer = showContainer,
         viewContent = {
             DetailKeyValueList(
                 rows = buildList {

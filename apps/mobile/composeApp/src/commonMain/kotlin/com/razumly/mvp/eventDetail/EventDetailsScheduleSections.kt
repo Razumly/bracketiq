@@ -94,6 +94,7 @@ internal data class EventDetailsScheduleActions(
 internal fun LazyListScope.eventDetailsLeagueScoringSection(
     state: EventDetailsLeagueScoringState,
     actions: EventDetailsLeagueScoringActions,
+    showContainer: Boolean = true,
 ) {
     if (state.editEvent.eventType != EventType.LEAGUE) {
         return
@@ -116,6 +117,7 @@ internal fun LazyListScope.eventDetailsLeagueScoringSection(
         lazyListState = state.lazyListState,
         stickyHeaderTopInset = state.stickyHeaderTopInset,
         animationDelay = 440,
+        showContainer = showContainer,
         viewContent = {
             DetailKeyValueList(
                 rows = listOf(
@@ -139,6 +141,7 @@ internal fun LazyListScope.eventDetailsLeagueScoringSection(
 internal fun LazyListScope.eventDetailsScheduleSection(
     state: EventDetailsScheduleState,
     actions: EventDetailsScheduleActions,
+    showContainer: Boolean = true,
 ) {
     if (!state.supportsScheduleConfig) {
         return
@@ -162,6 +165,7 @@ internal fun LazyListScope.eventDetailsScheduleSection(
         lazyListState = state.lazyListState,
         stickyHeaderTopInset = state.stickyHeaderTopInset,
         animationDelay = 450,
+        showContainer = showContainer,
         viewContent = {
             DetailKeyValueList(
                 rows = buildScheduleDetailsRows(

@@ -60,6 +60,7 @@ internal data class EventDetailsMatchRulesActions(
 internal fun LazyListScope.eventDetailsMatchRulesSection(
     state: EventDetailsMatchRulesState,
     actions: EventDetailsMatchRulesActions,
+    showContainer: Boolean = true,
 ) {
     if (!state.showSection) {
         return
@@ -78,6 +79,7 @@ internal fun LazyListScope.eventDetailsMatchRulesSection(
         lazyListState = state.lazyListState,
         stickyHeaderTopInset = state.stickyHeaderTopInset,
         animationDelay = 250,
+        showContainer = showContainer,
         viewContent = {
             DetailKeyValueList(
                 rows = buildList {

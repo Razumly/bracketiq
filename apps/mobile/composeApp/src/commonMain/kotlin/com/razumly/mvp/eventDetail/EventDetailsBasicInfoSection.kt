@@ -103,6 +103,7 @@ internal data class EventDetailsBasicInfoActions(
 internal fun LazyListScope.eventDetailsBasicInfoSection(
     state: EventDetailsBasicInfoState,
     actions: EventDetailsBasicInfoActions,
+    showContainer: Boolean = true,
 ) {
     animatedCardSection(
         sectionId = state.readOnlySection.sectionId,
@@ -116,6 +117,7 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
         lazyListState = state.lazyListState,
         stickyHeaderTopInset = state.stickyHeaderTopInset,
         animationDelay = 100,
+        showContainer = showContainer,
         viewContent = {
             HostedByReadOnlyRow(
                 host = state.host,

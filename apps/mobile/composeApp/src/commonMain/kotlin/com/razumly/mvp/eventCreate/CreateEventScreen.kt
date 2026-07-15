@@ -36,7 +36,6 @@ import com.razumly.mvp.core.data.dataTypes.updateOfficialUserPositions
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.withOfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.repositories.RegistrationQuestionDraft
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
@@ -64,14 +63,10 @@ fun CreateEventScreen(
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
     var pendingMapPlace by remember { mutableStateOf<MVPPlace?>(null) }
     var setupMode by rememberSaveable { mutableStateOf(EventCreateSetupMode.SIMPLE) }
-    var currentSetupPageId by rememberSaveable { mutableStateOf(EventCreateSetupPageId.FORMAT) }
+    var currentSetupPageId by rememberSaveable { mutableStateOf(EventCreateSetupPageId.BASIC_INFORMATION) }
     var completedSetupPageIds by remember { mutableStateOf(emptySet<EventCreateSetupPageId>()) }
-    var setupChoices by remember { mutableStateOf(EventCreateSetupChoices()) }
     val defaultEvent by component.defaultEvent.collectAsState()
     val newEventState by component.newEventState.collectAsState()
-    var simplePriceQuoteConfirmed by rememberSaveable(newEventState.id) {
-        mutableStateOf(newEventState.priceCents <= 0)
-    }
     fun originalLocationPlace(): MVPPlace? {
         val lat = newEventState.lat
         val long = newEventState.long
@@ -97,9 +92,7 @@ fun CreateEventScreen(
     val availableRentalResources by component.availableRentalResources.collectAsState()
     val selectedRentalResourceIds by component.selectedRentalResourceIds.collectAsState()
     val leagueScoringConfig by component.leagueScoringConfig.collectAsState()
-    val registrationQuestionDrafts by component.registrationQuestionDrafts.collectAsState()
     val suggestedUsers by component.suggestedUsers.collectAsState()
-    val userSearchLoading by component.userSearchLoading.collectAsState()
     val pendingStaffInvites by component.pendingStaffInvites.collectAsState()
     val termsConsentState by component.termsConsentState.collectAsState()
     val termsConsentLoading by component.termsConsentLoading.collectAsState()
@@ -174,13 +167,11 @@ fun CreateEventScreen(
     }
     val setupPages = remember(
         newEventState,
-        setupChoices,
         currentSetupPageId,
         completedSetupPageIds,
     ) {
         resolveEventCreateSetupPages(
             event = newEventState,
-            choices = setupChoices,
             currentPageId = currentSetupPageId,
             completedPageIds = completedSetupPageIds,
         )
@@ -346,11 +337,16 @@ fun CreateEventScreen(
     } else {
         null
     }
+    val nextSimplePageId = if (setupMode == EventCreateSetupMode.SIMPLE && isEventInfoStep) {
+        nextUsedSetupPage(setupPages, currentSetupPageId)
+    } else {
+        null
+    }
     val actionBackEnabled = previousSimplePageId != null || !isEventInfoStep
     val actionPrimaryLabel = when {
         !isEventInfoStep -> "Create event"
         setupMode == EventCreateSetupMode.ADVANCED -> "Review"
-        currentSetupPageId == EventCreateSetupPageId.REVIEW_PUBLISH -> "Create event"
+        nextSimplePageId == null -> "Review"
         else -> "Continue"
     }
 
@@ -364,9 +360,9 @@ fun CreateEventScreen(
 
     fun handleSimpleSetupPrimary() {
         if (!currentSetupPage.used) {
-            currentSetupPage.controlledByPageId?.let { controllerPageId ->
-                currentSetupPageId = controllerPageId
-            } ?: nextUsedSetupPage(setupPages, currentSetupPageId)?.let { pageId ->
+            nextUsedSetupPage(setupPages, currentSetupPageId)?.let { pageId ->
+                currentSetupPageId = pageId
+            } ?: previousUsedSetupPage(setupPages, currentSetupPageId)?.let { pageId ->
                 currentSetupPageId = pageId
             }
             return
@@ -375,31 +371,22 @@ fun CreateEventScreen(
         val isComplete = isSimpleSetupPageComplete(
             pageId = currentSetupPageId,
             event = newEventState,
-            choices = setupChoices,
-            priceQuoteConfirmed = simplePriceQuoteConfirmed,
-            registrationQuestions = registrationQuestionDrafts,
         )
         if (!isComplete) {
-            errorHandler.showPopup(
-                simpleSetupPageError(
-                    pageId = currentSetupPageId,
-                    event = newEventState,
-                    choices = setupChoices,
-                    priceQuoteConfirmed = simplePriceQuoteConfirmed,
-                    registrationQuestions = registrationQuestionDrafts,
-                ),
-            )
-            return
-        }
-
-        if (currentSetupPageId == EventCreateSetupPageId.REVIEW_PUBLISH) {
-            component.createEvent()
+            hasAttemptedEventSubmit = true
+            errorHandler.showPopup("Complete the required fields on this page before continuing.")
             return
         }
 
         completedSetupPageIds = completedSetupPageIds + currentSetupPageId
-        nextUsedSetupPage(setupPages, currentSetupPageId)?.let { pageId ->
+        if (nextSimplePageId != null) {
+            val pageId = nextSimplePageId
             currentSetupPageId = pageId
+        } else if (canProceed) {
+            component.nextStep()
+        } else {
+            hasAttemptedEventSubmit = true
+            errorHandler.showPopup(buildValidationPopupMessage(validationErrors))
         }
     }
 
@@ -515,116 +502,7 @@ fun CreateEventScreen(
                 ) { child ->
                     when (child.instance) {
                         is CreateEventComponent.Child.EventInfo -> {
-                            if (setupMode == EventCreateSetupMode.SIMPLE) {
-                                EventCreateSimpleSetupPage(
-                                    state = EventCreateSimpleSetupUiState(
-                                        page = currentSetupPage,
-                                        event = newEventState,
-                                        choices = setupChoices,
-                                        sports = sports,
-                                        divisionTypeParameters = divisionTypeParameters,
-                                        localFields = localFields,
-                                        leagueTimeSlots = leagueSlots,
-                                        registrationQuestions = registrationQuestionDrafts,
-                                        pendingStaffInvites = pendingStaffInvites,
-                                        leagueScoringConfig = leagueScoringConfig,
-                                        suggestedUsers = suggestedUsers,
-                                        userSearchLoading = userSearchLoading,
-                                        useManualTimeSlots = useManualTimeSlots,
-                                        priceQuoteConfirmed = simplePriceQuoteConfirmed,
-                                    ),
-                                    actions = EventCreateSimpleSetupUiActions(
-                                        onEventTypeSelected = { selectedType ->
-                                            completedSetupPageIds = emptySet()
-                                            onEventTypeSelected(selectedType)
-                                        },
-                                        onEditEvent = onEditEvent,
-                                        onSportSelected = { sportId ->
-                                            onEditEvent {
-                                                copy(
-                                                    sportId = sportId.takeIf(String::isNotBlank),
-                                                    matchRulesOverride = null,
-                                                    resolvedMatchRules = null,
-                                                    usesSets = false,
-                                                    matchDurationMinutes = null,
-                                                    setDurationMinutes = null,
-                                                    setsPerMatch = null,
-                                                    pointsToVictory = emptyList(),
-                                                    winnerSetCount = 1,
-                                                    loserSetCount = 1,
-                                                    winnerBracketPointsToVictory = emptyList(),
-                                                    loserBracketPointsToVictory = emptyList(),
-                                                )
-                                            }
-                                        },
-                                        onChoicesChange = { choices ->
-                                            if (setupChoices.useRegistrationQuestions && !choices.useRegistrationQuestions) {
-                                                component.setRegistrationQuestionDrafts(emptyList())
-                                            }
-                                            setupChoices = choices
-                                        },
-                                        onUseManualTimeSlotsChange = component::setUseManualTimeSlots,
-                                        onOpenLocationMap = {
-                                            pendingMapPlace = null
-                                            mapComponent.toggleMap()
-                                        },
-                                        onSelectFieldCount = component::selectFieldCount,
-                                        onUpdateLocalFieldName = component::updateLocalFieldName,
-                                        onAddLeagueTimeSlot = { slot ->
-                                            val index = leagueSlots.size
-                                            component.addLeagueTimeSlot()
-                                            component.updateLeagueTimeSlot(index) { slot }
-                                        },
-                                        onUpdateLeagueTimeSlot = { index, slot ->
-                                            component.updateLeagueTimeSlot(index) { slot }
-                                        },
-                                        onRemoveLeagueTimeSlot = component::removeLeagueTimeSlot,
-                                        onLeagueScoringConfigChange = { updated ->
-                                            component.updateLeagueScoringConfig { updated }
-                                        },
-                                        onRegistrationQuestionsChange = component::setRegistrationQuestionDrafts,
-                                        onSearchUsers = onSearchUsers,
-                                        onUpdateAssistantHostIds = onUpdateAssistantHostIds,
-                                        onUpdateOfficialIds = { updatedIds ->
-                                            val currentIds = (
-                                                newEventState.officialIds +
-                                                    newEventState.eventOfficials.map { official -> official.userId }
-                                                ).toSet()
-                                            (updatedIds.toSet() - currentIds).forEach(onAddOfficialId)
-                                            (currentIds - updatedIds.toSet()).forEach(onRemoveOfficialId)
-                                        },
-                                        onUpdateOfficialSchedulingMode = onUpdateOfficialSchedulingMode,
-                                        onUpdateDoTeamsOfficiate = onUpdateDoTeamsOfficiate,
-                                        onUpdateTeamOfficialsMaySwap = onUpdateTeamOfficialsMaySwap,
-                                        onUpdateTeamCheckInMode = onUpdateTeamCheckInMode,
-                                        onUpdateTeamCheckInOpenMinutesBefore = onUpdateTeamCheckInOpenMinutesBefore,
-                                        onUpdateAllowMatchRosterEdits = onUpdateAllowMatchRosterEdits,
-                                        onUpdateAllowTemporaryMatchPlayers = onUpdateAllowTemporaryMatchPlayers,
-                                        onLoadOfficialPositionDefaults = {
-                                            component.updateEventField {
-                                                syncOfficialStaffing(
-                                                    sport = selectedSport,
-                                                    replacePositionsWithSportDefaults = true,
-                                                )
-                                            }
-                                        },
-                                        onAddOfficialPosition = onAddOfficialPosition,
-                                        onUpdateOfficialPositionName = onUpdateOfficialPositionName,
-                                        onUpdateOfficialPositionCount = onUpdateOfficialPositionCount,
-                                        onRemoveOfficialPosition = onRemoveOfficialPosition,
-                                        onAddPendingStaffInvite = onAddPendingStaffInvite,
-                                        onRemovePendingStaffInvite = onRemovePendingStaffInvite,
-                                        onUpdateOfficialUserPositions = onUpdateOfficialUserPositions,
-                                        onPriceQuoteConfirmationChange = { confirmed ->
-                                            simplePriceQuoteConfirmed = confirmed
-                                        },
-                                        quoteInclusivePrice = component::quoteInclusivePrice,
-                                        onOpenAdvanced = { setupMode = EventCreateSetupMode.ADVANCED },
-                                    ),
-                                    modifier = Modifier.fillMaxSize(),
-                                )
-                            } else {
-                                EventDetails(
+                            EventDetails(
                                     paymentProcessor = component,
                                     mapComponent = mapComponent,
                                     hostHasAccount = currentUser?.hasStripeAccount ?: false,
@@ -735,9 +613,19 @@ fun CreateEventScreen(
                                         validationErrors = errors
                                     },
                                     quoteInclusivePrice = component::quoteInclusivePrice,
+                                    sectionVisibility = if (setupMode == EventCreateSetupMode.SIMPLE) {
+                                        simpleSetupSectionVisibility(currentSetupPageId)
+                                    } else {
+                                        com.razumly.mvp.eventDetail.EventDetailsSectionVisibility.All
+                                    },
+                                    showSectionContainers = setupMode == EventCreateSetupMode.ADVANCED,
+                                    contentScrollResetKey = if (setupMode == EventCreateSetupMode.SIMPLE) {
+                                        "simple:$currentSetupPageId"
+                                    } else {
+                                        "advanced"
+                                    },
                                     joinButton = {},
                                 )
-                            }
                         }
 
                         is CreateEventComponent.Child.Preview -> Preview(
@@ -749,57 +637,6 @@ fun CreateEventScreen(
             }
         }
     }
-}
-
-private fun simpleSetupPageError(
-    pageId: EventCreateSetupPageId,
-    event: Event,
-    choices: EventCreateSetupChoices,
-    priceQuoteConfirmed: Boolean,
-    registrationQuestions: List<RegistrationQuestionDraft>,
-): String = when (pageId) {
-    EventCreateSetupPageId.BASICS -> "Add an event name and select a sport before continuing."
-    EventCreateSetupPageId.DIVISIONS -> "Add at least one division before continuing."
-    EventCreateSetupPageId.SCHEDULE_LOCATION -> when {
-        event.location.isBlank() || event.lat == 0.0 || event.long == 0.0 -> {
-            "Select a mapped location before continuing."
-        }
-        !event.noFixedEndDateTime && event.end <= event.start -> "Choose an end time after the start time."
-        else -> "Complete the schedule before continuing."
-    }
-    EventCreateSetupPageId.COMPETITION_RULES -> if (
-        event.eventType == EventType.TOURNAMENT && event.includePlayoffs
-    ) {
-        buildValidationPopupMessage(
-            simpleCompetitionRulesValidationErrors(event) +
-                simpleTournamentPoolValidationErrors(event, requireCapacity = false),
-        )
-    } else {
-        buildValidationPopupMessage(
-            simpleCompetitionRulesValidationErrors(event) +
-                if (event.includePlayoffs && (event.playoffTeamCount ?: 0) < 2) {
-                    listOf("Choose at least two playoff teams.")
-                } else {
-                    emptyList()
-                },
-        )
-    }
-    EventCreateSetupPageId.WINNER_BRACKET_RULES ->
-        buildValidationPopupMessage(
-            simpleTournamentWinnerBracketValidationErrors(event) +
-                simpleTournamentLoserBracketValidationErrors(event),
-        )
-    EventCreateSetupPageId.PRICING_REGISTRATION -> when {
-        event.maxParticipants < 2 -> "Capacity must be at least 2."
-        choices.paidRegistration && event.priceCents <= 0 -> "Enter a registration price."
-        choices.paidRegistration && !priceQuoteConfirmed -> "Wait for the online price quote."
-        else -> "Complete the registration settings before continuing."
-    }
-    EventCreateSetupPageId.QUESTIONS -> "Add at least one registration question before continuing."
-    EventCreateSetupPageId.REVIEW_PUBLISH -> buildValidationPopupMessage(
-        simpleSetupValidationErrors(event, choices, priceQuoteConfirmed, registrationQuestions),
-    )
-    else -> "Complete the required fields on this page before continuing."
 }
 
 private fun buildValidationPopupMessage(errors: List<String>): String {

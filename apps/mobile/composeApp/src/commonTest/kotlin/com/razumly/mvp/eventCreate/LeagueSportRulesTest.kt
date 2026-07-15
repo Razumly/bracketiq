@@ -58,7 +58,11 @@ class LeagueSportRulesTest : MainDispatcherTest() {
         harness.component.updateEventField { copy(sportId = volleyball.id) }
         advance()
         harness.component.updateEventField {
-            withSimpleSetPointTargets(listOf(21, 21, 21, 21, 15))
+            copy(
+                usesSets = true,
+                setsPerMatch = 5,
+                pointsToVictory = listOf(21, 21, 21, 21, 15),
+            )
         }
         advance()
 

@@ -289,6 +289,8 @@ fun EventDetails(
         Result.failure(UnsupportedOperationException("Inclusive price quotes are unavailable."))
     },
     sectionVisibility: EventDetailsSectionVisibility = EventDetailsSectionVisibility.All,
+    showSectionContainers: Boolean = true,
+    contentScrollResetKey: Any? = null,
     heroTopControls: @Composable BoxScope.() -> Unit = {},
     modifier: Modifier = Modifier,
     joinButton: @Composable (isValid: Boolean) -> Unit
@@ -356,6 +358,11 @@ fun EventDetails(
     }
 
     val lazyListState = rememberLazyListState()
+    LaunchedEffect(contentScrollResetKey) {
+        if (contentScrollResetKey != null) {
+            lazyListState.scrollToItem(0)
+        }
+    }
 
     var fieldCount by remember {
         mutableStateOf(resolveReadOnlyFieldCount(event = editEvent, editableFields = editableFields))
@@ -2438,6 +2445,7 @@ fun EventDetails(
                         onShowStartPicker = { showStartPicker = true },
                         onShowEndPicker = { showEndPicker = true },
                     ),
+                    showContainer = showSectionContainers,
                 )
 
                 if (sectionVisibility.registration) eventDetailsRegistrationSection(
@@ -2476,6 +2484,7 @@ fun EventDetails(
                         onToggleEventRegistrationQuestions = onToggleEventRegistrationQuestions,
                         onEventRegistrationQuestionAnswerChange = onEventRegistrationQuestionAnswerChange,
                     ),
+                    showContainer = showSectionContainers,
                 )
 
                 if (sectionVisibility.matchRules) eventDetailsMatchRulesSection(
@@ -2502,6 +2511,7 @@ fun EventDetails(
                         onEditEvent = onEditEvent,
                         onCustomIncidentDraftChange = { customIncidentDraft = it },
                     ),
+                    showContainer = showSectionContainers,
                 )
 
                 if (sectionVisibility.staff) eventDetailsStaffSection(
@@ -2616,6 +2626,7 @@ fun EventDetails(
                         onRemovePendingStaffInvite = onRemovePendingStaffInvite,
                         onUpdateOfficialUserPositions = onUpdateOfficialUserPositions,
                     ),
+                    showContainer = showSectionContainers,
                 )
 
                 if (sectionVisibility.divisions) eventDetailsDivisionsSection(
@@ -2635,6 +2646,7 @@ fun EventDetails(
                     actions = EventDetailsDivisionsSectionActions(
                         onDisabledClick = ::showSelectSportMessage,
                     ),
+                    showContainer = showSectionContainers,
                     editContent = {
                         EventDetailsDivisionEditorForm(
                             state = EventDetailsDivisionEditorFormState(
@@ -2731,6 +2743,7 @@ fun EventDetails(
                         onDisabledClick = ::showSelectSportMessage,
                         onConfigChange = onLeagueScoringConfigChange,
                     ),
+                    showContainer = showSectionContainers,
                 )
 
                 if (sectionVisibility.schedule) eventDetailsScheduleSection(
@@ -2783,6 +2796,7 @@ fun EventDetails(
                         onRemoveSlot = onRemoveLeagueTimeSlot,
                         onUseManualTimeSlotsChange = onUseManualTimeSlotsChange,
                     ),
+                    showContainer = showSectionContainers,
                 )
 
             }

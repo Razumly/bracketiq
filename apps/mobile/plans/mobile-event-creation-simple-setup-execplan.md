@@ -4,7 +4,7 @@ This ExecPlan is a living document maintained according to `PLANS.md` in the rep
 
 ## Purpose / Big Picture
 
-Mobile event creation currently opens one long advanced event-details form. After this change, creation opens in a named, page-based Simple Setup flow that asks structural questions before showing dependent inputs. Users can switch to the existing Advanced form at any time without losing draft values. Mobile does not offer Tryout creation; Tryouts remain organization-only creation on the web, although the app can discover and display them.
+Mobile event creation has one established Advanced editor whose section content already owns the supported event contract. Simple Setup now presents those same section contents one page at a time, in Advanced order, while omitting only the outer collapsible card and header. This reset establishes exact behavioral parity first; later simplification can happen section by section without maintaining a second form implementation. Users can switch modes without losing draft values, and both modes use the same validation and Preview step.
 
 ## Progress
 
@@ -33,6 +33,11 @@ Mobile event creation currently opens one long advanced event-details form. Afte
 - [x] (2026-07-15) Kept cleared schedule durations null, added inline required warnings, and prevented sport-default normalization from repopulating them.
 - [x] (2026-07-15) Combined loser-bracket rules beneath winner-bracket rules on one compact tournament page.
 - [x] (2026-07-15) Made registration-question wording registration-aware, exposed and enforced short/long response limits, and brought Simple Setup staff controls to Advanced Setup parity.
+- [x] (2026-07-15) Reset Simple Setup to render the established Advanced `EventDetails` section content one page at a time and removed the duplicate page-specific form implementation.
+- [x] (2026-07-15) Added a section-wrapper seam that omits the collapsible card and section header in Simple Setup while leaving Advanced Setup unchanged.
+- [x] (2026-07-15) Replaced the separate Simple review/publish page with the established Advanced Preview step and reduced the visible Simple route to the Advanced section order.
+- [x] (2026-07-15) Compiled Android production code and passed focused section-routing plus league sport-rule tests after removing obsolete Simple-only UI tests.
+- [x] (2026-07-15) Verified Basic Information, Event Details, Staff, Divisions, and Schedule on the Android emulator; confirmed shared Advanced content, direct non-collapsible section bodies, page navigation, top-of-page reset, and the shared Review transition.
 
 ## Surprises & Discoveries
 
@@ -93,6 +98,15 @@ Mobile event creation currently opens one long advanced event-details form. Afte
 - Observation: Pool and playoff match rules can persist separately on the same division.
   Evidence: regular `DivisionDetail` fields hold pool set count, targets, and duration, while `DivisionDetail.playoffConfig` holds the bracket duration and independent winner/loser rules used by the scheduler.
 
+- Observation: The duplicate Simple implementation had grown to roughly 3,800 lines of UI, mapping helpers, and tests even though every supported control already exists in modular Advanced sections.
+  Evidence: Replacing it with section routing and the shared wrapper seam removed the duplicate code while `:composeApp:compileDebugKotlinAndroid` continued to pass.
+
+- Observation: The Advanced section bodies can be reused without their collapsible chrome at one shared boundary.
+  Evidence: Every modular Advanced section calls `animatedCardSection`; its `showContainer` flag now renders the same edit-content lambda directly for Simple Setup.
+
+- Observation: Switching from a scrolled Advanced editor back to Simple initially retained the Advanced list offset.
+  Evidence: Emulator QA opened Simple midway through Basic Information after mode switching; keying `EventDetails` scroll reset to the setup mode and Simple page now restores the top of each page.
+
 ## Decision Log
 
 - Decision: Keep one `Event` draft for Simple and Advanced modes.
@@ -111,8 +125,16 @@ Mobile event creation currently opens one long advanced event-details form. Afte
   Rationale: The product decision is that only organizations create Tryouts through the web organization flow.
   Date/Author: 2026-07-13 / Codex
 
-- Decision: Stop reusing `EventDetails` inside Simple Setup; retain it unchanged for Advanced Setup.
+- Decision (superseded 2026-07-15): Stop reusing `EventDetails` inside Simple Setup; retain it unchanged for Advanced Setup.
   Rationale: A compact, non-collapsible, no-scroll wizard needs page-specific controls. The full editor's hero, expandable sections, and long lists cannot meet that layout contract without harming Advanced Setup.
+  Date/Author: 2026-07-15 / Codex
+
+- Decision: Reset Simple Setup to the exact Advanced section content, routed one section per page, and simplify only after parity is stable.
+  Rationale: The bespoke forms diverged from established behavior and multiplied fixes. Reusing the actual Advanced content makes one implementation authoritative while `showContainer = false` satisfies the requirement that the whole section is not collapsible in Simple Setup.
+  Date/Author: 2026-07-15 / Codex
+
+- Decision: Use Basic Information (hero plus basic fields), Event Details, Match Rules, Staff, Divisions, League Scoring Config, and Schedule as the Simple page order, skipping only sections that Advanced itself does not render for the selected event type.
+  Rationale: This is the existing Advanced composition order. Standard events skip Match Rules and non-leagues skip League Scoring Config; the final used page advances to the shared Preview screen.
   Date/Author: 2026-07-15 / Codex
 
 - Decision: Replace the horizontal fourteen-card progress rail with a page title, step count, and linear progress indicator.
@@ -181,35 +203,21 @@ Mobile event creation currently opens one long advanced event-details form. Afte
 
 ## Outcomes & Retrospective
 
-The mobile create screen now starts in a purpose-built Simple Setup instead of embedding the advanced editor. Each used page presents only the controls needed for that decision, has no collapsible container, and writes into the same `Event` draft used by Advanced Setup and final creation. Fixed-content pages fit the standard viewport; resource, timeslot, question, and staff collections use a single vertical scroll region while the inset-aware Back/Continue bar remains fixed above the app navigation and system gesture area.
+Simple Setup is now a thin page router over the real Advanced editor. There is no duplicate set of event, tournament, registration, division, schedule, or staff controls. Each page receives one `EventDetailsSectionVisibility` slice; the Basic Information page also includes the established hero/name/location content. Section bodies remain scrollable exactly as they are in Advanced, but Simple omits the outer card title and collapse affordance because the page header already supplies that context.
 
-The complete base path and the tallest conditional paths were inspected on an Android emulator at 360 x 800 dp. The latest pass verified separate Schedule & Location, Resources, and Timeslots pages; five saved timeslots scrolling beneath a fixed action bar; direct short/long and required/optional question authoring; and four explained scheduling-priority cards. The screenshot pass directly led to compact date formatting, narrower header typography, full-width pricing cutoff fields, an explicit no-cutoff value, plural-aware resource/division summaries, and non-squeezing helper-card actions. Competition values continue to follow the sport's resolved scoring model: Indoor Soccer exposes duration and conventional 3/1/0 result points, while Indoor Volleyball exposes per-set targets and an explicit 1/3/5 set count.
+Advanced Setup still renders all sections with the original collapsible cards because `showSectionContainers` defaults to true. Existing event detail/edit callers are unchanged. The last used Simple section now validates through `EventDetails` and opens the same Preview component used by Advanced rather than publishing through a second review path.
 
-Tournament creation now distinguishes bracket-only competition from pool play that advances into a bracket. The pool path persists pool count, bracket teams, derived pool size, and bracket format through each division's established payload fields. The complete volleyball pool page, including single/double elimination, was verified at 360 x 800 dp without scrolling.
-
-Scheduling inputs now follow the same separation. Competition Rules owns pool or league duration and scoring. Winner Bracket owns bracket format, minutes per set or timed match duration, winner set count, and winner targets, with the conditional loser-bracket set count and targets directly beneath it. Defaults seed the initial draft, but clearing a duration preserves null and shows a required warning instead of silently restoring the default.
-
-Registration questions now explain whether the team or individual player answers them. Short answers are capped at 200 characters and long answers at 2,000, with the limit visible both while configuring and answering questions. The Simple Setup staff page now exposes the same operational controls as Advanced Setup, including team officiating and swaps, check-in and rosters, scheduling mode, official positions, existing-user assignment, email invites with roles, assigned staff removal, and official position eligibility.
-
-Android debug Kotlin compilation and debug APK assembly pass. The earlier scoring/layout pass ran 27 focused tests; the latest scheduling/question pass ran 18 focused tests across `EventCreateSimpleSetupTest`, the post-create question persistence regression, and the registration-question HTTP contract. The iOS simulator compile remains blocked by the unrelated existing `PaymentProcessor.ios.kt` expect/actual mismatch described above.
-
-The latest setup pass runs all 28 `EventCreateSimpleSetupTest` cases plus focused default-preservation and staff-action UI regressions with zero failures and assembles the debug APK. A broader `DefaultCreateEventComponentTest` run still has seven schedule-slot assertions failing outside the files changed for the tournament branch; those failures are recorded separately from this focused green result.
+Android production compilation and installation pass. Focused Android JVM tests cover the Advanced-section page list, event-type conditional sections, navigation, visibility mapping, minimum page checks, default event-range slot behavior, and league set-count preservation. Emulator QA confirmed the five-page Event route from Basic Information through Schedule, the shared content without outer collapsible cards, scroll reset between pages and modes, and the final Review action. No crash was recorded during the flow.
 
 ## Context and Orientation
 
 `composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/CreateEventScreen.kt` renders the creation screen and owns transient UI state. `DefaultCreateEventComponent.kt` owns the mutable event draft and persistence. `composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetails.kt` renders the existing advanced form by composing modular section functions. The new resolver and Simple Setup UI belong under the `eventCreate` package. No database or API changes are needed.
 
-The current pages are Format, Basics, Participation Plan, Divisions, Schedule & Location, Resources, Timeslots, Competition Rules, Registration Plan, Pricing & Registration, Registration Questions, Operations Plan, Staff & Operations, and Review & Publish. Resources and Timeslots are used only by leagues and tournaments. Registration Questions is controlled by Registration Plan. Planning pages remain only where they gate a genuinely optional later page. A page can be current, complete, available, locked, or not used.
+The current pages mirror Advanced order: Basic Information, Event Details, Match Rules, Staff, Divisions, League Scoring Config, and Schedule. Match Rules is skipped for event types where Advanced hides it. League Scoring Config is used only for leagues. Review is the existing `Preview` child, not another Simple page.
 
 ## Plan of Work
 
-First add pure setup types and resolver functions. They must exclude Tryout, mark competition pages unused for Event and Weekly Event, mark documents/questions unused until enabled, and mark staff/operations unused until enabled or team operations apply. Add tests before wiring UI.
-
-Next add a stable Simple/Advanced mode action and compact title, step count, and linear progress indicator. Back and Continue move through only the pages used by the current choices.
-
-Then add planning-page controls for participation, schedule, competition, registration, and operations. These controls update the existing event draft where a persisted field already exists and keep transient choices only for layout decisions that are not event fields.
-
-Finally build page-specific Simple Setup composables that update the established draft callbacks. Schedule & Location owns only the mapped location and event timing. Resources owns count and editable labels. Timeslots owns the automatic-window summary plus a single vertically scrollable list/editor for custom slots. Registration Questions holds mobile drafts and saves them through the shared API immediately after event creation. Advanced continues to render the complete `EventDetails` editor unchanged. Review summarizes the draft and publishes through the same component validation and create method.
+Keep the compact Simple/Advanced header and fixed Back/Continue bar. Route Simple pages using the Advanced section order and the same `EventDetails` call used by Advanced. Add one backward-compatible wrapper flag so Simple can render section bodies directly while every other caller retains the card and collapse behavior. Remove bespoke Simple forms, draft-mapping helpers, and tests that no longer represent runtime behavior. Verify section routing in unit tests, then compare Simple and Advanced on the emulator before committing.
 
 ## Concrete Steps
 
@@ -223,11 +231,11 @@ If the full multiplatform test task is blocked by an unrelated native environmen
 
 ## Validation and Acceptance
 
-Creating a new event must open Simple Setup on Format. Event, Weekly Event, League, and Tournament must be selectable; Tryout must not appear. The title, step count, and linear indicator must reflect only used pages. Fixed-content pages must fit at 360 x 800 dp without collapsible sections. Variable resource, timeslot, and question collections may use one vertical scroll region per page and must keep the bottom action bar visible. Switching to Advanced and back must preserve name, sport, event type, division, schedule, pricing, questions, and staffing values. Review must submit through the existing create action and save question drafts after the event exists. Existing event detail and edit screens must render all sections unchanged.
+Creating a new event must open Simple Setup on Basic Information. Each Simple page must show the same edit content as its matching Advanced section, without the outer section header, card, or collapse interaction. The page title, step count, and linear indicator must include only sections Advanced renders for that event type. Switching modes must preserve the shared draft. The final Simple page must open the existing Preview step. Existing Advanced event create/edit/detail screens must retain their all-section collapsible layout.
 
 ## Idempotence and Recovery
 
-The change is additive. The section-visibility default preserves all existing callers. If Simple Setup must be disabled temporarily, initialize create mode to Advanced while leaving the resolver and tests in place; no stored data requires migration or repair.
+The `EventDetails` flags default to all sections and visible containers, preserving existing callers. Simple Setup can be disabled temporarily by initializing create mode to Advanced; no stored data, API, or database migration is involved.
 
 ## Artifacts and Notes
 
@@ -241,6 +249,12 @@ Validation transcripts:
 
     JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew :composeApp:testDebugUnitTest --tests 'com.razumly.mvp.eventCreate.EventCreateSimpleSetupTest'
     BUILD SUCCESSFUL; 9 focused tests passed.
+
+    ./gradlew :composeApp:compileDebugKotlinAndroid --console=plain
+    BUILD SUCCESSFUL in 1m 1s.
+
+    ./gradlew :composeApp:testDebugUnitTest --tests 'com.razumly.mvp.eventCreate.EventCreateSimpleSetupTest' --tests 'com.razumly.mvp.eventCreate.LeagueSportRulesTest' --console=plain
+    BUILD SUCCESSFUL in 17s.
 
     JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew :composeApp:testDebugUnitTest --tests 'com.razumly.mvp.eventCreate.EventCreateSimpleSetupTest' --tests 'com.razumly.mvp.eventCreate.DefaultCreateEventComponentTest.selecting_competition_types_uses_finite_end_by_default' --tests 'com.razumly.mvp.eventCreate.DefaultCreateEventComponentTest.selecting_result_points_sport_applies_conventional_standings_defaults' --tests 'com.razumly.mvp.eventDetail.EventDetailsMatchRulesTest' :composeApp:assembleDebug
     BUILD SUCCESSFUL; 27 focused tests passed and the debug APK assembled.
@@ -269,4 +283,4 @@ Emulator screenshots:
 
 ## Interfaces and Dependencies
 
-`EventCreateSetupMode`, `EventCreateSetupPageId`, `EventCreateSetupChoices`, `EventCreateSetupPage`, resolver functions, page composables, and draft-mapping helpers live in the `eventCreate` package. `IEventRepository` exposes the existing registration-question PUT contract for create finalization; no persistence model or backend endpoint is added. Advanced Setup continues to use `EventDetails`.
+`EventCreateSetupMode`, `EventCreateSetupPageId`, `EventCreateSetupPage`, resolver functions, and section-visibility mapping live in the `eventCreate` package. `EventDetails.showSectionContainers` and `animatedCardSection.showContainer` are backward-compatible presentation seams; section state, mutations, validation, persistence, and Preview remain shared. No API or persistence model is added.
