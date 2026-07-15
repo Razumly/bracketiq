@@ -201,6 +201,7 @@ fun LeaguePlayoffConfigurationFields(
     leagueConfig: LeagueConfig,
     playoffConfig: TournamentConfig,
     onPlayoffConfigChange: (TournamentConfig) -> Unit,
+    showEliminationControl: Boolean = true,
 ) {
     if (!leagueConfig.includePlayoffs) return
 
@@ -210,6 +211,7 @@ fun LeaguePlayoffConfigurationFields(
         tournamentConfig = playoffConfig,
         onTournamentConfigChange = onPlayoffConfigChange,
         showPrize = false,
+        showEliminationControl = showEliminationControl,
     )
 }
 
@@ -220,6 +222,7 @@ fun TournamentConfigurationFields(
     tournamentConfig: TournamentConfig,
     onTournamentConfigChange: (TournamentConfig) -> Unit,
     showPrize: Boolean = true,
+    showEliminationControl: Boolean = true,
 ) {
     val playoffConfig = tournamentConfig
     val onPlayoffConfigChange = onTournamentConfigChange
@@ -231,7 +234,7 @@ fun TournamentConfigurationFields(
 
     TwoColumnRow(
         first = {
-            LabeledCheckboxRow(
+            if (showEliminationControl) LabeledCheckboxRow(
                 checked = playoffConfig.doubleElimination,
                 label = "Double elimination",
                 onCheckedChange = { checked ->

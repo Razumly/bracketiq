@@ -72,7 +72,9 @@ internal fun buildEventDetailsRows(
                 event.maxParticipants.toString(),
             ),
         )
-        add(DetailRowSpec("Team size", event.teamSizeLimit.toString()))
+        if (event.teamSignup) {
+            add(DetailRowSpec("Team size", event.teamSizeLimit.toString()))
+        }
         add(DetailRowSpec("Registration closes", "$registrationSummary \u203A"))
         add(DetailRowSpec("Refunds", "$refundSummary \u203A"))
         add(DetailRowSpec("Waitlist", "${event.waitListIds.size}"))

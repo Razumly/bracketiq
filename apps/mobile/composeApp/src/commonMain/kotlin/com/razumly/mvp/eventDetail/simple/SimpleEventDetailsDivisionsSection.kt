@@ -31,25 +31,9 @@ import com.razumly.mvp.eventDetail.shared.DetailRowSpec
 import com.razumly.mvp.eventDetail.shared.DetailStatsGrid
 import com.razumly.mvp.eventDetail.shared.animatedCardSection
 
-internal data class EventDetailsDivisionsSectionState(
-    val readOnlySection: ReadOnlySectionModel,
-    val editSection: EditSectionModel,
-    val sectionExpansionStates: SnapshotStateMap<String, Boolean>,
-    val eventDetailsMode: EventDetailsMode,
-    val lazyListState: LazyListState,
-    val stickyHeaderTopInset: Dp,
-    val enabled: Boolean,
-    val editView: Boolean,
-    val event: Event,
-    val teamsCount: Int,
-    val freeAgentCount: Int,
-)
 
-internal data class EventDetailsDivisionsSectionActions(
-    val onDisabledClick: () -> Unit,
-)
 
-internal fun LazyListScope.eventDetailsDivisionsSection(
+internal fun LazyListScope.simpleEventDetailsDivisionsSection(
     state: EventDetailsDivisionsSectionState,
     actions: EventDetailsDivisionsSectionActions,
     showContainer: Boolean = true,
@@ -85,24 +69,7 @@ internal fun LazyListScope.eventDetailsDivisionsSection(
     )
 }
 
-internal data class EventDetailsDivisionEditorActionsState(
-    val editEvent: Event,
-    val divisionEditor: DivisionEditorState,
-    val divisionEditorReady: Boolean,
-    val isSkillLevelValid: Boolean,
-    val isLeaguePlayoffTeamsValid: Boolean,
-    val showValidationErrors: Boolean,
-    val divisionDetails: List<DivisionDetail>,
-    val isPriceQuoteConfirmed: Boolean = true,
-)
 
-internal data class EventDetailsDivisionEditorActions(
-    val onDivisionEditorChange: (DivisionEditorState) -> Unit,
-    val onSaveDivision: () -> Unit,
-    val onResetDivisionEditor: () -> Unit,
-    val onEditDivision: (String) -> Unit,
-    val onRemoveDivision: (String) -> Unit,
-)
 
 @Composable
 private fun EventDetailsDivisionsReadOnlyContent(
@@ -118,9 +85,7 @@ private fun EventDetailsDivisionsReadOnlyContent(
 
     DetailStatsGrid(
         items = buildList {
-            add(
-            DetailGridItem(maxParticipantsLabel, event.maxParticipants.toString()),
-            )
+            add(DetailGridItem(maxParticipantsLabel, event.maxParticipants.toString()))
             if (event.teamSignup) {
                 add(DetailGridItem("Team size", event.teamSizeLimit.teamSizeFormat()))
             }
@@ -228,7 +193,7 @@ private fun EventDetailsDivisionsReadOnlyContent(
 }
 
 @Composable
-internal fun EventDetailsDivisionEditorActionsContent(
+internal fun SimpleEventDetailsDivisionEditorActionsContent(
     state: EventDetailsDivisionEditorActionsState,
     actions: EventDetailsDivisionEditorActions,
 ) {

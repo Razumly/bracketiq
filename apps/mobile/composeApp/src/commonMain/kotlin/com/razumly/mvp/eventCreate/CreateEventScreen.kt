@@ -63,7 +63,7 @@ fun CreateEventScreen(
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
     var pendingMapPlace by remember { mutableStateOf<MVPPlace?>(null) }
     var setupMode by rememberSaveable { mutableStateOf(EventCreateSetupMode.SIMPLE) }
-    var currentSetupPageId by rememberSaveable { mutableStateOf(EventCreateSetupPageId.BASIC_INFORMATION) }
+    var currentSetupPageId by rememberSaveable { mutableStateOf(EventCreateSetupPageId.OPTIONS) }
     var completedSetupPageIds by remember { mutableStateOf(emptySet<EventCreateSetupPageId>()) }
     val defaultEvent by component.defaultEvent.collectAsState()
     val newEventState by component.newEventState.collectAsState()
@@ -619,6 +619,7 @@ fun CreateEventScreen(
                                         com.razumly.mvp.eventDetail.EventDetailsSectionVisibility.All
                                     },
                                     showSectionContainers = setupMode == EventCreateSetupMode.ADVANCED,
+                                    useSimpleSectionContent = setupMode == EventCreateSetupMode.SIMPLE,
                                     contentScrollResetKey = if (setupMode == EventCreateSetupMode.SIMPLE) {
                                         "simple:$currentSetupPageId"
                                     } else {

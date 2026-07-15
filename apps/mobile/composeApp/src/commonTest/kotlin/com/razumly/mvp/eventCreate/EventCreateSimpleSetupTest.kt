@@ -1,6 +1,10 @@
 package com.razumly.mvp.eventCreate
 
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_MANUAL
+import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
+import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.eventDetail.EventDetailsSectionVisibility
@@ -15,9 +19,10 @@ import kotlin.test.assertTrue
 class EventCreateSimpleSetupTest {
 
     @Test
-    fun simple_setup_pages_match_the_advanced_event_detail_sections() {
+    fun simple_setup_starts_with_options_then_uses_independent_section_copies() {
         assertEquals(
             listOf(
+                "Options",
                 "Basic Information",
                 "Event Details",
                 "Match Rules",
@@ -51,7 +56,10 @@ class EventCreateSimpleSetupTest {
         val pages = resolveEventCreateSetupPages(
             event = Event(eventType = EventType.LEAGUE),
             currentPageId = EventCreateSetupPageId.BASIC_INFORMATION,
-            completedPageIds = setOf(EventCreateSetupPageId.BASIC_INFORMATION),
+            completedPageIds = setOf(
+                EventCreateSetupPageId.OPTIONS,
+                EventCreateSetupPageId.BASIC_INFORMATION,
+            ),
         )
 
         assertTrue(pages.all(EventCreateSetupPage::used))
@@ -94,6 +102,10 @@ class EventCreateSimpleSetupTest {
 
     @Test
     fun each_simple_page_exposes_only_its_advanced_section_content() {
+        assertEquals(
+            EventDetailsSectionVisibility.None.copy(options = true),
+            simpleSetupSectionVisibility(EventCreateSetupPageId.OPTIONS),
+        )
         assertEquals(
             EventDetailsSectionVisibility.None.copy(hero = true, basics = true),
             simpleSetupSectionVisibility(EventCreateSetupPageId.BASIC_INFORMATION),
@@ -165,5 +177,98 @@ class EventCreateSimpleSetupTest {
         assertEquals(listOf("open", "competitive"), slot.divisions)
         assertEquals(18 * 60, slot.startTimeMinutes)
         assertEquals(20 * 60, slot.endTimeMinutes)
+    }
+
+    @Test
+    fun turning_off_paid_registration_clears_all_hidden_payment_state() {
+        val updated = Event(
+            priceCents = 2500,
+            registrationPaymentMode = REGISTRATION_PAYMENT_MODE_MANUAL,
+            cancellationRefundHours = 24,
+            allowPaymentPlans = true,
+            installmentCount = 2,
+            installmentAmounts = listOf(1250, 1250),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "open",
+                    price = 2500,
+                    allowPaymentPlans = true,
+                    installmentCount = 2,
+                    installmentAmounts = listOf(1250, 1250),
+                ),
+            ),
+        ).withSimplePaidRegistration(false)
+
+        assertEquals(0, updated.priceCents)
+        assertFalse(updated.hasPaidRegistration())
+        assertNull(updated.cancellationRefundHours)
+        assertFalse(updated.allowPaymentPlans == true)
+        assertTrue(updated.installmentAmounts.isEmpty())
+        assertTrue(updated.divisionDetails.all { detail -> detail.price == 0 })
+        assertTrue(updated.divisionDetails.all { detail -> detail.allowPaymentPlans == false })
+    }
+
+    @Test
+    fun turning_off_team_registration_clears_team_only_children() {
+        val updated = Event(
+            eventType = EventType.EVENT,
+            teamSignup = true,
+            doTeamsOfficiate = true,
+            teamOfficialsMaySwap = true,
+            teamCheckInMode = TeamCheckInMode.MATCH,
+            allowMatchRosterEdits = true,
+            allowTemporaryMatchPlayers = true,
+        ).withSimpleTeamRegistration(false)
+
+        assertFalse(updated.teamSignup)
+        assertFalse(updated.doTeamsOfficiate == true)
+        assertFalse(updated.teamOfficialsMaySwap == true)
+        assertEquals(TeamCheckInMode.OFF, updated.teamCheckInMode)
+        assertFalse(updated.allowMatchRosterEdits)
+        assertFalse(updated.allowTemporaryMatchPlayers)
+    }
+
+    @Test
+    fun manual_payments_clear_online_refund_and_installment_children() {
+        val updated = Event(
+            priceCents = 2500,
+            cancellationRefundHours = 24,
+            allowPaymentPlans = true,
+            installmentCount = 2,
+            installmentAmounts = listOf(1250, 1250),
+        ).withSimpleManualRegistrationPayments(
+            enabled = true,
+            paidRegistrationEnabled = true,
+        )
+
+        assertEquals(REGISTRATION_PAYMENT_MODE_MANUAL, updated.registrationPaymentMode)
+        assertNull(updated.cancellationRefundHours)
+        assertFalse(updated.allowPaymentPlans == true)
+        assertTrue(updated.installmentAmounts.isEmpty())
+    }
+
+    @Test
+    fun disabling_double_elimination_normalizes_event_and_division_brackets() {
+        val updated = Event(
+            eventType = EventType.TOURNAMENT,
+            doubleElimination = true,
+            loserSetCount = 3,
+            loserBracketPointsToVictory = listOf(21, 21, 15),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "open",
+                    playoffConfig = TournamentConfig(
+                        doubleElimination = true,
+                        loserSetCount = 3,
+                        loserBracketPointsToVictory = listOf(21, 21, 15),
+                    ),
+                ),
+            ),
+        ).withSimpleDoubleElimination(false)
+
+        assertFalse(updated.doubleElimination)
+        assertEquals(1, updated.loserSetCount)
+        assertTrue(updated.loserBracketPointsToVictory.isEmpty())
+        assertFalse(updated.divisionDetails.single().playoffConfig?.doubleElimination == true)
     }
 }

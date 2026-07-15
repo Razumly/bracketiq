@@ -150,16 +150,24 @@ internal fun computeEventValidationResult(
     divisionDetailsForSettings: List<DivisionDetail>,
     isColorLoaded: Boolean,
     scheduleTimeLocked: Boolean,
+    requiresPositiveRegistrationPrice: Boolean = false,
 ): EventValidationResult {
     val isNameValid = editEvent.name.isNotBlank()
-    val isPriceValid = editEvent.priceCents >= 0
+    val isPriceValid = if (!requiresPositiveRegistrationPrice) {
+        editEvent.priceCents >= 0
+    } else if (editEvent.singleDivision) {
+        editEvent.priceCents > 0
+    } else {
+        divisionDetailsForSettings.isNotEmpty() &&
+            divisionDetailsForSettings.all { detail -> (detail.price ?: 0) > 0 }
+    }
     val isMaxParticipantsValid = if (editEvent.singleDivision) {
         editEvent.maxParticipants >= 2
     } else {
         divisionDetailsForSettings.isNotEmpty() &&
             divisionDetailsForSettings.all { detail -> (detail.maxParticipants ?: 0) >= 2 }
     }
-    val isTeamSizeValid = editEvent.teamSizeLimit >= 1
+    val isTeamSizeValid = !editEvent.teamSignup || editEvent.teamSizeLimit >= 1
     val isLocationValid = editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0
     val isSkillLevelValid = editEvent.eventType == EventType.LEAGUE || editEvent.divisions.isNotEmpty()
     val duplicateDivisionNames = duplicateDivisionIdentityNames(divisionDetailsForSettings)
@@ -417,7 +425,17 @@ internal fun computeEventValidationResult(
             add("End date/time must be after start date/time when no fixed end datetime scheduling is disabled.")
         }
         if (!isPriceValid) {
-            add("Price must be 0 or higher.")
+            add(
+                if (requiresPositiveRegistrationPrice) {
+                    if (editEvent.singleDivision) {
+                        "Enter a price greater than 0 for paid registration."
+                    } else {
+                        "Each division needs a price greater than 0 for paid registration."
+                    }
+                } else {
+                    "Price must be 0 or higher."
+                },
+            )
         }
         if (!isMaxParticipantsValid) {
             add(

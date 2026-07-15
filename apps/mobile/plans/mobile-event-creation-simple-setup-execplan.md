@@ -4,7 +4,9 @@ This ExecPlan is a living document maintained according to `PLANS.md` in the rep
 
 ## Purpose / Big Picture
 
-Mobile event creation has one established Advanced editor whose section content already owns the supported event contract. Simple Setup now presents those same section contents one page at a time, in Advanced order, while omitting only the outer collapsible card and header. This reset establishes exact behavioral parity first; later simplification can happen section by section without maintaining a second form implementation. Users can switch modes without losing draft values, and both modes use the same validation and Preview step.
+Mobile event creation has one established Advanced editor whose section content already owns the supported event contract. Simple Setup now presents independent Simple section composables one page at a time, in Advanced order. Each Simple file begins as a close copy of its Advanced counterpart, but the two modes no longer share top-level section UI. They continue to share the event draft, mutation boundaries, validation, persistence, and Preview step so mode switching cannot lose data or create two product contracts.
+
+The next simplification adds a first-page Options step. Organizers choose one of four event types from compact square buttons, then use categorized parent checkboxes to decide which dependent controls appear later. Team registration controls team-size and team-operation fields; division mode controls shared versus per-division inputs; competition choices control playoff, pool, and loser-bracket inputs; schedule choices control the end-date field; and paid registration controls price, payment-method, refund, and payment-plan controls. Advanced Setup retains its inline controls.
 
 ## Progress
 
@@ -38,6 +40,12 @@ Mobile event creation has one established Advanced editor whose section content 
 - [x] (2026-07-15) Replaced the separate Simple review/publish page with the established Advanced Preview step and reduced the visible Simple route to the Advanced section order.
 - [x] (2026-07-15) Compiled Android production code and passed focused section-routing plus league sport-rule tests after removing obsolete Simple-only UI tests.
 - [x] (2026-07-15) Verified Basic Information, Event Details, Staff, Divisions, and Schedule on the Android emulator; confirmed shared Advanced content, direct non-collapsible section bodies, page navigation, top-of-page reset, and the shared Review transition.
+- [x] (2026-07-15) Split every Simple page into a dedicated Simple source file initialized from the corresponding Advanced section while preserving shared typed state, actions, validation, and persistence.
+- [x] (2026-07-15) Added the first-page Options step with four compact square event-type buttons and categorized parent checkboxes.
+- [x] (2026-07-15) Centralized parent/child option normalization and removed the moved controlling checkboxes from later Simple pages while retaining them in Advanced.
+- [x] (2026-07-15) Hid team-size and price inputs when their parent options are off, and made validation ignore individual-event team size while requiring positive prices for paid Simple events.
+- [x] (2026-07-15) Added regression tests for option dependencies, page routing, payload normalization, and paid/team validation.
+- [x] (2026-07-15) Compiled, installed, and verified the independent Simple flow and the preserved Advanced flow in the Android emulator.
 
 ## Surprises & Discoveries
 
@@ -106,6 +114,21 @@ Mobile event creation has one established Advanced editor whose section content 
 
 - Observation: Switching from a scrolled Advanced editor back to Simple initially retained the Advanced list offset.
   Evidence: Emulator QA opened Simple midway through Basic Information after mode switching; keying `EventDetails` scroll reset to the setup mode and Simple page now restores the top of each page.
+
+- Observation: Team size is currently validated and rendered even when `teamSignup` is false.
+  Evidence: `EventDetailsRegistrationSection` always renders `Team Size Limit`, and `computeEventValidationResult` currently evaluates `teamSizeLimit >= 1` without checking `teamSignup`.
+
+- Observation: The controlling checkboxes are spread across Basic Information, Event Details, Staff, Divisions, and tournament configuration, so moving only their visuals would leave duplicate mutation paths.
+  Evidence: no-fixed-end-date, team registration, playoff/pool play, manual payments, refunds, division mode, team officiating, roster editing, and double elimination each currently own both their checkbox and dependent content in separate components.
+
+- Observation: Sharing the Advanced top-level section composables made the Simple layout inseparable from future Advanced UI changes.
+  Evidence: the latest product direction explicitly requires separate Simple files that begin as close copies, with only state, actions, validation, and persistence shared across modes.
+
+- Observation: A separate local paid-registration intent is required while creating a free event because the persisted event model represents free versus paid only through zero or positive prices.
+  Evidence: the Options checkbox can be enabled before a price is entered, so Simple validation now uses the explicit intent while persistence continues to use the established price fields.
+
+- Observation: The independent Simple copies can preserve Advanced behavior without calling Advanced section composables.
+  Evidence: `eventDetail/simple` contains separate hero, basic information, registration, match-rules, staff, division, league-scoring, and schedule functions; Android compilation and emulator mode switching both pass.
 
 ## Decision Log
 
@@ -201,23 +224,39 @@ Mobile event creation has one established Advanced editor whose section content 
   Rationale: Team officiating, check-in, roster controls, scheduling mode, official positions, existing-user assignment, email-role invites, assigned staff, and official position eligibility all share the same event contract and should not diverge by setup mode.
   Date/Author: 2026-07-15 / Codex
 
+- Decision (superseded 2026-07-15): Add Options as the first Simple page while keeping every later page backed by the shared Advanced components.
+  Rationale: Parent choices need one predictable home, but the shared top-level UI would prevent the two modes from evolving independently.
+  Date/Author: 2026-07-15 / Codex
+
+- Decision: Give every Simple page its own section composable file, initialized as a close copy of the corresponding Advanced section.
+  Rationale: Simple and Advanced need independent presentation surfaces. Sharing typed section state, action models, normalization rules, validation, and persistence retains behavioral parity without coupling their UI implementations.
+  Date/Author: 2026-07-15 / Codex
+
+- Decision: Treat unchecked parent options as normalized state, not merely hidden state.
+  Rationale: A free event must not retain paid division prices, manual-payment links, automatic-refund settings, or payment plans; an individual event must not retain team-only roster and officiating settings. Clearing incompatible children prevents invisible values from reaching the create payload.
+  Date/Author: 2026-07-15 / Codex
+
+- Decision: Use full-row labeled checkboxes inside category cards and compact two-by-two square event-type buttons.
+  Rationale: This keeps touch targets at least 48 dp, makes disabled dependencies explicit, and uses progressive disclosure without returning to the oversized full-height format cards.
+  Date/Author: 2026-07-15 / Codex
+
 ## Outcomes & Retrospective
 
-Simple Setup is now a thin page router over the real Advanced editor. There is no duplicate set of event, tournament, registration, division, schedule, or staff controls. Each page receives one `EventDetailsSectionVisibility` slice; the Basic Information page also includes the established hero/name/location content. Section bodies remain scrollable exactly as they are in Advanced, but Simple omits the outer card title and collapse affordance because the page header already supplies that context.
+Simple Setup now has an independent presentation surface. Every page dispatches to a Simple-specific section function stored under `eventDetail/simple`; those files began as close copies of the corresponding Advanced implementations but can now be simplified without changing Advanced. The two modes still share the `Event` draft, typed section state and actions, normalization functions, validation, persistence, and Preview step, so the UI is separate without creating a second backend contract.
 
-Advanced Setup still renders all sections with the original collapsible cards because `showSectionContainers` defaults to true. Existing event detail/edit callers are unchanged. The last used Simple section now validates through `EventDetails` and opens the same Preview component used by Advanced rather than publishing through a second review path.
+Options is the first Simple page. Its four event types use a compact two-by-two square grid, and its categorized checkboxes own the parent choices that determine later content. Turning off team registration removes team-size and team-operation state. Turning off paid registration clears prices, manual-payment details, refunds, and installments. Manual payments disable online refunds and payment plans. Division, playoff/pool, and loser-bracket choices normalize their hidden children instead of leaving stale payload values. Advanced Setup retains the original inline controls.
 
-Android production compilation and installation pass. Focused Android JVM tests cover the Advanced-section page list, event-type conditional sections, navigation, visibility mapping, minimum page checks, default event-range slot behavior, and league set-count preservation. Emulator QA confirmed the five-page Event route from Basic Information through Schedule, the shared content without outer collapsible cards, scroll reset between pages and modes, and the final Review action. No crash was recorded during the flow.
+Android production compilation, focused JVM tests, installation, and emulator QA pass. The emulator confirmed Options as step 1, persisted an individual-event choice into later pages, showed no team-size or moved parent controls on Simple Event Details, switched to the original Advanced setup without a crash, and recorded no fatal Android runtime exception during the exercised flow.
 
 ## Context and Orientation
 
 `composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/CreateEventScreen.kt` renders the creation screen and owns transient UI state. `DefaultCreateEventComponent.kt` owns the mutable event draft and persistence. `composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetails.kt` renders the existing advanced form by composing modular section functions. The new resolver and Simple Setup UI belong under the `eventCreate` package. No database or API changes are needed.
 
-The current pages mirror Advanced order: Basic Information, Event Details, Match Rules, Staff, Divisions, League Scoring Config, and Schedule. Match Rules is skipped for event types where Advanced hides it. League Scoring Config is used only for leagues. Review is the existing `Preview` child, not another Simple page.
+The current pages begin with Options, then mirror Advanced order: Basic Information, Event Details, Match Rules, Staff, Divisions, League Scoring Config, and Schedule. Match Rules is skipped for event types where Advanced hides it. League Scoring Config is used only for leagues. Review is the existing `Preview` child, not another Simple page.
 
 ## Plan of Work
 
-Keep the compact Simple/Advanced header and fixed Back/Continue bar. Route Simple pages using the Advanced section order and the same `EventDetails` call used by Advanced. Add one backward-compatible wrapper flag so Simple can render section bodies directly while every other caller retains the card and collapse behavior. Remove bespoke Simple forms, draft-mapping helpers, and tests that no longer represent runtime behavior. Verify section routing in unit tests, then compare Simple and Advanced on the emulator before committing.
+Keep the compact Simple/Advanced header and fixed Back/Continue bar. Create a Simple-specific file for Options, hero/basic information, registration, match rules, staff, divisions, league scoring, and schedule content. Initialize each from the corresponding Advanced implementation, but dispatch to it through the same typed state and action models so domain behavior remains shared. Remove the controlling checkboxes only from their Simple copies; Advanced continues to show its inline controls. Refactor complex division-mode, playoff/pool, and payment transitions into shared mutation boundaries before wiring Options to them. Pass the paid-registration intent into validation because the persisted event contract represents free registration as zero price and otherwise has no separate paid boolean. Verify pure dependency rules, section routing, and Simple-versus-Advanced dispatch in unit tests, compile Android, then exercise both Event and Tournament paths in the emulator before committing.
 
 ## Concrete Steps
 
@@ -231,7 +270,7 @@ If the full multiplatform test task is blocked by an unrelated native environmen
 
 ## Validation and Acceptance
 
-Creating a new event must open Simple Setup on Basic Information. Each Simple page must show the same edit content as its matching Advanced section, without the outer section header, card, or collapse interaction. The page title, step count, and linear indicator must include only sections Advanced renders for that event type. Switching modes must preserve the shared draft. The final Simple page must open the existing Preview step. Existing Advanced event create/edit/detail screens must retain their all-section collapsible layout.
+Creating a new event must open Simple Setup on Options. Event type appears as four centered square choices. Checkbox groups must visually distinguish disabled dependencies, and tapping the full enabled row must toggle it. Turning Team Event off must remove Team Size Limit and all team-only child controls. Turning Paid Registration off must remove price fields and disable plus clear manual payments, automatic refunds, and payment plans. Manual payments must disable and clear automatic refunds and payment plans. Multiple Divisions, no-fixed-end scheduling, playoffs or pool play, double elimination, team officiating, and roster-edit choices must reveal only their compatible downstream controls. Each later Simple page must render from a dedicated Simple section file, without moved parent controls or an outer collapsible card. Existing Advanced event create/edit/detail screens must retain their original section files, all-section collapsible layout, and inline controlling checkboxes.
 
 ## Idempotence and Recovery
 
@@ -283,4 +322,8 @@ Emulator screenshots:
 
 ## Interfaces and Dependencies
 
-`EventCreateSetupMode`, `EventCreateSetupPageId`, `EventCreateSetupPage`, resolver functions, and section-visibility mapping live in the `eventCreate` package. `EventDetails.showSectionContainers` and `animatedCardSection.showContainer` are backward-compatible presentation seams; section state, mutations, validation, persistence, and Preview remain shared. No API or persistence model is added.
+`EventCreateSetupMode`, `EventCreateSetupPageId`, `EventCreateSetupPage`, resolver functions, and section-visibility mapping live in the `eventCreate` package. Simple section composables live in a dedicated `eventCreate/simple` package and receive the same typed state/action models as the Advanced section composables. `EventDetails.showSectionContainers` and `animatedCardSection.showContainer` remain backward-compatible presentation seams; domain state, mutations, validation, persistence, and Preview remain shared. No API or persistence model is added.
+
+Revision note (2026-07-15): extended the parity-first plan with the Options-page simplification, explicit checkbox dependency normalization, paid-price validation, and emulator acceptance requested after the shared Advanced-section reset.
+
+Revision note (2026-07-15): corrected the UI ownership boundary so every Simple section lives in a separate file copied from, but no longer rendered by, the Advanced section implementation. Shared state and domain behavior remain the parity boundary.

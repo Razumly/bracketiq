@@ -75,6 +75,35 @@ class EventDetailsValidationTest {
     }
 
     @Test
+    fun individual_registration_does_not_require_a_team_size() {
+        val result = validateEvent(
+            baseLeagueEvent(maxParticipants = 2).copy(
+                eventType = EventType.EVENT,
+                teamSignup = false,
+                teamSizeLimit = 0,
+            ),
+        )
+
+        assertTrue(result.isTeamSizeValid)
+        assertFalse(result.validationErrors.any { error -> error.contains("Team size") })
+    }
+
+    @Test
+    fun simple_paid_registration_requires_a_positive_price() {
+        val result = validateEvent(
+            baseLeagueEvent(maxParticipants = 2).copy(priceCents = 0),
+            requiresPositiveRegistrationPrice = true,
+        )
+
+        assertFalse(result.isPriceValid)
+        assertTrue(
+            result.validationErrors.any { error ->
+                error == "Enter a price greater than 0 for paid registration."
+            },
+        )
+    }
+
+    @Test
     fun given_split_division_team_event_when_division_max_teams_missing_then_validation_fails() {
         val result = validateEvent(
             baseLeagueEvent(maxParticipants = 0).copy(
@@ -219,6 +248,7 @@ class EventDetailsValidationTest {
     private fun validateEvent(
         event: Event,
         divisionDetailsForSettings: List<DivisionDetail> = emptyList(),
+        requiresPositiveRegistrationPrice: Boolean = false,
     ): EventValidationResult {
         return computeEventValidationResult(
             editEvent = event,
@@ -230,6 +260,7 @@ class EventDetailsValidationTest {
             divisionDetailsForSettings = divisionDetailsForSettings,
             isColorLoaded = true,
             scheduleTimeLocked = true,
+            requiresPositiveRegistrationPrice = requiresPositiveRegistrationPrice,
         )
     }
 

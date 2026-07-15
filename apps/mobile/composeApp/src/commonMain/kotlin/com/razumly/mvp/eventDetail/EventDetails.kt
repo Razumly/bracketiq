@@ -118,6 +118,15 @@ import com.razumly.mvp.eventDetail.staff.StaffAssignmentCardModel
 import com.razumly.mvp.eventDetail.staff.buildAssignedStaffCards
 import com.razumly.mvp.eventDetail.staff.buildDraftStaffCards
 import com.razumly.mvp.eventDetail.staff.userDisplayName
+import com.razumly.mvp.eventCreate.hasPaidRegistration
+import com.razumly.mvp.eventCreate.withSimpleAutomaticRefunds
+import com.razumly.mvp.eventCreate.withSimpleDoubleElimination
+import com.razumly.mvp.eventCreate.withSimpleManualRegistrationPayments
+import com.razumly.mvp.eventCreate.withSimplePaidRegistration
+import com.razumly.mvp.eventCreate.withSimplePaymentPlans
+import com.razumly.mvp.eventCreate.withSimplePlayoffsOrPoolPlay
+import com.razumly.mvp.eventCreate.withSimpleSingleDivision
+import com.razumly.mvp.eventCreate.withSimpleTeamRegistration
 import com.razumly.mvp.eventMap.MapComponent
 import dev.chrisbanes.haze.ExperimentalHazeApi
 import io.github.aakira.napier.Napier
@@ -290,6 +299,7 @@ fun EventDetails(
     },
     sectionVisibility: EventDetailsSectionVisibility = EventDetailsSectionVisibility.All,
     showSectionContainers: Boolean = true,
+    useSimpleSectionContent: Boolean = false,
     contentScrollResetKey: Any? = null,
     heroTopControls: @Composable BoxScope.() -> Unit = {},
     modifier: Modifier = Modifier,
@@ -309,7 +319,7 @@ fun EventDetails(
     // Validation states
     var isPriceValid by remember { mutableStateOf(editEvent.priceCents >= 0) }
     var isMaxParticipantsValid by remember { mutableStateOf(true) }
-    var isTeamSizeValid by remember { mutableStateOf(editEvent.teamSizeLimit >= 1) }
+    var isTeamSizeValid by remember { mutableStateOf(!editEvent.teamSignup || editEvent.teamSizeLimit >= 1) }
     var isWinnerSetCountValid by remember { mutableStateOf(true) }
     var isLoserSetCountValid by remember { mutableStateOf(true) }
     var isWinnerPointsValid by remember { mutableStateOf(true) }
@@ -328,6 +338,15 @@ fun EventDetails(
     var isColorLoaded by remember { mutableStateOf(editEvent.imageId.isNotBlank()) }
     var paymentPlanValidationErrors by remember { mutableStateOf<List<String>>(emptyList()) }
     var validationErrors by remember { mutableStateOf<List<String>>(emptyList()) }
+    var simplePaidRegistrationEnabled by rememberSaveable(editEvent.id) {
+        mutableStateOf(editEvent.hasPaidRegistration())
+    }
+    val persistedPaidRegistration = editEvent.hasPaidRegistration()
+    LaunchedEffect(persistedPaidRegistration) {
+        if (persistedPaidRegistration) {
+            simplePaidRegistrationEnabled = true
+        }
+    }
 
     val coroutineScope = rememberCoroutineScope()
     val eventImagePicker = rememberImagePickerKMP()
@@ -553,7 +572,8 @@ fun EventDetails(
     }
     val isInclusivePriceQuoteConfirmed = isEventInclusivePriceReady(
         editView = editView,
-        manualPaymentsEnabled = editEvent.usesManualRegistrationPayments(),
+        manualPaymentsEnabled = editEvent.usesManualRegistrationPayments() ||
+            (useSimpleSectionContent && !simplePaidRegistrationEnabled),
         isQuoteConfirmed = confirmedInclusivePriceEditorKey == inclusivePriceEditorKey,
     )
     val effectiveIsValid = isValid && isInclusivePriceQuoteConfirmed
@@ -1569,6 +1589,8 @@ fun EventDetails(
         isNewEvent,
         scheduleTimeLocked,
         isInclusivePriceQuoteConfirmed,
+        useSimpleSectionContent,
+        simplePaidRegistrationEnabled,
     ) {
         // Coalesce rapid keystrokes so validation work does not contend with typing.
         delay(80)
@@ -1583,6 +1605,8 @@ fun EventDetails(
                 divisionDetailsForSettings = divisionDetailsForSettings,
                 isColorLoaded = isColorLoaded,
                 scheduleTimeLocked = scheduleTimeLocked,
+                requiresPositiveRegistrationPrice = useSimpleSectionContent &&
+                    simplePaidRegistrationEnabled,
             )
         }
 
@@ -1764,11 +1788,17 @@ fun EventDetails(
     var lastAutoLoadedOfficialDefaultsSportId by rememberSaveable(editEvent.id, editView) {
         mutableStateOf<String?>(null)
     }
-    val summaryTags = remember(event.eventType, eventSportName, event.teamSizeLimit, event.singleDivision) {
+    val summaryTags = remember(
+        event.eventType,
+        eventSportName,
+        event.teamSignup,
+        event.teamSizeLimit,
+        event.singleDivision,
+    ) {
         buildList {
             add(eventSportName)
             add(event.eventType.name.toEnumTitleCase())
-            add("Teams of ${event.teamSizeLimit}")
+            if (event.teamSignup) add("Teams of ${event.teamSizeLimit}")
             add(if (event.singleDivision) "Single division" else "Multi division")
         }
     }
@@ -2035,7 +2065,7 @@ fun EventDetails(
         listOfNotNull(
             if (event.singleDivision) "Single division" else "Multi division",
             maxLabel,
-            "Team size ${event.teamSizeLimit}",
+            if (event.teamSignup) "Team size ${event.teamSizeLimit}" else null,
             leagueSummary,
         ).joinToString(" - ")
     }
@@ -2387,7 +2417,80 @@ fun EventDetails(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
 
-                if (sectionVisibility.hero) eventDetailsHeroSection(
+                if (sectionVisibility.options && useSimpleSectionContent) {
+                    simpleEventDetailsOptionsSection(
+                        state = SimpleEventDetailsOptionsState(
+                            editEvent = editEvent,
+                            paidRegistrationEnabled = simplePaidRegistrationEnabled,
+                            hostHasAccount = hostHasAccount,
+                        ),
+                        actions = SimpleEventDetailsOptionsActions(
+                            onEventTypeSelected = onEventTypeSelected,
+                            onTeamRegistrationChange = { enabled ->
+                                onEditEvent { withSimpleTeamRegistration(enabled) }
+                                if (!enabled) onUpdateDoTeamsOfficiate(false)
+                            },
+                            onMultipleDivisionsChange = { multipleDivisions ->
+                                onEditEvent { withSimpleSingleDivision(!multipleDivisions) }
+                                syncLeagueSlotsForSelectedDivisions(
+                                    selectedDivisions,
+                                    multipleDivisions,
+                                )
+                            },
+                            onNoFixedEndDateChange = { enabled ->
+                                onEditEvent { copy(noFixedEndDateTime = enabled) }
+                            },
+                            onPlayoffsOrPoolPlayChange = { enabled ->
+                                onEditEvent { withSimplePlayoffsOrPoolPlay(enabled) }
+                            },
+                            onDoubleEliminationChange = { enabled ->
+                                onEditEvent { withSimpleDoubleElimination(enabled) }
+                            },
+                            onPaidRegistrationChange = { enabled ->
+                                simplePaidRegistrationEnabled = enabled
+                                onEditEvent { withSimplePaidRegistration(enabled) }
+                            },
+                            onManualPaymentsChange = { enabled ->
+                                onEditEvent {
+                                    withSimpleManualRegistrationPayments(
+                                        enabled = enabled,
+                                        paidRegistrationEnabled = simplePaidRegistrationEnabled,
+                                    )
+                                }
+                            },
+                            onAutomaticRefundsChange = { enabled ->
+                                onEditEvent {
+                                    withSimpleAutomaticRefunds(
+                                        enabled = enabled,
+                                        paidRegistrationEnabled = simplePaidRegistrationEnabled,
+                                    )
+                                }
+                            },
+                            onPaymentPlansChange = { enabled ->
+                                if (enabled && simplePaidRegistrationEnabled && hostHasAccount) {
+                                    onSetPaymentPlansEnabled(true)
+                                } else {
+                                    onEditEvent {
+                                        withSimplePaymentPlans(
+                                            enabled = false,
+                                            paidRegistrationEnabled = simplePaidRegistrationEnabled,
+                                        )
+                                    }
+                                }
+                            },
+                            onTeamsOfficiateChange = onUpdateDoTeamsOfficiate,
+                            onTeamOfficialsMaySwapChange = onUpdateTeamOfficialsMaySwap,
+                            onAllowRosterEditsChange = { enabled ->
+                                onUpdateAllowMatchRosterEdits(enabled)
+                                if (!enabled) onUpdateAllowTemporaryMatchPlayers(false)
+                            },
+                            onAllowTemporaryPlayersChange = onUpdateAllowTemporaryMatchPlayers,
+                        ),
+                    )
+                }
+
+                if (sectionVisibility.hero) eventDetailsHeroSectionForMode(
+                    useSimpleSectionContent = useSimpleSectionContent,
                     state = EventDetailsHeroState(
                         editView = editView,
                         isNewEvent = isNewEvent,
@@ -2414,7 +2517,8 @@ fun EventDetails(
                     ),
                 )
 
-                if (sectionVisibility.basics) eventDetailsBasicInfoSection(
+                if (sectionVisibility.basics) eventDetailsBasicInfoSectionForMode(
+                    useSimpleSectionContent = useSimpleSectionContent,
                     state = EventDetailsBasicInfoState(
                         readOnlySection = readOnlyUiModel.basics,
                         editSection = editUiModel.basics,
@@ -2448,7 +2552,8 @@ fun EventDetails(
                     showContainer = showSectionContainers,
                 )
 
-                if (sectionVisibility.registration) eventDetailsRegistrationSection(
+                if (sectionVisibility.registration) eventDetailsRegistrationSectionForMode(
+                    useSimpleSectionContent = useSimpleSectionContent,
                     state = EventDetailsRegistrationState(
                         readOnlySection = readOnlyUiModel.registration,
                         editSection = editUiModel.registration,
@@ -2467,6 +2572,7 @@ fun EventDetails(
                         refundSummary = refundSummary,
                         isTeamSizeValid = isTeamSizeValid,
                         showValidationErrors = showValidationErrors,
+                        paidRegistrationEnabled = simplePaidRegistrationEnabled,
                         isOrganizationEvent = isOrganizationEvent,
                         organizationTemplatesLoading = organizationTemplatesLoading,
                         organizationTemplatesError = organizationTemplatesError,
@@ -2487,7 +2593,8 @@ fun EventDetails(
                     showContainer = showSectionContainers,
                 )
 
-                if (sectionVisibility.matchRules) eventDetailsMatchRulesSection(
+                if (sectionVisibility.matchRules) eventDetailsMatchRulesSectionForMode(
+                    useSimpleSectionContent = useSimpleSectionContent,
                     state = EventDetailsMatchRulesState(
                         readOnlySection = readOnlyUiModel.matchRules,
                         sectionExpansionStates = sectionExpansionStates,
@@ -2514,7 +2621,8 @@ fun EventDetails(
                     showContainer = showSectionContainers,
                 )
 
-                if (sectionVisibility.staff) eventDetailsStaffSection(
+                if (sectionVisibility.staff) eventDetailsStaffSectionForMode(
+                    useSimpleSectionContent = useSimpleSectionContent,
                     state = EventDetailsStaffState(
                         readOnlySection = readOnlyUiModel.staff,
                         sectionExpansionStates = sectionExpansionStates,
@@ -2629,7 +2737,8 @@ fun EventDetails(
                     showContainer = showSectionContainers,
                 )
 
-                if (sectionVisibility.divisions) eventDetailsDivisionsSection(
+                if (sectionVisibility.divisions) eventDetailsDivisionsSectionForMode(
+                    useSimpleSectionContent = useSimpleSectionContent,
                     state = EventDetailsDivisionsSectionState(
                         readOnlySection = readOnlyUiModel.divisions,
                         editSection = editUiModel.divisions,
@@ -2648,64 +2757,67 @@ fun EventDetails(
                     ),
                     showContainer = showSectionContainers,
                     editContent = {
-                        EventDetailsDivisionEditorForm(
-                            state = EventDetailsDivisionEditorFormState(
-                                editEvent = editEvent,
-                                divisionDetails = divisionDetailsForSettings,
-                                selectedDivisions = selectedDivisions,
-                                divisionEditor = divisionEditor,
-                                divisionEditorDefaults = divisionEditorDefaults,
-                                divisionEditorReady = divisionEditorReady,
-                                divisionScheduleUsesSets = divisionScheduleUsesSets,
-                                skillDivisionTypeOptions = skillDivisionTypeSelectOptions,
-                                ageDivisionTypeOptions = ageDivisionTypeSelectOptions,
-                                genderOptions = genderSelectOptions,
-                                divisionInputsExpanded = divisionInputsExpanded,
-                                hostHasAccount = hostHasAccount,
-                                isNewEvent = isNewEvent,
-                                showValidationErrors = showValidationErrors,
-                                addSelfToEvent = addSelfToEvent,
-                                inclusivePriceEditorKey = inclusivePriceEditorKey,
-                            ),
-                            actions = EventDetailsDivisionEditorFormActions(
-                                onEditEvent = onEditEvent,
-                                onDivisionEditorChange = { divisionEditor = it },
-                                onDivisionEditorDefaultsChange = { divisionEditorDefaults = it },
-                                onUpdateDivisionEditorSelection = ::updateDivisionEditorSelection,
-                                onNormalizeLeagueConfigWithSportMode = ::normalizeLeagueConfigWithSportMode,
-                                onUpdateDivisionLeagueConfig = ::updateDivisionLeagueConfig,
-                                onUpdateDivisionPlayoffConfig = ::updateDivisionPlayoffConfig,
-                                onUpdateDivisionTournamentConfig = ::updateDivisionTournamentConfig,
-                                onSyncLeagueSlotsForSelectedDivisions = ::syncLeagueSlotsForSelectedDivisions,
-                                onSetDivisionPaymentPlansEnabled = ::setDivisionPaymentPlansEnabled,
-                                onSyncDivisionInstallmentCount = ::syncDivisionInstallmentCount,
-                                onUpdateDivisionInstallmentAmount = ::updateDivisionInstallmentAmount,
-                                onSetDivisionInstallmentDueDatePickerIndex = { divisionInstallmentDueDatePickerIndex = it },
-                                onAddDivisionInstallmentRow = ::addDivisionInstallmentRow,
-                                onRemoveDivisionInstallmentRow = ::removeDivisionInstallmentRow,
-                                onAddSelfToEventChange = { addSelfToEvent = it },
-                                onAddCurrentUser = onAddCurrentUser,
-                                onDivisionInputsExpandedChange = { divisionInputsExpanded = it },
-                                quoteInclusivePrice = quoteInclusivePrice,
-                                onPriceQuoteConfirmationChange = { isConfirmed ->
-                                    if (isConfirmed) {
-                                        confirmedInclusivePriceEditorKey = inclusivePriceEditorKey
-                                    } else if (confirmedInclusivePriceEditorKey == inclusivePriceEditorKey) {
-                                        confirmedInclusivePriceEditorKey = null
-                                    }
-                                    if (!isConfirmed) {
-                                        onValidationChange(
-                                            false,
-                                            (validationErrors +
-                                                "Wait for the online price quote before continuing.").distinct(),
-                                        )
-                                    }
-                                },
-                            ),
+                        val divisionFormState = EventDetailsDivisionEditorFormState(
+                            editEvent = editEvent,
+                            divisionDetails = divisionDetailsForSettings,
+                            selectedDivisions = selectedDivisions,
+                            divisionEditor = divisionEditor,
+                            divisionEditorDefaults = divisionEditorDefaults,
+                            divisionEditorReady = divisionEditorReady,
+                            divisionScheduleUsesSets = divisionScheduleUsesSets,
+                            skillDivisionTypeOptions = skillDivisionTypeSelectOptions,
+                            ageDivisionTypeOptions = ageDivisionTypeSelectOptions,
+                            genderOptions = genderSelectOptions,
+                            divisionInputsExpanded = divisionInputsExpanded,
+                            hostHasAccount = hostHasAccount,
+                            isNewEvent = isNewEvent,
+                            showValidationErrors = showValidationErrors,
+                            paidRegistrationEnabled = simplePaidRegistrationEnabled,
+                            addSelfToEvent = addSelfToEvent,
+                            inclusivePriceEditorKey = inclusivePriceEditorKey,
                         )
+                        val divisionFormActions = EventDetailsDivisionEditorFormActions(
+                            onEditEvent = onEditEvent,
+                            onDivisionEditorChange = { divisionEditor = it },
+                            onDivisionEditorDefaultsChange = { divisionEditorDefaults = it },
+                            onUpdateDivisionEditorSelection = ::updateDivisionEditorSelection,
+                            onNormalizeLeagueConfigWithSportMode = ::normalizeLeagueConfigWithSportMode,
+                            onUpdateDivisionLeagueConfig = ::updateDivisionLeagueConfig,
+                            onUpdateDivisionPlayoffConfig = ::updateDivisionPlayoffConfig,
+                            onUpdateDivisionTournamentConfig = ::updateDivisionTournamentConfig,
+                            onSyncLeagueSlotsForSelectedDivisions = ::syncLeagueSlotsForSelectedDivisions,
+                            onSetDivisionPaymentPlansEnabled = ::setDivisionPaymentPlansEnabled,
+                            onSyncDivisionInstallmentCount = ::syncDivisionInstallmentCount,
+                            onUpdateDivisionInstallmentAmount = ::updateDivisionInstallmentAmount,
+                            onSetDivisionInstallmentDueDatePickerIndex = { divisionInstallmentDueDatePickerIndex = it },
+                            onAddDivisionInstallmentRow = ::addDivisionInstallmentRow,
+                            onRemoveDivisionInstallmentRow = ::removeDivisionInstallmentRow,
+                            onAddSelfToEventChange = { addSelfToEvent = it },
+                            onAddCurrentUser = onAddCurrentUser,
+                            onDivisionInputsExpandedChange = { divisionInputsExpanded = it },
+                            quoteInclusivePrice = quoteInclusivePrice,
+                            onPriceQuoteConfirmationChange = { isConfirmed ->
+                                if (isConfirmed) {
+                                    confirmedInclusivePriceEditorKey = inclusivePriceEditorKey
+                                } else if (confirmedInclusivePriceEditorKey == inclusivePriceEditorKey) {
+                                    confirmedInclusivePriceEditorKey = null
+                                }
+                                if (!isConfirmed) {
+                                    onValidationChange(
+                                        false,
+                                        (validationErrors +
+                                            "Wait for the online price quote before continuing.").distinct(),
+                                    )
+                                }
+                            },
+                        )
+                        if (useSimpleSectionContent) {
+                            SimpleEventDetailsDivisionEditorForm(divisionFormState, divisionFormActions)
+                        } else {
+                            EventDetailsDivisionEditorForm(divisionFormState, divisionFormActions)
+                        }
 
-                    EventDetailsDivisionEditorActionsContent(
-                        state = EventDetailsDivisionEditorActionsState(
+                        val divisionActionsState = EventDetailsDivisionEditorActionsState(
                             editEvent = editEvent,
                             divisionEditor = divisionEditor,
                             divisionEditorReady = divisionEditorReady,
@@ -2714,19 +2826,30 @@ fun EventDetails(
                             showValidationErrors = showValidationErrors,
                             divisionDetails = divisionDetailsForSettings,
                             isPriceQuoteConfirmed = isInclusivePriceQuoteConfirmed,
-                        ),
-                        actions = EventDetailsDivisionEditorActions(
+                        )
+                        val divisionActions = EventDetailsDivisionEditorActions(
                             onDivisionEditorChange = { divisionEditor = it },
                             onSaveDivision = ::handleSaveDivisionDetail,
                             onResetDivisionEditor = ::resetDivisionEditor,
                             onEditDivision = ::handleEditDivisionDetail,
                             onRemoveDivision = ::handleRemoveDivisionDetail,
-                        ),
-                    )
+                        )
+                        if (useSimpleSectionContent) {
+                            SimpleEventDetailsDivisionEditorActionsContent(
+                                divisionActionsState,
+                                divisionActions,
+                            )
+                        } else {
+                            EventDetailsDivisionEditorActionsContent(
+                                divisionActionsState,
+                                divisionActions,
+                            )
+                        }
                     },
                 )
 
-                if (sectionVisibility.leagueScoring) eventDetailsLeagueScoringSection(
+                if (sectionVisibility.leagueScoring) eventDetailsLeagueScoringSectionForMode(
+                    useSimpleSectionContent = useSimpleSectionContent,
                     state = EventDetailsLeagueScoringState(
                         readOnlySection = readOnlyUiModel.leagueScoring,
                         editSection = editUiModel.leagueScoring,
@@ -2746,7 +2869,8 @@ fun EventDetails(
                     showContainer = showSectionContainers,
                 )
 
-                if (sectionVisibility.schedule) eventDetailsScheduleSection(
+                if (sectionVisibility.schedule) eventDetailsScheduleSectionForMode(
+                    useSimpleSectionContent = useSimpleSectionContent,
                     state = EventDetailsScheduleState(
                         readOnlySection = readOnlyUiModel.schedule,
                         editSection = editUiModel.schedule,

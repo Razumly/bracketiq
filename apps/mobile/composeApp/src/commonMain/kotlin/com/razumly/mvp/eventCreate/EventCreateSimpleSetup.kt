@@ -22,6 +22,7 @@ enum class EventCreateSetupMode {
 }
 
 enum class EventCreateSetupPageId(val label: String) {
+    OPTIONS("Options"),
     BASIC_INFORMATION("Basic Information"),
     EVENT_DETAILS("Event Details"),
     MATCH_RULES("Match Rules"),
@@ -165,6 +166,7 @@ fun isSimpleSetupPageComplete(
     pageId: EventCreateSetupPageId,
     event: Event,
 ): Boolean = when (pageId) {
+    EventCreateSetupPageId.OPTIONS -> true
     EventCreateSetupPageId.BASIC_INFORMATION -> event.name.isNotBlank() && !event.sportId.isNullOrBlank()
     EventCreateSetupPageId.DIVISIONS -> event.divisions.isNotEmpty()
     EventCreateSetupPageId.SCHEDULE -> {
@@ -177,6 +179,7 @@ fun isSimpleSetupPageComplete(
 }
 
 fun simpleSetupSectionVisibility(pageId: EventCreateSetupPageId): EventDetailsSectionVisibility = when (pageId) {
+    EventCreateSetupPageId.OPTIONS -> EventDetailsSectionVisibility.None.copy(options = true)
     EventCreateSetupPageId.BASIC_INFORMATION -> EventDetailsSectionVisibility.None.copy(
         hero = true,
         basics = true,

@@ -47,8 +47,6 @@ import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_STRIPE
 import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_VENMO
 import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_ZELLE
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
-import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_MANUAL
-import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_ONLINE
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.manualPaymentProviderInputLabel
 import com.razumly.mvp.core.data.dataTypes.manualPaymentProviderInputPlaceholder
@@ -69,7 +67,6 @@ import com.razumly.mvp.eventDetail.readonly.ReadOnlyDivisionsList
 import com.razumly.mvp.eventDetail.readonly.buildEventDetailsRows
 import com.razumly.mvp.eventDetail.shared.DetailKeyValueList
 import com.razumly.mvp.eventDetail.shared.FormSectionDivider
-import com.razumly.mvp.eventDetail.shared.LabeledCheckboxRow
 import com.razumly.mvp.eventDetail.shared.animatedCardSection
 import com.razumly.mvp.icons.MVPIcons
 import com.razumly.mvp.icons.PaymentProviderCashApp
@@ -81,43 +78,7 @@ import mvp.composeapp.generated.resources.payment_provider_venmo
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 
-internal data class EventDetailsRegistrationState(
-    val readOnlySection: ReadOnlySectionModel,
-    val editSection: EditSectionModel,
-    val sectionExpansionStates: SnapshotStateMap<String, Boolean>,
-    val eventDetailsMode: EventDetailsMode,
-    val lazyListState: LazyListState,
-    val stickyHeaderTopInset: Dp,
-    val enabled: Boolean,
-    val isNewEvent: Boolean,
-    val rentalTimeLocked: Boolean,
-    val event: Event,
-    val editEvent: Event,
-    val divisionDetails: List<DivisionDetail>,
-    val priceSummary: String,
-    val registrationSummary: String,
-    val refundSummary: String,
-    val isTeamSizeValid: Boolean,
-    val showValidationErrors: Boolean,
-    val paidRegistrationEnabled: Boolean = true,
-    val isOrganizationEvent: Boolean,
-    val organizationTemplatesLoading: Boolean,
-    val organizationTemplatesError: String?,
-    val requiredTemplateOptions: List<DropdownOption>,
-    val selectedRequiredTemplateIds: List<String>,
-    val selectedRequiredTemplateLabels: List<String>,
-    val eventRegistrationQuestions: List<TeamJoinQuestion>,
-    val eventRegistrationQuestionAnswers: Map<String, String>,
-    val eventRegistrationQuestionsExpanded: Boolean,
-)
 
-internal data class EventDetailsRegistrationActions(
-    val onDisabledClick: () -> Unit,
-    val onEditEvent: (Event.() -> Event) -> Unit,
-    val onEventTypeSelected: (EventType) -> Unit,
-    val onToggleEventRegistrationQuestions: () -> Unit,
-    val onEventRegistrationQuestionAnswerChange: (String, String) -> Unit,
-)
 
 private val manualPaymentProviderOptions = listOf(
     MANUAL_PAYMENT_PROVIDER_CASH_APP,
@@ -128,7 +89,7 @@ private val manualPaymentProviderOptions = listOf(
     MANUAL_PAYMENT_PROVIDER_OTHER,
 )
 
-internal fun LazyListScope.eventDetailsRegistrationSection(
+internal fun LazyListScope.simpleEventDetailsRegistrationSection(
     state: EventDetailsRegistrationState,
     actions: EventDetailsRegistrationActions,
     showContainer: Boolean = true,
@@ -170,42 +131,15 @@ internal fun LazyListScope.eventDetailsRegistrationSection(
             )
         },
         editContent = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                PlatformDropdown(
-                    selectedValue = state.editEvent.eventType.name,
-                    onSelectionChange = { selectedValue ->
-                        EventType.entries
-                            .find { eventType -> eventType.name == selectedValue }
-                            ?.let(actions.onEventTypeSelected)
-                    },
-                    options = selectableMobileEventTypes(
-                        isNewEvent = state.isNewEvent,
-                        rentalTimeLocked = state.rentalTimeLocked,
-                        currentEventType = state.editEvent.eventType,
-                    )
-                        .map { eventType ->
-                            DropdownOption(
-                                value = eventType.name,
-                                label = eventType.name.toEnumTitleCase(),
-                            )
-                        },
-                    label = "Event Type",
-                    modifier = Modifier.weight(1f),
-                )
+            if (state.editEvent.teamSignup) {
                 NumberInputField(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                     value = state.editEvent.teamSizeLimit.toString(),
                     label = "Team Size Limit",
                     onValueChange = { newValue ->
                         if (newValue.all { it.isDigit() }) {
-                            if (newValue.isBlank()) {
-                                actions.onEditEvent { copy(teamSizeLimit = 0) }
-                            } else {
-                                actions.onEditEvent { copy(teamSizeLimit = newValue.toInt()) }
+                            actions.onEditEvent {
+                                copy(teamSizeLimit = newValue.toIntOrNull() ?: 0)
                             }
                         }
                     },
@@ -216,106 +150,8 @@ internal fun LazyListScope.eventDetailsRegistrationSection(
                         ""
                     },
                 )
+                FormSectionDivider()
             }
-
-            val playoffsOrPoolsInput: @Composable () -> Unit = {
-                if (state.editEvent.eventType == EventType.LEAGUE) {
-                    LabeledCheckboxRow(
-                        checked = state.editEvent.includePlayoffs,
-                        label = "Include Playoffs",
-                        onCheckedChange = { checked ->
-                            actions.onEditEvent {
-                                val nextDivisionDetails = mergeDivisionDetailsForDivisions(
-                                    divisions = divisions,
-                                    existingDetails = divisionDetails,
-                                    eventId = id,
-                                ).map { detail ->
-                                    when {
-                                        !checked -> detail.copy(playoffTeamCount = null)
-                                        singleDivision -> detail.copy(
-                                            playoffTeamCount = playoffTeamCount ?: detail.playoffTeamCount,
-                                        )
-                                        else -> detail
-                                    }
-                                }
-                                copy(
-                                    includePlayoffs = checked,
-                                    playoffTeamCount = when {
-                                        !checked -> null
-                                        singleDivision -> playoffTeamCount
-                                            ?: nextDivisionDetails.firstOrNull()?.playoffTeamCount
-                                        else -> playoffTeamCount
-                                    },
-                                    divisionDetails = nextDivisionDetails,
-                                )
-                            }
-                        },
-                    )
-                } else if (state.editEvent.eventType == EventType.TOURNAMENT) {
-                    LabeledCheckboxRow(
-                        checked = state.editEvent.includePlayoffs,
-                        label = "Include Pool Play",
-                        onCheckedChange = { checked ->
-                            actions.onEditEvent {
-                                val nextDivisionDetails = mergeDivisionDetailsForDivisions(
-                                    divisions = divisions,
-                                    existingDetails = divisionDetails,
-                                    eventId = id,
-                                ).map { detail ->
-                                    if (checked) {
-                                        detail.withDerivedTournamentPoolTeamCount(enabled = true)
-                                    } else {
-                                        detail.copy(
-                                            playoffTeamCount = null,
-                                            poolCount = null,
-                                            poolTeamCount = null,
-                                        )
-                                    }
-                                }
-                                copy(
-                                    includePlayoffs = checked,
-                                    playoffTeamCount = if (checked) playoffTeamCount else null,
-                                    divisionDetails = nextDivisionDetails,
-                                )
-                            }
-                        },
-                    )
-                }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                Box(modifier = Modifier.weight(1f)) {
-                    playoffsOrPoolsInput()
-                }
-                Box(modifier = Modifier.weight(1f)) {
-                    LabeledCheckboxRow(
-                        checked = if (
-                            state.editEvent.eventType == EventType.EVENT ||
-                            state.editEvent.eventType == EventType.WEEKLY_EVENT
-                        ) {
-                            state.editEvent.teamSignup
-                        } else {
-                            true
-                        },
-                        label = "Team Event",
-                        enabled = state.editEvent.eventType == EventType.EVENT ||
-                            state.editEvent.eventType == EventType.WEEKLY_EVENT,
-                        onCheckedChange = { checked ->
-                            if (
-                                state.editEvent.eventType == EventType.EVENT ||
-                                state.editEvent.eventType == EventType.WEEKLY_EVENT
-                            ) {
-                                actions.onEditEvent { copy(teamSignup = checked) }
-                            }
-                        },
-                    )
-                }
-            }
-            FormSectionDivider()
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -328,9 +164,7 @@ internal fun LazyListScope.eventDetailsRegistrationSection(
                     label = "Min Age",
                     onValueChange = { newValue ->
                         if (!newValue.all { it.isDigit() }) return@NumberInputField
-                        actions.onEditEvent {
-                            copy(minAge = newValue.toIntOrNull())
-                        }
+                        actions.onEditEvent { copy(minAge = newValue.toIntOrNull()) }
                     },
                     isError = false,
                 )
@@ -340,67 +174,47 @@ internal fun LazyListScope.eventDetailsRegistrationSection(
                     label = "Max Age",
                     onValueChange = { newValue ->
                         if (!newValue.all { it.isDigit() }) return@NumberInputField
-                        actions.onEditEvent {
-                            copy(maxAge = newValue.toIntOrNull())
-                        }
+                        actions.onEditEvent { copy(maxAge = newValue.toIntOrNull()) }
                     },
                     isError = false,
                 )
             }
             FormSectionDivider()
 
-            val manualPaymentsEnabled = state.editEvent.usesManualRegistrationPayments()
-            ManualPaymentSettingsSection(
-                event = state.editEvent,
-                onEditEvent = actions.onEditEvent,
-            )
-            FormSectionDivider()
-
-            val automaticRefundsEnabled = if (manualPaymentsEnabled) {
-                false
-            } else if (state.editEvent.singleDivision) {
-                state.editEvent.priceCents > 0
-            } else {
-                state.divisionDetails.any { detail -> (detail.price ?: 0) > 0 }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                RegistrationOptions(
-                    cutoffHours = state.editEvent.registrationCutoffHours,
-                    onCutoffHoursChange = {
-                        actions.onEditEvent { copy(registrationCutoffHours = it) }
-                    },
-                    modifier = Modifier.weight(1f),
-                )
-                CancellationRefundOptions(
-                    refundHours = state.editEvent.cancellationRefundHours,
-                    onRefundHoursChange = {
-                        actions.onEditEvent { copy(cancellationRefundHours = it) }
-                    },
-                    modifier = Modifier.weight(1f),
-                    enabled = automaticRefundsEnabled,
-                    disabledMessage = if (manualPaymentsEnabled) {
-                        "Manual payments are refunded directly by the host."
-                    } else {
-                        "Add a paid division to enable automatic refunds."
-                    },
-                )
-            }
-            RequiredDocumentsSection(
-                isOrganizationEvent = state.isOrganizationEvent,
-                rentalTimeLocked = state.rentalTimeLocked,
-                organizationTemplatesLoading = state.organizationTemplatesLoading,
-                organizationTemplatesError = state.organizationTemplatesError,
-                requiredTemplateOptions = state.requiredTemplateOptions,
-                selectedRequiredTemplateIds = state.selectedRequiredTemplateIds,
-                selectedRequiredTemplateLabels = state.selectedRequiredTemplateLabels,
-                onRequiredTemplateIdsChange = { normalizedTemplateIds ->
-                    actions.onEditEvent { copy(requiredTemplateIds = normalizedTemplateIds) }
+            RegistrationOptions(
+                cutoffHours = state.editEvent.registrationCutoffHours,
+                onCutoffHoursChange = { hours ->
+                    actions.onEditEvent { copy(registrationCutoffHours = hours) }
                 },
+                modifier = Modifier.fillMaxWidth(),
             )
+
+            if (state.editEvent.usesManualRegistrationPayments()) {
+                FormSectionDivider()
+                ManualPaymentSettingsSection(
+                    event = state.editEvent,
+                    onEditEvent = actions.onEditEvent,
+                )
+            }
+
+            if (state.editEvent.cancellationRefundHours != null) {
+                FormSectionDivider()
+                StandardTextField(
+                    value = state.editEvent.cancellationRefundHours
+                        ?.coerceAtLeast(0)
+                        ?.toString()
+                        .orEmpty(),
+                    onValueChange = { newValue ->
+                        if (!newValue.all(Char::isDigit)) return@StandardTextField
+                        actions.onEditEvent {
+                            copy(cancellationRefundHours = newValue.toIntOrNull() ?: 0)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "Automatic refund cutoff (hours)",
+                    keyboardType = "number",
+                )
+            }
         },
     )
 }
@@ -415,35 +229,6 @@ private fun ManualPaymentSettingsSection(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        LabeledCheckboxRow(
-            checked = manualPaymentsEnabled,
-            label = "Use manual registration payments",
-            onCheckedChange = { checked ->
-                onEditEvent {
-                    copy(
-                        registrationPaymentMode = if (checked) {
-                            REGISTRATION_PAYMENT_MODE_MANUAL
-                        } else {
-                            REGISTRATION_PAYMENT_MODE_ONLINE
-                        },
-                        manualPaymentLinks = if (checked) manualPaymentLinks else emptyList(),
-                        manualPaymentInstructions = if (checked) manualPaymentInstructions else null,
-                        cancellationRefundHours = if (checked) null else cancellationRefundHours,
-                    )
-                }
-            },
-        )
-
-        Text(
-            text = if (manualPaymentsEnabled) {
-                "Players pay outside BracketIQ. You are responsible for collecting payments, reviewing proof, and handling refunds directly."
-            } else {
-                "BracketIQ will use online payment processing for paid registrations."
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
         if (!manualPaymentsEnabled) return
 
         event.manualPaymentLinks.forEachIndexed { index, link ->

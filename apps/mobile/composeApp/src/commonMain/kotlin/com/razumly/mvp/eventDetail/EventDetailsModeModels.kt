@@ -11,6 +11,7 @@ internal enum class EventDetailsMode {
 }
 
 data class EventDetailsSectionVisibility(
+    val options: Boolean = false,
     val hero: Boolean = true,
     val basics: Boolean = true,
     val registration: Boolean = true,
@@ -23,6 +24,7 @@ data class EventDetailsSectionVisibility(
     companion object {
         val All = EventDetailsSectionVisibility()
         val None = EventDetailsSectionVisibility(
+            options = false,
             hero = false,
             basics = false,
             registration = false,
