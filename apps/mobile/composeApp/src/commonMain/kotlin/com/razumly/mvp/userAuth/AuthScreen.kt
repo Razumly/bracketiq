@@ -210,8 +210,8 @@ fun AuthScreenBase(
                         value = email,
                         onValueChange = { email = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = "Email",
-                        keyboardType = "email",
+                        label = if (isSignup) "Email" else "Email or username",
+                        keyboardType = if (isSignup) "email" else "text",
                         imeAction = ImeAction.Next,
                         externalFocusManager = emailFocusManager
                     )

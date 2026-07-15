@@ -415,7 +415,7 @@ class UserRepository(
     override suspend fun login(email: String, password: String): Result<UserData> = runCatching {
         cancelStartupLoadIfRunning()
         val normalizedEmail = normalizeEmail(email)
-        if (normalizedEmail.isBlank()) error("Email is required")
+        if (normalizedEmail.isBlank()) error("Email or username is required")
         Napier.d(tag = USER_REPOSITORY_LOG_TAG) { "Email login started for ${maskEmail(normalizedEmail)}" }
         val res = api.post<LoginRequestDto, AuthResponseDto>(
             path = "api/auth/login",
