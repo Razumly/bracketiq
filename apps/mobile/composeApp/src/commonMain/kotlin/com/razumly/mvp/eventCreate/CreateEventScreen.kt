@@ -747,7 +747,13 @@ private fun simpleSetupPageError(
         !event.noFixedEndDateTime && event.end <= event.start -> "Choose an end time after the start time."
         else -> "Complete the schedule before continuing."
     }
-    EventCreateSetupPageId.COMPETITION_RULES -> "Choose at least two playoff teams before continuing."
+    EventCreateSetupPageId.COMPETITION_RULES -> if (
+        event.eventType == EventType.TOURNAMENT && event.includePlayoffs
+    ) {
+        buildValidationPopupMessage(simpleTournamentPoolValidationErrors(event, requireCapacity = false))
+    } else {
+        "Choose at least two playoff teams before continuing."
+    }
     EventCreateSetupPageId.PRICING_REGISTRATION -> when {
         event.maxParticipants < 2 -> "Capacity must be at least 2."
         choices.paidRegistration && event.priceCents <= 0 -> "Enter a registration price."

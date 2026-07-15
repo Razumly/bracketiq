@@ -26,6 +26,8 @@ Mobile event creation currently opens one long advanced event-details form. Afte
 - [x] (2026-07-15) Split schedule setup into event timing/location, resource labels, and a scrollable timeslot page.
 - [x] (2026-07-15) Removed organization document templates from Simple Setup and added direct event registration-question authoring through the shared API.
 - [x] (2026-07-15) Replaced the official scheduling dropdown with explained single-select priority cards.
+- [x] (2026-07-15) Completed the tournament Simple Setup branches with explicit pool count, bracket-team advancement, derived pool summaries, and single/double-elimination selection.
+- [x] (2026-07-15) Added tournament payload and validation regressions and compacted the complete pool-play rules page to fit a 360 x 800 dp viewport.
 
 ## Surprises & Discoveries
 
@@ -73,6 +75,12 @@ Mobile event creation currently opens one long advanced event-details form. Afte
 
 - Observation: Official scheduling persists as one `OfficialSchedulingMode`, not a combinable set of priorities.
   Evidence: The shared event model stores exactly one of `STAFFING`, `TEAM_STAFFING`, `SCHEDULE`, or `OFF`.
+
+- Observation: Tournament Simple Setup reused the league `includePlayoffs` switch but never exposed the pool count stored in `DivisionDetail`.
+  Evidence: The original Competition Rules page rendered only a generic playoff-team count, while Advanced Setup and the create payload already supported pool count, pool team count, and per-division playoff configuration.
+
+- Observation: Tournament capacity is entered after Competition Rules, and the draft may still contain the placeholder capacity of two teams at that point.
+  Evidence: Emulator QA initially blocked a 2-pool, 4-team bracket with `Bracket teams cannot exceed maximum teams` before the organizer had reached Pricing & Registration.
 
 ## Decision Log
 
@@ -140,13 +148,25 @@ Mobile event creation currently opens one long advanced event-details form. Afte
   Rationale: The persisted model allows one mode, so the cards improve comparison and clarity without implying that contradictory priorities can be selected together.
   Date/Author: 2026-07-15 / Codex
 
+- Decision: Give tournaments two explicit Simple Setup paths: bracket-only, or pool play followed by a bracket.
+  Rationale: Pool play needs pool count and bracket-team advancement, while both paths still need an explicit single- or double-elimination bracket format. Derived teams-per-pool and advancing-per-pool values make the configured structure understandable without adding another page.
+  Date/Author: 2026-07-15 / Codex
+
+- Decision: Defer capacity-dependent pool validation until Pricing & Registration and final publish.
+  Rationale: Competition Rules precedes capacity entry. The page can validate pool and bracket divisibility immediately, then recompute and validate teams per pool once the organizer enters maximum teams.
+  Date/Author: 2026-07-15 / Codex
+
 ## Outcomes & Retrospective
 
 The mobile create screen now starts in a purpose-built Simple Setup instead of embedding the advanced editor. Each used page presents only the controls needed for that decision, has no collapsible container, and writes into the same `Event` draft used by Advanced Setup and final creation. Fixed-content pages fit the standard viewport; resource, timeslot, question, and staff collections use a single vertical scroll region while the inset-aware Back/Continue bar remains fixed above the app navigation and system gesture area.
 
 The complete base path and the tallest conditional paths were inspected on an Android emulator at 360 x 800 dp. The latest pass verified separate Schedule & Location, Resources, and Timeslots pages; five saved timeslots scrolling beneath a fixed action bar; direct short/long and required/optional question authoring; and four explained scheduling-priority cards. The screenshot pass directly led to compact date formatting, narrower header typography, full-width pricing cutoff fields, an explicit no-cutoff value, plural-aware resource/division summaries, and non-squeezing helper-card actions. Competition values continue to follow the sport's resolved scoring model: Indoor Soccer exposes duration and conventional 3/1/0 result points, while Indoor Volleyball exposes per-set targets and an explicit 1/3/5 set count.
 
+Tournament creation now distinguishes bracket-only competition from pool play that advances into a bracket. The pool path persists pool count, bracket teams, derived pool size, and bracket format through each division's established payload fields. The complete volleyball pool page, including single/double elimination, was verified at 360 x 800 dp without scrolling.
+
 Android debug Kotlin compilation and debug APK assembly pass. The earlier scoring/layout pass ran 27 focused tests; the latest scheduling/question pass ran 18 focused tests across `EventCreateSimpleSetupTest`, the post-create question persistence regression, and the registration-question HTTP contract. The iOS simulator compile remains blocked by the unrelated existing `PaymentProcessor.ios.kt` expect/actual mismatch described above.
+
+The final tournament pass runs all 21 `EventCreateSimpleSetupTest` cases with zero failures and assembles the debug APK. A broader `DefaultCreateEventComponentTest` run still has seven schedule-slot assertions failing outside the files changed for the tournament branch; those failures are recorded separately from this focused green result.
 
 ## Context and Orientation
 

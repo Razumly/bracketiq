@@ -232,8 +232,13 @@ fun isSimpleSetupPageComplete(
             event.long != 0.0 &&
             (event.noFixedEndDateTime || event.end > event.start)
     }
-    EventCreateSetupPageId.COMPETITION_RULES -> !event.includePlayoffs ||
-        (event.playoffTeamCount ?: 0) >= 2
+    EventCreateSetupPageId.COMPETITION_RULES -> when {
+        event.eventType == EventType.TOURNAMENT && event.includePlayoffs ->
+            simpleTournamentPoolValidationErrors(event, requireCapacity = false).isEmpty()
+        event.eventType == EventType.LEAGUE && event.includePlayoffs ->
+            (event.playoffTeamCount ?: 0) >= 2
+        else -> true
+    }
     EventCreateSetupPageId.PRICING_REGISTRATION -> event.maxParticipants >= 2 &&
         (!choices.paidRegistration || (event.priceCents > 0 && priceQuoteConfirmed))
     EventCreateSetupPageId.QUESTIONS -> !choices.useRegistrationQuestions ||
@@ -301,6 +306,21 @@ fun Event.upsertSimpleSetupDivision(
         } else {
             existingDetail?.maxParticipants?.coerceAtLeast(2) ?: 2
         },
+        playoffTeamCount = if (eventType == EventType.TOURNAMENT && includePlayoffs) {
+            existingDetail?.playoffTeamCount ?: playoffTeamCount
+        } else {
+            existingDetail?.playoffTeamCount
+        },
+        poolCount = if (eventType == EventType.TOURNAMENT && includePlayoffs) {
+            existingDetail?.poolCount ?: divisionDetails.firstNotNullOfOrNull(DivisionDetail::poolCount)
+        } else {
+            existingDetail?.poolCount
+        },
+    )
+    val normalizedDetail = detail.copy(
+        poolTeamCount = detail.poolCount?.let { count ->
+            detail.maxParticipants?.takeIf { capacity -> count > 0 && capacity % count == 0 }?.div(count)
+        },
     )
     val nextDetails = divisionDetails
         .filterNot { candidate ->
@@ -313,9 +333,11 @@ fun Event.upsertSimpleSetupDivision(
         .let { retained ->
             val replacementIndex = retained.indexOfFirst { candidate -> candidate.id == divisionId }
             if (replacementIndex < 0) {
-                retained + detail
+                retained + normalizedDetail
             } else {
-                retained.mapIndexed { index, candidate -> if (index == replacementIndex) detail else candidate }
+                retained.mapIndexed { index, candidate ->
+                    if (index == replacementIndex) normalizedDetail else candidate
+                }
             }
         }
     val nextDivisionIds = nextDetails.map(DivisionDetail::id).normalizeDivisionIdentifiers()
@@ -339,12 +361,104 @@ fun Event.withSimpleSetupRegistrationValues(
         priceCents = normalizedPrice,
         maxParticipants = normalizedCapacity,
         divisionDetails = divisionDetails.map { detail ->
+            val detailCapacity = normalizedCapacity.takeIf { value -> value >= 2 }
             detail.copy(
                 price = normalizedPrice,
-                maxParticipants = normalizedCapacity.takeIf { value -> value >= 2 },
+                maxParticipants = detailCapacity,
+                poolTeamCount = detail.poolCount?.let { count ->
+                    detailCapacity?.takeIf { capacity -> count > 0 && capacity % count == 0 }?.div(count)
+                },
             )
         },
     )
+}
+
+fun Event.withSimpleTournamentPoolPlayEnabled(enabled: Boolean): Event {
+    if (eventType != EventType.TOURNAMENT) return copy(includePlayoffs = enabled)
+    return copy(
+        includePlayoffs = enabled,
+        playoffTeamCount = playoffTeamCount.takeIf { enabled },
+        divisionDetails = divisionDetails.map { detail ->
+            detail.copy(
+                playoffTeamCount = detail.playoffTeamCount.takeIf { enabled },
+                poolCount = detail.poolCount.takeIf { enabled },
+                poolTeamCount = detail.poolTeamCount.takeIf { enabled },
+            )
+        },
+    )
+}
+
+fun Event.withSimpleTournamentPoolConfiguration(
+    poolCount: Int?,
+    bracketTeamCount: Int? = playoffTeamCount,
+): Event {
+    val normalizedPoolCount = poolCount?.takeIf { count -> count >= 1 }
+    val normalizedBracketTeamCount = bracketTeamCount?.takeIf { count -> count >= 1 }
+    return copy(
+        playoffTeamCount = normalizedBracketTeamCount,
+        divisionDetails = divisionDetails.map { detail ->
+            val capacity = detail.maxParticipants ?: maxParticipants.takeIf { value -> value >= 2 }
+            detail.copy(
+                playoffTeamCount = normalizedBracketTeamCount,
+                poolCount = normalizedPoolCount,
+                poolTeamCount = normalizedPoolCount?.let { count ->
+                    capacity?.takeIf { value -> value % count == 0 }?.div(count)
+                },
+            )
+        },
+    )
+}
+
+fun Event.withSimpleTournamentDoubleElimination(enabled: Boolean): Event {
+    if (eventType != EventType.TOURNAMENT) return this
+    return copy(
+        doubleElimination = enabled,
+        divisionDetails = divisionDetails.map { detail ->
+            val bracketConfig = detail.playoffConfig ?: TournamentConfig(
+                winnerSetCount = winnerSetCount.coerceAtLeast(1),
+                loserSetCount = loserSetCount.coerceAtLeast(1),
+                winnerBracketPointsToVictory = winnerBracketPointsToVictory.ifEmpty { listOf(21) },
+                loserBracketPointsToVictory = loserBracketPointsToVictory.ifEmpty { listOf(21) },
+                restTimeMinutes = restTimeMinutes ?: 0,
+            )
+            detail.copy(playoffConfig = bracketConfig.copy(doubleElimination = enabled))
+        },
+    )
+}
+
+fun simpleTournamentPoolValidationErrors(
+    event: Event,
+    requireCapacity: Boolean = true,
+): List<String> {
+    if (event.eventType != EventType.TOURNAMENT || !event.includePlayoffs) return emptyList()
+    val poolCount = event.divisionDetails.firstNotNullOfOrNull(DivisionDetail::poolCount)
+    val bracketTeamCount = event.playoffTeamCount
+    val capacities = event.divisionDetails.map { detail ->
+        detail.maxParticipants ?: event.maxParticipants.takeIf { value -> value >= 2 }
+    }
+    return buildList {
+        if (poolCount == null || poolCount < 1) {
+            add("Choose at least one pool.")
+            return@buildList
+        }
+        if (
+            requireCapacity &&
+            (capacities.isEmpty() || capacities.any { capacity -> capacity == null || capacity % poolCount != 0 })
+        ) {
+            add("Maximum teams must divide evenly by the pool count.")
+        }
+        if (bracketTeamCount == null || bracketTeamCount < 2) {
+            add("Choose at least two bracket teams.")
+        } else {
+            if (bracketTeamCount % poolCount != 0) {
+                add("Bracket teams must divide evenly by the pool count.")
+            }
+            val smallestCapacity = capacities.filterNotNull().minOrNull()
+            if (requireCapacity && smallestCapacity != null && bracketTeamCount > smallestCapacity) {
+                add("Bracket teams cannot exceed maximum teams.")
+            }
+        }
+    }
 }
 
 fun Event.withSimpleTimedMatchDuration(
@@ -520,7 +634,9 @@ fun simpleSetupValidationErrors(
     if (!event.noFixedEndDateTime && event.end <= event.start) {
         add("Choose an end time after the start time.")
     }
-    if (event.includePlayoffs && (event.playoffTeamCount ?: 0) < 2) {
+    if (event.eventType == EventType.TOURNAMENT && event.includePlayoffs) {
+        addAll(simpleTournamentPoolValidationErrors(event))
+    } else if (event.eventType == EventType.LEAGUE && event.includePlayoffs && (event.playoffTeamCount ?: 0) < 2) {
         add("Choose at least two playoff teams.")
     }
     if (event.maxParticipants < 2) add("Capacity must be at least 2.")

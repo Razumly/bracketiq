@@ -6,6 +6,7 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.RegistrationQuestionDraft
+import com.razumly.mvp.core.network.dto.toUpdateDto
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 import kotlin.test.Test
@@ -250,6 +251,121 @@ class EventCreateSimpleSetupTest {
                 sportDefaults = listOf(21, 21, 15),
             ),
         )
+    }
+
+    @Test
+    fun tournament_pool_configuration_maps_pool_and_bracket_values_to_the_create_payload() {
+        val configured = Event(
+            id = "tournament-1",
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            maxParticipants = 12,
+            divisions = listOf("open"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "open",
+                    name = "Open",
+                    maxParticipants = 12,
+                ),
+            ),
+        ).withSimpleTournamentPoolConfiguration(
+            poolCount = 3,
+            bracketTeamCount = 6,
+        )
+
+        assertEquals(3, configured.divisionDetails.single().poolCount)
+        assertEquals(4, configured.divisionDetails.single().poolTeamCount)
+        assertEquals(6, configured.divisionDetails.single().playoffTeamCount)
+        assertTrue(simpleTournamentPoolValidationErrors(configured).isEmpty())
+
+        val payload = configured.toUpdateDto()
+        assertTrue(payload.divisionDetails.orEmpty().isEmpty())
+        assertEquals(3, payload.playoffDivisionDetails.single().poolCount)
+        assertEquals(4, payload.playoffDivisionDetails.single().poolTeamCount)
+        assertEquals(6, payload.playoffDivisionDetails.single().playoffTeamCount)
+    }
+
+    @Test
+    fun tournament_pool_validation_requires_divisible_capacity_and_bracket_advancement() {
+        val base = Event(
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            maxParticipants = 10,
+            divisions = listOf("open"),
+            divisionDetails = listOf(DivisionDetail(id = "open", maxParticipants = 10)),
+        )
+
+        assertContains(simpleTournamentPoolValidationErrors(base), "Choose at least one pool.")
+
+        val invalidCapacity = base.withSimpleTournamentPoolConfiguration(
+            poolCount = 3,
+            bracketTeamCount = 6,
+        )
+        assertContains(
+            simpleTournamentPoolValidationErrors(invalidCapacity),
+            "Maximum teams must divide evenly by the pool count.",
+        )
+
+        val invalidAdvancement = base
+            .withSimpleSetupRegistrationValues(maxParticipants = 12)
+            .withSimpleTournamentPoolConfiguration(poolCount = 3, bracketTeamCount = 8)
+        assertContains(
+            simpleTournamentPoolValidationErrors(invalidAdvancement),
+            "Bracket teams must divide evenly by the pool count.",
+        )
+    }
+
+    @Test
+    fun tournament_pool_page_defers_capacity_math_until_registration_capacity_is_entered() {
+        val awaitingCapacity = Event(
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            maxParticipants = 2,
+            divisions = listOf("open"),
+            divisionDetails = listOf(DivisionDetail(id = "open", maxParticipants = 2)),
+        ).withSimpleTournamentPoolConfiguration(poolCount = 2, bracketTeamCount = 4)
+
+        assertTrue(
+            isSimpleSetupPageComplete(
+                pageId = EventCreateSetupPageId.COMPETITION_RULES,
+                event = awaitingCapacity,
+            ),
+        )
+        assertContains(
+            simpleTournamentPoolValidationErrors(awaitingCapacity),
+            "Bracket teams cannot exceed maximum teams.",
+        )
+    }
+
+    @Test
+    fun tournament_pool_derived_values_follow_capacity_and_clear_when_pool_play_is_disabled() {
+        val configured = Event(
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            maxParticipants = 8,
+            divisionDetails = listOf(DivisionDetail(id = "open", maxParticipants = 8)),
+        ).withSimpleTournamentPoolConfiguration(poolCount = 2, bracketTeamCount = 4)
+
+        val resized = configured.withSimpleSetupRegistrationValues(maxParticipants = 12)
+        assertEquals(6, resized.divisionDetails.single().poolTeamCount)
+
+        val disabled = resized.withSimpleTournamentPoolPlayEnabled(false)
+        assertFalse(disabled.includePlayoffs)
+        assertNull(disabled.playoffTeamCount)
+        assertNull(disabled.divisionDetails.single().poolCount)
+        assertNull(disabled.divisionDetails.single().poolTeamCount)
+        assertNull(disabled.divisionDetails.single().playoffTeamCount)
+    }
+
+    @Test
+    fun tournament_bracket_format_updates_each_division_payload() {
+        val updated = Event(
+            eventType = EventType.TOURNAMENT,
+            divisionDetails = listOf(DivisionDetail(id = "open")),
+        ).withSimpleTournamentDoubleElimination(true)
+
+        assertTrue(updated.doubleElimination)
+        assertTrue(updated.divisionDetails.single().playoffConfig?.doubleElimination == true)
     }
 
     @Test

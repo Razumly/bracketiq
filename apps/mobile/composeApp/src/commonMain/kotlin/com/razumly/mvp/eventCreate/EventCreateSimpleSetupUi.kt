@@ -49,6 +49,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameterOption
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Event
@@ -284,13 +285,15 @@ private fun SimpleSetupPageFrame(
             modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            if (description.isNotBlank()) {
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
                 content()
             }
@@ -436,14 +439,22 @@ private fun SimpleParticipationPage(
         if (state.event.eventType == EventType.LEAGUE || state.event.eventType == EventType.TOURNAMENT) {
             SetupChoiceSwitch(
                 title = if (state.event.eventType == EventType.LEAGUE) "Include playoffs" else "Include pool play",
-                description = "Add a final competition stage after regular play.",
+                description = if (state.event.eventType == EventType.LEAGUE) {
+                    "Add a playoff bracket after regular-season matches."
+                } else {
+                    "Create pools that advance teams into a playoff bracket."
+                },
                 checked = state.event.includePlayoffs,
                 onCheckedChange = { include ->
                     actions.onEditEvent {
-                        copy(
-                            includePlayoffs = include,
-                            playoffTeamCount = if (include) playoffTeamCount else null,
-                        )
+                        if (eventType == EventType.TOURNAMENT) {
+                            withSimpleTournamentPoolPlayEnabled(include)
+                        } else {
+                            copy(
+                                includePlayoffs = include,
+                                playoffTeamCount = if (include) playoffTeamCount else null,
+                            )
+                        }
                     }
                 },
             )
@@ -954,19 +965,32 @@ private fun SimpleCompetitionRulesPage(
         ?: List(segmentCount) { 21 }
     val showStandings = event.eventType == EventType.LEAGUE &&
         (sport?.usePointsForWin == true || sport?.usePointsForDraw == true || sport?.usePointsForLoss == true)
+    val tournamentPoolPlayEnabled = event.eventType == EventType.TOURNAMENT && event.includePlayoffs
+    val tournamentPoolCount = event.divisionDetails.firstNotNullOfOrNull(DivisionDetail::poolCount)
+    val tournamentCapacity = event.maxParticipants.takeIf { value -> value >= 2 }
+    val tournamentTeamsPerPool = tournamentPoolCount?.let { count ->
+        tournamentCapacity?.takeIf { capacity -> capacity % count == 0 }?.div(count)
+    }
+    val tournamentAdvancingPerPool = tournamentPoolCount?.let { count ->
+        event.playoffTeamCount?.takeIf { teams -> teams % count == 0 }?.div(count)
+    }
+    val competitionSummary = when (rules.scoringModel) {
+        "SETS" -> "Sets • Best of $segmentCount"
+        "PERIODS" -> "Timed • $segmentCount ${segmentPlural.lowercase()}"
+        "INNINGS" -> "$segmentCount ${segmentPlural.lowercase()}"
+        else -> "Single score"
+    }
 
     Column(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        SimpleInfoCard(
-            title = sport?.name ?: "Selected sport",
-            body = when (rules.scoringModel) {
-                "SETS" -> "Set based • best of $segmentCount"
-                "PERIODS" -> "Time based • $segmentCount ${segmentPlural.lowercase()}"
-                "INNINGS" -> "$segmentCount ${segmentPlural.lowercase()} per match"
-                else -> "Single-score match"
-            },
+        Text(
+            text = "${sport?.name ?: "Selected sport"} • $competitionSummary",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         when (rules.scoringModel) {
             "PERIODS" -> {
@@ -979,15 +1003,19 @@ private fun SimpleCompetitionRulesPage(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     SimpleNumberField(
-                        label = "Match length (min)",
+                        label = if (tournamentPoolPlayEnabled) "Pool match (min)" else "Match length (min)",
                         value = matchMinutes,
                         onChange = { minutes ->
                             actions.onEditEvent { withSimpleTimedMatchDuration(minutes, segmentCount) }
                         },
                     )
-                    if (event.eventType == EventType.LEAGUE && event.includePlayoffs) {
+                    if (event.includePlayoffs) {
                         SimpleNumberField(
-                            label = "Playoff length (min)",
+                            label = if (event.eventType == EventType.TOURNAMENT) {
+                                "Bracket match (min)"
+                            } else {
+                                "Playoff length (min)"
+                            },
                             value = playoffMinutes,
                             onChange = { minutes ->
                                 actions.onEditEvent { withSimplePlayoffMatchDuration(minutes) }
@@ -1050,7 +1078,56 @@ private fun SimpleCompetitionRulesPage(
                 }
             }
         }
-        if (event.includePlayoffs) {
+        if (tournamentPoolPlayEnabled) {
+            Text(
+                text = "Pool setup",
+                style = MaterialTheme.typography.labelLarge,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                SimpleNumberField(
+                    label = "Pool count",
+                    value = tournamentPoolCount,
+                    onChange = { count ->
+                        actions.onEditEvent {
+                            withSimpleTournamentPoolConfiguration(
+                                poolCount = count,
+                                bracketTeamCount = playoffTeamCount,
+                            )
+                        }
+                    },
+                )
+                SimpleNumberField(
+                    label = "Bracket teams",
+                    value = event.playoffTeamCount,
+                    onChange = { teams ->
+                        actions.onEditEvent {
+                            withSimpleTournamentPoolConfiguration(
+                                poolCount = tournamentPoolCount,
+                                bracketTeamCount = teams,
+                            )
+                        }
+                    },
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                SimplePoolValueCard(
+                    label = "Teams / pool",
+                    value = tournamentTeamsPerPool?.toString() ?: "After capacity",
+                    modifier = Modifier.weight(1f),
+                )
+                SimplePoolValueCard(
+                    label = "Advance / pool",
+                    value = tournamentAdvancingPerPool?.toString() ?: "After bracket teams",
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        } else if (event.eventType == EventType.LEAGUE && event.includePlayoffs) {
             StandardTextField(
                 value = event.playoffTeamCount?.toString().orEmpty(),
                 onValueChange = { value ->
@@ -1062,6 +1139,29 @@ private fun SimpleCompetitionRulesPage(
                 keyboardType = "number",
                 modifier = Modifier.fillMaxWidth(),
             )
+        }
+        if (event.eventType == EventType.TOURNAMENT) {
+            Text(
+                text = if (tournamentPoolPlayEnabled) "Playoff bracket" else "Bracket format",
+                style = MaterialTheme.typography.labelLarge,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(
+                    selected = !event.doubleElimination,
+                    onClick = { actions.onEditEvent { withSimpleTournamentDoubleElimination(false) } },
+                    label = { Text("Single elimination") },
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                )
+                FilterChip(
+                    selected = event.doubleElimination,
+                    onClick = { actions.onEditEvent { withSimpleTournamentDoubleElimination(true) } },
+                    label = { Text("Double elimination") },
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                )
+            }
         }
         if (showStandings) {
             Text(
@@ -1085,6 +1185,24 @@ private fun SimpleCompetitionRulesPage(
                     actions.onLeagueScoringConfigChange(state.leagueScoringConfig.copy(pointsForLoss = value))
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SimplePoolValueCard(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        shape = RoundedCornerShape(10.dp),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp)) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -1914,7 +2032,7 @@ private fun simpleSetupPageDescription(pageId: EventCreateSetupPageId): String =
     EventCreateSetupPageId.SCHEDULE_LOCATION -> "Set the event timing and mapped location."
     EventCreateSetupPageId.RESOURCES -> "Choose how many playing areas are available and give each one a clear label."
     EventCreateSetupPageId.TIMESLOTS -> "Use the default event window or add custom windows for resources and divisions."
-    EventCreateSetupPageId.COMPETITION_RULES -> "Review the selected sport structure and set the competition values it supports."
+    EventCreateSetupPageId.COMPETITION_RULES -> ""
     EventCreateSetupPageId.REGISTRATION_PLAN -> "Choose payments and registration requirements."
     EventCreateSetupPageId.PRICING_REGISTRATION -> "Set capacity, price, and registration cutoffs."
     EventCreateSetupPageId.QUESTIONS -> "Add the questions players answer before registration is complete."
